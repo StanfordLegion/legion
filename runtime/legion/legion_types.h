@@ -495,6 +495,7 @@ namespace Legion {
       SEND_VIEW_UPDATE_REQUEST,
       SEND_VIEW_UPDATE_RESPONSE,
       SEND_VIEW_REMOTE_UPDATE,
+      SEND_VIEW_REMOTE_INVALIDATE,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -598,6 +599,7 @@ namespace Legion {
         "Send View Update Request",                                   \
         "Send View Update Response",                                  \
         "Send View Remote Update",                                    \
+        "Send View Remote Invalidate",                                \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

@@ -128,10 +128,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraversalInfo::TraversalInfo(ContextID c, Operation *o, unsigned idx,
-                                 const RegionRequirement &r,
-                                 VersionInfo &info, const FieldMask &k)
+                                 const RegionRequirement &r, VersionInfo &info, 
+                                 const FieldMask &k, std::set<Event> &e)
       : ctx(c), op(o), index(idx), req(r), version_info(info),
-        traversal_mask(k), context_uid(o->get_parent()->get_context_uid())
+        traversal_mask(k), context_uid(o->get_parent()->get_context_uid()),
+        map_applied_events(e)
     //--------------------------------------------------------------------------
     {
     }
@@ -1463,8 +1464,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
                                      const FieldMask &m, VersionInfo &info, 
-                                     Operation *o, unsigned idx)
-      : ctx(c), target(t), close_mask(m), version_info(info), op(o), index(idx)
+                                     Operation *o, unsigned idx,
+                                     std::set<Event> &e)
+      : ctx(c), target(t), close_mask(m), version_info(info), op(o), 
+        index(idx), map_applied_events(e)
     //--------------------------------------------------------------------------
     {
     }
@@ -1472,7 +1475,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(const ReductionCloser &rhs)
       : ctx(0), target(NULL), close_mask(FieldMask()), 
-        version_info(rhs.version_info), op(NULL), index(0)
+        version_info(rhs.version_info), op(NULL), index(0),
+        map_applied_events(rhs.map_applied_events)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1518,7 +1522,7 @@ namespace Legion {
       }
       if (!valid_reductions.empty())
         node->issue_update_reductions(target, close_mask, version_info,
-                                      valid_reductions, op, index);
+                          valid_reductions, op, index, map_applied_events);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3223,7 +3227,8 @@ namespace Legion {
         if (!needed_fields)
           continue;
         node->issue_update_reductions(lower_targets[idx], needed_fields,
-              info.version_info, valid_reductions, info.op, info.index);
+                           info.version_info, valid_reductions, info.op, 
+                           info.index, info.map_applied_events);
       }
     }
 

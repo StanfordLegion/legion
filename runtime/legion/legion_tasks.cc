@@ -1762,7 +1762,8 @@ namespace Legion {
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[*it],
                                                 version_info, this, *it, 
-                                                true/*find valid*/, valid
+                                                true/*find valid*/, 
+                                                applied_conditions, valid
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -1949,7 +1950,7 @@ namespace Legion {
         runtime->forest->physical_register_only(req_ctx, 
                               regions[*it], version_info, this, *it,
                               completion_event, (regions.size() > 1), 
-                              chosen_instances
+                              applied_conditions, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                               , get_logging_name(), unique_op_id
 #endif
@@ -2374,6 +2375,7 @@ namespace Legion {
       safe_cast_domains.clear();
       restricted_trees.clear();
       frame_events.clear();
+      map_applied_conditions.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -5435,6 +5437,7 @@ namespace Legion {
                                     regions[idx], get_version_info(idx), 
                                     this, idx, local_termination_event, 
                                     (regions.size() > 1)/*defer add users*/,
+                                    map_applied_conditions,
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
                                     , get_logging_name()
@@ -5449,8 +5452,9 @@ namespace Legion {
         // C++ type system suckiness
         std::deque<InstanceSet> &phy_inst_ref = 
           *(reinterpret_cast<std::deque<InstanceSet>*>(&physical_instances));
-        runtime->forest->physical_register_users(this,local_termination_event,
-            regions, virtual_mapped, *get_version_infos(), phy_inst_ref);
+        runtime->forest->physical_register_users(this,
+            local_termination_event, regions, virtual_mapped, 
+            *get_version_infos(), phy_inst_ref, map_applied_conditions);
       }
       if (perform_postmap)
         perform_post_mapping();
@@ -5479,7 +5483,8 @@ namespace Legion {
         initialize_mapping_path(path, regions[idx], regions[idx].region);
         runtime->forest->physical_traverse_path(enclosing_contexts[idx],
                               path, regions[idx], get_version_info(idx), 
-                              this, idx, true/*valid*/, postmap_valid[idx]
+                              this, idx, true/*valid*/, 
+                              map_applied_conditions, postmap_valid[idx]
 #ifdef DEBUG_HIGH_LEVEL
                               , get_logging_name()
                               , unique_op_id
@@ -5623,7 +5628,8 @@ namespace Legion {
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                           regions[idx], get_version_info(idx), this, idx,
                           Event::NO_EVENT/*done immediately*/, 
-                          true/*defer add users*/, result
+                          true/*defer add users*/, 
+                          map_applied_conditions, result
 #ifdef DEBUG_HIGH_LEVEL
                           , get_logging_name(), unique_op_id
 #endif
@@ -5845,7 +5851,8 @@ namespace Legion {
           // Now we clone across for the given region requirement
           VersionInfo &info = get_version_info(idx); 
           runtime->forest->convert_views_into_context(regions[idx], this, idx,
-              info, parent_context_view, result, get_task_completion(), path);
+                     info, parent_context_view, result, get_task_completion(), 
+                     path, map_applied_conditions);
         }
       }
       // Record the result and trigger any user event to signal that the
@@ -5896,8 +5903,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::convert_virtual_instance_top_views(
-                   const std::map<AddressSpaceID,RemoteTask*> &remote_instances,
-                                        std::set<Event> &map_applied_conditions)
+                   const std::map<AddressSpaceID,RemoteTask*> &remote_instances)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL);
@@ -5988,7 +5994,8 @@ namespace Legion {
                                                       dummy_info,
                                                       parent_context_view,
                                                       get_task_completion(),
-                                                      true/*initial user*/);
+                                                      true/*initial user*/,
+                                                      map_applied_conditions);
           }
         }
         // Then we can remove our valid reference on the manager
@@ -7215,7 +7222,6 @@ namespace Legion {
       privilege_paths.clear();
       version_infos.clear();
       restrict_infos.clear();
-      map_applied_conditions.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
@@ -7798,7 +7804,8 @@ namespace Legion {
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
                                               index, Event::NO_EVENT, 
-                                              false/*defer add users*/, refs
+                                              false/*defer add users*/, 
+                                              map_applied_conditions, refs
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
                                               , unique_op_id
@@ -8064,8 +8071,7 @@ namespace Legion {
         // and newly created regions and fields, don't have to do this
         // though if we are at the top of the task tree
         if (!top_level_task)
-          convert_virtual_instance_top_views(remote_instances,
-                                             map_applied_conditions);
+          convert_virtual_instance_top_views(remote_instances);
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
@@ -8098,7 +8104,8 @@ namespace Legion {
       runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
                                               regions[idx], 
                                               version_infos[idx], this, idx, 
-                                              true/*find valid*/, valid
+                                              true/*find valid*/, 
+                                              map_applied_conditions, valid
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name() 
                                               , get_unique_id()
@@ -8513,10 +8520,19 @@ namespace Legion {
       // then we are done mapping
       if (map_success && is_leaf()) 
       {
-        // Tell our owner that we mapped
-        slice_owner->record_child_mapped();
-        // Mark that we ourselves have mapped
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+        {
+          Event done = Runtime::merge_events<true>(map_applied_conditions);
+          slice_owner->record_child_mapped(done);
+          complete_mapping(done);
+        }
+        else
+        {
+          // Tell our owner that we mapped
+          slice_owner->record_child_mapped(Event::NO_EVENT);
+          // Mark that we ourselves have mapped
+          complete_mapping();
+        }
       }
       return map_success;
     }
@@ -8725,7 +8741,8 @@ namespace Legion {
             orig_req.region.get_index_space(), traversal_path);
       runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
                                              slice_owner->get_version_info(idx),
-                                             this, idx, true/*find valid*/,valid
+                                             this, idx, true/*find valid*/,
+                                             map_applied_conditions, valid
 #ifdef DEBUG_HIGH_LEVEL
                                              , get_logging_name()
                                              , get_unique_id()
@@ -8764,7 +8781,7 @@ namespace Legion {
       // task as being mapped
       if (is_locally_mapped() && is_leaf())
       {
-        slice_owner->record_child_mapped();
+        slice_owner->record_child_mapped(Event::NO_EVENT);
         complete_mapping();
       }
       return false;
@@ -8807,16 +8824,19 @@ namespace Legion {
       }
       // Handle remaining state flowing back out for virtual mappings
       // and newly created regions and fields
-      std::set<Event> preconditions;
-      convert_virtual_instance_top_views(remote_instances, preconditions);
-      if (!preconditions.empty())
+      convert_virtual_instance_top_views(remote_instances);
+      if (!map_applied_conditions.empty())
       {
-        Event ready = Runtime::merge_events<true>(preconditions);
-        ready.wait();
+        Event done = Runtime::merge_events<true>(map_applied_conditions);
+        slice_owner->record_child_mapped(done);
+        complete_mapping(done);
       }
-      slice_owner->record_child_mapped();
-      // Now we can complete this point task
-      complete_mapping();
+      else
+      {
+        slice_owner->record_child_mapped(Event::NO_EVENT);
+        // Now we can complete this point task
+        complete_mapping();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9310,12 +9330,11 @@ namespace Legion {
         derez.deserialize(created_requirements[idx]);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      std::set<Event> applied_conditions;
       std::map<AddressSpaceID,RemoteTask*> empty_remote;
-      convert_virtual_instance_top_views(empty_remote, applied_conditions);
-      if (!applied_conditions.empty())
+      convert_virtual_instance_top_views(empty_remote);
+      if (!map_applied_conditions.empty())
         Runtime::trigger_event<true/*meta*/>(to_trigger,
-            Runtime::merge_events<true/*meta*/>(applied_conditions));
+            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
       else
         Runtime::trigger_event<true/*meta*/>(to_trigger);
     }
@@ -11143,6 +11162,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       acquired_instances.clear();
+      map_applied_conditions.clear();
       runtime->free_slice_task(this);
     }
 
@@ -11202,6 +11222,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_PREWALK_CALL);
       // Premap all regions that were not early mapped
+      std::set<Event> empty_conditions;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // If we've already premapped it then we are done
@@ -11215,12 +11236,16 @@ namespace Legion {
         runtime->forest->physical_traverse_path(get_parent_context(idx),
                                         privilege_path, regions[idx],
                                         version_infos[idx], this, idx,
-                                        false/*find valid*/, empty_set
+                                        false/*find valid*/, 
+                                        empty_conditions, empty_set
 #ifdef DEBUG_HIGH_LEVEL
                                         , get_logging_name(), unique_op_id
 #endif
                                         );
       }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(empty_conditions.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11703,6 +11728,7 @@ namespace Legion {
       assert(refs[0].is_composite_ref());
 #endif
       RegionTreeContext virtual_ctx = get_parent_context(index);
+      std::set<Event> empty_conditions;
       // Have to control access to the version info data structure
       AutoLock o_lock(op_lock);
       // Hold a reference so it doesn't get deleted
@@ -11710,21 +11736,27 @@ namespace Legion {
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
                                               index, Event::NO_EVENT, 
-                                              false/*defer add users*/, refs
+                                              false/*defer add users*/, 
+                                              empty_conditions, refs
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
+#ifdef DEBUG_HIGH_LEVEL
+      assert(empty_conditions.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_child_mapped(void)
+    void SliceTask::record_child_mapped(Event child_complete)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
       {
         AutoLock o_lock(op_lock);
+        if (child_complete.exists())
+          map_applied_conditions.insert(child_complete);
 #ifdef DEBUG_HIGH_LEVEL
         assert(num_unmapped_points > 0);
 #endif
@@ -11787,16 +11819,18 @@ namespace Legion {
       Event applied_condition = Event::NO_EVENT;
       if (!is_remote() || !is_locally_mapped())
       {
-        std::set<Event> applied_conditions;
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
         {
           version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                           owner_space, applied_conditions);
+                                           owner_space, map_applied_conditions);
         }
-        if (!applied_conditions.empty())
-          applied_condition = Runtime::merge_events<true>(applied_conditions);
+        if (!map_applied_conditions.empty())
+          applied_condition = 
+            Runtime::merge_events<true>(map_applied_conditions);
       }
+      else if (!map_applied_conditions.empty())
+        applied_condition = Runtime::merge_events<true>(map_applied_conditions);
       if (is_remote())
       {
         bool has_nonleaf_point = false;

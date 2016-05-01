@@ -144,7 +144,22 @@ namespace Legion {
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      // We have to be able to find this or it is very bad for deadlock
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
+      assert(inst_view != NULL);
+#else
+      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+#endif
+      inst_view->process_update_request(source, update_mask, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -152,11 +167,34 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      // We have to be able to find this or it is very bad for deadlock
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
+      assert(inst_view != NULL);
+#else
+      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+#endif
+      inst_view->process_update_response(derez, update_mask, done_event);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_remote_update(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_remote_invalidate(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -512,7 +550,8 @@ namespace Legion {
                                                 const VersionInfo &version_info,
                                                    const UniqueID creator_op_id,
                                                    const unsigned index,
-                             LegionMap<Event,FieldMask>::aligned &preconditions)
+                             LegionMap<Event,FieldMask>::aligned &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       Event start_use_event = manager->get_use_event();
@@ -526,12 +565,13 @@ namespace Legion {
           finder->second |= copy_mask;
       }
       find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
-                          version_info, creator_op_id, index, preconditions);
+          version_info, creator_op_id, index, preconditions, applied_events);
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-             local_point, version_info, creator_op_id, index, preconditions);
+                        local_point, version_info, creator_op_id, index,
+                        preconditions, applied_events);
       }
     }
 
@@ -543,16 +583,18 @@ namespace Legion {
                                                 const VersionInfo &version_info,
                                                   const UniqueID creator_op_id,
                                                   const unsigned index,
-                             LegionMap<Event,FieldMask>::aligned &preconditions)
+                             LegionMap<Event,FieldMask>::aligned &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       find_local_copy_preconditions(redop, reading, copy_mask, child_color, 
-                        version_info, creator_op_id, index, preconditions);
+            version_info, creator_op_id, index, preconditions, applied_events);
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-            local_point, version_info, creator_op_id, index, preconditions);
+                        local_point, version_info, creator_op_id, index, 
+                        preconditions, applied_events);
       }
     }
     
@@ -564,11 +606,15 @@ namespace Legion {
                                                 const VersionInfo &version_info,
                                                   const UniqueID creator_op_id,
                                                   const unsigned index,
-                             LegionMap<Event,FieldMask>::aligned &preconditions)
+                             LegionMap<Event,FieldMask>::aligned &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      // If we are not the logical owner, we need to see if we are up to date 
+      if (!is_logical_owner())
+        perform_remote_valid_check(copy_mask);  
       FieldMask filter_mask;
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_current_users, 
@@ -655,7 +701,8 @@ namespace Legion {
                                          const VersionInfo &version_info,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
-                                     const FieldMask &copy_mask, bool reading)
+                                     const FieldMask &copy_mask, bool reading,
+                                         std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       // Quick test, we only need to do this if the copy_term event
@@ -675,10 +722,10 @@ namespace Legion {
         {
           const ColorPoint &local_color = logical_node->get_color();
           parent->add_copy_user_above(usage, copy_term, local_color,
-                                 version_info, creator_op_id, index, copy_mask);
+                 version_info, creator_op_id, index, copy_mask, applied_events);
         }
         add_local_copy_user(usage, copy_term, true/*base*/, ColorPoint(),
-                            version_info, creator_op_id, index, copy_mask);
+                 version_info, creator_op_id, index, copy_mask, applied_events);
       }
     }
 
@@ -689,17 +736,18 @@ namespace Legion {
                                                const VersionInfo &version_info,
                                                const UniqueID creator_op_id,
                                                const unsigned index,
-                                               const FieldMask &copy_mask)
+                                               const FieldMask &copy_mask,
+                                               std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color,
-                                version_info, creator_op_id, index, copy_mask);
+              version_info, creator_op_id, index, copy_mask, applied_events);
       }
       add_local_copy_user(usage, copy_term, false/*base*/, child_color, 
-                          version_info, creator_op_id, index, copy_mask);
+              version_info, creator_op_id, index, copy_mask, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -709,9 +757,26 @@ namespace Legion {
                                                const VersionInfo &version_info,
                                                const UniqueID creator_op_id,
                                                const unsigned index,
-                                               const FieldMask &copy_mask)
+                                               const FieldMask &copy_mask,
+                                               std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
+      if (!is_logical_owner())
+      {
+        // If we are not the owner we have to send the user back to the owner
+        UserEvent remote_update_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(remote_update_event);
+          rez.serialize<bool>(true); // is copy
+          // TODO
+        }
+        runtime->send_view_remote_update(logical_owner, rez);
+        // Tell the operation it has to wait for this event
+        // to trigger before it can be considered mapped
+      }
       PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color, 
                                                     creator_op_id, index);
       user->add_reference();
@@ -732,7 +797,8 @@ namespace Legion {
     Event MaterializedView::find_user_precondition(
                           const RegionUsage &usage, Event term_event,
                           const FieldMask &user_mask, Operation *op,
-                          const unsigned index, const VersionInfo &version_info)
+                          const unsigned index, const VersionInfo &version_info,
+                          std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       std::set<Event> wait_on_events;
@@ -742,13 +808,13 @@ namespace Legion {
       UniqueID op_id = op->get_unique_op_id();
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
-                                    index, user_mask, wait_on_events);
+                          index, user_mask, wait_on_events, applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
-                        version_info, op_id, index, user_mask, wait_on_events);
+         version_info, op_id, index, user_mask, wait_on_events, applied_events);
       }
       return Runtime::merge_events<false/*meta*/>(wait_on_events); 
     }
@@ -762,18 +828,19 @@ namespace Legion {
                                                 const UniqueID op_id,
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
-                                                std::set<Event> &preconditions)
+                                                std::set<Event> &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
       find_local_user_preconditions(usage, term_event, child_color, op_id, 
-                                    index, user_mask, preconditions);
+                            index, user_mask, preconditions, applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
-                        version_info, op_id, index, user_mask, preconditions);
+          version_info, op_id, index, user_mask, preconditions, applied_events);
       }
     }
 
@@ -785,11 +852,15 @@ namespace Legion {
                                                 const UniqueID op_id,
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
-                                                std::set<Event> &preconditions)
+                                                std::set<Event> &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      // If we are not the logical owner, we need to see if we are up to date 
+      if (!is_logical_owner())
+        perform_remote_valid_check(user_mask);
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_current_users, 
                                           filter_previous_users;
@@ -853,19 +924,21 @@ namespace Legion {
     void MaterializedView::add_user(const RegionUsage &usage, Event term_event,
                                     const FieldMask &user_mask, Operation *op,
                                     const unsigned index,
-                                    const VersionInfo &version_info)
+                                    const VersionInfo &version_info,
+                                    std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       UniqueID op_id = op->get_unique_op_id();
       bool need_version_update = false;
       if (IS_WRITE(usage))
-        need_version_update = update_version_numbers(user_mask, version_info);
+        need_version_update = update_version_numbers(user_mask, version_info,
+                                                     applied_events);
       // Go up the tree if necessary 
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, version_info, 
-                               op_id, index, user_mask, need_version_update);
+               op_id, index, user_mask, need_version_update, applied_events);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -886,18 +959,20 @@ namespace Legion {
                                           const UniqueID op_id,
                                           const unsigned index,
                                           const FieldMask &user_mask,
-                                          const bool need_version_update)
+                                          const bool need_version_update,
+                                          std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       bool need_update_above = false;
       if (need_version_update)
-        need_update_above = update_version_numbers(user_mask, version_info);
+        need_update_above = update_version_numbers(user_mask, version_info,
+                                                   applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, version_info,
-                               op_id, index, user_mask, need_update_above);
+                 op_id, index, user_mask, need_update_above, applied_events);
       }
       add_local_user(usage, term_event, child_color, op_id, index, user_mask);
     }
@@ -936,6 +1011,7 @@ namespace Legion {
                                            const FieldMask &user_mask, 
                                            Operation *op, const unsigned index,
                                            const VersionInfo &version_info,
+                                           std::set<Event> &applied_events,
                                            bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -946,17 +1022,19 @@ namespace Legion {
       UniqueID op_id = op->get_unique_op_id();
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
-                                    index, user_mask, wait_on_events);
+                          index, user_mask, wait_on_events, applied_events);
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
-        need_version_update = update_version_numbers(user_mask, version_info);
+        need_version_update = update_version_numbers(user_mask, version_info,
+                                                     applied_events);
       // Go up the tree if necessary
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color, 
                               version_info, op_id, index, user_mask, 
-                              wait_on_events, need_version_update);
+                              wait_on_events, applied_events, 
+                              need_version_update);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -985,22 +1063,24 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                                 std::set<Event> &preconditions,
+                                                std::set<Event> &applied_events,
                                                 const bool need_version_update)
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
       find_local_user_preconditions(usage, term_event, child_color, op_id, 
-                                    index, user_mask, preconditions);
+                            index, user_mask, preconditions, applied_events);
       bool need_update_above = false;
       if (need_version_update)
-        need_update_above = update_version_numbers(user_mask, version_info);
+        need_update_above = update_version_numbers(user_mask, version_info,
+                                                   applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color,
                               version_info, op_id, index, user_mask, 
-                              preconditions, need_update_above);
+                              preconditions, applied_events, need_update_above);
       }
       // Add the user on the way back down
       add_local_user(usage, term_event, child_color, op_id, index, user_mask);
@@ -1276,7 +1356,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
-                                                const VersionInfo &version_info)
+                                                const VersionInfo &version_info,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       FieldVersions *versions = version_info.get_versions(logical_node); 
@@ -2445,6 +2526,128 @@ namespace Legion {
       view->register_with_runtime();
     }
 
+    //--------------------------------------------------------------------------
+    void MaterializedView::perform_remote_valid_check(
+                          const FieldMask &check_mask, std::set<Event> *wait_on)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_logical_owner());
+#endif
+      // First do the check to see if we are already valid 
+      FieldMask need_valid_update;
+      std::set<Event> local_wait_on;
+      UserEvent request_event = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock v_lock(view_lock);
+        need_valid_update = check_mask - remote_valid_mask;
+        if (!need_valid_update)
+          return; // We're done if all our fields are valid
+        // See which fields we already have requests for
+        for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+              remote_update_requests.begin(); it != 
+              remote_update_requests.end(); it++)
+        {
+          FieldMask overlap = need_valid_update & it->second;
+          if (!overlap)
+            continue;
+          if (wait_on != NULL)
+            wait_on->insert(it->first);
+          else
+            local_wait_on.insert(it->first);
+          need_valid_update -= overlap;
+          if (!need_valid_update)
+            break;
+        }
+        if (!!need_valid_update)
+        {
+          request_event = UserEvent::create_user_event();
+          remote_update_requests[request_event] = need_valid_update;
+        }
+      }
+      // If we have a request event, send the request now
+      if (request_event.exists())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(need_valid_update);
+          rez.serialize(request_event);
+        }
+        context->runtime->send_view_update_request(logical_owner, rez);
+      }
+      // If we have a parent, see if it needs to send requests too so 
+      // we can get as many in flight as possible in parallel
+      if (parent != NULL)
+      {
+        if (wait_on != NULL)
+          parent->perform_remote_valid_check(check_mask, wait_on);
+        else
+          parent->perform_remote_valid_check(check_mask, &local_wait_on);
+      }
+      // If we are the base caller, then we do the wait
+      if ((wait_on == NULL) && !local_wait_on.empty())
+      {
+        Event wait_for = Runtime::merge_events<true/*meta*/>(local_wait_on);
+        wait_for.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_update_request(AddressSpaceID source,
+                            const FieldMask &request_mask, UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_logical_owner());
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(request_mask);
+        rez.serialize(done_event);
+        // Hold the view lock when building up the information to send back
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // Package up the information to send back
+        // TODO
+      }
+      // Send the message back to get it on the wire before an 
+      // invalidate might be issued
+      runtime->send_view_update_response(source, rez);
+      // Retake the lock in exlcusive mode to update our
+      // set of remote instances
+      AutoLock v_lock(view_lock);
+      valid_remote_instances[source] |= request_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_update_response(Deserializer &derez,
+                           const FieldMask &response_mask, UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_logical_owner());
+#endif
+      // Take the lock in exclusive mode and update all our state
+      {
+        AutoLock v_lock(view_lock);
+        // TODO
+
+        // Update our remote valid mask
+        remote_valid_mask |= response_mask;
+        // Prune out the request event
+#ifdef DEBUG_HIGH_LEVEL
+        assert(remote_update_requests.find(done_event) != 
+                remote_update_requests.end());
+#endif
+        remote_update_requests.erase(done_event);
+      }
+      // Trigger our request saying everything is up to date
+      done_event.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // DeferredView 
     /////////////////////////////////////////////////////////////
@@ -2475,7 +2678,8 @@ namespace Legion {
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                    copy_mask, info.version_info, 
                                    info.op->get_unique_op_id(),
-                                   info.index, preconditions);
+                                   info.index, preconditions,
+                                   info.map_applied_events);
       LegionMap<Event,FieldMask>::aligned postconditions;
       issue_deferred_copies(info, dst, copy_mask, 
                             preconditions, postconditions);
@@ -2485,7 +2689,8 @@ namespace Legion {
       {
         dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
                            info.op->get_unique_op_id(), info.index,
-                           it->second, false/*reading*/);
+                           it->second, false/*reading*/, 
+                           info.map_applied_events);
       }
     }
 
@@ -3569,7 +3774,8 @@ namespace Legion {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              it->second, src_version_info,
                                              info.op->get_unique_op_id(),
-                                             info.index, src_preconditions);
+                                             info.index, src_preconditions,
+                                             info.map_applied_events);
           actual_copy_mask |= it->second;
         }
         // Move in any preconditions that overlap with our set of fields
@@ -3639,7 +3845,7 @@ namespace Legion {
             reduce_mask, src_version_info, local_preconditions, info.op,
             info.index, across_helper, 
             (dst->logical_node == it->first->logical_node) ?
-              NULL : it->first->logical_node);
+              NULL : it->first->logical_node, info.map_applied_events);
         if (reduce_event.exists())
           postreductions[reduce_event] = overlap;
       }
@@ -4153,7 +4359,8 @@ namespace Legion {
     void ReductionView::perform_reduction(InstanceView *target,
                                           const FieldMask &reduce_mask,
                                           const VersionInfo &version_info,
-                                          Operation *op, unsigned index)
+                                          Operation *op, unsigned index,
+                                          std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
@@ -4161,12 +4368,13 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
       this->reduce_from(manager->redop, reduce_mask, src_fields);
-
       LegionMap<Event,FieldMask>::aligned preconditions;
       target->find_copy_preconditions(manager->redop, false/*reading*/, 
-       reduce_mask, version_info, op->get_unique_op_id(), index, preconditions);
+              reduce_mask, version_info, op->get_unique_op_id(), index, 
+              preconditions, map_applied_events);
       this->find_copy_preconditions(manager->redop, true/*reading*/, 
-       reduce_mask, version_info, op->get_unique_op_id(), index, preconditions);
+           reduce_mask, version_info, op->get_unique_op_id(), index, 
+           preconditions, map_applied_events);
       std::set<Event> event_preconds;
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             preconditions.begin(); it != preconditions.end(); it++)
@@ -4180,9 +4388,11 @@ namespace Legion {
                                                    fold, true/*precise*/,
                                                    NULL/*intersect*/);
       target->add_copy_user(manager->redop, reduce_post, version_info,
-             op->get_unique_op_id(), index, reduce_mask, false/*reading*/);
+                           op->get_unique_op_id(), index, reduce_mask, 
+                           false/*reading*/, map_applied_events);
       this->add_copy_user(manager->redop, reduce_post, version_info,
-             op->get_unique_op_id(), index, reduce_mask, true/*reading*/);
+                         op->get_unique_op_id(), index, reduce_mask, 
+                         true/*reading*/, map_applied_events);
     } 
 
     //--------------------------------------------------------------------------
@@ -4192,7 +4402,8 @@ namespace Legion {
                                                     const std::set<Event> &pre,
                                                   Operation *op, unsigned index,
                                                     CopyAcrossHelper *helper,
-                                                    RegionTreeNode *intersect)
+                                                    RegionTreeNode *intersect,
+                                            std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -4207,7 +4418,8 @@ namespace Legion {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                      version_info, op->get_unique_op_id(), index, src_pre);
+                              version_info, op->get_unique_op_id(), index, 
+                              src_pre, map_applied_events);
       std::set<Event> preconditions = pre;
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
@@ -4222,7 +4434,8 @@ namespace Legion {
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
-                    op->get_unique_op_id(), index, red_mask, true/*reading*/);
+                    op->get_unique_op_id(), index, red_mask, 
+                    true/*reading*/, map_applied_events);
       return reduce_post;
     }
 
@@ -4233,7 +4446,8 @@ namespace Legion {
                               const VersionInfo &version_info,
                               const std::set<Event> &preconds,
                               Operation *op, unsigned index,
-                              RegionTreeNode *intersect)
+                              RegionTreeNode *intersect,
+                              std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -4244,12 +4458,12 @@ namespace Legion {
       target->copy_field(dst_field, dst_fields);
       FieldMask red_mask; red_mask.set_bit(src_index);
       this->reduce_from(manager->redop, red_mask, src_fields);
-
       LegionMap<Event,FieldMask>::aligned src_pre;
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                    version_info, op->get_unique_op_id(), index, src_pre);
+                              version_info, op->get_unique_op_id(), index, 
+                              src_pre, map_applied_events);
       std::set<Event> preconditions = preconds;
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
@@ -4264,7 +4478,8 @@ namespace Legion {
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
-                    op->get_unique_op_id(), index, red_mask, true/*reading*/);
+                    op->get_unique_op_id(), index, red_mask, 
+                    true/*reading*/, map_applied_events);
       return reduce_post;
     }
 
@@ -4290,7 +4505,8 @@ namespace Legion {
                                                 const VersionInfo &version_info,
                                                 const UniqueID creator_op_id,
                                                 const unsigned index,
-                             LegionMap<Event,FieldMask>::aligned &preconditions)
+                             LegionMap<Event,FieldMask>::aligned &preconditions,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -4395,7 +4611,8 @@ namespace Legion {
                                       const VersionInfo &version_info,
                                       const UniqueID creator_op_id,
                                       const unsigned index,
-                                      const FieldMask &mask, bool reading)
+                                      const FieldMask &mask, bool reading,
+                                      std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4441,7 +4658,8 @@ namespace Legion {
                                                 const FieldMask &user_mask,
                                                 Operation *op, 
                                                 const unsigned index,
-                                                const VersionInfo &version_info)
+                                                const VersionInfo &version_info,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -4471,7 +4689,8 @@ namespace Legion {
     void ReductionView::add_user(const RegionUsage &usage, Event term_event,
                                  const FieldMask &user_mask, Operation *op,
                                  const unsigned index,
-                                 const VersionInfo &version_info)
+                                 const VersionInfo &version_info,
+                                 std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4509,6 +4728,7 @@ namespace Legion {
                                         const FieldMask &user_mask, 
                                         Operation *op, const unsigned index,
                                         const VersionInfo &version_info,
+                                        std::set<Event> &applied_events,
                                         bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -4927,6 +5147,22 @@ namespace Legion {
                                   false/*register now*/);
       // Only register after construction
       view->register_with_runtime();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_update_request(AddressSpaceID source,
+                            const FieldMask &request_mask, UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_update_response(Deserializer &derez,
+                           const FieldMask &response_mask, UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
     }
 
   }; // namespace Internal 

@@ -511,8 +511,7 @@ namespace Legion {
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
       void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances,
-                                      std::set<Event> &mapped_applied);
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -615,6 +614,9 @@ namespace Legion {
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
       Mapper::TaskProfilingInfo             profiling_info;
+    protected:
+      // Events that must be triggered before we are done mapping
+      std::set<Event> map_applied_conditions;
     protected:
       // Track whether this task has finished executing
       unsigned outstanding_children_count;
@@ -877,7 +879,6 @@ namespace Legion {
       bool has_remote_subtasks;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
-      std::set<Event> map_applied_conditions;
       std::map<PhysicalManager*,
         std::pair<unsigned/*ref count*/,bool/*created*/> > acquired_instances;
     };
@@ -1333,7 +1334,7 @@ namespace Legion {
     public:
       void return_privileges(PointTask *point);
       void return_virtual_instance(unsigned index, InstanceSet &refs);
-      void record_child_mapped(void);
+      void record_child_mapped(Event child_complete);
       void record_child_complete(void);
       void record_child_committed(void);
     protected:
@@ -1370,6 +1371,7 @@ namespace Legion {
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
       std::deque<InstanceRef> temporary_virtual_refs;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::set<Event> map_applied_conditions;
     };
 
     /**

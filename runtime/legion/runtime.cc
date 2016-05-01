@@ -4892,6 +4892,11 @@ namespace Legion {
               runtime->handle_view_remote_update(derez);
               break;
             }
+          case SEND_VIEW_REMOTE_INVALIDATE:
+            {
+              runtime->handle_view_remote_invalidate(derez);
+              break;
+            }
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -14109,6 +14114,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_invalidate(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_INVALIDATE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14899,6 +14913,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceView::handle_view_remote_update(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_invalidate(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_remote_invalidate(derez, this);
     }
 
     //--------------------------------------------------------------------------

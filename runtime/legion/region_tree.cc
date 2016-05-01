@@ -575,7 +575,8 @@ namespace Legion {
                                                   IndexPartition pending,
                                                   const Domain &color_space,
                                                   Event term_event,
-                                                  VersionInfo &version_info)
+                                                  VersionInfo &version_info,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -597,7 +598,8 @@ namespace Legion {
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
                                        user_mask, field_id, op, index,
-                                       field_data, preconditions, version_info);
+                                       field_data, preconditions, 
+                                       version_info, applied_events);
       }
       // Enumerate the color space so we can get back a different index
       // for each color in the color space
@@ -630,7 +632,8 @@ namespace Legion {
                                                   IndexPartition pending,
                                                   const Domain &color_space,
                                                   Event term_event,
-                                                  VersionInfo &version_info)
+                                                  VersionInfo &version_info,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -660,8 +663,9 @@ namespace Legion {
         // Get the field data on this child node
         RegionUsage usage(req);
         child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                            user_mask, field_id, op, index,
-                                       field_data, preconditions, version_info);
+                                           user_mask, field_id, op, index,
+                                           field_data, preconditions, 
+                                           version_info, applied_events);
         Event child_pre;
         const Domain &child_dom = 
                         child_node->row_source->get_domain(child_pre);
@@ -697,7 +701,8 @@ namespace Legion {
                                                   IndexPartition pending,
                                                   const Domain &color_space,
                                                   Event term_event,
-                                                  VersionInfo &version_info)
+                                                  VersionInfo &version_info,
+                                                std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -720,7 +725,8 @@ namespace Legion {
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
                                          user_mask, field_id, op, index,
-                                       field_data, preconditions, version_info);
+                                         field_data, preconditions, 
+                                         version_info, applied_events);
       }
       // Get all the index spaces from the color space in the projection
       std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
@@ -1832,6 +1838,7 @@ namespace Legion {
                                                   VersionInfo &version_info,
                                                   Operation *op, unsigned index,
                                                   bool find_valid,
+                                                  std::set<Event> &map_applied,
                                                   InstanceSet &valid_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                   , const char *log_name
@@ -1851,7 +1858,8 @@ namespace Legion {
       RegionNode *parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
-      TraversalInfo info(ctx.get_id(), op, index, req, version_info, user_mask);
+      TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                         user_mask, map_applied);
       // Build path traverser object
       PhysicalTraverser traverser(path, &info, &valid_instances);
       // Get the start node
@@ -1892,6 +1900,7 @@ namespace Legion {
                                                  Operation *op, unsigned index,
                                                  Event term_event,
                                                  bool defer_add_users,
+                                                 std::set<Event> &map_applied,
                                                  InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , const char *log_name
@@ -1904,15 +1913,15 @@ namespace Legion {
                         REGION_TREE_PHYSICAL_TRAVERSE_AND_REGISTER_CALL);
       // Just call physical traverse path with an empty InstanceSet
       InstanceSet empty_targets;
-      physical_traverse_path(ctx, path, req, version_info, 
-                             op, index, false/*find valid*/, empty_targets
+      physical_traverse_path(ctx, path, req, version_info, op, index, 
+                             false/*find valid*/, map_applied, empty_targets
 #ifdef DEBUG_HIGH_LEVEL
                              , log_name, uid
 #endif
                              );
       // Now we can do the registration
       physical_register_only(ctx, req, version_info, op, index, 
-                             term_event, defer_add_users, targets
+                             term_event, defer_add_users, map_applied, targets
 #ifdef DEBUG_HIGH_LEVEL
                              , log_name, uid
 #endif
@@ -1965,6 +1974,7 @@ namespace Legion {
                                                   Operation *op, unsigned index,
                                                   Event term_event,
                                                   bool defer_add_users,
+                                                  std::set<Event> &map_applied,
                                                   InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , const char *log_name
@@ -1983,7 +1993,8 @@ namespace Legion {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the traversal info
-      TraversalInfo info(ctx.get_id(), op, index, req, version_info, user_mask);
+      TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                         user_mask, map_applied);
       RegionUsage usage(req);
 #ifdef DEBUG_HIGH_LEVEL 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2019,7 +2030,8 @@ namespace Legion {
                                   const std::vector<RegionRequirement> &regions,
                                   const std::vector<bool> &to_skip,
                                   const std::vector<VersionInfo> &version_infos,
-                                  std::deque<InstanceSet> &target_sets)
+                                  std::deque<InstanceSet> &target_sets,
+                                  std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_USERS_CALL);
@@ -2057,7 +2069,8 @@ namespace Legion {
           assert(!ref.is_composite_ref());
 #endif
           Event ready = target_views[idx2]->find_user_precondition(usage, 
-              term_event, ref.get_valid_fields(), op, idx1, info);
+                            term_event, ref.get_valid_fields(), op, idx1, 
+                            info, map_applied_events);
           ref.set_ready_event(ready);
         }
       }
@@ -2073,7 +2086,8 @@ namespace Legion {
         RegionUsage usage(req);
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
           target_views[idx2]->add_user(usage, term_event, 
-              targets[idx2].get_valid_fields(), op, idx1, info);
+                        targets[idx2].get_valid_fields(), 
+                        op, idx1, info, map_applied_events);
       }
     }
 
@@ -2083,7 +2097,8 @@ namespace Legion {
                       Operation *op, unsigned index, int composite_idx,
                       const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                       const std::set<ColorPoint> &next_children,
-                      Event term_event, const InstanceSet &targets
+                      Event term_event, std::set<Event> &map_applied,
+                      const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                       , const char *log_name
                       , UniqueID uid
@@ -2096,7 +2111,7 @@ namespace Legion {
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       TraversalInfo info(ctx.get_id(), op, index, req, 
-                         version_info, closing_mask);
+                         version_info, closing_mask, map_applied);
       RegionTreeNode *close_node = (req.handle_type == PART_PROJECTION) ?
                   static_cast<RegionTreeNode*>(get_node(req.partition)) : 
                   static_cast<RegionTreeNode*>(get_node(req.region));
@@ -2128,8 +2143,26 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!targets.empty());
 #endif
-        closed = close_node->perform_close_operation(info, closing_mask, 
-              to_close, targets, version_info, term_event, next_children);
+        if (composite_idx >= 0)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(targets.size() > 1);
+#endif
+          // copy over the targets
+          InstanceSet copy_targets(targets.size() - 1);
+          unsigned copy_idx = 0;
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            if (idx == composite_idx)
+              continue;
+            copy_targets[copy_idx++] = targets[idx];
+          }
+          closed = close_node->perform_close_operation(info, closing_mask,
+            to_close, copy_targets, version_info, term_event, next_children);
+        }
+        else
+          closed = close_node->perform_close_operation(info, closing_mask, 
+                to_close, targets, version_info, term_event, next_children);
       }
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2146,6 +2179,7 @@ namespace Legion {
                                                    const RegionRequirement &req,
                                                    VersionInfo &version_info,
                                                    Operation *op,unsigned index,
+                                                   std::set<Event> &map_applied,
                                                    InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                                    , const char *log_name
@@ -2163,7 +2197,8 @@ namespace Legion {
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       RegionUsage usage(req);
-      TraversalInfo info(ctx.get_id(), op, index, req, version_info, user_mask);
+      TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                         user_mask, map_applied);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2200,7 +2235,8 @@ namespace Legion {
                                         VersionInfo &src_version_info, 
                                         int src_composite_index,
                                         Operation *op, unsigned index,
-                                        Event precondition)
+                                        Event precondition, 
+                                        std::set<Event> &map_applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_COPY_ACROSS_CALL);
@@ -2297,7 +2333,7 @@ namespace Legion {
 #endif
           CompositeView *src_view = composite_ref.get_composite_view();
           TraversalInfo info(src_ctx.get_id(), op, index, src_req,
-                         src_version_info, composite_ref.get_valid_fields());
+             src_version_info, composite_ref.get_valid_fields(), map_applied);
           InstanceView *view = 
               dst_node->convert_reference(dst_ref, op->get_parent());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2465,7 +2501,8 @@ namespace Legion {
                                         InstanceView *src_view,
                                         InstanceView *dst_view,
                                         Event ready_event,
-                                        const std::vector<ColorPoint> &path)
+                                        const std::vector<ColorPoint> &path,
+                                        std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_VIEWS_INTO_CALL);
@@ -2505,7 +2542,9 @@ namespace Legion {
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
       Event init_event = src_view->add_user_fused(usage, ready_event, user_mask,
-                        context, index, version_info, false/*update versions*/);
+                                                  context, index, version_info, 
+                                                  applied_events,
+                                                  false/*update versions*/);
       if (init_event.exists())
       {
         dst_view->add_initial_user(init_event, usage, user_mask,
@@ -2523,7 +2562,8 @@ namespace Legion {
                                             SingleTask *context, unsigned index,
                                             VersionInfo &version_info,
                                             InstanceView *dst_view,
-                                            Event ready_event, bool init)
+                                            Event ready_event, bool init,
+                                            std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_VIEWS_FROM_CALL);
@@ -2567,7 +2607,7 @@ namespace Legion {
                                    context->get_unique_op_id(), index);
       else
         dst_view->add_user_fused(usage, ready_event, user_mask, 
-                                 context, index, version_info);
+                                 context, index, version_info, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2881,7 +2921,8 @@ namespace Legion {
                                         VersionInfo &version_info,
                                         RestrictInfo &restrict_info,
                                         InstanceSet &instances, 
-                                        Event precondition)
+                                        Event precondition,
+                                        std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -2903,7 +2944,8 @@ namespace Legion {
         restrict_info.populate_restrict_fields(eager_fields);
         Event done_event = fill_node->eager_fill_fields(ctx.get_id(), op, 
                            index, eager_fields, value, value_size, 
-                           version_info, instances, precondition);
+                           version_info, instances, precondition,
+                           map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
@@ -12715,14 +12757,16 @@ namespace Legion {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              it->second, info.version_info,
                                              info.op->get_unique_op_id(),
-                                             info.index, preconditions);
+                                             info.index, preconditions,
+                                             info.map_applied_events);
           update_mask |= it->second;
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                      update_mask, info.version_info,
                                      info.op->get_unique_op_id(),
-                                     info.index, preconditions);
+                                     info.index, preconditions,
+                                     info.map_applied_events);
 
         LegionMap<Event,FieldMask>::aligned postconditions;
         issue_grouped_copies(info, dst, preconditions, update_mask,
@@ -12733,7 +12777,8 @@ namespace Legion {
         {
           dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
                              info.op->get_unique_op_id(), info.index,
-                             it->second, false/*reading*/);
+                             it->second, false/*reading*/, 
+                             info.map_applied_events);
         }
       }
       // If we still have fields that need to be updated and there
@@ -13027,7 +13072,8 @@ namespace Legion {
           {
             it->first->add_copy_user(0/*redop*/, copy_post, src_version_info,
                                      info.op->get_unique_op_id(), info.index,
-                                     it->second, true/*reading*/);
+                                     it->second, true/*reading*/,
+                                     info.map_applied_events);
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
@@ -13118,7 +13164,8 @@ namespace Legion {
                                                  const FieldMask &mask,
                                                 const VersionInfo &version_info,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                                 Operation *op, unsigned index)
+                                                 Operation *op, unsigned index,
+                                                 std::set<Event> &map_applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13147,7 +13194,7 @@ namespace Legion {
 #endif
           // Then we have a reduction to perform
           it->first->perform_reduction(inst_target, copy_mask, 
-                                       version_info, op, index);
+                                       version_info, op, index, map_applied);
         }
       }
     }
@@ -13432,7 +13479,7 @@ namespace Legion {
             continue;
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.version_info,
-                                  reduction_views, info.op, info.index);
+              reduction_views, info.op, info.index, info.map_applied_events);
           // Save the overlap fields
           it->second = overlap;
           update_mask |= overlap;
@@ -14767,7 +14814,7 @@ namespace Legion {
 #endif
         const FieldMask &close_mask = ref.get_valid_fields();
         return target_views[0]->add_user_fused(usage, term_event, close_mask,
-                                          info.op, info.index, version_info);
+                  info.op, info.index, version_info, info.map_applied_events);
       }
       std::set<Event> closed_events;
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -14778,7 +14825,8 @@ namespace Legion {
 #endif
         const FieldMask &close_mask = ref.get_valid_fields();
         closed_events.insert(target_views[idx]->add_user_fused(usage, 
-              term_event, close_mask, info.op, info.index, version_info));
+                             term_event, close_mask, info.op, info.index, 
+                             version_info, info.map_applied_events));
       }
       return Runtime::merge_events<false/*meta*/>(closed_events);
     }
@@ -14953,7 +15001,8 @@ namespace Legion {
           {
             // Only find the preconditions now 
             Event ready = new_view->find_user_precondition(usage, term_event,
-                user_mask, info.op, info.index, info.version_info);
+                                  user_mask, info.op, info.index, 
+                                  info.version_info, info.map_applied_events);
             ref.set_ready_event(ready);
             new_views[idx] = new_view;
           }
@@ -14961,7 +15010,7 @@ namespace Legion {
           {
             // Do the fused find preconditions and add user
             Event ready = new_view->add_user_fused(usage, term_event, user_mask,
-                                        info.op, info.index, info.version_info);
+               info.op, info.index, info.version_info, info.map_applied_events);
             ref.set_ready_event(ready);
           }
         }
@@ -14971,8 +15020,8 @@ namespace Legion {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
             InstanceRef &ref = targets[idx]; 
-            new_views[idx]->add_user(usage, term_event, 
-                ref.get_valid_fields(), info.op, info.index, info.version_info);
+            new_views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
+               info.op, info.index, info.version_info, info.map_applied_events);
           }
         }
       }
@@ -15109,7 +15158,7 @@ namespace Legion {
 #endif
             Event ready = new_views[0]->as_instance_view()->add_user_fused(
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
-                info.version_info);
+                info.version_info, info.map_applied_events);
             ref.set_ready_event(ready);
           }
           else
@@ -15125,14 +15174,15 @@ namespace Legion {
               Event ready = 
                 new_views[idx]->as_instance_view()->find_user_precondition(
                     usage, term_event, ref.get_valid_fields(), info.op, 
-                    info.index, info.version_info);
+                    info.index, info.version_info, info.map_applied_events);
               ref.set_ready_event(ready);
             }
             for (unsigned idx = 0; idx < targets.size(); idx++)
             {
               InstanceRef &ref = targets[idx];
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
-                ref.get_valid_fields(), info.op, info.index, info.version_info);
+                                 ref.get_valid_fields(), info.op, info.index, 
+                                 info.version_info, info.map_applied_events);
             }
           }
         }
@@ -15192,12 +15242,13 @@ namespace Legion {
           // Flush any reductions from this level, and then flush any
           // from farther down in the tree
           ReductionCloser closer(info.ctx, target_view, user_mask, 
-                                 info.version_info, info.op, info.index);
+             info.version_info, info.op, info.index, info.map_applied_events);
           closer.issue_close_reductions(this, state);
           siphon_physical_children(closer, state);
           
           Event ready = target_view->add_user_fused(usage, Event::NO_EVENT,
-                    user_mask, info.op, info.index, info.version_info);
+                                    user_mask, info.op, info.index, 
+                                    info.version_info, info.map_applied_events);
           ref.set_ready_event(ready);
         }
       }
@@ -15220,7 +15271,8 @@ namespace Legion {
                                             unsigned index,
                                   std::vector<FieldDataDescriptor> &field_data,
                                             std::set<Event> &preconditions,
-                                            VersionInfo &version_info)
+                                            VersionInfo &version_info,
+                                            std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(ctx, version_info);
@@ -15250,7 +15302,7 @@ namespace Legion {
             view->set_descriptor(field_data.back(), field_id);
             // Register ourselves as user of this instance
             Event ready_event = view->add_user_fused(usage, term_event, 
-                                    user_mask, op, index, version_info);
+                    user_mask, op, index, version_info, applied_events);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done
@@ -15312,7 +15364,8 @@ namespace Legion {
                                         const void *value, size_t value_size,
                                         VersionInfo &version_info, 
                                         InstanceSet &instances,
-                                        Event sync_precondition)
+                                        Event sync_precondition,
+                                        std::set<Event> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       // Effectively a fill is a special kind of copy so we can analyze
@@ -15325,7 +15378,8 @@ namespace Legion {
         InstanceView *target = target_views[idx];
         LegionMap<Event,FieldMask>::aligned preconditions;
         target->find_copy_preconditions(0/*redop*/, false/*reading*/, fill_mask,
-                    version_info, op->get_unique_op_id(), index, preconditions);
+                                    version_info, op->get_unique_op_id(), index,
+                                    preconditions, map_applied_events);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -15347,7 +15401,8 @@ namespace Legion {
         // Add user to make record when everyone is done writing
         target->add_copy_user(0/*redop*/, op->get_completion_event(), 
                               version_info, op->get_unique_op_id(), 
-                              index, fill_mask, false/*reading*/);
+                              index, fill_mask, false/*reading*/,
+                              map_applied_events);
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(ctx, version_info);
@@ -16553,7 +16608,8 @@ namespace Legion {
 #endif
         const FieldMask &close_mask = ref.get_valid_fields();
         return target_views[0]->add_user_fused(usage, term_event, close_mask,
-                                          info.op, info.index, version_info);
+                                           info.op, info.index, version_info,
+                                           info.map_applied_events);
       }
       std::set<Event> closed_events;
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -16564,7 +16620,8 @@ namespace Legion {
 #endif
         const FieldMask &close_mask = ref.get_valid_fields();
         closed_events.insert(target_views[idx]->add_user_fused(usage, 
-              term_event, close_mask, info.op, info.index, version_info));
+                             term_event, close_mask, info.op, info.index, 
+                             version_info, info.map_applied_events));
       }
       return Runtime::merge_events<false/*meta*/>(closed_events);
     }

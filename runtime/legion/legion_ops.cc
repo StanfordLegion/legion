@@ -1832,6 +1832,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       InstanceSet mapped_instances;
+      std::set<Event> map_applied_conditions;
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
@@ -1841,6 +1842,7 @@ namespace Legion {
                                                this, 0/*idx*/, 
                                                termination_event, 
                                                false/*defer add users*/,
+                                               map_applied_conditions,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
@@ -1857,6 +1859,7 @@ namespace Legion {
                                                this, 0/*idx*/, 
                                                termination_event,
                                                false/*defer add users*/,
+                                               map_applied_conditions,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
@@ -1873,6 +1876,7 @@ namespace Legion {
                                                 requirement, version_info, 
                                                 this, 0/*idx*/,
                                                 true/*find valid*/,
+                                                map_applied_conditions,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -1886,6 +1890,7 @@ namespace Legion {
                                                 version_info, this, 0/*idx*/,
                                                 termination_event, 
                                                 false/*defer add users*/,
+                                                map_applied_conditions,
                                                 mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -1897,9 +1902,8 @@ namespace Legion {
       assert(!mapped_instances.empty());
 #endif 
       // We're done so apply our mapping changes
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(), 
-                                 runtime->address_space, applied_conditions);
+                               runtime->address_space, map_applied_conditions);
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
       region.impl->reset_references(mapped_instances, termination_event);
@@ -1939,8 +1943,8 @@ namespace Legion {
       }
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -2962,6 +2966,7 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
+      std::set<Event> map_applied_conditions;
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -2976,6 +2981,7 @@ namespace Legion {
                                                 src_requirements[idx],
                                                 src_versions[idx],
                                                 this, idx, true/*find valid*/,
+                                                map_applied_conditions,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -2999,6 +3005,7 @@ namespace Legion {
                                                 dst_requirements[idx],
                                                 dst_versions[idx],
                                                 this, idx, true/*find valid*/,
+                                                map_applied_conditions,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -3036,7 +3043,7 @@ namespace Legion {
         sync_precondition = Runtime::merge_events<false>(preconditions);
       }
       // Register the source and destination regions
-      std::set<Event> copy_complete_events, applied_conditions;
+      std::set<Event> copy_complete_events;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         InstanceSet src_targets, dst_targets;
@@ -3079,6 +3086,7 @@ namespace Legion {
                                                   src_versions[idx],
                                                   this, idx, local_completion,
                                                   false/*defer add users*/,
+                                                  map_applied_conditions,
                                                   src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , get_logging_name()
@@ -3098,6 +3106,7 @@ namespace Legion {
                                                  src_versions[idx], this, idx,
                                                  local_completion, 
                                                  false/*defer add users*/,
+                                                 map_applied_conditions,
                                                  src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
@@ -3128,6 +3137,7 @@ namespace Legion {
                                                   dst_versions[idx],
                                                   this, idx, local_completion,
                                                   false/*defer add users*/,
+                                                  map_applied_conditions,
                                                   dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , get_logging_name()
@@ -3147,6 +3157,7 @@ namespace Legion {
                                                  dst_versions[idx], this, idx,
                                                  local_completion, 
                                                  false/*defer add users*/, 
+                                                 map_applied_conditions,
                                                  dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
@@ -3188,7 +3199,8 @@ namespace Legion {
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, src_versions[idx], 
                                   src_composite, this, idx, 
-                                  local_sync_precondition);
+                                  local_sync_precondition, 
+                                  map_applied_conditions);
           Runtime::trigger_event<false>(local_completion, across_done);
         }
         else
@@ -3206,9 +3218,9 @@ namespace Legion {
         }
         // Apply our changes to the version states
         src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
-                            runtime->address_space, applied_conditions);
+                            runtime->address_space, map_applied_conditions);
         dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
-                            runtime->address_space, applied_conditions); 
+                            runtime->address_space, map_applied_conditions); 
       }
       Event copy_complete_event = 
         Runtime::merge_events<false>(copy_complete_events);
@@ -3229,8 +3241,8 @@ namespace Legion {
         }
       }
       // Mark that we completed mapping
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -4706,6 +4718,7 @@ namespace Legion {
       // See if we are restricted or not and if not find our valid instances 
       InstanceSet chosen_instances;
       int composite_idx = -1;
+      std::set<Event> map_applied_conditions;
       if (!restrict_info.has_restrictions())
       {
         InstanceSet valid_instances;
@@ -4713,6 +4726,7 @@ namespace Legion {
                                                 requirement, version_info,
                                                 this, 0/*idx*/, 
                                                 true/*find valid*/,
+                                                map_applied_conditions,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -4732,6 +4746,7 @@ namespace Legion {
                                                 version_info, this, 0/*idx*/, 
                                                 composite_idx, target_children,
                                                 next_children, completion_event,
+                                                map_applied_conditions,
                                                 chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -4748,11 +4763,10 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      std::set<Event> applied_conditions;
       version_info.apply_close(physical_ctx.get_id(), runtime->address_space,
-                               target_children, applied_conditions);
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+                               target_children, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -5167,9 +5181,11 @@ namespace Legion {
       // We already know the instances that we are going to need
       InstanceSet chosen_instances;
       parent_ctx->get_physical_references(parent_idx, chosen_instances);
+      std::set<Event> map_applied_conditions;
       Event close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/,
+                                                map_applied_conditions,
                                                 chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -5187,7 +5203,11 @@ namespace Legion {
 #endif
       }
       // No need to apply our mapping because we are done!
-      complete_mapping();
+      if (!map_applied_conditions.empty())
+        complete_mapping(
+            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
+      else
+        complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       Runtime::trigger_event<false>(completion_event, close_event);
@@ -5694,19 +5714,20 @@ namespace Legion {
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
+      std::set<Event> map_applied_conditions;
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
                                              false/*defer add users*/,
+                                             map_applied_conditions,
                                              mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                              , get_logging_name()
                                              , unique_op_id
 #endif
                                              );
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+                                 runtime->address_space,map_applied_conditions);
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
@@ -5753,8 +5774,8 @@ namespace Legion {
         }
       }
       // Mark that we completed mapping
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -6259,19 +6280,20 @@ namespace Legion {
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
+      std::set<Event> map_applied_conditions;
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
                                              false/*defer add users*/,
+                                             map_applied_conditions,
                                              mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                              , get_logging_name()
                                              , unique_op_id
 #endif
                                              );
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+                                 runtime->address_space,map_applied_conditions);
       std::set<Event> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
@@ -6316,8 +6338,8 @@ namespace Legion {
         }
       }
       // Mark that we completed mapping
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -9016,10 +9038,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We still have to do the traversal to flush any reductions
       InstanceSet empty_instances;
+      std::set<Event> map_applied_conditions;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info, 
                                               this, 0/*idx*/, 
                                               false/*find valid*/,
+                                              map_applied_conditions,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
@@ -9033,37 +9057,25 @@ namespace Legion {
           {
             ready_event = 
               runtime->forest->create_partition_by_field(physical_ctx, 
-                                                         this, 0/*idx*/,
-                                                         requirement,
-                                                         partition_handle,
-                                                         color_space,
-                                                         completion_event,
-                                                         version_info);
+                this, 0/*idx*/, requirement, partition_handle, color_space,
+                completion_event, version_info, map_applied_conditions);
             break;
           }
         case BY_IMAGE:
           {
             ready_event = 
               runtime->forest->create_partition_by_image(physical_ctx, 
-                                                         this, 0/*idx*/,
-                                                         requirement,
-                                                         partition_handle,
-                                                         color_space,
-                                                         completion_event,
-                                                         version_info);
+                this, 0/*idx*/, requirement, partition_handle, color_space,
+                completion_event, version_info, map_applied_conditions);
             break;
           }
         case BY_PREIMAGE:
           {
             ready_event = 
               runtime->forest->create_partition_by_preimage(physical_ctx, 
-                                                            this, 0/*idx*/,
-                                                            requirement,
-                                                            projection,
-                                                            partition_handle,
-                                                            color_space,
-                                                            completion_event,
-                                                            version_info);
+                this, 0/*idx*/, requirement, projection, partition_handle,
+                color_space, completion_event, version_info, 
+                map_applied_conditions);
             break;
           }
         default:
@@ -9075,7 +9087,11 @@ namespace Legion {
       assert(handle_ready.exists() && !handle_ready.has_triggered());
 #endif
       handle_ready.trigger();
-      complete_mapping();
+      if (!map_applied_conditions.empty())
+        complete_mapping(
+            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
+      else
+        complete_mapping();
       Runtime::trigger_event<false>(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(ready_event);
@@ -9446,6 +9462,7 @@ namespace Legion {
       version_info.clear();
       future = Future();
       restrict_info.clear();
+      map_applied_conditions.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
@@ -9550,6 +9567,7 @@ namespace Legion {
                                               requirement, version_info, 
                                               this, 0/*idx*/, 
                                               false/*find valid*/,
+                                              map_applied_conditions,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
@@ -9573,6 +9591,7 @@ namespace Legion {
                                                  this, 0/*idx*/, 
                                                  Event::NO_EVENT,
                                                  false/*defer add users*/,
+                                                 map_applied_conditions,
                                                  mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
@@ -9585,7 +9604,8 @@ namespace Legion {
           runtime->forest->fill_fields(physical_ctx, this, requirement, 
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
-                                       mapped_instances, sync_precondition);
+                                       mapped_instances, sync_precondition,
+                                       map_applied_conditions);
         if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
         {
           runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -9596,15 +9616,14 @@ namespace Legion {
                                           completion_event);
 #endif
         }
-        std::set<Event> applied_conditions;
         version_info.apply_mapping(physical_ctx.get_id(),
-                                   runtime->address_space, applied_conditions);
+                               runtime->address_space, map_applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
         value_size = 0;
-        if (!applied_conditions.empty())
-          complete_mapping(Runtime::merge_events<true>(applied_conditions));
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
         else
           complete_mapping();
         // See if we have any arrivals to trigger
@@ -9662,6 +9681,7 @@ namespace Legion {
                                                this, 0/*idx*/, 
                                                Event::NO_EVENT, 
                                                false/*defer add users*/,
+                                               map_applied_conditions,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
@@ -9674,7 +9694,8 @@ namespace Legion {
           runtime->forest->fill_fields(physical_ctx, this, requirement, 
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
-                                       mapped_instances, sync_precondition);
+                                       mapped_instances, sync_precondition,
+                                       map_applied_conditions);
       if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -9685,11 +9706,10 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+                              runtime->address_space, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       // See if we have any arrivals to trigger
@@ -10132,10 +10152,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We still have to do a traversal to make sure everything is open
       InstanceSet empty_instances;
+      std::set<Event> map_applied_conditions;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info, 
                                               this, 0/*idx*/,
                                               false/*find valid*/,
+                                              map_applied_conditions,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
@@ -10148,14 +10170,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
 #endif
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+                                 runtime->address_space,map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
-      if (!applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       Event attach_event = result.get_ready_event();

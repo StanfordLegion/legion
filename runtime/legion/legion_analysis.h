@@ -300,8 +300,9 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
-                    const RegionRequirement &req,
-                    VersionInfo &version_info, const FieldMask &traversal_mask);
+                    const RegionRequirement &req, VersionInfo &version_info, 
+                    const FieldMask &traversal_mask, 
+                    std::set<Event> &map_applied_events);
     public:
       const ContextID ctx;
       Operation *const op;
@@ -310,6 +311,7 @@ namespace Legion {
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;
+      std::set<Event> &map_applied_events;
     };
 
     /**
@@ -1039,7 +1041,8 @@ namespace Legion {
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
                       VersionInfo &version_info, 
-                      Operation *op, unsigned index);
+                      Operation *op, unsigned index,
+                      std::set<Event> &map_applied_events);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1052,6 +1055,7 @@ namespace Legion {
       VersionInfo &version_info;
       Operation *const op;
       const unsigned index;
+      std::set<Event> &map_applied_events;
     protected:
       std::set<ReductionView*> issued_reductions;
     };

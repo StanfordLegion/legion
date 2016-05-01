@@ -1928,6 +1928,7 @@ namespace Legion {
       void *value;
       size_t value_size;
       Future future;
+      std::set<Event> map_applied_conditions;
     protected:
       std::vector<Grant>        grants;
       std::vector<PhaseBarrier> wait_barriers;
