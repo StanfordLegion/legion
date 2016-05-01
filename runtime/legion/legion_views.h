@@ -187,9 +187,12 @@ namespace Legion {
         { return get_subview(c)->as_instance_view(); }
     public:
       virtual void process_update_request(AddressSpaceID source,
-                    const FieldMask &request_mask, UserEvent done_event) = 0;
+                               UserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
-                    const FieldMask &response_mask, UserEvent done_event) = 0;
+                                           UserEvent done_event) = 0;
+      virtual void process_remote_update(Deserializer &derez) = 0;
+      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
+                                             UserEvent done_event) = 0;
     public:
       static void handle_view_update_request(Deserializer &derez, 
           Runtime *runtime, AddressSpaceID source); 
@@ -358,8 +361,10 @@ namespace Legion {
                           std::set<Event> &applied_events);
       bool add_local_user(const RegionUsage &usage, Event term_event,
                           const ColorPoint &child_color, 
+                          const VersionInfo &version_info,
                           const UniqueID op_id, const unsigned index,
-                          const FieldMask &user_mask);
+                          const FieldMask &user_mask,
+                          std::set<Event> &applied_events);
     public:
       // This is a fused version of the above two virtual methods
       virtual Event add_user_fused(const RegionUsage &user, Event term_event,
@@ -493,9 +498,12 @@ namespace Legion {
                                       std::set<Event> *wait_on = NULL);
     public:
       virtual void process_update_request(AddressSpaceID source,
-                    const FieldMask &request_mask, UserEvent done_event);
+                               UserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                    const FieldMask &response_mask, UserEvent done_event);
+                                           UserEvent done_event);
+      virtual void process_remote_update(Deserializer &derez);
+      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
+                                             UserEvent done_event);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -690,10 +698,14 @@ namespace Legion {
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
+      void perform_remote_valid_check(void);
       virtual void process_update_request(AddressSpaceID source,
-                    const FieldMask &request_mask, UserEvent done_event);
+                               UserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                    const FieldMask &response_mask, UserEvent done_event);
+                                           UserEvent done_event);
+      virtual void process_remote_update(Deserializer &derez);
+      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
+                                             UserEvent done_event);
     public:
       ReductionOpID get_redop(void) const;
     public:
@@ -704,6 +716,10 @@ namespace Legion {
       std::set<Event> outstanding_gc_events;
     protected:
       std::set<Event> initial_user_events;
+    protected:
+      // the request event for reducers
+      // only needed on remote views
+      Event remote_request_event; 
     };
 
     /**

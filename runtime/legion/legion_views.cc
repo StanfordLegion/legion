@@ -147,8 +147,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      FieldMask update_mask;
-      derez.deserialize(update_mask);
       UserEvent done_event;
       derez.deserialize(done_event);
       // We have to be able to find this or it is very bad for deadlock
@@ -159,7 +157,7 @@ namespace Legion {
 #else
       InstanceView *inst_view = static_cast<InstanceView*>(dc);
 #endif
-      inst_view->process_update_request(source, update_mask, done_event);
+      inst_view->process_update_request(source, done_event, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -170,8 +168,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      FieldMask update_mask;
-      derez.deserialize(update_mask);
       UserEvent done_event;
       derez.deserialize(done_event);
       // We have to be able to find this or it is very bad for deadlock
@@ -182,7 +178,7 @@ namespace Legion {
 #else
       InstanceView *inst_view = static_cast<InstanceView*>(dc);
 #endif
-      inst_view->process_update_response(derez, update_mask, done_event);
+      inst_view->process_update_response(derez, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -190,7 +186,18 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      // We have to be able to find this or it is very bad for deadlock
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
+      assert(inst_view != NULL);
+#else
+      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+#endif
+      inst_view->process_remote_update(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -198,7 +205,22 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask invalid_mask;
+      derez.deserialize(invalid_mask);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      // We have to be able to find this or it is very bad for deadlock
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
+      assert(inst_view != NULL);
+#else
+      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+#endif
+      inst_view->process_remote_invalidate(invalid_mask, done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -771,11 +793,36 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(remote_update_event);
           rez.serialize<bool>(true); // is copy
-          // TODO
+          rez.serialize(usage);
+          rez.serialize(copy_mask);
+          rez.serialize(child_color);
+          rez.serialize(creator_op_id);
+          rez.serialize(index);
+          rez.serialize(copy_term);
+          // Figure out which version infos we need
+          LegionMap<VersionID,FieldMask>::aligned needed_versions;
+          const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
+            version_info.get_versions(logical_node)->get_field_versions();
+          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+                field_versions.begin(); it != field_versions.end(); it++)
+          {
+            FieldMask overlap = it->second & copy_mask;
+            if (!overlap)
+              continue;
+            needed_versions[it->first] = overlap;
+          }
+          rez.serialize<size_t>(needed_versions.size());
+          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+                needed_versions.begin(); it != needed_versions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
         }
         runtime->send_view_remote_update(logical_owner, rez);
         // Tell the operation it has to wait for this event
         // to trigger before it can be considered mapped
+        applied_events.insert(remote_update_event);
       }
       PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color, 
                                                     creator_op_id, index);
@@ -942,7 +989,7 @@ namespace Legion {
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                                    ColorPoint(), op_id, index, user_mask);
+          ColorPoint(), version_info, op_id, index, user_mask, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -974,20 +1021,64 @@ namespace Legion {
         parent->add_user_above(usage, term_event, local_color, version_info,
                  op_id, index, user_mask, need_update_above, applied_events);
       }
-      add_local_user(usage, term_event, child_color, op_id, index, user_mask);
+      add_local_user(usage, term_event, child_color, version_info,
+                     op_id, index, user_mask, applied_events);
     }
 
     //--------------------------------------------------------------------------
     bool MaterializedView::add_local_user(const RegionUsage &usage,
                                           Event term_event,
                                           const ColorPoint &child_color,
+                                          const VersionInfo &version_info,
                                           const UniqueID op_id,
                                           const unsigned index,
-                                          const FieldMask &user_mask)
+                                          const FieldMask &user_mask,
+                                          std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
       if (!term_event.exists())
         return false;
+      if (!is_logical_owner())
+      {
+        // If we are no the owner, we have to send the user back
+        UserEvent remote_update_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(remote_update_event);
+          rez.serialize<bool>(false); // is copy
+          rez.serialize(usage);
+          rez.serialize(user_mask);
+          rez.serialize(child_color);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize(term_event);
+          // Figure out which version infos we need
+          LegionMap<VersionID,FieldMask>::aligned needed_versions;
+          const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
+            version_info.get_versions(logical_node)->get_field_versions();
+          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+                field_versions.begin(); it != field_versions.end(); it++)
+          {
+            FieldMask overlap = it->second & user_mask;
+            if (!overlap)
+              continue;
+            needed_versions[it->first] = overlap;
+          }
+          rez.serialize<size_t>(needed_versions.size());
+          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+                needed_versions.begin(); it != needed_versions.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+        }
+        runtime->send_view_remote_update(logical_owner, rez);
+        // Tell the operation it has to wait for this event to
+        // trigger before it can be considered mapped
+        applied_events.insert(remote_update_event);
+      }
       PhysicalUser *new_user = 
         legion_new<PhysicalUser>(usage, child_color, op_id, index);
       new_user->add_reference();
@@ -1038,7 +1129,7 @@ namespace Legion {
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                                    ColorPoint(), op_id, index, user_mask);
+          ColorPoint(), version_info, op_id, index, user_mask, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1083,7 +1174,8 @@ namespace Legion {
                               preconditions, applied_events, need_update_above);
       }
       // Add the user on the way back down
-      add_local_user(usage, term_event, child_color, op_id, index, user_mask);
+      add_local_user(usage, term_event, child_color, version_info,
+                     op_id, index, user_mask, applied_events);
       // No need to launch a collect user task, the child takes care of that
     }
 
@@ -2572,8 +2664,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(need_valid_update);
           rez.serialize(request_event);
+          rez.serialize(need_valid_update);
         }
         context->runtime->send_view_update_request(logical_owner, rez);
       }
@@ -2596,18 +2688,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::process_update_request(AddressSpaceID source,
-                            const FieldMask &request_mask, UserEvent done_event)
+                                      UserEvent done_event, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_logical_owner());
 #endif
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(request_mask);
         rez.serialize(done_event);
+        rez.serialize(request_mask);
         // Hold the view lock when building up the information to send back
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Package up the information to send back
@@ -2624,12 +2718,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::process_update_response(Deserializer &derez,
-                           const FieldMask &response_mask, UserEvent done_event)
+                                                   UserEvent done_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!is_logical_owner());
 #endif
+      FieldMask response_mask;
+      derez.deserialize(response_mask);
       // Take the lock in exclusive mode and update all our state
       {
         AutoLock v_lock(view_lock);
@@ -2646,6 +2742,90 @@ namespace Legion {
       }
       // Trigger our request saying everything is up to date
       done_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_remote_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_logical_owner());
+#endif
+      UserEvent update_event;
+      derez.deserialize(update_event);
+      bool is_copy;
+      derez.deserialize(is_copy);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      ColorPoint child_color;
+      derez.deserialize(child_color);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      Event term_event;
+      derez.deserialize(term_event);
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      FieldVersions *field_versions = new FieldVersions();
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        FieldMask mask;
+        derez.deserialize(mask);
+        field_versions->add_field_version(vid, mask);
+      }
+      // Make a temporary version info just for these field versions
+      VersionInfo temp_version_info;
+      VersionInfo::NodeInfo &node_info = 
+        temp_version_info.find_tree_node_info(logical_node);
+      field_versions->add_reference();
+      node_info.field_versions = field_versions;
+      std::set<Event> applied_conditions;
+      if (is_copy)
+      {
+        // Do analysis and register the user
+        LegionMap<Event,FieldMask>::aligned dummy_preconditions;
+        find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
+                                    user_mask, child_color,
+                                    temp_version_info, op_id, index,
+                                    dummy_preconditions, applied_conditions);
+        add_local_copy_user(usage, term_event, true/*base user*/,
+                            child_color, temp_version_info, op_id, index,
+                            user_mask, applied_conditions);
+      }
+      else
+      {
+        // Do analysis and register the user
+        std::set<Event> dummy_preconditions;
+        find_local_user_preconditions(usage, term_event, child_color,
+                                      op_id, index, user_mask,
+                                      dummy_preconditions, applied_conditions);
+        if (add_local_user(usage, term_event, child_color, temp_version_info,
+                           op_id, index, user_mask, applied_conditions))
+          defer_collect_user(term_event);
+      }
+      // Chain the update events
+      if (!applied_conditions.empty())
+        Runtime::trigger_event<true>(update_event,
+            Runtime::merge_events<true>(applied_conditions));
+      else
+        Runtime::trigger_event<true>(update_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::process_remote_invalidate(
+                            const FieldMask &invalid_mask, UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock v_lock(view_lock);
+        remote_valid_mask -= invalid_mask;
+      }
+      Runtime::trigger_event<true>(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4521,6 +4701,8 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
+      if (!is_logical_owner() && reading)
+        perform_remote_valid_check();
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       if (reading)
       {
@@ -4618,6 +4800,26 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
+      if (!is_logical_owner())
+      {
+        // If we are not the logical owner we have to send our result back
+        UserEvent remote_applied_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(remote_applied_event);
+          rez.serialize(copy_term);
+          rez.serialize(mask);
+          rez.serialize(creator_op_id);
+          rez.serialize(index);
+          rez.serialize<bool>(true); // is_copy
+          rez.serialize(redop);
+          rez.serialize<bool>(reading);
+        }
+        runtime->send_view_remote_update(logical_owner, rez);
+        applied_events.insert(remote_applied_event);
+      }
       // Quick test: only need to do this if copy term exists
       bool issue_collect = false;
       if (copy_term.exists())
@@ -4671,6 +4873,8 @@ namespace Legion {
         assert(IS_READ_ONLY(usage));
 #endif
       const bool reading = IS_READ_ONLY(usage);
+      if (!is_logical_owner() && reading)
+        perform_remote_valid_check();
       std::set<Event> wait_on;
       Event use_event = manager->get_use_event();
       if (use_event.exists())
@@ -4701,8 +4905,27 @@ namespace Legion {
 #endif
       if (!term_event.exists())
         return;
-      const bool reading = IS_READ_ONLY(usage);
       UniqueID op_id = op->get_unique_op_id();
+      if (!is_logical_owner())
+      {
+        // Send back the results to the logical owner node
+        UserEvent remote_applied_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(remote_applied_event);
+          rez.serialize(term_event);
+          rez.serialize(user_mask);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize<bool>(false); // is copy
+          rez.serialize(usage);
+        }
+        runtime->send_view_remote_update(logical_owner, rez);
+        applied_events.insert(remote_applied_event);
+      }
+      const bool reading = IS_READ_ONLY(usage);
       PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
                                                         op_id, index);
       bool issue_collect = false;
@@ -4738,6 +4961,26 @@ namespace Legion {
       else
         assert(IS_READ_ONLY(usage));
 #endif
+      UniqueID op_id = op->get_unique_op_id();
+      if (!is_logical_owner())
+      {
+        // Send back the results to the logical owner node
+        UserEvent remote_applied_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(remote_applied_event);
+          rez.serialize(term_event);
+          rez.serialize(user_mask);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize<bool>(false); // is copy
+          rez.serialize(usage);
+        }
+        runtime->send_view_remote_update(logical_owner, rez);
+        applied_events.insert(remote_applied_event);
+      }
       const bool reading = IS_READ_ONLY(usage);
       std::set<Event> wait_on;
       Event use_event = manager->get_use_event();
@@ -4746,7 +4989,6 @@ namespace Legion {
       // Who cares just hold the lock in exlcusive mode, this analysis
       // shouldn't be too expensive for reduction views
       bool issue_collect = false;
-      UniqueID op_id = op->get_unique_op_id();
       PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
                                                         op_id, index);
       {
@@ -5150,19 +5392,219 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::process_update_request(AddressSpaceID source,
-                            const FieldMask &request_mask, UserEvent done_event)
+    void ReductionView::perform_remote_valid_check(void)
     //--------------------------------------------------------------------------
     {
-      // TODO
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_logical_owner());
+#endif
+      UserEvent request_event = UserEvent::NO_USER_EVENT;
+      Event wait_on = Event::NO_EVENT;
+      // If we don't have any registered readers, we have to ask
+      // the owner for all the current reducers
+      {
+        AutoLock v_lock(view_lock);  
+        if (!remote_request_event.exists())
+        {
+          request_event = UserEvent::create_user_event();
+          wait_on = request_event;
+        }
+        else // request was already sent
+          wait_on = remote_request_event;
+      }
+      // If we made the event send the request
+      if (request_event.exists())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(request_event);
+        }
+        context->runtime->send_view_update_request(logical_owner, rez);
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_update_request(AddressSpaceID source,
+                                      UserEvent done_event, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_logical_owner());
+#endif
+      // Send back all the reduction users
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(done_event);
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        rez.serialize<size_t>(reduction_users.size());
+        for (LegionMap<Event,EventUsers>::aligned::const_iterator it = 
+              reduction_users.begin(); it != reduction_users.end(); it++)
+        {
+          rez.serialize(it->first);
+          if (it->second.single)
+          {
+            rez.serialize<size_t>(1);
+            rez.serialize(*(it->second.users.single_user));
+            rez.serialize(it->second.user_mask);
+          }
+          else
+          {
+            rez.serialize<size_t>(it->second.users.multi_users->size());
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  uit = it->second.users.multi_users->begin(); uit != 
+                  it->second.users.multi_users->end(); uit++)
+            {
+              rez.serialize(*(uit->first));
+              rez.serialize(uit->second);
+            }
+          }
+        }
+      }
+      runtime->send_view_update_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::process_update_response(Deserializer &derez,
-                           const FieldMask &response_mask, UserEvent done_event)
+                                                UserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      // TODO
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_logical_owner());
+#endif
+      std::set<Event> deferred_collections;
+      {
+        // Take the lock in exclusive mode and start unpacking things
+        size_t num_events;
+        derez.deserialize(num_events);
+        AutoLock v_lock(view_lock);
+        for (unsigned idx1 = 0; idx1 < num_events; idx1++)
+        {
+          Event term_event;
+          derez.deserialize(term_event);
+#ifdef DEBUG_HIGH_LEVEL
+          // should never have this event before now
+          assert(reduction_users.find(term_event) == reduction_users.end());
+#endif
+          EventUsers current_users = reduction_users[term_event];
+          size_t num_users;
+          derez.deserialize(num_users);
+          if (num_users == 1)
+          {
+            current_users.users.single_user = legion_new<PhysicalUser>();
+            derez.deserialize(*(current_users.users.single_user));
+            derez.deserialize(current_users.user_mask);
+          }
+          else
+          {
+            current_users.single = false;
+            current_users.users.multi_users = 
+              new LegionMap<PhysicalUser*,FieldMask>::aligned();
+            LegionMap<PhysicalUser*,FieldMask>::aligned &multi = 
+              *(current_users.users.multi_users);
+            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+            {
+              PhysicalUser *user = legion_new<PhysicalUser>();
+              derez.deserialize(*user);
+              derez.deserialize(multi[user]);
+            }
+          }
+          deferred_collections.insert(term_event);
+        }
+      }
+      // Trigger the done event
+      Runtime::trigger_event<true/*meta*/>(done_event);
+      // Defer all the event collections
+      for (std::set<Event>::const_iterator it = deferred_collections.begin();
+            it != deferred_collections.end(); it++)
+        defer_collect_user(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_remote_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_logical_owner());
+#endif
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      Event term_event;
+      derez.deserialize(term_event);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      bool is_copy;
+      derez.deserialize(is_copy);
+      bool issue_collect = false;
+      if (is_copy)
+      {
+        ReductionOpID redop;
+        derez.deserialize(redop);
+        bool reading;
+        derez.deserialize(reading);
+        PhysicalUser *user;
+        // We don't use field versions for doing interference 
+        // tests on reductions so no need to record it
+        if (reading)
+        {
+          RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
+          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+        }
+        else
+        {
+          RegionUsage usage(REDUCE, EXCLUSIVE, redop);
+          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+        }
+        AutoLock v_lock(view_lock);
+        add_physical_user(user, reading, term_event, user_mask);
+        // Update the reference users
+        if (outstanding_gc_events.find(term_event) ==
+            outstanding_gc_events.end())
+        {
+          outstanding_gc_events.insert(term_event);
+          issue_collect = true;
+        }
+      }
+      else
+      {
+        RegionUsage usage;
+        derez.deserialize(usage);
+        const bool reading = IS_READ_ONLY(usage);
+        PhysicalUser *new_user = 
+          legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+        AutoLock v_lock(view_lock);
+        add_physical_user(new_user, reading, term_event, user_mask);
+        // Only need to do this if we actually have a term event
+        if (outstanding_gc_events.find(term_event) == 
+            outstanding_gc_events.end())
+        {
+          outstanding_gc_events.insert(term_event);
+          issue_collect = true;
+        }
+      }
+      // Now we can trigger our done event
+      Runtime::trigger_event<true/*meta*/>(done_event);
+      // Launch the garbage collection task if we need to
+      if (issue_collect)
+        defer_collect_user(term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::process_remote_invalidate(const FieldMask &invalid_mask,
+                                                  UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called, there are no invalidates for reduction views
+      assert(false);
     }
 
   }; // namespace Internal 

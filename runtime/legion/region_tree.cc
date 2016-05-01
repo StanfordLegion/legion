@@ -2153,7 +2153,7 @@ namespace Legion {
           unsigned copy_idx = 0;
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            if (idx == composite_idx)
+            if (idx == unsigned(composite_idx))
               continue;
             copy_targets[copy_idx++] = targets[idx];
           }
