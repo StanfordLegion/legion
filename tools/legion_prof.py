@@ -28,11 +28,14 @@ copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
-user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
+user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
+task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
+owner_pat = re.compile(prefix + r'Prof Slice Owner (?P<pid>[0-9]+) (?P<opid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
@@ -40,6 +43,8 @@ mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[
 # Extensions for messages
 message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
 message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Self-profiling
+proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -258,23 +263,52 @@ class TaskRange(TimeRange):
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
         if not self.task.is_task:
-            color = "#555555"
+            color = self.task.color or "#555555"
         else:
             color = self.task.variant.color
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
-                (base_level + (max_levels - level),
-                 self.start_time, self.stop_time,
-                 color,title))
+        if len(self.task.wait_intervals) > 0:
+            start_time = self.start_time
+            cur_level = base_level + (max_levels - level)
+            for wait_interval in self.task.wait_intervals:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         wait_interval.start, color, title))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
+                        (cur_level,
+                         wait_interval.start,
+                         wait_interval.ready, color, title))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\n" % \
+                        (cur_level,
+                         wait_interval.ready,
+                         wait_interval.end, color, title))
+                start_time = max(start_time, wait_interval.end)
+            if start_time < self.stop_time:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         self.stop_time, color, title))
+        else:
+            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                    (base_level + (max_levels - level),
+                     self.start_time, self.stop_time,
+                     color,title))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         exec_time = self.total_time()
-        for subrange in self.subranges:
-            subrange.update_task_stats(stat)
-            exec_time -= subrange.total_time()
+        last_time = self.start_time
+        #for subrange in self.subranges:
+        #    subrange.update_task_stats(stat)
+        #    if last_time > subrange.start_time:
+        #        exec_time -= subrange.stop_time - last_time
+        #    else:
+        #        exec_time -= subrange.total_time()
+        #    last_time = max(last_time, subrange.stop_time)
+        #assert exec_time >= 0
         if self.task.is_task:
-            stat.record_task(self.task, exec_time)
+            stat.record_task(self.task, exec_time, proc)
 
     def active_time(self):
         return self.total_time()
@@ -325,7 +359,7 @@ class MessageRange(TimeRange):
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.message)
         title += (' '+self.message.get_timing())
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
                  self.message.kind.color,title))
@@ -356,34 +390,55 @@ class Processor(object):
         self.kind = kind
         self.app_ranges = list()
         self.full_range = None
+        self.tasks = list()
+        self.max_levels = 0
+        self.time_points = list()
 
     def add_task(self, task):
-        self.app_ranges.append(TaskRange(task))
+        self.tasks.append(TaskRange(task))
 
     def add_message(self, message):
-        self.app_ranges.append(MessageRange(message))
+        # treating messages like any other task
+        self.tasks.append(MessageRange(message))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
 
     def sort_time_range(self):
-        for r in self.app_ranges:
-            self.full_range.add_range(r)
-        self.full_range.sort_range()
+        time_points = list()
+        for task in self.tasks:
+            self.time_points.append(TimePoint(task.start_time, task, True))
+            self.time_points.append(TimePoint(task.stop_time, task, False))
+        self.time_points.sort(key=lambda p: p.time_key)
+        free_levels = set()
+        for point in self.time_points:
+            if point.first:
+                if free_levels:
+                    point.thing.level = min(free_levels)
+                    free_levels.remove(point.thing.level)
+                else:
+                    self.max_levels += 1
+                    point.thing.level = self.max_levels
+            else:
+                free_levels.add(point.thing.level)
 
     def emit_svg(self, printer):
-        max_levels = self.full_range.max_levels()
         # Skip any empty processors
-        if max_levels > 1:
-            # First figure out the max number of levels + 1 for padding
-            printer.init_chunk(max_levels+1)
-            self.full_range.emit_svg_range(printer)
+        if self.max_levels > 0:
+            printer.init_chunk(self.max_levels + 1)
+            title = repr(self)
+            printer.emit_time_line(0, 0, self.full_range.stop_time, title)
+            # iterate over tasks in start time order
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_svg(printer, point.thing.level)
 
     def emit_tsv(self, tsv_file, base_level):
-        max_levels = self.full_range.max_levels()
-        if max_levels > 1:
-            self.full_range.emit_tsv_range(tsv_file, base_level, max_levels)
-        return base_level + max_levels
+        # iterate over tasks in start time order
+        for point in self.time_points:
+            if point.first:
+                point.thing.emit_tsv(tsv_file, base_level, self.max_levels + 1, point.thing.level)
+        return base_level + max(self.max_levels, 1) + 1
 
     def print_stats(self):
         total_time = self.full_range.total_time()
@@ -401,7 +456,8 @@ class Processor(object):
         print
 
     def update_task_stats(self, stat):
-        self.full_range.update_task_stats(stat)
+        for task in self.tasks:
+            task.update_task_stats(stat, self)
 
     def __repr__(self):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
@@ -472,7 +528,7 @@ class Memory(object):
                 assert instance.create is not None
                 assert instance.destroy is not None
                 inst_name = repr(instance)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - instance.level),
                          instance.create, instance.destroy,
                          instance.get_color(), inst_name))
@@ -570,7 +626,7 @@ class Channel(object):
                 assert copy.start is not None
                 assert copy.stop is not None
                 copy_name = repr(copy)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - copy.level),
                          copy.start, copy.stop,
                          copy.get_color(), copy_name))
@@ -606,10 +662,16 @@ class Channel(object):
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
+class WaitInterval(object):
+    def __init__(self, start, ready, end):
+        self.start = start
+        self.ready = ready
+        self.end = end
+
 class TaskKind(object):
     def __init__(self, task_id, name):
         self.task_id = task_id
-        self.name = 'Task "'+name+'"'
+        self.name = name
 
     def __repr__(self):
         return self.name
@@ -618,14 +680,14 @@ class Variant(object):
     def __init__(self, variant_id, name):
         self.variant_id = variant_id
         self.name = name
-        self.op = None
+        self.op = dict()
         self.task = None
         self.color = None
-        self.total_calls = 0
-        self.total_execution_time = 0
-        self.all_calls = list()
-        self.max_call = None
-        self.min_call = None
+        self.total_calls = dict()
+        self.total_execution_time = dict()
+        self.all_calls = dict()
+        self.max_call = dict()
+        self.min_call = dict()
 
     def set_task(self, task):
         assert self.task == None
@@ -642,36 +704,81 @@ class Variant(object):
     def total_time(self):
         return self.total_execution_time
 
-    def increment_calls(self, exec_time):
-        self.total_calls += 1
-        self.total_execution_time += exec_time
-        self.all_calls.append(exec_time)
-        if self.max_call is None:
-            self.max_call = exec_time
-        elif exec_time > self.max_call:
-            self.max_call = exec_time
-        if self.min_call is None:
-            self.min_call = exec_time
-        elif exec_time < self.min_call:
-            self.min_call = exec_time
+    def increment_calls(self, exec_time, proc):
+        if proc not in self.total_calls:
+            self.total_calls[proc] = 1
+            self.total_execution_time[proc] = exec_time
+            self.all_calls[proc] = [exec_time]
+            self.max_call[proc] = exec_time
+            self.min_call[proc] = exec_time
+        else:
+            self.total_calls[proc] += 1
+            self.total_execution_time[proc] += exec_time
+            self.all_calls[proc].append(exec_time)
+            if exec_time > self.max_call[proc]:
+                self.max_call[proc] = exec_time
+            if exec_time < self.min_call[proc]:
+                self.min_call[proc] = exec_time
 
-    def print_stats(self):
-        avg = float(self.total_execution_time)/float(self.total_calls)
+    def print_task_stat(self, total_calls, total_execution_time,
+            max_call, max_dev, min_call, min_dev):
+        avg = float(total_execution_time) / float(total_calls) \
+                if total_calls > 0 else 0
+        print '       Total Invocations: %d' % total_calls
+        print '       Total Time: %d us' % total_execution_time
+        print '       Average Time: %.2f us' % avg
+        print '       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev)
+        print '       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev)
+
+
+    def print_stats(self, verbose):
+        procs = sorted(self.total_calls.iterkeys())
+        total_execution_time = 0
+        total_calls = 0
+
+        for proc in procs:
+            total_execution_time += self.total_execution_time[proc]
+            total_calls += self.total_calls[proc]
+
+        avg = float(total_execution_time) / float(total_calls)
         stddev = 0
-        for call in self.all_calls:
-            diff = float(call) - avg
-            stddev += sqrt(diff * diff)
-        stddev /= float(self.total_calls)
+        max_call = self.max_call[procs[0]]
+        min_call = self.min_call[procs[0]]
+        for proc in procs:
+            max_call = max(max_call, self.max_call[proc])
+            min_call = min(min_call, self.min_call[proc])
+            for call in self.all_calls[proc]:
+                diff = float(call) - avg
+                stddev += sqrt(diff * diff)
+        stddev /= float(total_calls)
         stddev = sqrt(stddev)
-        max_dev = (float(self.max_call) - avg) / stddev if stddev != 0.0 else 0.0
-        min_dev = (float(self.min_call) - avg) / stddev if stddev != 0.0 else 0.0
+        max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
+        min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
+
         print '  '+self.name
-        print '       Total Invocations: '+str(self.total_calls)
-        print '       Total Time: '+str(self.total_execution_time)+' us'
-        print '       Average Time: %.2f us' % (avg)
-        print '       Maximum Time: %d us (%.3f sig)' % (self.max_call,max_dev)
-        print '       Minimum Time: %d us (%.3f sig)' % (self.min_call,min_dev)
+        self.print_task_stat(total_calls, total_execution_time,
+                max_call, max_dev, min_call, min_dev)
         print
+
+        if verbose and len(procs) > 1:
+            for proc in sorted(self.total_calls.iterkeys()):
+                avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
+                        if self.total_calls[proc] > 0 else 0
+                stddev = 0
+                for call in self.all_calls[proc]:
+                    diff = float(call) - avg
+                    stddev += sqrt(diff * diff)
+                stddev /= float(self.total_calls[proc])
+                stddev = sqrt(stddev)
+                max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
+                min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
+
+                print '    On ' + repr(proc)
+                self.print_task_stat(self.total_calls[proc],
+                        self.total_execution_time[proc],
+                        self.max_call[proc], max_dev,
+                        self.min_call[proc], min_dev)
+                print
 
 class Operation(object):
     def __init__(self, op_id):
@@ -681,6 +788,7 @@ class Operation(object):
         self.is_task = False
         self.is_meta = False
         self.is_multi = False
+        self.is_proftask = False
         self.name = 'Operation '+str(op_id)
         self.variant = None
         self.task_kind = None
@@ -689,29 +797,47 @@ class Operation(object):
         self.start = None
         self.stop = None
         self.color = None
+        self.wait_intervals = list()
+        self.owner = None
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def assign_color(self, color_map):
         assert self.color is None
         if self.is_task:
             assert self.variant is not None
             self.color = self.variant.color
+        elif self.is_proftask:
+            self.color = '#FFCOCB' # Pink
+        elif self.kind is None:
+            self.color = '#000000' # Black
         else:
-            if self.kind is None:
-                self.color = '#000000' # Black
-            else:
-                assert self.kind_num in color_map
-                self.color = color_map[self.kind_num]
+            assert self.kind_num in color_map
+            self.color = color_map[self.kind_num]
 
     def get_color(self):
         assert self.color is not None
         return self.color
 
     def get_info(self):
-        return 'UID='+str(self.op_id)
+        info = '<'+str(self.op_id)+">"
+        if self.owner <> None:
+            prev = self.owner
+            next = prev.owner
+            while next <> None:
+                prev = next
+                next = next.owner
+            info += ' (<-' + repr(self.owner) + ')'
+        return info
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.end - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def __repr__(self):
         if self.is_task:
@@ -723,6 +849,8 @@ class Operation(object):
         elif self.is_multi:
             assert self.task_kind is not None
             return self.task_kind.name+' '+self.get_info()
+        elif self.is_proftask:
+            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -739,16 +867,24 @@ class MetaTask(object):
         self.ready = None
         self.start = None
         self.stop = None
+        self.wait_intervals = list()
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.end - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def get_initiation(self):
         return 'initiated by="'+repr(self.op)+'"'
 
     def __repr__(self):
-        return 'Meta '+self.variant.name
+        return self.variant.name
 
 class UserMarker(object):
     def __init__(self, name):
@@ -986,30 +1122,30 @@ class StatGatherer(object):
         self.application_tasks = set()
         self.meta_tasks = set()
 
-    def record_task(self, task, exec_time):
+    def record_task(self, task, exec_time, proc):
         assert task.variant is not None
         if task.is_meta:
             if task.variant not in self.meta_tasks:
                 self.meta_tasks.add(task.variant)
-            task.variant.increment_calls(exec_time)
+            task.variant.increment_calls(exec_time, proc)
         else:
             if task.variant not in self.application_tasks:
                 self.application_tasks.add(task.variant)
-            task.variant.increment_calls(exec_time)
+            task.variant.increment_calls(exec_time, proc)
 
-    def print_stats(self):
+    def print_stats(self, verbose):
         print "  -------------------------"
         print "  Task Statistics"
         print "  -------------------------"
         for variant in sorted(self.application_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
-            variant.print_stats()
+            variant.print_stats(verbose)
         print "  -------------------------"
         print "  Meta-Task Statistics"
         print "  -------------------------"
         for variant in sorted(self.meta_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
-            variant.print_stats()
+            variant.print_stats(verbose)
 
 class State(object):
     def __init__(self):
@@ -1103,6 +1239,22 @@ class State(object):
                                        read_time(m.group('stop')),
                                        m.group('name'))
                     continue
+                m = task_wait_info_pat.match(line)
+                if m is not None:
+                    self.log_task_wait_info(long(m.group('opid')),
+                                            int(m.group('vid')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
+                    continue
+                m = meta_wait_info_pat.match(line)
+                if m is not None:
+                    self.log_meta_wait_info(long(m.group('opid')),
+                                            int(m.group('hlr')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
+                    continue
                 m = kind_pat.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
@@ -1123,6 +1275,11 @@ class State(object):
                 if m is not None:
                     self.log_multi(long(m.group('opid')),
                                    int(m.group('tid')))
+                    continue
+                m = owner_pat.match(line)
+                if m is not None:
+                    self.log_slice_owner(long(m.group('pid')),
+                                         long(m.group('opid')))
                     continue
                 m = meta_desc_pat.match(line)
                 if m is not None:
@@ -1161,6 +1318,13 @@ class State(object):
                                           long(m.group('start')),
                                           long(m.group('stop')))
                     continue
+                m = proftask_info_pat.match(line)
+                if m is not None:
+                    self.log_proftask_info(int(m.group('pid'),16),
+                                           long(m.group('opid')),
+                                           read_time(m.group('start')),
+                                           read_time(m.group('stop')))
+                    continue
                 # If we made it here then we failed to match
                 matches -= 1 
                 print 'Skipping line: %s' % line.strip()
@@ -1190,7 +1354,7 @@ class State(object):
         meta.create = create
         assert create <= ready
         meta.ready = ready
-        #assert ready <= start
+        assert ready <= start
         meta.start = start
         assert start <= stop
         meta.stop = stop
@@ -1256,6 +1420,21 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
+    def log_task_wait_info(self, op_id, variant_id, start, ready, end):
+        variant = self.find_variant(variant_id)
+        task = self.find_task(op_id, variant)
+        assert ready >= start
+        assert end >= ready
+        task.add_wait_interval(start, ready, end)
+
+    def log_meta_wait_info(self, op_id, hlr, start, ready, end):
+        op = self.find_op(op_id)
+        variant = self.find_meta_variant(hlr)
+        assert ready >= start
+        assert end >= ready
+        assert op_id in variant.op
+        variant.op[op_id].add_wait_interval(start, ready, end)
+
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
@@ -1279,9 +1458,18 @@ class State(object):
 
     def log_multi(self, op_id, task_id):
         op = self.find_op(op_id)
+        task_kind = TaskKind(task_id, None)
         if task_id in self.task_kinds:
-            op.is_multi = True
-            op.task_kind = self.task_kinds[task_id]
+            task_kind = self.task_kinds[task_id]
+        else:
+            self.task_kinds[task_id] = task_kind
+        op.is_multi = True
+        op.task_kind = self.task_kinds[task_id]
+
+    def log_slice_owner(self, parent_id, op_id):
+        parent = self.find_op(parent_id)
+        op = self.find_op(op_id)
+        op.owner = parent
 
     def log_meta_desc(self, hlr, name):
         if hlr not in self.meta_variants:
@@ -1317,6 +1505,20 @@ class State(object):
         message = Message(self.message_kinds[kind], start, stop)
         proc = self.find_processor(proc_id)
         proc.add_message(message)
+
+    def log_proftask_info(self, proc_id, op_id, start, stop):
+        assert start <= stop
+        task = Operation(op_id)
+        # we don't have a unique op_id for the profiling task itself, so we don't add to
+        #  self.operations, but that means we have to pick a color here
+        task.color = '#FFC0CB'  # Pink
+        task.is_proftask = True
+        task.create = start
+        task.ready = start
+        task.start = start
+        task.stop = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
 
     def find_processor(self, proc_id):
         if proc_id not in self.processors:
@@ -1363,12 +1565,12 @@ class State(object):
             task.is_task = True
             task.name = 'Task '+str(op_id) 
             task.variant = variant
-            variant.op = task
+            variant.op[op_id] = task
         return task
 
     def create_meta(self, variant, op):
         result = MetaTask(variant, op)
-        variant.op = result
+        variant.op[op.op_id] = result
         return result
 
     def create_copy(self, src, dst, op):
@@ -1420,14 +1622,14 @@ class State(object):
             channel.print_stats()
         print
 
-    def print_task_stats(self):
+    def print_task_stats(self, verbose):
         print '****************************************************'
         print '   TASK STATS'
         print '****************************************************'
         stat = StatGatherer(self)
         for proc in self.processors.itervalues():
             proc.update_task_stats(stat)
-        stat.print_stats()
+        stat.print_stats(verbose)
         print
 
     def print_stats(self, verbose):
@@ -1435,7 +1637,7 @@ class State(object):
             self.print_processor_stats()
             self.print_memory_stats()
             self.print_channel_stats()
-        self.print_task_stats()
+        self.print_task_stats(verbose)
 
     def assign_colors(self):
         # Subtract out some colors for which we have special colors
@@ -1554,22 +1756,25 @@ class State(object):
         base_level = 0
         last_time = 0
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\ttitle\n")
+        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
-                base_level = proc.emit_tsv(data_tsv_file, base_level)
-                processor_levels[proc] = base_level
-                last_time = max(last_time, proc.full_range.stop_time)
+                if len(proc.tasks) > 0:
+                    base_level = proc.emit_tsv(data_tsv_file, base_level)
+                    processor_levels[proc] = base_level
+                    last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
             for c,channel in sorted(self.channels.iteritems()):
-                base_level = channel.emit_tsv(data_tsv_file, base_level)
-                channel_levels[channel] = base_level
-                last_time = max(last_time, channel.last_time)
+                if len(channel.copies) > 0:
+                    base_level = channel.emit_tsv(data_tsv_file, base_level)
+                    channel_levels[channel] = base_level
+                    last_time = max(last_time, channel.last_time)
         if show_instances:
             for m,memory in sorted(self.memories.iteritems()):
-                base_level = memory.emit_tsv(data_tsv_file, base_level)
-                memory_levels[memory] = base_level
-                last_time = max(last_time, memory.last_time)
+                if len(memory.instances) > 0:
+                    base_level = memory.emit_tsv(data_tsv_file, base_level)
+                    memory_levels[memory] = base_level
+                    last_time = max(last_time, memory.last_time)
         data_tsv_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
@@ -1603,7 +1808,7 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sCT')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:sCST')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -1619,7 +1824,7 @@ def main():
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
-    interactive_timeline = False
+    interactive_timeline = True
     if '-p' in opts:
         show_procs = True
         show_all = False
@@ -1641,8 +1846,8 @@ def main():
         copy_output_prefix = output_prefix + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
-    if '-T' in opts:
-        interactive_timeline = True
+    if '-S' in opts:
+        interactive_timeline = False
     if show_all:
         show_procs = True
         show_channels = True
@@ -1665,16 +1870,16 @@ def main():
 
     if print_stats:
         state.print_stats(verbose) 
+    else:
+        if not interactive_timeline:
+            state.emit_visualization(output_prefix, show_procs, 
+                                     show_channels, show_instances) 
 
-    if not interactive_timeline:
-        state.emit_visualization(output_prefix, show_procs, 
-                                 show_channels, show_instances) 
-
-    if interactive_timeline:
-        state.emit_interactive_visualization(output_prefix, show_procs,
-                             show_channels, show_instances)
-    if show_copy_matrix:
-        state.show_copy_matrix(copy_output_prefix)
+        if interactive_timeline:
+            state.emit_interactive_visualization(output_prefix, show_procs,
+                                 show_channels, show_instances)
+        if show_copy_matrix:
+            state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
     main()

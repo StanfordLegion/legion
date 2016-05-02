@@ -74,8 +74,8 @@ namespace LegionRuntime {
     */
 
     // helper methods used in other places
-    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, int elmt_size,
-				     int block_size, int index)
+    static inline off_t calc_mem_loc(off_t alloc_offset, off_t field_start, int field_size, size_t elmt_size,
+				     size_t block_size, off_t index)
     {
       return (alloc_offset +                                      // start address
 	      ((index / block_size) * block_size * elmt_size) +   // full blocks
@@ -95,7 +95,12 @@ namespace LegionRuntime {
       DmaRequest(int _priority, Event _after_copy,
                  const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~DmaRequest(void);
+
+    public:
+      virtual void print(std::ostream& os) const;
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
 
@@ -127,8 +132,9 @@ namespace LegionRuntime {
 
 	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
 
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
+	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
       };
     };
 
@@ -149,13 +155,13 @@ namespace LegionRuntime {
       InstPairCopier(void);
       virtual ~InstPairCopier(void);
     public:
-      virtual void copy_field(int src_index, int dst_index, int elem_count,
+      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                               unsigned offset_index) = 0;
 
-      virtual void copy_all_fields(int src_index, int dst_index, int elem_count) = 0;
+      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count) = 0;
 
-      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-				   int src_stride, int dst_stride, int lines);
+      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+				   off_t src_stride, off_t dst_stride, off_t lines);
 
       virtual void flush(void) = 0;
     };
@@ -173,13 +179,13 @@ namespace LegionRuntime {
 
       virtual ~SpanBasedInstPairCopier(void);
 
-      virtual void copy_field(int src_index, int dst_index, int elem_count,
+      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                               unsigned offset_index);
 
-      virtual void copy_all_fields(int src_index, int dst_index, int elem_count);
+      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count);
 
-      virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-				   int src_stride, int dst_stride, int lines);
+      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+				   off_t src_stride, off_t dst_stride, off_t lines);
 
       virtual void flush(void);
 

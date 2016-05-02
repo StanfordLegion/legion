@@ -127,6 +127,14 @@ function data.range(start, stop) -- zero-based, exclusive (as in Python)
   return result
 end
 
+function data.mapi(fn, list)
+  local result = terralib.newlist()
+  for i, elt in ipairs(list) do
+    result:insert(fn(i, elt))
+  end
+  return result
+end
+
 function data.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do
@@ -192,7 +200,7 @@ end
 -- #################
 
 data.tuple = {}
-setmetatable(data.tuple, { __index = terralib.list })
+setmetatable(data.tuple, { __index = terralib.newlist })
 data.tuple.__index = data.tuple
 
 function data.tuple.__eq(a, b)
@@ -232,6 +240,16 @@ end
 function data.tuple:starts_with(t)
   assert(data.is_tuple(t))
   return self:slice(1, data.min(#self, #t)) == t
+end
+
+function data.tuple:mkstring(first, sep, last)
+  if first and sep and last then
+    return first .. self:map(tostring):concat(sep) .. last
+  elseif first and sep then
+    return first .. self:map(tostring):concat(sep)
+  else
+    return self:map(tostring):concat(first)
+  end
 end
 
 function data.tuple:__tostring()
@@ -334,10 +352,10 @@ function data.map:map_list(fn)
 end
 
 function data.map:__tostring()
-  return self:map_list(
+  return "{" .. self:map_list(
     function(k, v)
       return tostring(k) .. "=" .. tostring(v)
-    end):mkstring("{", ",", "}")
+    end):concat(",") .. "}"
 end
 
 -- #####################################

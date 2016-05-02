@@ -20,9 +20,10 @@ function g(y)
   regentlib.assert(y == 5, "test failed")
   x = true
 end
+local tg = terralib.cast({int} -> {}, g)
 
 task f(z : int)
-  g(z)
+  tg(z)
 end
 
 task main()

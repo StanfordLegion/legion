@@ -115,16 +115,24 @@ namespace LegionRuntime {
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                                            const VersionInfo &version_info,
+                                           const UniqueID creator_op_id,
+                                           const unsigned index,
                      LegionMap<Event,FieldMask>::aligned &preconditions) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
+                                 const UniqueID creator_op_id,
+                                 const unsigned index,
                                  const FieldMask &mask, bool reading) = 0;
       virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask,
-                                   const VersionInfo &version_info) = 0;
+                                   const VersionInfo &version_info,
+                                   const UniqueID op_id,
+                                   const unsigned index) = 0;
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
-                                    const FieldMask &user_mask) = 0;
+                                    const FieldMask &user_mask,
+                                    const UniqueID op_id,
+                                    const unsigned index) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(void) = 0;
@@ -252,16 +260,24 @@ namespace LegionRuntime {
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                                            const VersionInfo &version_info,
+                                           const UniqueID creator_op_id,
+                                           const unsigned index,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
+                                 const UniqueID creator_op_id,
+                                 const unsigned index,
                                  const FieldMask &mask, bool reading);
       virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask,
-                                   const VersionInfo &version_info);
+                                   const VersionInfo &version_info,
+                                   const UniqueID op_id,
+                                   const unsigned index);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
-                                    const FieldMask &user_mask);
+                                    const FieldMask &user_mask,
+                                    const UniqueID op_id,
+                                    const unsigned index);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -278,23 +294,31 @@ namespace LegionRuntime {
       void add_user_above(const RegionUsage &usage, Event term_event,
                           const ColorPoint &child_color,
                           const VersionInfo &version_info,
+                          const UniqueID op_id,
+                          const unsigned index,
                           const FieldMask &user_mask,
                           std::set<Event> &preconditions);
       bool add_local_user(const RegionUsage &usage, 
                           Event term_event, bool base_user,
                           const ColorPoint &child_color,
                           const VersionInfo &version_info,
+                          const UniqueID op_id,
+                          const unsigned index,
                           const FieldMask &user_mask,
                           std::set<Event> &preconditions);
     protected:
       void add_copy_user_above(const RegionUsage &usage, Event copy_term,
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
+                               const UniqueID creator_op_id,
+                               const unsigned index,
                                const FieldMask &copy_mask);
       void add_local_copy_user(const RegionUsage &usage, 
                                Event copy_term, bool base_user,
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
+                               const UniqueID creator_op_id,
+                               const unsigned index,
                                const FieldMask &copy_mask);
       bool find_current_preconditions(Event test_event,
                                       const PhysicalUser *prev_user,
@@ -302,6 +326,8 @@ namespace LegionRuntime {
                                       const RegionUsage &next_user,
                                       const FieldMask &next_mask,
                                       const ColorPoint &child_color,
+                                      const UniqueID op_id,
+                                      const unsigned index,
                                       std::set<Event> &preconditions,
                                       FieldMask &observed,
                                       FieldMask &non_dominated);
@@ -311,17 +337,22 @@ namespace LegionRuntime {
                                        const RegionUsage &next_user,
                                        const FieldMask &next_mask,
                                        const ColorPoint &child_color,
+                                       const UniqueID op_id,
+                                       const unsigned index,
                                        std::set<Event> &preconditions);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          const VersionInfo &version_info,
+                                         const UniqueID creator_op_id,
+                                         const unsigned index,
                        LegionMap<Event,FieldMask>::aligned &preconditions);
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
+                                         const UniqueID creator_op_id,
+                                         const unsigned index,
                            LegionMap<Event,FieldMask>::aligned &preconditions);
       void find_current_copy_preconditions(Event test_event,
                                            const PhysicalUser *user, 
@@ -329,7 +360,8 @@ namespace LegionRuntime {
                                            ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                                            const ColorPoint &child_color,
-                                           const FieldVersions *versions,
+                                           const UniqueID creator_op_id,
+                                           const unsigned index,
                         LegionMap<Event,FieldMask>::aligned &preconditions,
                                            FieldMask &observed,
                                            FieldMask &non_dominated);
@@ -339,7 +371,8 @@ namespace LegionRuntime {
                                             ReductionOpID redop, bool reading,
                                             const FieldMask &copy_mask,
                                             const ColorPoint &child_dolor,
-                                            const FieldVersions *versions,
+                                            const UniqueID creator_op_id,
+                                            const unsigned index,
                         LegionMap<Event,FieldMask>::aligned &preconditions);
     protected:
       void filter_previous_users(
@@ -453,15 +486,15 @@ namespace LegionRuntime {
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              const VersionInfo &version_info,
-                             Processor local_proc, Operation *op,
-                             CopyTracker *tracker = NULL);
+                             Processor local_proc, Operation *op, 
+                             unsigned index, CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
                                         const std::set<Event> &preconditions,
                                         const std::set<Domain> &reduce_domains,
                                         Event domain_precondition,
-                                        Operation *op);
+                                        Operation *op, unsigned index);
       Event perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
                                               FieldID src_field,
@@ -470,7 +503,7 @@ namespace LegionRuntime {
                                        const std::set<Event> &preconditions,
                                        const std::set<Domain> &reduce_domains,
                                        Event domain_precondition,
-                                       Operation *op);
+                                       Operation *op, unsigned index);
     public:
       virtual bool is_materialized_view(void) const;
       virtual bool is_reduction_view(void) const;
@@ -489,16 +522,24 @@ namespace LegionRuntime {
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
                                            const VersionInfo &version_info,
+                                           const UniqueID creator_op_id,
+                                           const unsigned index,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
+                                 const UniqueID creator_op_id,
+                                 const unsigned index,
                                  const FieldMask &mask, bool reading);
       virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask,
-                                   const VersionInfo &version_info);
+                                   const VersionInfo &version_info,
+                                   const UniqueID op_id,
+                                   const unsigned index);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
-                                    const FieldMask &user_mask);
+                                    const FieldMask &user_mask,
+                                    const UniqueID op_id,
+                                    const unsigned index);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields);
@@ -659,6 +700,8 @@ namespace LegionRuntime {
       virtual void find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -666,6 +709,8 @@ namespace LegionRuntime {
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           Realm::IndexSpace target,
@@ -741,6 +786,8 @@ namespace LegionRuntime {
       virtual void find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -748,6 +795,8 @@ namespace LegionRuntime {
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           Realm::IndexSpace target,
@@ -887,6 +936,8 @@ namespace LegionRuntime {
     public:
       bool find_field_descriptors(Event term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
+                                  const UniqueID reading_op_id,
+                                  const unsigned index,
                                   unsigned fid_idx, Processor local_proc, 
                                   Realm::IndexSpace target, Event target_pre,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -1001,6 +1052,8 @@ namespace LegionRuntime {
       virtual void find_field_descriptors(Event term_event, 
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -1008,6 +1061,8 @@ namespace LegionRuntime {
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
+                                          const UniqueID reading_op_id,
+                                          const unsigned index,
                                           unsigned fid_idx,
                                           Processor local_proc,
                                           Realm::IndexSpace target,

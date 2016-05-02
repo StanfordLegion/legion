@@ -31,28 +31,41 @@ namespace Realm {
     class DeferredLockRequest : public EventWaiter {
     public:
       DeferredLockRequest(Reservation _lock, unsigned _mode, bool _exclusive,
-			  GenEventImpl *_after_lock)
+			  Event _after_lock)
 	: lock(_lock), mode(_mode), exclusive(_exclusive), after_lock(_after_lock) {}
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive, after_lock);
+	// if input event is poisoned, do not attempt to take the lock - simply poison
+	//  the output event too
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred lock skipped - lock=" << lock << " after=" << after_lock;
+	  GenEventImpl::trigger(after_lock, true /*poisoned*/);
+	} else {
+	  get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive,
+						      ReservationImpl::ACQUIRE_BLOCKING,
+						      after_lock);
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred lock: lock=" IDFMT " after=" IDFMT "/%d\n",
-		lock.id, after_lock->me.id(), after_lock->generation + 1);
+	os << "deferred lock: lock=" << lock << " after=" << after_lock;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
       }
 
     protected:
       Reservation lock;
       unsigned mode;
       bool exclusive;
-      GenEventImpl *after_lock;
+      Event after_lock;
     };
 
   ////////////////////////////////////////////////////////////////////////
@@ -67,17 +80,29 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->release();
+	// if input event is poisoned, do not attempt to release the lock
+	// we don't have an output event here, so this may result in a hang if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.warning() << "poisoned deferred unlock skipped - POSSIBLE HANG - lock=" << lock;
+	} else {
+	  get_runtime()->get_lock_impl(lock)->release();
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred unlock: lock=" IDFMT "\n",
-	       lock.id);
+	os << "deferred unlock: lock=" << lock;
       }
+
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT; // WRONG!  Should be ALL the waiting events
+      }
+
     protected:
       Reservation lock;
     };
@@ -94,15 +119,27 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->release_reservation();
+	// if input event is poisoned, do not attempt to destroy the lock
+	// we don't have an output event here, so this may result in a leak if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred lock destruction skipped - POSSIBLE LEAK - lock=" << lock;
+	} else {
+	  get_runtime()->get_lock_impl(lock)->release_reservation();
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred lock destruction: lock=" IDFMT "\n", lock.id);
+	os << "deferred lock destruction: lock=" << lock;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
       }
 
     protected:
@@ -125,18 +162,44 @@ namespace Realm {
       // early out - if the event has obviously triggered (or is NO_EVENT)
       //  don't build up continuation
       if(wait_on.has_triggered()) {
-	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive);
+	Event e = get_runtime()->get_lock_impl(*this)->acquire(mode, exclusive,
+							       ReservationImpl::ACQUIRE_BLOCKING);
 	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e;
 	//printf("(" IDFMT "/%d)\n", e.id, e.gen);
 	return e;
       } else {
-	GenEventImpl *after_lock = GenEventImpl::create_genevent();
-	Event e = after_lock->current_event();
-	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << e << " wait_on=" << wait_on;
+	Event after_lock = GenEventImpl::create_genevent()->current_event();
+	log_reservation.info() << "reservation acquire: rsrv=" << *this << " finish=" << after_lock << " wait_on=" << wait_on;
 	EventImpl::add_waiter(wait_on, new DeferredLockRequest(*this, mode, exclusive, after_lock));
 	//printf("*(" IDFMT "/%d)\n", after_lock.id, after_lock.gen);
-	return e;
+	return after_lock;
       }
+    }
+
+    Event Reservation::try_acquire(bool retry, unsigned mode /* = 0 */, bool exclusive /* = true */,
+				   Event wait_on /* = Event::NO_EVENT */) const
+    {
+      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+      ReservationImpl *impl = get_runtime()->get_lock_impl(*this);
+
+      // if we have an unsatisfied precondition, we need to wait for that before actually trying
+      //  to get the reservation, but those will be marked as retries, so get a placeholder request
+      //  in here
+      if(!wait_on.has_triggered()) {
+	impl->acquire(mode, exclusive,
+		      ReservationImpl::ACQUIRE_NONBLOCKING_PLACEHOLDER);
+	log_reservation.info() << "reservation try_acquire: rsrv=" << *this << " wait_on=" << wait_on << " finish=" << wait_on;
+	return wait_on;
+      }
+
+      // attempt the nonblocking acquire
+      Event e = impl->acquire(mode, exclusive,
+			      (retry ?
+ 			         ReservationImpl::ACQUIRE_NONBLOCKING_RETRY :
+			         ReservationImpl::ACQUIRE_NONBLOCKING));
+      log_reservation.info() << "reservation try_acquire: rsrv=" << *this << " wait_on=" << wait_on << " finish=" << e;
+      return e;
     }
 
     // releases a held lock - release can be deferred until an event triggers
@@ -234,7 +297,7 @@ namespace Realm {
 
       // to destroy a local lock, we first must lock it (exclusively)
       ReservationImpl *lock_impl = get_runtime()->get_lock_impl(*this);
-      Event e = lock_impl->acquire(0, true);
+      Event e = lock_impl->acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING);
       if(!e.has_triggered()) {
 	EventImpl::add_waiter(e, new DeferredLockDestruction(*this));
       } else {
@@ -423,7 +486,7 @@ namespace Realm {
       log_reservation.debug(          "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
 	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
-      std::deque<GenEventImpl *> to_wake;
+      ReservationImpl::WaiterList to_wake;
 
       ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
       {
@@ -458,30 +521,30 @@ namespace Realm {
 	assert(any_local);
       }
 
-      for(std::deque<GenEventImpl *>::iterator it = to_wake.begin();
+      for(ReservationImpl::WaiterList::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
-	log_reservation.debug("release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
-			args.lock.id, (*it)->me.id(), (*it)->generation+1);
-	(*it)->trigger_current();
+	log_reservation.debug() << "release trigger: reservation=" << args.lock << " event=" << (*it);
+	GenEventImpl::trigger(*it, false /*!poisoned*/);
       }
     }
 
     Event ReservationImpl::acquire(unsigned new_mode, bool exclusive,
-				     GenEventImpl *after_lock /* = 0*/)
+				   AcquireType acquire_type,
+				   Event after_lock /*= Event:NO_EVENT*/)
     {
-      Event after_lock_event = after_lock ? after_lock->current_event() : Event::NO_EVENT;
-
-      log_reservation.debug(		      "local reservation request: reservation=" IDFMT " mode=%d excl=%d event=" IDFMT "/%d count=%d impl=%p",
-		      me.id, new_mode, exclusive, 
-		      after_lock_event.id,
-		      after_lock_event.gen, count, this);
+      log_reservation.debug() << "local reservation request: reservation=" << me
+			      << " mode=" << new_mode << " excl=" << exclusive
+			      << " acq=" << acquire_type
+			      << " event=" << after_lock
+			      << " count=" << count << " impl=" << this;
 
       // collapse exclusivity into mode
       if(exclusive) new_mode = MODE_EXCL;
 
       bool got_lock = false;
       int lock_request_target = -1;
+      WaiterList bonus_grants;
 
       {
 	AutoHSLLock a(mutex); // hold mutex on lock while we check things
@@ -490,6 +553,13 @@ namespace Realm {
 	//   deleted...  (info is only valid on a lock's home node)
 	assert((ID(me).node() != gasnet_mynode()) ||
 	       in_use);
+
+	// if this is just a placeholder nonblocking acquire, update the retry_count and
+	//  return immediately
+	if(acquire_type == ACQUIRE_NONBLOCKING_PLACEHOLDER) {
+	  retry_count[new_mode]++;
+	  return Event::NO_EVENT;
+	}
 
 	if(owner == gasnet_mynode()) {
 #ifdef LOCK_TRACING
@@ -501,12 +571,31 @@ namespace Realm {
           }
 #endif
 	  // case 1: we own the lock
-	  // can we grant it?
-	  if((count == ZERO_COUNT) || ((mode == new_mode) && (mode != MODE_EXCL))) {
+	  // can we grant it?  (don't if there is a higher priority waiter)
+	  if((count == ZERO_COUNT) ||
+	     ((mode == new_mode) &&
+	      (mode != MODE_EXCL) &&
+	      (local_waiters.empty() || (local_waiters.begin()->first > mode)))) {
 	    mode = new_mode;
 	    count++;
 	    log_reservation.spew("count ++(1) [%p]=%d", &count, count);
 	    got_lock = true;
+	    // fun special case here - if we grant a shared mode and there were local waiters and/or
+	    //  a retry event for that mode, we can trigger them to see if they want to come along
+	    //  for the ride
+	    if(new_mode != MODE_EXCL) {
+	      std::map<unsigned, WaiterList>::iterator it = local_waiters.find(new_mode);
+	      if(it != local_waiters.end()) {
+		bonus_grants.swap(it->second);
+		local_waiters.erase(it);
+	      }
+	      std::map<unsigned, Event>::iterator it2 = retry_events.find(new_mode);
+	      if(it2 != retry_events.end()) {
+		bonus_grants.push_back(it2->second);
+		retry_events.erase(it2);
+	      }
+	    }
+	    //
 #ifdef LOCK_TRACING
             {
               LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -547,14 +636,70 @@ namespace Realm {
 	log_reservation.debug(            "local reservation result: reservation=" IDFMT " got=%d req=%d count=%d",
 		 me.id, got_lock ? 1 : 0, requested ? 1 : 0, count);
 
+	// if this was a successful retry of a nonblocking request, decrement the retry_count
+	if(got_lock && (acquire_type == ACQUIRE_NONBLOCKING_RETRY)) {
+	  std::map<unsigned, unsigned>::iterator it = retry_count.find(new_mode);
+	  assert(it != retry_count.end());
+	  if(it->second > 1) {
+	    it->second--;
+	  } else {
+	    retry_count.erase(it);
+	  }
+	}
+
 	// if we didn't get the lock, put our event on the queue of local
 	//  waiters - create an event if we weren't given one to use
 	if(!got_lock) {
-	  if(!after_lock) {
-	    after_lock = GenEventImpl::create_genevent();
-	    after_lock_event = after_lock->current_event();
+	  switch(acquire_type) {
+	  case ACQUIRE_BLOCKING:
+	    {
+	      if(!after_lock.exists())
+		after_lock = GenEventImpl::create_genevent()->current_event();
+	      local_waiters[new_mode].push_back(after_lock);
+	      break;
+	    }
+
+	  case ACQUIRE_NONBLOCKING:
+	    {
+	      // first, record that we'll eventually see a retry of this
+	      retry_count[new_mode]++;
+
+	      // can't handle an existing after_event
+	      assert(!after_lock.exists());
+
+	      // now, make a retry event if we don't have one, or reuse an existing one
+	      std::map<unsigned, Event>::iterator it = retry_events.find(new_mode);
+	      if(it != retry_events.end()) {
+		after_lock = it->second;
+	      } else {
+		after_lock = GenEventImpl::create_genevent()->current_event();
+		retry_events[new_mode] = after_lock;
+	      }
+	      break;
+	    }
+
+	  case ACQUIRE_NONBLOCKING_RETRY:
+	    {
+	      // same as ACQUIRE_NONBLOCKING, but no increment of the retry count, since we
+	      //  already did that on the first request
+
+	      // can't handle an existing after_event
+	      assert(!after_lock.exists());
+
+	      // now, make a retry event if we don't have one, or reuse an existing one
+	      std::map<unsigned, Event>::iterator it = retry_events.find(new_mode);
+	      if(it != retry_events.end()) {
+		after_lock = it->second;
+	      } else {
+		after_lock = GenEventImpl::create_genevent()->current_event();
+		retry_events[new_mode] = after_lock;
+	      }
+	      break;
+	    }
+
+	  default:
+	    assert(0);
 	  }
-	  local_waiters[new_mode].push_back(after_lock);
 	}
       }
 
@@ -573,29 +718,35 @@ namespace Realm {
       }
 
       // if we got the lock, trigger an event if we were given one
-      if(got_lock && after_lock) 
-	after_lock->trigger(after_lock_event.gen, gasnet_mynode());
+      if(got_lock && after_lock.exists()) 
+	GenEventImpl::trigger(after_lock, false /*!poisoned*/);
 
-      return after_lock_event;
+      // trigger any bonus grants too
+      if(!bonus_grants.empty()) {
+	for(WaiterList::iterator it = bonus_grants.begin();
+	    it != bonus_grants.end();
+	    it++) {
+	  log_reservation.debug() << "acquire bonus grant: reservation=" << me << " event=" << (*it);
+	  GenEventImpl::trigger(*it, false /*!poisoned*/);
+	}
+      }
+
+      return after_lock;
     }
 
     // factored-out code to select one or more local waiters on a lock
     //  fills events to trigger into 'to_wake' and returns true if any were
     //  found - NOTE: ASSUMES LOCK IS ALREADY HELD!
-    bool ReservationImpl::select_local_waiters(std::deque<GenEventImpl *>& to_wake)
+    // also looks at retry_events and triggers one of those if it's higher
+    //  priority than any blocking waiter
+    bool ReservationImpl::select_local_waiters(WaiterList& to_wake)
     {
-      if(local_waiters.size() == 0)
+      if(local_waiters.empty() && retry_events.empty())
 	return false;
 
-      // favor the local waiters
-      log_reservation.debug("reservation going to local waiter: size=%zd first=%d(%zd)",
-	       local_waiters.size(), 
-	       local_waiters.begin()->first,
-	       local_waiters.begin()->second.size());
-	
       // further favor exclusive waiters
       if(local_waiters.find(MODE_EXCL) != local_waiters.end()) {
-	std::deque<GenEventImpl *>& excl_waiters = local_waiters[MODE_EXCL];
+	WaiterList& excl_waiters = local_waiters[MODE_EXCL];
 	to_wake.push_back(excl_waiters.front());
 	excl_waiters.pop_front();
 	  
@@ -607,17 +758,25 @@ namespace Realm {
 	count = ZERO_COUNT + 1;
 	log_reservation.spew("count <-1 [%p]=%d", &count, count);
       } else {
-	// pull a whole list of waiters that want to share with the same mode
-	std::map<unsigned, std::deque<GenEventImpl *> >::iterator it = local_waiters.begin();
-	
-	mode = it->first;
-	count = ZERO_COUNT + it->second.size();
-	log_reservation.spew("count <-waiters [%p]=%d", &count, count);
-	assert(count > ZERO_COUNT);
-	// grab the list of events wanting to share the lock
-	to_wake.swap(it->second);
-	local_waiters.erase(it);  // actually pull list off map!
-	// TODO: can we share with any other nodes?
+	// find the highest priority retry event and also the highest priority shared blocking waiters
+	std::map<unsigned, WaiterList>::iterator it = local_waiters.begin();
+	std::map<unsigned, Event>::iterator it2 = retry_events.begin();
+
+	if((it != local_waiters.end()) &&
+	   ((it2 == retry_events.end()) || (it->first <= it2->first))) {
+	  mode = it->first;
+	  count = ZERO_COUNT + it->second.size();
+	  log_reservation.spew("count <-waiters [%p]=%d", &count, count);
+	  assert(count > ZERO_COUNT);
+	  // grab the list of events wanting to share the lock
+	  to_wake.swap(it->second);
+	  local_waiters.erase(it);  // actually pull list off map!
+	  // TODO: can we share with any other nodes?
+	} else {
+	  // wake up one or more folks that will retry their try_acquires
+	  to_wake.push_back(it2->second);
+	  retry_events.erase(it2);
+	}
       }
 #ifdef LOCK_TRACING
       {
@@ -635,15 +794,17 @@ namespace Realm {
     {
       // make a list of events that we be woken - can't do it while holding the
       //  lock's mutex (because the event we trigger might try to take the lock)
-      std::deque<GenEventImpl *> to_wake;
+      WaiterList to_wake;
 
       int release_target = -1;
       int grant_target = -1;
       NodeSet copy_waiters;
 
       do {
+#ifdef RSRV_DEBUG_MSGS
 	log_reservation.debug(            "release: reservation=" IDFMT " count=%d mode=%d owner=%d", // share=%lx wait=%lx",
 			me.id, count, mode, owner); //, remote_sharer_mask, remote_waiter_mask);
+#endif
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
 	assert(count > ZERO_COUNT);
@@ -651,9 +812,11 @@ namespace Realm {
 	// if this isn't the last holder of the lock, just decrement count
 	//  and return
 	count--;
+#ifdef RSRV_DEBUG_MSGS
 	log_reservation.spew("count -- [%p]=%d", &count, count);
 	log_reservation.debug(            "post-release: reservation=" IDFMT " count=%d mode=%d", // share=%lx wait=%lx",
 		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
+#endif
 	if(count > ZERO_COUNT) break;
 
 	// case 1: if we were sharing somebody else's lock, tell them we're
@@ -666,20 +829,26 @@ namespace Realm {
 	  break;
 	}
 
-	// case 2: we own the lock, so we can give it to another waiter
-	//  (local or remote)
+	// case 2: we own the lock, so we can give it to a local waiter (or a retry list)
 	bool any_local = select_local_waiters(to_wake);
-	assert(!any_local || (to_wake.size() > 0));
+	if(any_local) {
+	  // we'll wake the blocking waiter(s) below
+	  assert(!to_wake.empty());
+	  break;
+	}
 
-	if(!any_local && (!remote_waiter_mask.empty())) {
+	// case 3: we can grant to a remote waiter (if any) if we don't expect any local retries
+	if(!remote_waiter_mask.empty() && retry_count.empty()) {
 	  // nobody local wants it, but another node does
 	  //HACK int new_owner = remote_waiter_mask.find_first_set();
 	  // TODO: use iterator - all we need is *begin()
           int new_owner = 0;  while(!remote_waiter_mask.contains(new_owner)) new_owner++;
           remote_waiter_mask.remove(new_owner);
 
+#ifdef RSRV_DEBUG_MSGS
 	  log_reservation.debug(              "reservation going to remote waiter: new=%d", // mask=%lx",
 		   new_owner); //, remote_waiter_mask);
+#endif
 
 	  grant_target = new_owner;
           copy_waiters = remote_waiter_mask;
@@ -687,6 +856,11 @@ namespace Realm {
 	  owner = new_owner;
           remote_waiter_mask = NodeSet();
 	}
+
+	// nobody wants it?  just sits in available state
+	assert(local_waiters.empty());
+	assert(retry_events.empty());
+	assert(remote_waiter_mask.empty());
       } while(0);
 
       if(release_target != -1)
@@ -733,12 +907,15 @@ namespace Realm {
 #endif
       }
 
-      for(std::deque<GenEventImpl *>::iterator it = to_wake.begin();
-	  it != to_wake.end();
-	  it++) {
-	log_reservation.debug("release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
-			me.id, (*it)->me.id(), (*it)->generation + 1);
-	(*it)->trigger_current();
+      if(!to_wake.empty()) {
+	for(WaiterList::iterator it = to_wake.begin();
+	    it != to_wake.end();
+	    it++) {
+#ifdef RSRV_DEBUG_MSGS
+	  log_reservation.debug() << "release trigger: reservation=" << me << " event=" << (*it);
+#endif
+	  GenEventImpl::trigger(*it, false /*!poisoned*/);
+	}
       }
     }
 

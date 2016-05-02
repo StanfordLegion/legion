@@ -132,6 +132,7 @@ namespace LegionRuntime {
       children_commit_invoked = false;
       local_cached = false;
       arg_manager = NULL;
+      must_epoch = NULL;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -178,6 +179,15 @@ namespace LegionRuntime {
       deleted_field_spaces.clear();
       deleted_index_spaces.clear();
       parent_req_indexes.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::set_must_epoch(MustEpochOp *epoch, unsigned index,
+                                bool do_registration)
+    //--------------------------------------------------------------------------
+    {
+      Operation::set_must_epoch(epoch, do_registration);
+      must_epoch_index = index;
     }
 
     //--------------------------------------------------------------------------
@@ -451,6 +461,7 @@ namespace LegionRuntime {
       assert(impl != NULL);
 #endif
       const size_t result_size = impl->get_untyped_size();
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
       if (result_size != variants->return_size)
       {
         log_run.error("Predicated task launch for task %s "
@@ -465,6 +476,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
       }
+#endif
       return result_size;
     }
 
@@ -584,6 +596,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskOp::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called except by inherited types
+      assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1500,8 +1521,10 @@ namespace LegionRuntime {
     {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
+      // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
-        this->set_must_epoch(rhs->must_epoch, this->must_epoch_index);
+        this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
+                             false/*do registration*/);
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -1727,9 +1750,9 @@ namespace LegionRuntime {
               regions[idx].premapped = runtime->forest->premap_physical_region(
                                        req_ctx, privilege_path, regions[idx], 
                                        version_info, this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+                                       parent_ctx->get_executing_processor(),idx
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                       , get_logging_name(), unique_op_id
 #endif
                                        );
 #ifdef DEBUG_HIGH_LEVEL
@@ -2625,13 +2648,20 @@ namespace LegionRuntime {
       if ((max_outstanding_frames <= 0) && (max_window_size > 0) && 
             (outstanding_count >= max_window_size))
       {
-        // Launch a window-wait task and then wait on the event 
-        WindowWaitArgs args;
-        args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
-        args.parent_ctx = this;
-        Event wait_done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                HLR_WINDOW_WAIT_TASK_ID, this);
-        wait_done.wait();
+        // Try taking the lock first and see if we succeed
+        Event precondition = op_lock.acquire(0, true/*exclusive*/);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          // Launch a window-wait task and then wait on the event 
+          WindowWaitArgs args;
+          args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
+          args.parent_ctx = this;  
+          Event wait_done = runtime->issue_runtime_meta_task(&args,sizeof(args),
+            HLR_WINDOW_WAIT_TASK_ID, this, precondition, 0, true/*holds lock*/);
+          wait_done.wait();
+        }
+        else // we can do the wait inline
+          perform_window_wait();
       }
     }
 
@@ -2640,22 +2670,18 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
+      // We already hold our lock from the callsite above
+      if (outstanding_children_count >= max_window_size)
       {
-        // Take the lock and make sure we didn't lose the race
-        AutoLock o_lock(op_lock);
-        // We can read this without locking because we know the application
-        // task isn't running if we are here and the lock serializes us
-        // with all the other meta-tasks
-        if (outstanding_children_count >= max_window_size)
-        {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!valid_wait_event);
+        assert(!valid_wait_event);
 #endif
-          window_wait = UserEvent::create_user_event();
-          valid_wait_event = true;
-          wait_event = window_wait;
-        }
+        window_wait = UserEvent::create_user_event();
+        valid_wait_event = true;
+        wait_event = window_wait;
       }
+      // Release our lock now
+      op_lock.release();
       if (wait_event.exists() && !wait_event.has_triggered())
         wait_event.wait();
     }
@@ -2675,7 +2701,8 @@ namespace LegionRuntime {
           args.proxy_this = this;
           args.op = op;
           last_registration = runtime->issue_runtime_meta_task(&args, 
-             sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, lock_acquire);
+                          sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, 
+                          op, lock_acquire, 0, true/*holds reservation*/);
           return;
         }
       }
@@ -2705,33 +2732,38 @@ namespace LegionRuntime {
     void SingleTask::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::set<Operation*>::iterator finder = executing_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != executing_children.end());
-      assert(executed_children.find(op) == executed_children.end());
-      assert(complete_children.find(op) == complete_children.end());
-#endif
-      executing_children.erase(finder);
-      // Now put it in the list of executing operations
-      // Note this doesn't change the number of active children
-      // so there's no need to trigger any window waits
-      //
-      // Add some hysteresis here so that we have some runway for when
-      // the paused task resumes it can run for a little while.
-      executed_children.insert(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (max_window_size > 0) &&
-          (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
+        AutoLock o_lock(op_lock);
+        std::set<Operation*>::iterator finder = executing_children.find(op);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != executing_children.end());
+        assert(executed_children.find(op) == executed_children.end());
+        assert(complete_children.find(op) == complete_children.end());
+#endif
+        executing_children.erase(finder);
+        // Now put it in the list of executing operations
+        // Note this doesn't change the number of active children
+        // so there's no need to trigger any window waits
+        //
+        // Add some hysteresis here so that we have some runway for when
+        // the paused task resumes it can run for a little while.
+        executed_children.insert(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(outstanding_count >= 0);
+#endif
+        if (valid_wait_event && (max_window_size > 0) &&
+            (outstanding_count <=
+             int(hysteresis_percentage * max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
       }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -2793,30 +2825,35 @@ namespace LegionRuntime {
     void SingleTask::unregister_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Remove it from everything and then see if we need to
-      // trigger the window wait event
-      executing_children.erase(op);
-      executed_children.erase(op);
-      complete_children.erase(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (max_window_size > 0) &&
-          (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
-      }
-      // No need to see if we trigger anything else because this
-      // method is only called while the task is still executing
-      // so 'executed' is still false.
+        AutoLock o_lock(op_lock);
+        // Remove it from everything and then see if we need to
+        // trigger the window wait event
+        executing_children.erase(op);
+        executed_children.erase(op);
+        complete_children.erase(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!executed);
+        assert(outstanding_count >= 0);
 #endif
+        if (valid_wait_event && (max_window_size > 0) &&
+            (outstanding_count <=
+             int(hysteresis_percentage * max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
+        // No need to see if we trigger anything else because this
+        // method is only called while the task is still executing
+        // so 'executed' is still false.
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!executed);
+#endif
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -3150,28 +3187,43 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Event SingleTask::decrement_pending(SingleTask *child) const
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to do this if we are scheduled by frames
+      if (min_tasks_to_schedule == 0)
+        return Event::NO_EVENT;
+      // This may involve waiting, so always issue it as a meta-task 
+      DecrementArgs decrement_args;
+      decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
+      decrement_args.parent_ctx = const_cast<SingleTask*>(this);
+      Event precondition = op_lock.acquire(0, true/*exclusive*/);
+      return runtime->issue_runtime_meta_task(&decrement_args, 
+          sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, child,
+          precondition, 0, true/*holds reservation*/);
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::decrement_pending(void)
     //--------------------------------------------------------------------------
     {
-      // Don't need to do this if we are schedule based on mapped frames
-      if (min_tasks_to_schedule == 0)
-        return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
-      {
-        AutoLock o_lock(op_lock);
+      // We already hold the lock from the dispatch site (see above)
 #ifdef DEBUG_HIGH_LEVEL
-        assert(pending_subtasks > 0);
+      assert(pending_subtasks > 0);
 #endif
-        if ((outstanding_subtasks > 0) &&
-            (pending_subtasks == min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
-          context_order_event = to_trigger;
-        }
-        pending_subtasks--;
+      if ((outstanding_subtasks > 0) &&
+          (pending_subtasks == min_tasks_to_schedule))
+      {
+        wait_on = context_order_event;
+        to_trigger = UserEvent::create_user_event();
+        context_order_event = to_trigger;
       }
+      pending_subtasks--;
+      // Release the lock before doing the trigger or the wait
+      op_lock.release();
+      // Do anything that we need to do
       if (to_trigger.exists())
       {
         wait_on.wait();
@@ -3275,7 +3327,7 @@ namespace LegionRuntime {
       // event has triggered.  Otherwise it already exists on this node
       // so we are free to use it no matter what
       if (runtime->forest->allocate_field(info.handle, info.field_size,
-                              info.fid, true/*local*/, info.serdez_id))
+                                       info.fid, info.serdez_id, true/*local*/))
       {
         // Successfully allocated a local field, launch a task to reclaim it
         Serializer rez;
@@ -4462,6 +4514,9 @@ namespace LegionRuntime {
         // them a virtual mapping
         if (regions[idx].virtual_map || regions[idx].privilege_fields.empty())
         {
+          // Make sure no instance created when no access privilege is given
+          if (IS_NO_ACCESS(regions[idx])) continue;
+
           virtual_mapped[idx] = true;
           // Check to see if we already virtually mapped it
           if (virtual_instances.find(idx) != virtual_instances.end())
@@ -4705,7 +4760,7 @@ namespace LegionRuntime {
         {
           local_instances[idx] = 
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], 
+                clone_requirements[idx], get_unique_op_id(), idx,
                 physical_instances[idx].get_manager(),
                 unmap_events[idx], depth+1, top_views);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4746,7 +4801,7 @@ namespace LegionRuntime {
             // ever being read from, so all the dependences it will catch
             // are true dependences, therefore making it safe. :)
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], composite_view);
+              clone_requirements[idx], get_unique_op_id(), idx, composite_view);
           }
         }
       }
@@ -5001,6 +5056,9 @@ namespace LegionRuntime {
             // initialized the local contexts and received
             // back the local instance references
           }
+          // Make sure you have the metadata for the region with no access priv
+          if (IS_NO_ACCESS(clone_requirements[idx]))
+            runtime->forest->get_node(clone_requirements[idx].region);
         }
 
         // If we're a leaf task and we have virtual mappings
@@ -5249,13 +5307,7 @@ namespace LegionRuntime {
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      {
-        DecrementArgs decrement_args;
-        decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
-        decrement_args.parent_ctx = parent_ctx;
-        pending_done = runtime->issue_runtime_meta_task(&decrement_args, 
-            sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
-      }
+      pending_done = parent_ctx->decrement_pending(this);
       return physical_regions;
     }
 
@@ -5319,9 +5371,7 @@ namespace LegionRuntime {
       {
         if (physical_regions[idx].impl->is_mapped())
           physical_regions[idx].impl->unmap_region();
-      }
-      // Now we can clear the physical regions since we're done using them
-      physical_regions.clear();
+      } 
       // Do the same thing with any residual inline mapped regions
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
@@ -5370,6 +5420,8 @@ namespace LegionRuntime {
           }
         }
       } 
+      // Now we can clear the physical regions since we're done using them
+      physical_regions.clear();
 
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
@@ -5389,8 +5441,10 @@ namespace LegionRuntime {
         }
         else
           post_end_args.result = const_cast<void*>(res);
+        // Give these high priority too since they are cleaning up 
+        // and will allow other tasks to run
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-                                     HLR_POST_END_ID, this, last_registration);
+               HLR_POST_END_ID, this, last_registration, 0, true/*important*/);
       }
       else
         post_end_task(res, res_size, owned);
@@ -6121,6 +6175,7 @@ namespace LegionRuntime {
       remote_unique_id = get_unique_task_id();
       sent_remotely = false;
       top_level_task = false;
+      is_inline = false;
       has_remote_subtasks = false;
     }
 
@@ -6246,6 +6301,7 @@ namespace LegionRuntime {
           }
           else
           {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
             if (predicate_false_size != variants->return_size)
             {
               log_run.error("Predicated task launch for task %s "
@@ -6260,6 +6316,7 @@ namespace LegionRuntime {
 #endif
               exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
             }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
             assert(predicate_false_result == NULL);
 #endif
@@ -6376,7 +6433,7 @@ namespace LegionRuntime {
       // Top-level tasks never do dependence analysis, so we
       // need to complete those stages now
       resolve_speculation();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::trigger_dependence_analysis(void)
@@ -6565,9 +6622,10 @@ namespace LegionRuntime {
                                          get_parent_context(idx),
                                          privilege_paths[idx], regions[idx], 
                                          version_infos[idx], this, parent_ctx,
-                                         parent_ctx->get_executing_processor()
+                                         parent_ctx->get_executing_processor(),
+                                         idx
 #ifdef DEBUG_HIGH_LEVEL
-                                         , idx, get_logging_name(), unique_op_id
+                                         , get_logging_name(), unique_op_id
 #endif
                                          );
 #ifdef DEBUG_HIGH_LEVEL
@@ -6622,6 +6680,22 @@ namespace LegionRuntime {
       // Then clean up this task instance
       if (trigger)
         complete_execution();
+      // "mapping" does not change the physical state
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+	VersionInfo &version_info = version_infos[idx];
+	RegionTreeContext req_ctx =
+	  parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
+	// don't bother if this wasn't going to change mapping state anyway
+	// only requirements with write privileges bump version numbers
+	if(!IS_WRITE(req))
+	  continue;
+	version_info.apply_mapping(req_ctx.get_id(),
+				   runtime->address_space,
+				   map_applied_conditions,
+				   true /*copy previous*/);
+      }      
       complete_mapping();
       trigger_children_complete();
     }
@@ -6914,6 +6988,8 @@ namespace LegionRuntime {
           children_commit_invoked = true;
         }
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       // Mark that this operation is complete
       complete_operation();
       if (need_commit)
@@ -6936,6 +7012,8 @@ namespace LegionRuntime {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       commit_operation();
       // Finally we can deactivate this task now that it has commited
       deactivate();
@@ -7199,8 +7277,17 @@ namespace LegionRuntime {
       Processor current = parent_ctx->get_executing_processor();
       // Set the context to be the current inline context
       parent_ctx = ctx;
+      // Mark that we are an inline task
+      is_inline = true;
       variant->dispatch_inline(current, this); 
     }  
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_inline;
+    }
 
     //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& IndividualTask::begin_inline_task(void)
@@ -7393,6 +7480,10 @@ namespace LegionRuntime {
     void PointTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(
+            this->slice_owner->get_unique_op_id(),
+            this->get_unique_op_id());
       deactivate_single();
       if (!remote_instances.empty())
       {
@@ -7447,9 +7538,9 @@ namespace LegionRuntime {
                                      get_parent_context(idx),
                                      mapping_path, regions[idx], 
                                      version_info, this, parent_ctx,
-                                     parent_ctx->get_executing_processor()
+                                     parent_ctx->get_executing_processor(), idx
 #ifdef DEBUG_HIGH_LEVEL
-                                     , idx, get_logging_name(), unique_op_id
+                                     , get_logging_name(), unique_op_id
 #endif
                                      );
 #ifdef DEBUG_HIGH_LEVEL
@@ -7554,6 +7645,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       slice_owner->recapture_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are never an inline task
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7736,7 +7835,7 @@ namespace LegionRuntime {
     InstanceRef PointTask::find_restricted_instance(unsigned index)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->find_restricted_instance(index);
+      return slice_owner->find_restricted_instance(index,regions[index].region);
     }
 
     //--------------------------------------------------------------------------
@@ -8777,6 +8876,7 @@ namespace LegionRuntime {
         }
         else
         {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
           if (predicate_false_size != variants->return_size)
           {
             log_run.error("Predicated index task launch for task %s "
@@ -8791,6 +8891,7 @@ namespace LegionRuntime {
 #endif
             exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
           }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate_false_result == NULL);
 #endif
@@ -9157,6 +9258,7 @@ namespace LegionRuntime {
       // Then clean up this task execution
       if (trigger)
         complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
       trigger_children_complete();
     }
@@ -9309,7 +9411,8 @@ namespace LegionRuntime {
       }
       else
         future_map.impl->complete_all_futures();
-
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       complete_operation();
       if (speculation_state == RESOLVE_FALSE_STATE)
         trigger_children_committed();
@@ -9325,6 +9428,8 @@ namespace LegionRuntime {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       // Mark that this operation is now committed
       commit_operation();
       // Now we get to deactivate this task
@@ -9435,6 +9540,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are always an inline task if we are getting called here
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& IndexTask::begin_inline_task(void)
     //--------------------------------------------------------------------------
     {
@@ -9478,6 +9591,9 @@ namespace LegionRuntime {
       if (Internal::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_task_id(), 
                                    result->get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+                                                result->get_unique_op_id());
       return result;
     }
 
@@ -9503,7 +9619,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef IndexTask::find_restricted_instance(unsigned index)
+    InstanceRef IndexTask::find_restricted_instance(unsigned index, 
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9513,7 +9630,12 @@ namespace LegionRuntime {
       InstanceRef parent_ref = 
         parent_ctx->get_local_reference(parent_req_indexes[index]);
       // Now get the proper sub-view for our privilege path
-      return privilege_paths[index].translate_ref(parent_ref);
+      // Translate down from where the parent task had privileges
+      // down to where the target region is
+      RegionTreePath translate_path;
+      runtime->forest->initialize_path(target.get_index_space(),
+                     regions[index].parent.get_index_space(), translate_path);
+      return translate_path.translate_ref(parent_ref);
     }
 
     //--------------------------------------------------------------------------
@@ -10026,9 +10148,10 @@ namespace LegionRuntime {
                                        get_parent_context(idx),
                                        privilege_path, regions[idx], 
                                        version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+                                       parent_ctx->get_executing_processor(), 
+                                       idx
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                       , get_logging_name(), unique_op_id
 #endif
                                        );
 #ifdef DEBUG_HIGH_LEVEL
@@ -10332,6 +10455,9 @@ namespace LegionRuntime {
         parent_ctx = remote_ctx;
       if (Internal::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(remote_unique_id,
+            get_unique_op_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10379,6 +10505,9 @@ namespace LegionRuntime {
       if (Internal::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_task_id(), 
                                    result->get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+            result->get_unique_op_id());
       return result;
     }
 
@@ -10422,7 +10551,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef SliceTask::find_restricted_instance(unsigned index)
+    InstanceRef SliceTask::find_restricted_instance(unsigned index,
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -10433,7 +10563,7 @@ namespace LegionRuntime {
       }
       else
       {
-        return index_owner->find_restricted_instance(index);
+        return index_owner->find_restricted_instance(index, target);
       }
     }
 
@@ -10874,13 +11004,11 @@ namespace LegionRuntime {
         while (true) 
         {
           args.slice = *it;
-          it++;
-          bool done = (it == slices.end()); 
           Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                                sizeof(args), HLR_DEFERRED_SLICE_ID, owner);
+                                sizeof(args), HLR_DEFERRED_SLICE_ID, *it);
           if (wait.exists())
             wait_events.insert(wait);
-          if (done)
+          if (++it == slices.end())
             break;
         }
       }

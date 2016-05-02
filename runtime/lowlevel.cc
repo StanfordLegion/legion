@@ -74,9 +74,9 @@ namespace LegionRuntime {
     }
 #endif
 
-    void show_event_waiters(FILE *f = stdout)
+    void show_event_waiters(std::ostream& os)
     {
-      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      os << "PRINTING ALL PENDING EVENTS:\n";
       for(unsigned i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &get_runtime()->nodes[i];
         // Iterate over all the events and get their implementations
@@ -87,18 +87,33 @@ namespace LegionRuntime {
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	  if(e->current_local_waiters.empty() &&
+	     e->future_local_waiters.empty() &&
+	     e->remote_waiters.empty())
 	    continue;
 
-          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-		  e->me.id(), e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(),
-                  e->remote_waiters.size());
-	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
-	      it != e->local_waiters.end();
+	  os << "Event " << e->me <<": gen=" << e->generation
+	     << " subscr=" << e->gen_subscribed
+	     << " local=" << e->current_local_waiters.size()
+	     << "+" << e->future_local_waiters.size()
+	     << " remote=" << e->remote_waiters.size() << "\n";
+	  for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
+	      it != e->current_local_waiters.end();
 	      it++) {
-	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
-	      (*it)->print_info(f);
+	    os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
+	    (*it)->print(os);
+	    os << "\n";
+	  }
+	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	      it != e->future_local_waiters.end();
+	      it++) {
+	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
+		it2 != it->second.end();
+		it2++) {
+	      os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
+	      (*it2)->print(os);
+	      os << "\n";
+	    }
 	  }
 	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
 	  //     it != e->remote_waiters.end();
@@ -119,17 +134,18 @@ namespace LegionRuntime {
           if (b->generations.empty())
             continue;
 
-          fprintf(f,"Barrier " IDFMT ": gen=%d subscr=%d\n",
-                  b->me.id(), b->generation, b->gen_subscribed);
+	  os << "Barrier " << b->me << ": gen=" << b->generation
+	     << " subscr=" << b->gen_subscribed << "\n";
           for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
             for (std::vector<EventWaiter*>::const_iterator it = 
                   waiters.begin(); it != waiters.end(); it++)
-            {
-              fprintf(f, "  [%d] L:%p ", git->first, *it);
-              (*it)->print_info(f);
+            { 
+	      os << "  [" << (git->first) << "] L:" << (*it) << " - ";
+	      (*it)->print(os);
+	      os << "\n";
             }
           }
         }
@@ -178,8 +194,8 @@ namespace LegionRuntime {
       // }
 #endif
 
-      fprintf(f,"DONE\n");
-      fflush(f);
+      os << "DONE\n";
+      os.flush();
     }
 
 
@@ -1412,7 +1428,7 @@ namespace LegionRuntime {
     }
 #endif
 
-    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride)
+    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
@@ -1441,7 +1457,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets)
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1452,7 +1468,7 @@ namespace LegionRuntime {
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       Point<1> strides[DIM];
-      int index = mapping->image_linear_subrect(r, subrect, strides);
+      coord_t index = mapping->image_linear_subrect(r, subrect, strides);
 
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
@@ -1465,8 +1481,8 @@ namespace LegionRuntime {
 	int field_size;
 	Realm::find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-	int block_num = index / impl->metadata.block_size;
-	int block_ofs = index % impl->metadata.block_size;
+	size_t block_num = index / impl->metadata.block_size;
+	size_t block_ofs = index % impl->metadata.block_size;
 
 	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
@@ -1484,8 +1500,23 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(ByteOffset *offsets) const
+    {
+      // caller didn't give us a rectangle, so ask for something really big...
+      Point<DIM> lo = Point<DIM>::ZEROES();
+      Point<DIM> hi;
+      for(unsigned i = 0; i < DIM; i++)
+	hi.x[i] = INT_MAX;
+      Rect<DIM> r(lo, hi);
+      Rect<DIM> subrect;
+      void *ptr = raw_rect_ptr<DIM>(r, subrect, offsets);
+      assert(r == subrect);
+      return ptr;
+    }
+
+    template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets,
-						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
 	return 0;
@@ -1570,7 +1601,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride)
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1613,7 +1644,7 @@ namespace LegionRuntime {
 
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride,
-							const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+							const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
 	return 0;
@@ -1694,17 +1725,38 @@ namespace LegionRuntime {
       return dst;
     }
 
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride);
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride) const;
+
+    void AccessorType::Generic::Untyped::report_fault(ptr_t ptr, size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
+
+    void AccessorType::Generic::Untyped::report_fault(const Realm::DomainPoint& dp,
+                                                      size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
   };
 
   namespace Arrays {
     //template<> class Mapping<1,1>;
     template <unsigned IDIM, unsigned ODIM>
-    MappingRegistry<IDIM, ODIM> Mapping<IDIM, ODIM>::registry;
+    /*static*/ MappingRegistry<IDIM, ODIM>& Mapping<IDIM, ODIM>::registry(void)
+    {
+      static MappingRegistry<IDIM, ODIM> singleton;
+      return singleton;
+    }
+    template class Mapping<1,1>;
+    template class Mapping<2,1>;
+    template class Mapping<3,1>;
   };
 };

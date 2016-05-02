@@ -40,6 +40,15 @@ namespace Realm {
       //   specified mode - returns an event that will trigger when the reservation 
       //   is granted
       Event acquire(unsigned mode = 0, bool exclusive = true, Event wait_on = Event::NO_EVENT) const;
+
+      // tries to acquire ownership of the reservation with the given 'mode' and 'exclusive'ity
+      // if immediately successful, returns Event::NO_EVENT - check with exists(), not has_triggered()!
+      // if not, the reservation is NOT acquired (ever), and it returns an Event that should be
+      //  allowed to trigger before the caller tries again - also, the caller MUST retry until successful,
+      //  setting 'retry' to true on subsequent attempts
+      Event try_acquire(bool retry, unsigned mode = 0, bool exclusive = true,
+			Event wait_on = Event::NO_EVENT) const;
+
       // releases a held reservation - release can be deferred until an event triggers
       void release(Event wait_on = Event::NO_EVENT) const;
 

@@ -29,10 +29,10 @@ namespace Realm {
 
     struct ElementMaskImpl {
       //int count, offset;
-      typedef unsigned long long uint64;
+      //typedef unsigned long long uint64;
       uint64_t bits[0];
 
-      static size_t bytes_needed(off_t offset, off_t count)
+      static size_t bytes_needed(coord_t offset, coord_t count)
       {
 	size_t need = (((count + 63) >> 6) << 3);
 	return need;
@@ -56,9 +56,9 @@ namespace Realm {
       bool is_parent_of(IndexSpace other);
 
       size_t instance_size(const ReductionOpUntyped *redop = 0,
-			   off_t list_size = -1);
+			   coord_t list_size = -1);
 
-      off_t instance_adjust(const ReductionOpUntyped *redop = 0);
+      coord_t instance_adjust(const ReductionOpUntyped *redop = 0);
 
       Event request_valid_mask(void);
 
@@ -86,7 +86,6 @@ namespace Realm {
       int valid_mask_count;
       bool valid_mask_complete;
       Event valid_mask_event;
-      GenEventImpl *valid_mask_event_impl;
       int valid_mask_first, valid_mask_last;
       bool valid_mask_contig;
       ElementMask *avail_mask;
@@ -98,11 +97,11 @@ namespace Realm {
 
       ~IndexSpaceAllocatorImpl(void);
 
-      unsigned alloc_elements(unsigned count = 1);
+      coord_t alloc_elements(size_t count = 1);
 
-      void reserve_elements(unsigned ptr, unsigned count = 1);
+      void reserve_elements(coord_t ptr, size_t count = 1);
 
-      void free_elements(unsigned ptr, unsigned count = 1);
+      void free_elements(coord_t ptr, size_t count = 1);
 
       IndexSpaceImpl *is_impl;
     };
@@ -128,10 +127,10 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
 	IndexSpace is;
 	unsigned block_id;
-	int first_element;
-	int num_elements;
-	int first_enabled_elmt;
-	int last_enabled_elmt;
+	coord_t first_element;
+	size_t num_elements;
+	coord_t first_enabled_elmt;
+	coord_t last_enabled_elmt;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -141,8 +140,8 @@ namespace Realm {
 				         handle_request> Message;
       
       static void send_request(gasnet_node_t target, IndexSpace is, unsigned block_id,
-			       int first_element, int num_elements,
-			       int first_enabled_elmt, int last_enabled_elmt,
+			       coord_t first_element, size_t num_elements,
+			       coord_t first_enabled_elmt, coord_t last_enabled_elmt,
 			       const void *data, size_t datalen, int payload_mode);
     };
 

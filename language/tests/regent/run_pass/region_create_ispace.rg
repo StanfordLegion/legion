@@ -14,10 +14,6 @@
 
 import "regent"
 
-local i1d = index_type(int, "i1d")
-struct i2 { x : int, y : int }
-local i2d = index_type(i2, "i2d")
-
 task f0(r : region(int))
 where reads(r) do
   var s = 0
@@ -27,7 +23,7 @@ where reads(r) do
   return s
 end
 
-task f1(is : ispace(i1d), r : region(is, int))
+task f1(is : ispace(int1d), r : region(is, int))
 where reads(r) do
   var s = 0
   for x in r do
@@ -36,7 +32,7 @@ where reads(r) do
   return s
 end
 
-task f2(is : ispace(i2d), r : region(is, int))
+task f2(is : ispace(int2d), r : region(is, int))
 where reads(r) do
   var s = 0
   for x in r do
@@ -49,10 +45,10 @@ task main()
   var is0 = ispace(ptr, 5)
   var r0 = region(is0, int)
 
-  var is1 = ispace(i1d, 7, 2)
+  var is1 = ispace(int1d, 7, 2)
   var r1 = region(is1, int)
 
-  var is2 = ispace(i2d, { x = 2, y = 2 }, { x = 3, y = 4 })
+  var is2 = ispace(int2d, { x = 2, y = 2 }, { x = 3, y = 4 })
   var r2 = region(is2, int)
 
   regentlib.assert(f0(r0) == 0, "test failed")

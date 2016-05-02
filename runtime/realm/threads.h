@@ -19,6 +19,7 @@
 #define REALM_THREADS_H
 
 #include "realm_config.h"
+#include "activemsg.h"
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__
@@ -32,9 +33,12 @@
 #include <list>
 #include <set>
 #include <map>
+#include <deque>
 #include <iostream>
 
 namespace Realm {
+
+  class Operation;
 
   // ALL work inside Realm (i.e. both tasks and internal Realm work) should be done
   //  inside a Thread, which comes in (at least) two flavors:
@@ -102,13 +106,28 @@ namespace Realm {
 		 STATE_RUNNING,
 		 STATE_BLOCKING,
 		 STATE_BLOCKED,
+		 STATE_ALERTED,
 		 STATE_READY,
 		 STATE_FINISHED,
+		 STATE_DELETED,
                  };
 
     State get_state(void);
 
-    void signal(int sig, bool asynchronous);
+    enum Signal { TSIG_NONE,
+		  TSIG_SHOW_BACKTRACE,
+		  TSIG_INTERRUPT,
+    };
+
+    // adds a signal to the thread's queue, triggering an asynchronous notification
+    //  if 'asynchronous' is true
+    void signal(Signal sig, bool asynchronous);
+
+    // returns the next signal in the queue, if any
+    Signal pop_signal(void);
+
+    // pops and handles any signals in the queue
+    void process_signals(void);
 
     virtual void join(void) = 0; // BLOCKS until the thread completes
     virtual void detach(void) = 0;
@@ -118,6 +137,12 @@ namespace Realm {
     static void abort(void);
     static void yield(void);
 
+    // called from within thread to indicate the association of an Operation with the thread
+    //  for cancellation reasons
+    void start_operation(Operation *op);
+    void stop_operation(Operation *op);
+    Operation *get_operation(void) const;
+
 #ifdef REALM_USE_USER_THREADS
     // perform a user-level thread switch
     // if called from a kernel thread, that thread becomes the "host" for the user thread
@@ -126,7 +151,17 @@ namespace Realm {
 #endif
 
     template <typename CONDTYPE>
-    static void wait_for_condition(const CONDTYPE& cond);
+    static void wait_for_condition(const CONDTYPE& cond, bool& poisoned);
+
+    // does this thread have exception handlers installed?
+    bool exceptions_permitted(void) const;
+
+    // put one of these in a try {} block to indicate that exceptions are allowed
+    class ExceptionHandlerPresence {
+    public:
+      ExceptionHandlerPresence(void);
+      ~ExceptionHandlerPresence(void);
+    };
 
   protected:
     friend class ThreadScheduler;
@@ -141,8 +176,16 @@ namespace Realm {
     //  atomic compare and swap) - returns true on success and false on failure
     bool try_update_state(Thread::State old_state, Thread::State new_state);
 
+    // send an asynchronous notification to the thread
+    virtual void alert_thread(void) = 0;
+
     State state;
     ThreadScheduler *scheduler;
+    Operation *current_op;
+    int exception_handler_count;
+    int signal_count;
+    GASNetHSL signal_mutex;
+    std::deque<Signal> signal_queue;
   };
 
   // Finally, a Thread may operate as a co-routine, "yielding" intermediate values and 

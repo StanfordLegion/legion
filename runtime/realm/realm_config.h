@@ -21,7 +21,11 @@
 
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
+#ifndef __MACH__
+// clang on Mac is generating apparently-broken code in the user thread
+//  scheduler, so disable this code path for now
 #define REALM_USE_USER_THREADS
+#endif
 
 // if set, uses Linux's kernel-level io_submit interface, otherwise uses
 //  POSIX AIO for async file I/O
@@ -32,5 +36,17 @@
 // dynamic loading via dlfcn and a not-completely standard dladdr extension
 #define REALM_USE_DLFCN
 #define REALM_USE_DLADDR
+
+// can Realm use exceptions to propagate errors back to the profiling interace?
+#define REALM_USE_EXCEPTIONS
+
+// runtime configuration settings
+namespace Realm {
+  namespace Config {
+    // if non-zero, eagerly checks deferred user event triggers for loops up to the
+    //  specified limit
+    extern int event_loop_detection_limit;
+  };
+};
 
 #endif

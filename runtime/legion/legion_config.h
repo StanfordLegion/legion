@@ -17,6 +17,9 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
+// for UINT_MAX
+#include <limits.h>
+
 /**
  * \file legion_config.h
  */
@@ -413,6 +416,7 @@ typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
+typedef unsigned int legion_generator_id_t;
 typedef unsigned long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
@@ -422,5 +426,5 @@ typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 
-
 #endif // __LEGION_CONFIG_H__
+

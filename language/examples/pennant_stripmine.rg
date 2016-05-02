@@ -15,299 +15,33 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-compact", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-compact", "0",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1", "-compact", "0"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2", "-compact", "0"]
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
--- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
 import "regent"
 
--- Compile and link pennant.cc
-local cpennant
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
-  local pennant_cc = root_dir .. "pennant.cc"
-  local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                " -I " .. realm_dir .. " " ..  pennant_cc .. " -o " .. pennant_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. pennant_cc)
-    assert(false)
-  end
-  terralib.linklibrary(pennant_so)
-  cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir,
-                                             "-I", mapper_dir, "-I", legion_dir,
-                                             "-I", realm_dir})
-end
+require("pennant_common")
 
 local c = regentlib.c
-
--- Include other headers
-local cmath = terralib.includec("math.h")
-local cstring = terralib.includec("string.h")
-
-local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
-
--- (terra() c.printf("Compiling from top (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
--- #####################################
--- ## Data Structures
--- #################
-
--- Import max/min for Terra
-local max = regentlib.fmax
-local min = regentlib.fmin
-
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
-
-struct vec2 {
-  x : double,
-  y : double,
-}
-
-terra vec2.metamethods.__add(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x + b.x, y = a.y + b.y }
-end
-
-terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
-  return vec2 { x = a.x - b.x, y = a.y - b.y }
-end
-
-terra vec2.metamethods.__mul(a : double, b : vec2) : vec2
-  return vec2 { x = a * b.x, y = a * b.y }
-end
-
-terra vec2.metamethods.__mul(a : vec2, b : double) : vec2
-  return vec2 { x = a.x * b, y = a.y * b }
-end
-
-terra dot(a : vec2, b : vec2) : double
-  return a.x*b.x + a.y*b.y
-end
-
-terra cross(a : vec2, b : vec2) : double
-  return a.x*b.y - a.y*b.x
-end
-
-terra length(a : vec2) : double
-  return sqrt(dot(a, a))
-end
-
-terra rotateCCW(a : vec2) : vec2
-  return vec2 { x = -a.y, y = a.x }
-end
-
-terra project(a : vec2, b : vec2)
-  return a - b*dot(a, b)
-end
-
-local config_fields_input = terralib.newlist({
-  -- Configuration variables.
-  {field = "alfa", type = double, default_value = 0.5},
-  {field = "bcx", type = double[2], default_value = `array(0.0, 0.0), linked_field = "bcx_n"},
-  {field = "bcx_n", type = int64, default_value = 0, is_linked_field = true},
-  {field = "bcy", type = double[2], default_value = `array(0.0, 0.0), linked_field = "bcy_n"},
-  {field = "bcy_n", type = int64, default_value = 0, is_linked_field = true},
-  {field = "cfl", type = double, default_value = 0.6},
-  {field = "cflv", type = double, default_value = 0.1},
-  {field = "chunksize", type = int64, default_value = 99999999},
-  {field = "cstop", type = int64, default_value = 999999},
-  {field = "dtfac", type = double, default_value = 1.2},
-  {field = "dtinit", type = double, default_value = 1.0e99},
-  {field = "dtmax", type = double, default_value = 1.0e99},
-  {field = "dtreport", type = double, default_value = 10},
-  {field = "einit", type = double, default_value = 0.0},
-  {field = "einitsub", type = double, default_value = 0.0},
-  {field = "gamma", type = double, default_value = 5.0 / 3.0},
-  {field = "meshscale", type = double, default_value = 1.0},
-  {field = "q1", type = double, default_value = 0.0},
-  {field = "q2", type = double, default_value = 2.0},
-  {field = "qgamma", type = double, default_value = 5.0 / 3.0},
-  {field = "rinit", type = double, default_value = 1.0},
-  {field = "rinitsub", type = double, default_value = 1.0},
-  {field = "ssmin", type = double, default_value = 0.0},
-  {field = "subregion", type = double[4], default_value = `arrayof(double, 0, 0, 0, 0), linked_field = "subregion_n"},
-  {field = "subregion_n", type = int64, default_value = 0, is_linked_field = true},
-  {field = "tstop", type = double, default_value = 1.0e99},
-  {field = "uinitradial", type = double, default_value = 0.0},
-  {field = "meshparams", type = double[4], default_value = `arrayof(double, 0, 0, 0, 0), linked_field = "meshparams_n"},
-  {field = "meshparams_n", type = int64, default_value = 0, is_linked_field = true},
-})
-
-local config_fields_meshgen = terralib.newlist({
-  -- Mesh generator variables.
-  {field = "meshtype", type = int64, default_value = 0},
-  {field = "nzx", type = int64, default_value = 0},
-  {field = "nzy", type = int64, default_value = 0},
-  {field = "numpcx", type = int64, default_value = 0},
-  {field = "numpcy", type = int64, default_value = 0},
-  {field = "lenx", type = double, default_value = 0.0},
-  {field = "leny", type = double, default_value = 0.0},
-})
-
-local config_fields_mesh = terralib.newlist({
-  -- Mesh variables.
-  {field = "nz", type = int64, default_value = 0},
-  {field = "np", type = int64, default_value = 0},
-  {field = "ns", type = int64, default_value = 0},
-  {field = "maxznump", type = int64, default_value = 0},
-})
-
-local config_fields_cmd = terralib.newlist({
-  -- Command-line parameters.
-  {field = "npieces", type = int64, default_value = 1},
-  {field = "use_foreign", type = bool, default_value = false},
-  {field = "enable", type = bool, default_value = true},
-  {field = "warmup", type = bool, default_value = true},
-  {field = "compact", type = bool, default_value = true},
-  {field = "stripsize", type = int64, default_value = 128},
-  {field = "spansize", type = int64, default_value = 2048},
-  {field = "nspans_zones", type = int64, default_value = 0},
-  {field = "nspans_points", type = int64, default_value = 0},
-})
-
-local config_fields_all = terralib.newlist()
-config_fields_all:insertall(config_fields_input)
-config_fields_all:insertall(config_fields_meshgen)
-config_fields_all:insertall(config_fields_mesh)
-config_fields_all:insertall(config_fields_cmd)
-
-local config = terralib.types.newstruct("config")
-config.entries:insertall(config_fields_all)
-
-local MESH_PIE = 0
-local MESH_RECT = 1
-local MESH_HEX = 2
-
-fspace zone {
-  zxp :    vec2,         -- zone center coordinates, middle of cycle
-  zx :     vec2,         -- zone center coordinates, end of cycle
-  zareap : double,       -- zone area, middle of cycle
-  zarea :  double,       -- zone area, end of cycle
-  zvol0 :  double,       -- zone volume, start of cycle
-  zvolp :  double,       -- zone volume, middle of cycle
-  zvol :   double,       -- zone volume, end of cycle
-  zdl :    double,       -- zone characteristic length
-  zm :     double,       -- zone mass
-  zrp :    double,       -- zone density, middle of cycle
-  zr :     double,       -- zone density, end of cycle
-  ze :     double,       -- zone specific energy
-  zetot :  double,       -- zone total energy
-  zw :     double,       -- zone work
-  zwrate : double,       -- zone work rate
-  zp :     double,       -- zone pressure
-  zss :    double,       -- zone sound speed
-  zdu :    double,       -- zone delta velocity (???)
-
-  -- Temporaries for QCS
-  zuc :    vec2,         -- zone center velocity
-  z0tmp :  double,       -- temporary for qcs_vel_diff
-
-  -- Placed at end to avoid messing up alignment
-  znump :  uint8,        -- number of points in zone
-}
-
-fspace point {
-  px0 : vec2,            -- point coordinates, start of cycle
-  pxp : vec2,            -- point coordinates, middle of cycle
-  px :  vec2,            -- point coordinates, end of cycle
-  pu0 : vec2,            -- point velocity, start of cycle
-  pu :  vec2,            -- point velocity, end of cycle
-  pap : vec2,            -- point acceleration, middle of cycle -- FIXME: dead
-  pf :  vec2,            -- point force
-  pmaswt : double,       -- point mass
-
-  -- Used for computing boundary conditions
-  has_bcx : bool,
-  has_bcy : bool,
-}
-
-fspace side(rz : region(zone),
-            rpp : region(point),
-            rpg : region(point),
-            rs : region(side(rz, rpp, rpg, rs))) {
-  mapsz :  ptr(zone, rz),                      -- maps: side -> zone
-  mapsp1 : ptr(point, rpp, rpg),               -- maps: side -> points 1 and 2
-  mapsp2 : ptr(point, rpp, rpg),
-  mapss3 : ptr(side(rz, rpp, rpg, rs), rs),    -- maps: side -> previous side
-  mapss4 : ptr(side(rz, rpp, rpg, rs), rs),    -- maps: side -> next side
-
-  sareap : double,       -- side area, middle of cycle
-  sarea :  double,       -- side area, end of cycle
-  svolp :  double,       -- side volume, middle of cycle -- FIXME: dead field
-  svol :   double,       -- side volume, end of cycle    -- FIXME: dead field
-  ssurfp : vec2,         -- side surface vector, middle of cycle -- FIXME: dead
-  smf :    double,       -- side mass fraction
-  sfp :    vec2,         -- side force, pgas
-  sft :    vec2,         -- side force, tts
-  sfq :    vec2,         -- side force, qcs
-
-  -- In addition to storing their own state, sides also store the
-  -- state of edges and corners. This can be done because there is a
-  -- 1-1 correspondence between sides and edges/corners. Technically,
-  -- edges can be shared between zones, but the computations on edges
-  -- are minimal, and are not actually used for sharing information,
-  -- so duplicating computations on edges is inexpensive.
-
-  -- Edge variables
-  exp :    vec2,         -- edge center coordinates, middle of cycle
-  ex :     vec2,         -- edge center coordinates, end of cycle
-  elen :   double,       -- edge length, end of cycle
-
-  -- Corner variables (temporaries for QCS)
-  carea :  double,       -- corner area
-  cevol :  double,       -- corner evol
-  cdu :    double,       -- corner delta velocity
-  cdiv :   double,       -- ??????????
-  ccos :   double,       -- corner cosine
-  cqe1 :   vec2,         -- ??????????
-  cqe2 :   vec2,         -- ??????????
-}
 
 -- #####################################
 -- ## Initialization
 -- #################
-
--- function _t1() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling kernels (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
--- task reserve_space(rz : region(zone), rp : region(point),
---                    rs : region(side(wild, wild, wild, wild)))
--- where reads(rz, rp, rs) do
--- end
 
 -- Hack: This exists to make the compiler recompute the bitmasks for
 -- each pointer. This needs to happen here (rather than at
@@ -518,7 +252,8 @@ task adv_pos_half(rp : region(point),
                   rp_spans_p : partition(disjoint, rp),
                   dt : double,
                   nspans_points : int64,
-                  enable : bool)
+                  enable : bool,
+                  print_ts : bool)
 where
   writes(rp.{pmaswt, pf}),
 
@@ -526,6 +261,8 @@ where
   writes(rp.{px0, pxp, pu0})
 do
   if not enable then return end
+
+  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
   var dth = 0.5 * dt
 
@@ -578,7 +315,7 @@ task calc_everything(rz : region(zone), rpp : region(point), rpg : region(point)
                      alfa : double, gamma : double, ssmin : double, dt : double,
                      q1 : double, q2 : double,
                      nspans_zones : int64,
-                     use_foreign : bool, enable : bool)
+                     enable : bool)
 where
   reads(rz.zvol),
   writes(rz.zvol0),
@@ -1073,7 +810,7 @@ task calc_everything_full(rz : region(zone), rpp : region(point), rpg : region(p
                           rs_spans_p : partition(disjoint, rs),
                           dt : double,
                           nspans_zones : int64,
-                          use_foreign : bool, enable : bool)
+                          enable : bool)
 where
   reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zx, rs.ex),
@@ -1225,7 +962,8 @@ task calc_dt_hydro(rz : region(zone),
                    dtlast : double, dtmax : double,
                    cfl : double, cflv : double,
                    nspans_zones : int64,
-                   enable : bool) : double
+                   enable : bool,
+                   print_ts : bool) : double
 where
   reads(rz.{zdl, zvol0, zvol, zss, zdu})
 do
@@ -1257,6 +995,8 @@ do
     dthydro min= dtlast * cflv / dvovmax
   end
 
+  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+
   return dthydro
 end
 
@@ -1279,9 +1019,6 @@ task calc_global_dt(dt : double, dtfac : double, dtinit : double,
 
   return dt
 end
-
--- function _t2() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 terra wait_for(x : double)
   return x
@@ -1330,9 +1067,9 @@ do
   var uinitradial = conf.uinitradial
   var vfix = {x = 0.0, y = 0.0}
 
-  var use_foreign = conf.use_foreign
   var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
+  var print_ts = conf.print_ts
 
   var interval = 100
   var start_time = c.legion_get_current_time_in_micros()/1.e6
@@ -1366,13 +1103,15 @@ do
       last_time = current_time
     end
 
+    print_ts = conf.print_ts and cycle == 0
+
     __demand(__parallel)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_private_p[i],
                    rp_spans_private[i],
                    dt,
                    conf.nspans_points,
-                   enable)
+                   enable, print_ts)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1380,7 +1119,7 @@ do
                    rp_spans_shared[i],
                    dt,
                    conf.nspans_points,
-                   enable)
+                   enable, print_ts)
     end
 
     __demand(__parallel)
@@ -1394,7 +1133,7 @@ do
                       alfa, gamma, ssmin, dt,
                       q1, q2,
                       conf.nspans_zones,
-                      use_foreign, enable)
+                      enable)
     end
 
     __demand(__parallel)
@@ -1424,8 +1163,10 @@ do
                            rs_spans[i],
                            dt,
                            conf.nspans_zones,
-                           use_foreign, enable)
+                           enable)
     end
+
+    print_ts = conf.print_ts and cycle == cstop - 1
 
     dthydro = dtmax
     __demand(__parallel)
@@ -1434,7 +1175,7 @@ do
                                  rz_spans[i],
                                  dt, dtmax, cfl, cflv,
                                  conf.nspans_zones,
-                                 enable)
+                                 enable, print_ts)
     end
 
     cycle += 1
@@ -1480,7 +1221,6 @@ do
   var subregion = conf.subregion
   var uinitradial = conf.uinitradial
 
-  var use_foreign = conf.use_foreign
   var enable = true
 
   for i = 0, conf.npieces do
@@ -1549,794 +1289,33 @@ do
   return 1.0
 end
 
--- function _t20() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling main (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
---
--- Command Line Processing
---
-
-terra get_positional_arg()
-  var args = c.legion_runtime_get_input_args()
-  var i = 1
-  while i < args.argc do
-    if args.argv[i][0] == ('-')[0] then
-      i = i + 1
-    else
-      return args.argv[i]
-    end
-    i = i + 1
-  end
-  return nil
+task read_input_sequential(rz_all : region(zone),
+                           rp_all : region(point),
+                           rs_all : region(side(wild, wild, wild, wild)),
+                           conf : config)
+where reads writes(rz_all, rp_all, rs_all) do
+  return read_input(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
 end
 
-terra get_optional_arg(key : rawstring)
-  var args = c.legion_runtime_get_input_args()
-  var i = 1
-  while i < args.argc do
-    if cstring.strcmp(args.argv[i], key) == 0 then
-      if i + 1 < args.argc then
-        return args.argv[i + 1]
-      else
-        return nil
-      end
-    elseif args.argv[i][0] == ('-')[0] then
-      i = i + 1
-    end
-    i = i + 1
-  end
-  return nil
+task validate_output_sequential(rz_all : region(zone),
+                                rp_all : region(point),
+                                rs_all : region(side(wild, wild, wild, wild)),
+                                conf : config)
+where reads(rz_all, rp_all, rs_all) do
+  validate_output(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
 end
 
---
--- Configuration
---
-
-terra init_mesh(conf : &config)
-  conf.nzx = conf.meshparams[0]
-  if conf.meshparams_n >= 2 then
-    conf.nzy = conf.meshparams[1]
-  else
-    conf.nzy = conf.nzx
-  end
-  if conf.meshtype ~= MESH_PIE then
-    if conf.meshparams_n >= 3 then
-      conf.lenx = conf.meshparams[2]
-    else
-      conf.lenx = 1.0
-    end
-  else
-    -- convention:  x = theta, y = r
-    if conf.meshparams_n >= 3 then
-      conf.lenx = conf.meshparams[2] * cmath.M_PI / 180.0
-    else
-      conf.lenx = 90.0 * cmath.M_PI / 180.0
-    end
-  end
-  if conf.meshparams_n >= 4 then
-    conf.leny = conf.meshparams[3]
-  else
-    conf.leny = 1.0
-  end
-
-  if conf.nzx <= 0 or conf.nzy <= 0 or conf.lenx <= 0. or conf.leny <= 0. then
-    c.printf("Error: meshparams values must be positive\n")
-    c.abort()
-  end
-  if conf.meshtype == MESH_PIE and conf.lenx >= 2. * cmath.M_PI then
-    c.printf("Error: meshparams theta must be < 360\n")
-    c.abort()
-  end
-
-  -- Calculate approximate nz, np, ns for region size upper bound.
-  conf.nz = conf.nzx * conf.nzy
-  conf.np = (conf.nzx + 1) * (conf.nzy + 1)
-  if conf.meshtype ~= MESH_HEX then
-    conf.maxznump = 4
-  else
-    conf.maxznump = 6
-  end
-  conf.ns = conf.nz * conf.maxznump
-end
-
-do
-local max_items = 1024
-local max_item_len = 1024
-local fixed_string = int8[max_item_len]
-
-function get_type_specifier(t, as_input)
-  if t == fixed_string then
-    if as_input then
-      return "%" .. max_item_len .. "s", 1
-    else
-      return "%s"
-    end
-  elseif t == int64 then
-    return "%lld", 1
-  elseif t == bool then
-    return "%d", 1
-  elseif t == double then
-    if as_input then
-      return "%lf", 1
-    else
-      return "%.2e", 1
-    end
-  elseif t:isarray() then
-    local elt_type_specifier = get_type_specifier(t.type, as_input)
-    local type_specifier = ""
-    for i = 1, t.N do
-      if i > 1 then
-        type_specifier = type_specifier .. " "
-      end
-      type_specifier = type_specifier .. elt_type_specifier
-    end
-    return type_specifier, t.N
-  else
-    assert(false)
-  end
-end
-
-function explode_array(t, value)
-  if t == fixed_string then
-    return terralib.newlist({`@value})
-  elseif t:isarray() then
-    local values = terralib.newlist()
-    for i = 0, t.N - 1 do
-      values:insert(`&((@value)[i]))
-    end
-    return values
-  else
-    return terralib.newlist({value})
-  end
-end
-
-local extract = terralib.memoize(function(t)
-  local str_specifier = get_type_specifier(fixed_string, true)
-  local type_specifier, size = get_type_specifier(t, true)
-
-  return terra(items : &(fixed_string), nitems : int64, key : rawstring, result : &t)
-    var item_key : fixed_string
-    for i = 0, nitems do
-      var matched = c.sscanf(&(items[i][0]), [str_specifier], item_key)
-      if matched >= 1 and cstring.strncmp(key, item_key, max_item_len) == 0 then
-        var matched = c.sscanf(
-          &(items[i][0]), [str_specifier .. " " .. type_specifier],
-          item_key, [explode_array(t, result)])
-        if matched >= 1 then
-          return matched - 1
-        end
-      end
-    end
-  end
-end)
-
-terra read_config()
-  var input_filename = get_positional_arg()
-  if input_filename == nil then
-    c.printf("Usage: ./pennant <filename>\n")
-    c.abort()
-  end
-
-  c.printf("Reading \"%s\"...\n", input_filename)
-  var input_file = c.fopen(input_filename, "r")
-  if input_file == nil then
-    c.printf("Error: Failed to open \"%s\"\n", input_filename)
-    c.abort()
-  end
-
-  var items : fixed_string[max_items]
-
-  var nitems = 0
-  for i = 0, max_items do
-    if c.fgets(items[i], max_item_len, input_file) == nil then
-      nitems = i + 1
-      break
-    end
-  end
-
-  if c.fclose(input_file) ~= 0 then
-    c.printf("Error: Failed to close \"%s\"\n", input_filename)
-    c.abort()
-  end
-
-  var conf : config
-
-  -- Set defaults.
-  [config_fields_all:map(function(field)
-       return quote conf.[field.field] = [field.default_value] end
-     end)]
-
-  -- Read parameters from command line.
-  var npieces = get_optional_arg("-npieces")
-  if npieces ~= nil then
-    conf.npieces = c.atoll(npieces)
-  end
-  if conf.npieces <= 0 then
-    c.printf("Error: npieces (%lld) must be >= 0\n", conf.npieces)
-    c.abort()
-  end
-
-  var use_foreign = get_optional_arg("-foreign")
-  if use_foreign ~= nil then
-    conf.use_foreign = [bool](c.atoll(use_foreign))
-  end
-
-  var warmup = get_optional_arg("-warmup")
-  if warmup ~= nil then
-    conf.warmup = [bool](c.atoll(warmup))
-  end
-
-  var compact = get_optional_arg("-compact")
-  if compact ~= nil then
-    conf.compact = [bool](c.atoll(compact))
-  end
-
-  var stripsize = get_optional_arg("-stripsize")
-  if stripsize ~= nil then
-    conf.stripsize = c.atoll(stripsize)
-  end
-
-  var spansize = get_optional_arg("-spansize")
-  if spansize ~= nil then
-    conf.spansize = c.atoll(spansize)
-  end
-
-  -- Read parameters from input file.
-  [config_fields_input:map(function(field)
-       if field.is_linked_field then
-         return quote end
-       else
-         if field.linked_field then
-           return quote
-             conf.[field.linked_field] = [extract(field.type)](items, nitems, field.field, &(conf.[field.field]))
-           end
-         else
-           return quote
-             [extract(field.type)](items, nitems, field.field, &(conf.[field.field]))
-           end
-         end
-       end
-     end)]
-
-  -- Configure and run mesh generator.
-  var meshtype : fixed_string
-  if [extract(fixed_string)](items, nitems, "meshtype", &meshtype) < 1 then
-    c.printf("Error: Missing meshtype\n")
-    c.abort()
-  end
-  if cstring.strncmp(meshtype, "pie", max_item_len) == 0 then
-    conf.meshtype = MESH_PIE
-  elseif cstring.strncmp(meshtype, "rect", max_item_len) == 0 then
-    conf.meshtype = MESH_RECT
-  elseif cstring.strncmp(meshtype, "hex", max_item_len) == 0 then
-    conf.meshtype = MESH_HEX
-  else
-    c.printf("Error: Invalid meshtype \"%s\"\n", meshtype)
-    c.abort()
-  end
-
-  c.printf("Config meshtype = \"%s\"\n", meshtype)
-
-  init_mesh(&conf)
-
-  [config_fields_all:map(function(field)
-       return quote c.printf(
-         ["Config " .. field.field .. " = " .. get_type_specifier(field.type, false) .. "\n"],
-         [explode_array(field.type, `&(conf.[field.field])):map(
-            function(value)
-              return `@value
-            end)])
-       end
-     end)]
-
-  return conf
-end
-end
-
---
--- Mesh Generator
---
-
-struct mesh_colorings {
-  rz_all_c : c.legion_coloring_t,
-  rz_spans_c : c.legion_coloring_t,
-  rp_all_c : c.legion_coloring_t,
-  rp_all_private_c : c.legion_coloring_t,
-  rp_all_ghost_c : c.legion_coloring_t,
-  rp_all_shared_c : c.legion_coloring_t,
-  rp_spans_c : c.legion_coloring_t,
-  rs_all_c : c.legion_coloring_t,
-  rs_spans_c : c.legion_coloring_t,
-  nspans_zones : int64,
-  nspans_points : int64,
-}
-
-terra filter_none(i : int64, cs : &int64) return cs[i] end
-terra filter_ismulticolor(i : int64, cs : &int64)
-  return int64(cs[i] == cpennant.MULTICOLOR)
-end
-
-terra compute_coloring(ncolors : int64, nitems : int64,
-                       coloring : c.legion_coloring_t,
-                       colors : &int64, sizes : &int64,
-                       filter : {int64, &int64} -> int64)
-  if filter == nil then
-    filter = filter_none
-  end
-
-  for i = 0, ncolors do
-    c.legion_coloring_ensure_color(coloring, i)
-  end
-  do
-    if nitems > 0 then
-      var i_start = 0
-      var i_end = 0
-      var i_color = filter(0, colors)
-      for i = 0, nitems do
-        var i_size = 1
-        if sizes ~= nil then
-          i_size = sizes[i]
-        end
-
-        var color = filter(i, colors)
-        if i_color ~= color then
-          if i_color >= 0 then
-            c.legion_coloring_add_range(
-              coloring, i_color,
-              c.legion_ptr_t { value = i_start },
-              c.legion_ptr_t { value = i_end - 1 })
-          end
-          i_start = i_end
-          i_color = color
-        end
-        i_end = i_end + i_size
-      end
-      if i_color >= 0 then
-        c.legion_coloring_add_range(
-          coloring, i_color,
-          c.legion_ptr_t { value = i_start },
-          c.legion_ptr_t { value = i_end - 1 })
-      end
-    end
-  end
-end
-
-terra read_input(runtime : c.legion_runtime_t,
-                 ctx : c.legion_context_t,
-                 rz_physical : c.legion_physical_region_t[24],
-                 rz_fields : c.legion_field_id_t[24],
-                 rp_physical : c.legion_physical_region_t[17],
-                 rp_fields : c.legion_field_id_t[17],
-                 rs_physical : c.legion_physical_region_t[34],
-                 rs_fields : c.legion_field_id_t[34],
-                 conf : config)
-
-  var color_words : c.size_t = cmath.ceil(conf.npieces/64.0)
-
-  -- Allocate buffers for the mesh generator
-  var pointpos_x_size : c.size_t = conf.np
-  var pointpos_y_size : c.size_t = conf.np
-  var pointcolors_size : c.size_t = conf.np
-  var pointmcolors_size : c.size_t = conf.np * color_words
-  var pointspancolors_size : c.size_t = conf.np
-  var zonestart_size : c.size_t = conf.nz
-  var zonesize_size : c.size_t = conf.nz
-  var zonepoints_size : c.size_t = conf.nz * conf.maxznump
-  var zonecolors_size : c.size_t = conf.nz
-  var zonespancolors_size : c.size_t = conf.nz
-
-  var pointpos_x : &double = [&double](c.malloc(pointpos_x_size*sizeof(double)))
-  var pointpos_y : &double = [&double](c.malloc(pointpos_y_size*sizeof(double)))
-  var pointcolors : &int64 = [&int64](c.malloc(pointcolors_size*sizeof(int64)))
-  var pointmcolors : &uint64 = [&uint64](c.malloc(pointmcolors_size*sizeof(uint64)))
-  var pointspancolors : &int64 = [&int64](c.malloc(pointspancolors_size*sizeof(int64)))
-  var zonestart : &int64 = [&int64](c.malloc(zonestart_size*sizeof(int64)))
-  var zonesize : &int64 = [&int64](c.malloc(zonesize_size*sizeof(int64)))
-  var zonepoints : &int64 = [&int64](c.malloc(zonepoints_size*sizeof(int64)))
-  var zonecolors : &int64 = [&int64](c.malloc(zonecolors_size*sizeof(int64)))
-  var zonespancolors : &int64 = [&int64](c.malloc(zonespancolors_size*sizeof(int64)))
-
-  regentlib.assert(pointpos_x ~= nil, "pointpos_x nil")
-  regentlib.assert(pointpos_y ~= nil, "pointpos_y nil")
-  regentlib.assert(pointcolors ~= nil, "pointcolors nil")
-  regentlib.assert(pointmcolors ~= nil, "pointmcolors nil")
-  regentlib.assert(pointspancolors ~= nil, "pointspancolors nil")
-  regentlib.assert(zonestart ~= nil, "zonestart nil")
-  regentlib.assert(zonesize ~= nil, "zonesize nil")
-  regentlib.assert(zonepoints ~= nil, "zonepoints nil")
-  regentlib.assert(zonecolors ~= nil, "zonecolors nil")
-  regentlib.assert(zonespancolors ~= nil, "zonespancolors nil")
-
-  var nspans_zones : int64 = 0
-  var nspans_points : int64 = 0
-
-  -- Call the mesh generator
-  cpennant.generate_mesh_raw(
-    conf.np,
-    conf.nz,
-    conf.nzx,
-    conf.nzy,
-    conf.lenx,
-    conf.leny,
-    conf.numpcx,
-    conf.numpcy,
-    conf.npieces,
-    conf.meshtype,
-    conf.compact,
-    conf.stripsize,
-    conf.spansize,
-    pointpos_x, &pointpos_x_size,
-    pointpos_y, &pointpos_y_size,
-    pointcolors, &pointcolors_size,
-    pointmcolors, &pointmcolors_size,
-    pointspancolors, &pointspancolors_size,
-    zonestart, &zonestart_size,
-    zonesize, &zonesize_size,
-    zonepoints, &zonepoints_size,
-    zonecolors, &zonecolors_size,
-    zonespancolors, &zonespancolors_size,
-    &nspans_zones,
-    &nspans_points)
-
-  -- Write mesh data into regions
-  do
-    var rz_znump = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[23], rz_fields[23])
-
-    for i = 0, conf.nz do
-      var p = c.legion_ptr_t { value = i }
-      regentlib.assert(zonesize[i] < 255, "zone has more than 255 sides")
-      @[&uint8](c.legion_accessor_array_ref(rz_znump, p)) = uint8(zonesize[i])
-    end
-
-    c.legion_accessor_array_destroy(rz_znump)
-  end
-
-  do
-    var rp_px_x = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[4], rp_fields[4])
-    var rp_px_y = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[5], rp_fields[5])
-    var rp_has_bcx = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[15], rp_fields[15])
-    var rp_has_bcy = c.legion_physical_region_get_field_accessor_array(
-      rp_physical[16], rp_fields[16])
-
-    var eps : double = 1e-12
-    for i = 0, conf.np do
-      var p = c.legion_ptr_t { value = i }
-      @[&double](c.legion_accessor_array_ref(rp_px_x, p)) = pointpos_x[i]
-      @[&double](c.legion_accessor_array_ref(rp_px_y, p)) = pointpos_y[i]
-
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcx, p)) = (
-        (conf.bcx_n > 0 and cmath.fabs(pointpos_x[i] - conf.bcx[0]) < eps) or
-        (conf.bcx_n > 1 and cmath.fabs(pointpos_x[i] - conf.bcx[1]) < eps))
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcy, p)) = (
-        (conf.bcy_n > 0 and cmath.fabs(pointpos_y[i] - conf.bcy[0]) < eps) or
-        (conf.bcy_n > 1 and cmath.fabs(pointpos_y[i] - conf.bcy[1]) < eps))
-    end
-
-    c.legion_accessor_array_destroy(rp_px_x)
-    c.legion_accessor_array_destroy(rp_px_y)
-    c.legion_accessor_array_destroy(rp_has_bcx)
-    c.legion_accessor_array_destroy(rp_has_bcy)
-  end
-
-  do
-    var rs_mapsz = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[0], rs_fields[0])
-    var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[1], rs_fields[1])
-    var rs_mapsp1_index = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[2], rs_fields[2])
-    var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[3], rs_fields[3])
-    var rs_mapsp2_index = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[4], rs_fields[4])
-    var rs_mapss3 = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[5], rs_fields[5])
-    var rs_mapss4 = c.legion_physical_region_get_field_accessor_array(
-      rs_physical[6], rs_fields[6])
-
-    var sstart = 0
-    for iz = 0, conf.nz do
-      var zsize = zonesize[iz]
-      var zstart = zonestart[iz]
-      for izs = 0, zsize do
-        var izs3 = (izs + zsize - 1)%zsize
-        var izs4 = (izs + 1)%zsize
-
-        var p = c.legion_ptr_t { value = sstart + izs }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, p)) = c.legion_ptr_t { value = iz }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs] }
-        @[&uint8](c.legion_accessor_array_ref(rs_mapsp1_index, p)) = 0
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs4] }
-        @[&uint8](c.legion_accessor_array_ref(rs_mapsp2_index, p)) = 0
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss3, p)) = c.legion_ptr_t { value = sstart + izs3 }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss4, p)) = c.legion_ptr_t { value = sstart + izs4 }
-      end
-      sstart = sstart + zsize
-    end
-
-    c.legion_accessor_array_destroy(rs_mapsz)
-    c.legion_accessor_array_destroy(rs_mapsp1_ptr)
-    c.legion_accessor_array_destroy(rs_mapsp1_index)
-    c.legion_accessor_array_destroy(rs_mapsp2_ptr)
-    c.legion_accessor_array_destroy(rs_mapsp2_index)
-    c.legion_accessor_array_destroy(rs_mapss3)
-    c.legion_accessor_array_destroy(rs_mapss4)
-  end
-
-  -- Create colorings
-  var result : mesh_colorings
-  result.rz_all_c = c.legion_coloring_create()
-  result.rz_spans_c = c.legion_coloring_create()
-  result.rp_all_c = c.legion_coloring_create()
-  result.rp_all_private_c = c.legion_coloring_create()
-  result.rp_all_ghost_c = c.legion_coloring_create()
-  result.rp_all_shared_c = c.legion_coloring_create()
-  result.rp_spans_c = c.legion_coloring_create()
-  result.rs_all_c = c.legion_coloring_create()
-  result.rs_spans_c = c.legion_coloring_create()
-  result.nspans_zones = nspans_zones
-  result.nspans_points = nspans_points
-
-  compute_coloring(
-    conf.npieces, conf.nz, result.rz_all_c, zonecolors, nil, nil)
-  compute_coloring(
-    nspans_zones, conf.nz, result.rz_spans_c, zonespancolors, nil, nil)
-
-  compute_coloring(
-    2, conf.np, result.rp_all_c, pointcolors, nil, filter_ismulticolor)
-  compute_coloring(
-    conf.npieces, conf.np, result.rp_all_private_c, pointcolors, nil, nil)
-
-  for i = 0, conf.npieces do
-    c.legion_coloring_ensure_color(result.rp_all_ghost_c, i)
-  end
-  for i = 0, conf.np do
-    for color = 0, conf.npieces do
-      var word = i + color/64
-      var bit = color % 64
-
-      if (pointmcolors[word] and (1 << bit)) ~= 0 then
-        c.legion_coloring_add_point(
-          result.rp_all_ghost_c,
-          color,
-          c.legion_ptr_t { value = i })
-      end
-    end
-  end
-
-  for i = 0, conf.npieces do
-    c.legion_coloring_ensure_color(result.rp_all_shared_c, i)
-  end
-  for i = 0, conf.np do
-    var done = false
-    for color = 0, conf.npieces do
-      var word = i + color/64
-      var bit = color % 64
-
-      if not  done and (pointmcolors[word] and (1 << bit)) ~= 0 then
-        c.legion_coloring_add_point(
-          result.rp_all_shared_c,
-          color,
-          c.legion_ptr_t { value = i })
-        done = true
-      end
-    end
-  end
-
-  compute_coloring(
-    nspans_points, conf.np, result.rp_spans_c, pointspancolors, nil, nil)
-
-  compute_coloring(
-    conf.npieces, conf.nz, result.rs_all_c, zonecolors, zonesize, nil)
-  compute_coloring(
-    nspans_zones, conf.nz, result.rs_spans_c, zonespancolors, zonesize, nil)
-
-  -- Free buffers
-  c.free(pointpos_x)
-  c.free(pointpos_y)
-  c.free(pointcolors)
-  c.free(pointmcolors)
-  c.free(pointspancolors)
-  c.free(zonestart)
-  c.free(zonesize)
-  c.free(zonepoints)
-  c.free(zonecolors)
-  c.free(zonespancolors)
-
-  return result
-end
-read_input:compile()
-
-do
-local solution_filename_maxlen = 1024
-terra validate_output(runtime : c.legion_runtime_t,
-                      ctx : c.legion_context_t,
-                      rz_physical : c.legion_physical_region_t[24],
-                      rz_fields : c.legion_field_id_t[24],
-                      rp_physical : c.legion_physical_region_t[17],
-                      rp_fields : c.legion_field_id_t[17],
-                      rs_physical : c.legion_physical_region_t[34],
-                      rs_fields : c.legion_field_id_t[34],
-                      conf : config)
-  c.printf("Running validate_output (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-
-  var solution_zr : &double = [&double](c.malloc(conf.nz*sizeof(double)))
-  var solution_ze : &double = [&double](c.malloc(conf.nz*sizeof(double)))
-  var solution_zp : &double = [&double](c.malloc(conf.nz*sizeof(double)))
-
-  regentlib.assert(solution_zr ~= nil, "solution_zr nil")
-  regentlib.assert(solution_ze ~= nil, "solution_ze nil")
-  regentlib.assert(solution_zp ~= nil, "solution_zp nil")
-
-  var input_filename = get_positional_arg()
-  regentlib.assert(input_filename ~= nil, "input_filename nil")
-
-  var solution_filename : int8[solution_filename_maxlen]
-  do
-    var sep = cstring.strrchr(input_filename, (".")[0])
-    if sep == nil then
-      c.printf("Error: Failed to find file extention in \"%s\"\n", input_filename)
-      c.abort()
-    end
-    var len : int64 = [int64](sep - input_filename)
-    regentlib.assert(len + 8 < solution_filename_maxlen, "solution_filename exceeds maximum length")
-    cstring.strncpy(solution_filename, input_filename, len)
-    cstring.strncpy(solution_filename + len, ".xy.std", 8)
-  end
-
-  c.printf("Reading \"%s\"...\n", solution_filename)
-  var solution_file = c.fopen(solution_filename, "r")
-  if solution_file == nil then
-    c.printf("Warning: Failed to open \"%s\"\n", solution_filename)
-    c.printf("Warning: Skipping validation step\n")
-    return
-  end
-
-  c.fscanf(solution_file, " # zr")
-  for i = 0, conf.nz do
-    var iz : int64
-    var zr : double
-    var count = c.fscanf(
-      solution_file,
-      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
-      &iz, &zr)
-    if count ~= 2 then
-      c.printf("Error: malformed file, expected 2 and got %d\n", count)
-      c.abort()
-    end
-    solution_zr[i] = zr
-  end
-
-  c.fscanf(solution_file, " # ze")
-  for i = 0, conf.nz do
-    var iz : int64
-    var ze : double
-    var count = c.fscanf(
-      solution_file,
-      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
-      &iz, &ze)
-    if count ~= 2 then
-      c.printf("Error: malformed file, expected 2 and got %d\n", count)
-      c.abort()
-    end
-    solution_ze[i] = ze
-  end
-
-  c.fscanf(solution_file, " # zp")
-  for i = 0, conf.nz do
-    var iz : int64
-    var zp : double
-    var count = c.fscanf(
-      solution_file,
-      [" " .. get_type_specifier(int64, true) .. " " .. get_type_specifier(double, true)],
-      &iz, &zp)
-    if count ~= 2 then
-      c.printf("Error: malformed file, expected 2 and got %d\n", count)
-      c.abort()
-    end
-    solution_zp[i] = zp
-  end
-
-  var absolute_eps = 1.0e-8
-  var absolute_eps_text = get_optional_arg("-absolute")
-  if absolute_eps_text ~= nil then
-    absolute_eps = c.atof(absolute_eps_text)
-  end
-
-  var relative_eps = 1.0e-8
-  var relative_eps_text = get_optional_arg("-relative")
-  if relative_eps_text ~= nil then
-    relative_eps = c.atof(relative_eps_text)
-  end
-
-  -- FIXME: This is kind of silly, but some of the really small values
-  -- (around 1e-17) have fairly large relative error (1e-3), tripping
-  -- up the validator. For now, stop complaining about those cases if
-  -- the absolute error is small.
-  var relative_absolute_eps = 1.0e-17
-  var relative_absolute_eps_text = get_optional_arg("-relative_absolute")
-  if relative_absolute_eps_text ~= nil then
-    relative_absolute_eps = c.atof(relative_absolute_eps_text)
-  end
-
-  do
-    var rz_zr = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[12], rz_fields[12])
-    for i = 0, conf.nz do
-      var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_zr, p))
-      var sol = solution_zr[i]
-      if cmath.fabs(ck - sol) > absolute_eps or
-        (cmath.fabs(ck - sol) / sol > relative_eps and
-           cmath.fabs(ck - sol) > relative_absolute_eps)
-      then
-        c.printf("Error: zr value out of bounds at %d, expected %.12e and got %.12e\n",
-                 i, sol, ck)
-        c.printf("absolute %.12e relative %.12e\n",
-                 cmath.fabs(ck - sol),
-                 cmath.fabs(ck - sol) / sol)
-        c.abort()
-      end
-    end
-    c.legion_accessor_array_destroy(rz_zr)
-  end
-
-  do
-    var rz_ze = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[13], rz_fields[13])
-    for i = 0, conf.nz do
-      var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_ze, p))
-      var sol = solution_ze[i]
-      if cmath.fabs(ck - sol) > absolute_eps or
-        (cmath.fabs(ck - sol) / sol > relative_eps and
-           cmath.fabs(ck - sol) > relative_absolute_eps)
-      then
-        c.printf("Error: ze value out of bounds at %d, expected %.8e and got %.8e\n",
-                 i, sol, ck)
-        c.printf("absolute %.12e relative %.12e\n",
-                 cmath.fabs(ck - sol),
-                 cmath.fabs(ck - sol) / sol)
-        c.abort()
-      end
-    end
-    c.legion_accessor_array_destroy(rz_ze)
-  end
-
-  do
-    var rz_zp = c.legion_physical_region_get_field_accessor_array(
-      rz_physical[17], rz_fields[17])
-    for i = 0, conf.nz do
-      var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_zp, p))
-      var sol = solution_zp[i]
-      if cmath.fabs(ck - sol) > absolute_eps or
-        (cmath.fabs(ck - sol) / sol > relative_eps and
-           cmath.fabs(ck - sol) > relative_absolute_eps)
-      then
-        c.printf("Error: zp value out of bounds at %d, expected %.8e and got %.8e\n",
-                 i, sol, ck)
-        c.printf("absolute %.12e relative %.12e\n",
-                 cmath.fabs(ck - sol),
-                 cmath.fabs(ck - sol) / sol)
-        c.abort()
-      end
-    end
-    c.legion_accessor_array_destroy(rz_zp)
-  end
-
-  c.printf("Successfully validate output\n")
-
-  c.free(solution_zr)
-  c.free(solution_ze)
-  c.free(solution_zp)
-end
-validate_output:compile()
-end
+terra unwrap(x : mesh_colorings) return x end
 
 task test()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
@@ -2353,12 +1332,35 @@ task test()
 
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
-  var colorings = read_input(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  var colorings : mesh_colorings
+
+  regentlib.assert(conf.seq_init or conf.par_init,
+                   "enable one of sequential or parallel initialization")
+
+  if conf.seq_init then
+    -- Hack: This had better run on the same node...
+    colorings = unwrap(read_input_sequential(
+      rz_all, rp_all, rs_all, conf))
+  end
+
+  if conf.par_init then
+    var colorings_ = read_partitions(conf)
+    if conf.seq_init then
+      regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
+      regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
+      c.legion_coloring_destroy(colorings.rz_all_c)
+      c.legion_coloring_destroy(colorings.rz_spans_c)
+      c.legion_coloring_destroy(colorings.rp_all_c)
+      c.legion_coloring_destroy(colorings.rp_all_private_c)
+      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+      c.legion_coloring_destroy(colorings.rp_all_shared_c)
+      c.legion_coloring_destroy(colorings.rp_spans_c)
+      c.legion_coloring_destroy(colorings.rs_all_c)
+      c.legion_coloring_destroy(colorings.rs_spans_c)
+    end
+    colorings = colorings_
+  end
+
   conf.nspans_zones = colorings.nspans_zones
   conf.nspans_points = colorings.nspans_points
 
@@ -2401,11 +1403,18 @@ task test()
     disjoint, rs_all, colorings.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_topology(conf, i, rz_all_p[i],
+                          rp_all_private_p[i],
+                          rp_all_shared_p[i],
+                          rp_all_ghost_p[i],
+                          rs_all_p[i])
+    end
+  end
+
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  -- __demand(__parallel)
-  -- for i = 0, conf.npieces do
-  --   reserve_space(rz_all, rp_all, rs_all)
-  -- end
   wait_for(initialize(rz_all, rz_all_p, rz_spans_p, rz_spans,
                       rp_all,
                       rp_all_private, rp_all_private_p,
@@ -2425,12 +1434,12 @@ task test()
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   c.printf("Outer simulation time = %.6e\n", stop_time - start_time)
 
-  validate_output(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  if conf.seq_init then
+    validate_output_sequential(
+      rz_all, rp_all, rs_all, conf)
+  else
+    c.printf("Warning: Skipping sequential validation\n")
+  end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end
@@ -2438,7 +1447,21 @@ end
 task toplevel()
   test()
 end
--- function _t3() end -- seems like I need this to break up the statements
--- (terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-cpennant.register_mappers()
-regentlib.start(toplevel)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
+    local main, names = regentlib.setup(main_task, extra_setup_thunk)
+    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+
+    if filetype ~= nil then
+      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
+    else
+      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
+    end
+  end
+
+  saveobj(toplevel, "pennant", "executable", cpennant.register_mappers)
+else
+  cpennant.register_mappers()
+  regentlib.start(toplevel)
+end

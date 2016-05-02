@@ -58,9 +58,10 @@ namespace LegionRuntime {
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline bool is_premapped(void) const { return premapped; }
-    protected:
       void activate_task(void);
       void deactivate_task(void);
+      void set_must_epoch(MustEpochOp *epoch, unsigned index, 
+                          bool do_registration);
     protected:
       void pack_base_task(Serializer &derez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez);
@@ -105,6 +106,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -215,6 +217,9 @@ namespace LegionRuntime {
       mutable bool local_cached;
     protected:
       AllocManager *arg_manager;
+    protected:
+      // Index for this must epoch op
+      unsigned must_epoch_index;
     public:
       // Static methods
       static void process_unpack_task(Internal *rt,
@@ -374,6 +379,7 @@ namespace LegionRuntime {
       void increment_outstanding(void);
       void decrement_outstanding(void);
       void increment_pending(void);
+      Event decrement_pending(SingleTask *child) const;
       void decrement_pending(void);
       void increment_frame(void);
       void decrement_frame(void);
@@ -773,6 +779,7 @@ namespace LegionRuntime {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -813,12 +820,14 @@ namespace LegionRuntime {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
+      // Special field for inline tasks
+      bool is_inline;
     protected:
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
-      std::set<Event> map_applied_conditions;
+      std::set<Event> map_applied_conditions; 
     };
 
     /**
@@ -854,6 +863,7 @@ namespace LegionRuntime {
                                            const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
+      virtual bool is_inline_task(void) const;
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1143,6 +1153,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -1154,7 +1165,7 @@ namespace LegionRuntime {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
+      InstanceRef find_restricted_instance(unsigned index,LogicalRegion target);
     public:
       virtual void register_must_epoch(void);
     public:
@@ -1246,7 +1257,7 @@ namespace LegionRuntime {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
+      InstanceRef find_restricted_instance(unsigned index,LogicalRegion target);
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &p,

@@ -24,6 +24,7 @@
 #include "activemsg.h"
 #include "operation.h"
 #include "profiling.h"
+#include "sampling.h"
 
 #include "event_impl.h"
 #include "rsrv_impl.h"
@@ -133,9 +134,7 @@ namespace Realm {
       GASNetHSL mutex; // protection for resizing vectors
       std::vector<RegionInstanceImpl *> instances;
       std::map<off_t, off_t> free_blocks;
-#ifdef REALM_PROFILE_MEMORY_USAGE
-      size_t usage, peak_usage, peak_footprint;
-#endif
+      ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
 
     class LocalCPUMemory : public MemoryImpl {
@@ -600,6 +599,8 @@ namespace Realm {
       RemoteWriteFence(Operation *op);
 
       virtual void request_cancellation(void);
+
+      virtual void print(std::ostream& os) const;
     };
 
     struct RemoteWriteFenceMessage {

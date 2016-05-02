@@ -17,6 +17,7 @@
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
+#include "legion_tasks.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -663,6 +664,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
+      : phase_barrier(Barrier::NO_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
@@ -689,6 +691,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PhaseBarrier::operator!=(const PhaseBarrier &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (phase_barrier != rhs.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
     void PhaseBarrier::arrive(unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
@@ -705,12 +714,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      if (!phase_barrier.has_triggered())
+      Event e = phase_barrier.get_previous_phase();
+      if (!e.has_triggered())
       {
         Processor proc = Processor::get_executing_processor();
         Internal *rt = Internal::get_runtime(proc);
         rt->pre_wait(proc);
-        phase_barrier.wait();
+        e.wait();
         rt->post_wait(proc);
       }
     }
@@ -1450,6 +1460,27 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // FillLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
+                               TaskArgument arg, 
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), argument(arg), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), future(f), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MustEpochLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -1486,17 +1517,32 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskVariantRegistrar::TaskVariantRegistrar(void)
-      : task_id(0), global_registration(true), task_variant_name(NULL), 
-        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+      : task_id(0), generator(NULL), global_registration(true), 
+        task_variant_name(NULL), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/, 
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/,
+                                               GeneratorContext ctx/*=NULL*/,
                                                const char *name/*= NULL*/)
-      : task_id(tid), global_registration(global), task_variant_name(name), 
-        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+      : task_id(tid), generator(ctx), global_registration(global), 
+        task_variant_name(name), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID task_id,
+					       const char *variant_name,
+					       bool global/*=true*/,
+					       GeneratorContext ctx/*=NULL*/)
+      : task_id(task_id), generator(ctx), global_registration(global), 
+        task_variant_name(variant_name), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1890,8 +1936,10 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const Domain &dom)
-      : enumerator(dom.get_index_space().get_valid_mask().enumerate_enabled())
+    IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
+      : enumerator(dom
+		   .get_index_space().get_valid_mask()
+		   .enumerate_enabled(start.value))
     //--------------------------------------------------------------------------
     {
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
@@ -1899,21 +1947,23 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 IndexSpace space)
+                                 IndexSpace space, ptr_t start)
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, space);
-      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
+      enumerator = dom.get_index_space().get_valid_mask()
+ 	              .enumerate_enabled(start.value);
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 LogicalRegion handle)
+                                 LogicalRegion handle, ptr_t start)
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
+      enumerator = dom.get_index_space().get_valid_mask()
+	              .enumerate_enabled(start.value);
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
@@ -2640,11 +2690,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_disjoint(Context ctx, 
-                                                       IndexPartition p)
+    bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->is_index_partition_disjoint(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_complete(ctx, p);
     }
 
     //--------------------------------------------------------------------------
@@ -3085,6 +3141,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->fill_fields(ctx, handle, parent, fields, f, pred);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3575,72 +3638,92 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                              const void *&result, size_t &size)
+    bool Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                              const void *&result, size_t &size,
+                                                bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(task_id, tag, result, size);
+      return runtime->retrieve_semantic_information(task_id, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexSpace handle,
+    bool Runtime::retrieve_semantic_information(IndexSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexPartition handle,
+    bool Runtime::retrieve_semantic_information(IndexPartition handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle,
+    bool Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle,
+    bool Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          FieldID fid,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, fid, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, fid, tag, result, 
+                                                    size, can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalRegion handle,
+    bool Runtime::retrieve_semantic_information(LogicalRegion handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalPartition part,
+    bool Runtime::retrieve_semantic_information(LogicalPartition part,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(part, tag, result, size);
+      return runtime->retrieve_semantic_information(part, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
@@ -3649,7 +3732,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
-                                             dummy_ptr, dummy_size);
+                                         dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3659,7 +3742,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3670,7 +3753,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3680,7 +3763,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3692,7 +3775,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3703,7 +3786,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3714,7 +3797,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3760,26 +3843,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_inline_task(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->begin_inline_task(ctx);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::end_task(Context ctx, const void *result, 
                                     size_t result_size, bool owned /*= false*/)
     //--------------------------------------------------------------------------
     {
       runtime->end_task(ctx, result, result_size, owned);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_inline_task(Context ctx, const void *result,
-                                  size_t result_size, bool owned /*= false*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->end_inline_task(ctx, result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -3932,26 +4000,56 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    VariantID Runtime::register_task_variant(const TaskVariantRegistrar &registrar,
+		  const CodeDescriptor &codedesc,
+		  const void *user_data /*= NULL*/,
+		  size_t user_len /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      // if this needs to be correct, we need two versions...
+      bool has_return = false;
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      return register_variant(registrar, has_return, user_data, user_len,
+                              realm_desc);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ VariantID Runtime::preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data /*= NULL*/,
+	      size_t user_len /*= 0*/,
+	      const char *task_name /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // if this needs to be correct, we need two versions...
+      bool has_return = false;
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      return preregister_variant(registrar, user_data, user_len,
+				 realm_desc, has_return, task_name);
+    }
+
+    //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                   bool has_return, const void *user_data, size_t user_data_size,
-                  CodeDescriptor *realm, CodeDescriptor *indesc)
+                  CodeDescriptor *realm)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-                                       realm, indesc, has_return);
+                                       realm, has_return);
     }
     
     //--------------------------------------------------------------------------
     /*static*/ VariantID Runtime::preregister_variant(
                                   const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  CodeDescriptor *realm,
                                   bool has_return, const char *task_name, 
                                   bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return Internal::preregister_variant(registrar, user_data, user_data_size,
-                           realm, indesc, has_return, task_name, check_task_id);
+                                   realm, has_return, task_name, check_task_id);
     } 
 
     //--------------------------------------------------------------------------
@@ -4294,6 +4392,44 @@ namespace LegionRuntime {
       return runtime->runtime->sample_unmapped_tasks(proc, 
                                                      const_cast<Mapper*>(this));
     } 
+
+    /////////////////////////////////////////////////////////////
+    // LegionTaskWrapper
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionTaskWrapper::legion_task_preamble(
+                  const void *data,
+		  size_t datalen,
+		  Processor p,
+		  const Task *& task,
+		  const std::vector<PhysicalRegion> *& regionsptr,
+		  Context& ctx,
+		  Runtime *& runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Get the high level runtime
+      runtime = Runtime::get_runtime(p);
+
+      // Read the context out of the buffer
+#ifdef DEBUG_HIGH_LEVEL
+      assert(datalen == sizeof(Context));
+#endif
+      ctx = *((const Context*)data);
+      task = reinterpret_cast<Task*>(ctx);
+
+      regionsptr = &runtime->begin_task(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionTaskWrapper::legion_task_postamble(
+                  Runtime *runtime, Context ctx,
+		  const void *retvalptr /*= NULL*/,
+		  size_t retvalsize /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_task(ctx, retvalptr, retvalsize);
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

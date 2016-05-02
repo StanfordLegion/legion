@@ -29,6 +29,7 @@
 // ******************** IMPORTANT **************************
 
 #include "legion_config.h"
+#include "lowlevel_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,7 +49,10 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
+  NEW_OPAQUE_TYPE(legion_domain_point_coloring_t);
+  NEW_OPAQUE_TYPE(legion_multi_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
+  NEW_OPAQUE_TYPE(legion_field_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
   NEW_OPAQUE_TYPE(legion_future_t);
@@ -69,6 +73,8 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_machine_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
   NEW_OPAQUE_TYPE(legion_default_mapper_t);
+  NEW_OPAQUE_TYPE(legion_processor_query_t);
+  NEW_OPAQUE_TYPE(legion_memory_query_t);
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
 #undef NEW_OPAQUE_TYPE
 
@@ -76,10 +82,12 @@ extern "C" {
    * @see ptr_t
    */
   typedef struct legion_ptr_t {
-    unsigned value;
+    long long int value;
   } legion_ptr_t;
 
-#define NEW_POINT_TYPE(T, DIM) typedef struct T { int x[DIM]; } T
+typedef long long int coord_t;
+
+#define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
   NEW_POINT_TYPE(legion_point_2d_t, 2);
   NEW_POINT_TYPE(legion_point_3d_t, 3);
@@ -103,7 +111,7 @@ extern "C" {
   typedef struct legion_domain_t {
     legion_lowlevel_id_t is_id;
     int dim;
-    int rect_data[2 * MAX_RECT_DIM];
+    coord_t rect_data[2 * MAX_RECT_DIM];
   } legion_domain_t;
 
   /**
@@ -111,7 +119,7 @@ extern "C" {
    */
   typedef struct legion_domain_point_t {
     int dim;
-    int point_data[MAX_POINT_DIM];
+    coord_t point_data[MAX_POINT_DIM];
   } legion_domain_point_t;
 
   /**
@@ -144,15 +152,6 @@ extern "C" {
   typedef struct legion_field_space_t {
     legion_field_space_id_t id;
   } legion_field_space_t;
-
-  /**
-   * @see LegionRuntime::HighLevel::FieldAllocator
-   */
-  typedef struct legion_field_allocator_t {
-    legion_field_space_t field_space;
-    legion_context_t parent;
-    legion_runtime_t runtime;
-  } legion_field_allocator_t;
 
   /**
    * @see LegionRuntime::HighLevel::LogicalRegion
@@ -248,6 +247,20 @@ extern "C" {
   } legion_phase_barrier_t;
 
   /**
+   * @see LegionRuntime::HighLevel::DynamicCollective
+   */
+  typedef struct legion_dynamic_collective_t {
+    // From LegionRuntime::HighLevel::PhaseBarrier
+    //   From Realm::Event
+    legion_lowlevel_id_t id;
+    legion_lowlevel_event_gen_t gen;
+    //   From Realm::Barrier
+    legion_lowlevel_barrier_timestamp_t timestamp;
+    // From LegionRuntime::HighLevel::DynamicCollective
+    legion_reduction_op_id_t redop;
+  } legion_dynamic_collective_t;
+
+  /**
    * Interface for a Legion C registration callback.
    */
   typedef
@@ -303,6 +316,12 @@ extern "C" {
       legion_runtime_t /* runtime */);
 
   /**
+   * Interface for a Legion C task that is wrapped (i.e. this is the Realm
+   * task interface)
+   */
+  typedef legion_lowlevel_task_pointer_t legion_task_pointer_wrapped_t;
+
+  /**
    * Interface for a Legion C projection functor (Logical Region
    * upper bound).
    */
@@ -339,7 +358,7 @@ extern "C" {
   legion_ptr_nil(void)
   {
     legion_ptr_t ptr;
-    ptr.value = (unsigned)-1;
+    ptr.value = -1LL;
     return ptr;
   }
 
@@ -349,7 +368,7 @@ extern "C" {
   inline bool
   legion_ptr_is_null(legion_ptr_t ptr)
   {
-    return ptr.value == (unsigned)-1;
+    return ptr.value == -1LL;
   }
 
   /**
@@ -413,7 +432,9 @@ extern "C" {
    *        LegionRuntime::HighLevel::IndexSpace)
    */
   legion_domain_t
-  legion_domain_from_index_space(legion_index_space_t is);
+  legion_domain_from_index_space(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations
@@ -542,6 +563,66 @@ extern "C" {
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
 
   // -----------------------------------------------------------------------
+  // Domain Point Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  legion_domain_point_coloring_t
+  legion_domain_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  void
+  legion_domain_point_coloring_destroy(
+    legion_domain_point_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  void
+  legion_domain_point_coloring_color_domain(
+    legion_domain_point_coloring_t handle,
+    legion_domain_point_t color,
+    legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
+  // Multi-Domain Point Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  legion_multi_domain_point_coloring_t
+  legion_multi_domain_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_destroy(
+    legion_multi_domain_point_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_color_domain(
+    legion_multi_domain_point_coloring_t handle,
+    legion_color_t color,
+    legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
 
@@ -591,7 +672,8 @@ extern "C" {
   void
   legion_index_space_attach_name(legion_runtime_t runtime,
                                  legion_index_space_t handle,
-                                 const char *name);
+                                 const char *name,
+                                 bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -636,6 +718,37 @@ extern "C" {
     bool disjoint,
     int part_color /* = AUTO_GENERATE_ID */);
 
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, DomainPointColoring, PartitionKind, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_domain_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_domain_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, MultiDomainPointColoring, PartitionKind, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_multi_domain_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_multi_domain_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -793,6 +906,24 @@ extern "C" {
     bool allocable /* = false */);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
+   */
+  bool
+  legion_index_partition_is_disjoint(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_complete()
+   */
+  bool
+  legion_index_partition_is_complete(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
    */
   legion_index_space_t
@@ -800,6 +931,28 @@ extern "C" {
                                             legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
+   */
+  legion_index_space_t
+  legion_index_partition_get_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_index_subspace()
+   */
+  bool
+  legion_index_partition_has_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color_space()
@@ -810,6 +963,16 @@ extern "C" {
                                          legion_index_partition_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color()
+   */
+  legion_color_t
+  legion_index_partition_get_color(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_index_partition_t handle);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
    */
   legion_index_space_t
@@ -833,7 +996,8 @@ extern "C" {
   void
   legion_index_partition_attach_name(legion_runtime_t runtime,
                                      legion_index_partition_t handle,
-                                     const char *name);
+                                     const char *name,
+                                     bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -872,7 +1036,8 @@ extern "C" {
   void
   legion_field_space_attach_name(legion_runtime_t runtime,
                                  legion_field_space_t handle,
-                                 const char *name);
+                                 const char *name,
+                                 bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -889,7 +1054,8 @@ extern "C" {
   legion_field_id_attach_name(legion_runtime_t runtime,
                               legion_field_space_t handle,
                               legion_field_id_t id,
-                              const char *name);
+                              const char *name,
+                              bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::attach_name()
@@ -957,7 +1123,8 @@ extern "C" {
   void
   legion_logical_region_attach_name(legion_runtime_t runtime,
                                     legion_logical_region_t handle,
-                                    const char *name);
+                                    const char *name,
+                                    bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -1029,6 +1196,41 @@ extern "C" {
     legion_color_t c);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_color()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_logical_subregion_by_color()
+   */
+  bool
+  legion_logical_partition_has_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_tree()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_tree(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_field_space_t fspace,
+    legion_region_tree_id_t tid);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
    */
   legion_logical_region_t
@@ -1043,7 +1245,8 @@ extern "C" {
   void
   legion_logical_partition_attach_name(legion_runtime_t runtime,
                                        legion_logical_partition_t handle,
-                                       const char *name);
+                                       const char *name,
+                                       bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -1311,7 +1514,7 @@ extern "C" {
    */
   legion_ptr_t
   legion_index_allocator_alloc(legion_index_allocator_t allocator,
-                               unsigned num_elements /* = 1 */);
+                               size_t num_elements /* = 1 */);
 
   /**
    * @see LegionRuntime::HighLevel::IndexAllocator::free()
@@ -1319,7 +1522,7 @@ extern "C" {
   void
   legion_index_allocator_free(legion_index_allocator_t allocator,
                               legion_ptr_t ptr,
-                              unsigned num_elements /* = 1 */);
+                              size_t num_elements /* = 1 */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1434,12 +1637,29 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::destroy_phase_barrier()
    */
   void
   legion_phase_barrier_destroy(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_phase_barrier_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
+   */
+  void
+  legion_phase_barrier_arrive(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_phase_barrier_t handle,
+                              size_t count /* = 1 */);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
+   */
+  void
+  legion_phase_barrier_wait(legion_runtime_t runtime,
+                            legion_context_t ctx,
+                            legion_phase_barrier_t handle);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -1450,6 +1670,74 @@ extern "C" {
   legion_phase_barrier_advance(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_phase_barrier_t handle);
+
+  // -----------------------------------------------------------------------
+  // Dynamic Collective Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_dynamic_collective()
+   */
+  legion_dynamic_collective_t
+  legion_dynamic_collective_create(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   unsigned arrivals,
+                                   legion_reduction_op_id_t redop,
+                                   const void *init_value,
+                                   size_t init_size);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_dynamic_collective()
+   */
+  void
+  legion_dynamic_collective_destroy(legion_runtime_t runtime,
+                                    legion_context_t ctx,
+                                    legion_dynamic_collective_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::arrive_dynamic_collective()
+   */
+  void
+  legion_dynamic_collective_arrive(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_dynamic_collective_t handle,
+                                   const void *buffer,
+                                   size_t size,
+                                   unsigned count /* = 1 */);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::defer_dynamic_collective_arrival()
+   */
+  void
+  legion_dynamic_collective_defer_arrival(legion_runtime_t runtime,
+                                          legion_context_t ctx,
+                                          legion_dynamic_collective_t handle,
+                                          legion_future_t f,
+                                          unsigned count /* = 1 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::get_dynamic_collective_result()
+   */
+  legion_future_t
+  legion_dynamic_collective_get_result(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_dynamic_collective_t handle);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_dynamic_collective()
+   */
+  legion_dynamic_collective_t
+  legion_dynamic_collective_advance(legion_runtime_t runtime,
+                                    legion_context_t ctx,
+                                    legion_dynamic_collective_t handle);
 
   // -----------------------------------------------------------------------
   // Future Operations
@@ -1486,6 +1774,16 @@ extern "C" {
                             uint64_t value);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::from_value()
+   */
+  legion_future_t
+  legion_future_from_bytes(legion_runtime_t runtime,
+			   const void *buffer,
+			   size_t size);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see LegionRuntime::HighLevel::Future::~Future()
@@ -1518,6 +1816,12 @@ extern "C" {
    */
   uint64_t
   legion_future_get_result_uint64(legion_future_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Future::get_untyped_pointer()
+   */
+  void
+  legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
 
   /**
    * @see LegionRuntime::HighLevel::Future::is_empty()
@@ -1661,6 +1965,14 @@ extern "C" {
   legion_task_launcher_add_flags(legion_task_launcher_t launcher,
                                  unsigned idx,
                                  enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_task_launcher_intersect_flags(legion_task_launcher_t launcher,
+                                       unsigned idx,
+                                       enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
@@ -1811,6 +2123,14 @@ extern "C" {
   legion_index_launcher_add_flags(legion_index_launcher_t launcher,
                                   unsigned idx,
                                   enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_index_launcher_intersect_flags(legion_index_launcher_t launcher,
+                                        unsigned idx,
+                                        enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
@@ -2183,6 +2503,14 @@ extern "C" {
   legion_physical_region_get_logical_region(legion_physical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_fields()
+   */
+  size_t
+  legion_physical_region_get_field_count(legion_physical_region_t handle);
+  legion_field_id_t
+  legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
+
+  /**
    * Safe for use only with instances with a single field.
    *
    * @return Caller takes ownership of return value.
@@ -2382,6 +2710,23 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Task Operations
   // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_task_id_attach_name(legion_runtime_t runtime,
+                             legion_task_id_t task_id,
+                             const char *name,
+                             bool is_mutable /* = false */);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_task_id_retrieve_name(legion_runtime_t runtime,
+                               legion_task_id_t task_id,
+                               const char **result);
 
   /**
    * @see LegionRuntime::HighLevel::Task::args
@@ -2597,6 +2942,81 @@ extern "C" {
     legion_task_pointer_uint64_t task_pointer);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::register_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_register_task_variant_fnptr(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_register_task_variant_llvmir(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    bool global,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_fnptr(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_llvmir(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_preamble()
+   */
+  void
+  legion_task_preamble(
+    const void *data,
+    size_t datalen,
+    legion_lowlevel_id_t proc_id,
+    legion_task_t *taskptr,
+    const legion_physical_region_t **regionptr,
+    unsigned * num_regions_ptr,
+    legion_context_t * ctxptr,
+    legion_runtime_t * runtimeptr);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_postamble()
+   */
+  void
+  legion_task_postamble(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    const void *retval,
+    size_t retsize);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::register_projection_functor()
    */
   void
@@ -2642,13 +3062,28 @@ extern "C" {
   legion_machine_get_all_processors(
     legion_machine_t machine,
     legion_processor_t *processors,
-    unsigned processors_size);
+    size_t processors_size);
 
   /**
    * @see Realm::Machine::get_all_processors()
    */
-  unsigned
+  size_t
   legion_machine_get_all_processors_size(legion_machine_t machine);
+
+  /**
+   * @see Realm::Machine::get_all_memories()
+   */
+  void
+  legion_machine_get_all_memories(
+    legion_machine_t machine,
+    legion_memory_t *memories,
+    size_t memories_size);
+
+  /**
+   * @see Realm::Machine::get_all_memories()
+   */
+  size_t
+  legion_machine_get_all_memories_size(legion_machine_t machine);
 
   // -----------------------------------------------------------------------
   // Processor Operations
@@ -2658,7 +3093,13 @@ extern "C" {
    * @see Realm::Processor::kind()
    */
   legion_processor_kind_t
-  legion_processor_kind(legion_processor_t proc_);
+  legion_processor_kind(legion_processor_t proc);
+
+  /**
+   * @see Realm::Processor::address_space()
+   */
+  legion_address_space_t
+  legion_processor_address_space(legion_processor_t proc);
 
   // -----------------------------------------------------------------------
   // Memory Operations
@@ -2668,38 +3109,255 @@ extern "C" {
    * @see Realm::Memory::kind()
    */
   legion_memory_kind_t
-  legion_memory_kind(legion_memory_t proc_);
+  legion_memory_kind(legion_memory_t mem);
+
+  /**
+   * @see Realm::Memory::address_space()
+   */
+  legion_address_space_t
+  legion_memory_address_space(legion_memory_t mem);
 
   // -----------------------------------------------------------------------
-  // Machine Query Interface Operations
+  // Processor Query Operations
   // -----------------------------------------------------------------------
 
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::MappingUtilities::MachineQueryInterface()
+   * @see Realm::Machine::ProcessorQuery::ProcessorQuery()
    */
-  legion_machine_query_interface_t
-  legion_machine_query_interface_create(legion_machine_t machine);
+  legion_processor_query_t
+  legion_processor_query_create(legion_machine_t machine);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::ProcessorQuery::ProcessorQuery()
+   */
+  legion_processor_query_t
+  legion_processor_query_create_copy(legion_processor_query_t query);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::MappingUtilities::~MachineQueryInterface()
+   * @see Realm::Machine::ProcessorQuery::~ProcessorQuery()
    */
   void
-  legion_machine_query_interface_destroy(
-    legion_machine_query_interface_t handle);
+  legion_processor_query_destroy(legion_processor_query_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::MappingUtilities
-   *                   ::MachineQueryInterface::find_memory_kind()
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::only_kind()
+   */
+  void
+  legion_processor_query_only_kind(legion_processor_query_t query,
+                                   legion_processor_kind_t kind);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::local_address_space()
+   */
+  void
+  legion_processor_query_local_address_space(legion_processor_query_t query);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::same_address_space_as()
+   */
+  void
+  legion_processor_query_same_address_space_as_processor(legion_processor_query_t query,
+                                                         legion_processor_t proc);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::same_address_space_as()
+   */
+  void
+  legion_processor_query_same_address_space_as_memory(legion_processor_query_t query,
+                                                      legion_memory_t mem);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::has_affinity_to()
+   */
+  void
+  legion_processor_query_has_affinity_to_memory(legion_processor_query_t query,
+                                                legion_memory_t mem,
+                                                unsigned min_bandwidth /* = 0 */,
+                                                unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::best_affinity_to()
+   */
+  void
+  legion_processor_query_best_affinity_to_memory(legion_processor_query_t query,
+                                                 legion_memory_t mem,
+                                                 int bandwidth_weight /* = 0 */,
+                                                 int latency_weight /* = 0 */);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::count()
+   */
+  size_t
+  legion_processor_query_count(legion_processor_query_t query);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::first()
+   */
+  legion_processor_t
+  legion_processor_query_first(legion_processor_query_t query);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::next()
+   */
+  legion_processor_t
+  legion_processor_query_next(legion_processor_query_t query,
+                              legion_processor_t after);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::random()
+   */
+  legion_processor_t
+  legion_processor_query_random(legion_processor_query_t query);
+
+  // -----------------------------------------------------------------------
+  // Memory Query Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::MemoryQuery::MemoryQuery()
+   */
+  legion_memory_query_t
+  legion_memory_query_create(legion_machine_t machine);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::MemoryQuery::MemoryQuery()
+   */
+  legion_memory_query_t
+  legion_memory_query_create_copy(legion_memory_query_t query);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Realm::Machine::MemoryQuery::~MemoryQuery()
+   */
+  void
+  legion_memory_query_destroy(legion_memory_query_t handle);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::only_kind()
+   */
+  void
+  legion_memory_query_only_kind(legion_memory_query_t query,
+                                legion_memory_kind_t kind);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::local_address_space()
+   */
+  void
+  legion_memory_query_local_address_space(legion_memory_query_t query);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::same_address_space_as()
+   */
+  void
+  legion_memory_query_same_address_space_as_processor(legion_memory_query_t query,
+                                                      legion_processor_t proc);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::same_address_space_as()
+   */
+  void
+  legion_memory_query_same_address_space_as_memory(legion_memory_query_t query,
+                                                   legion_memory_t mem);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::has_affinity_to()
+   */
+  void
+  legion_memory_query_has_affinity_to_processor(legion_memory_query_t query,
+                                                legion_processor_t proc,
+                                                unsigned min_bandwidth /* = 0 */,
+                                                unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::has_affinity_to()
+   */
+  void
+  legion_memory_query_has_affinity_to_memory(legion_memory_query_t query,
+                                             legion_memory_t mem,
+                                             unsigned min_bandwidth /* = 0 */,
+                                             unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::best_affinity_to()
+   */
+  void
+  legion_memory_query_best_affinity_to_processor(legion_memory_query_t query,
+                                                 legion_processor_t proc,
+                                                 int bandwidth_weight /* = 0 */,
+                                                 int latency_weight /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::best_affinity_to()
+   */
+  void
+  legion_memory_query_best_affinity_to_memory(legion_memory_query_t query,
+                                              legion_memory_t mem,
+                                              int bandwidth_weight /* = 0 */,
+                                              int latency_weight /* = 0 */);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::count()
+   */
+  size_t
+  legion_memory_query_count(legion_memory_query_t query);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::first()
    */
   legion_memory_t
-  legion_machine_query_interface_find_memory_kind(
-    legion_machine_query_interface_t handle,
-    legion_processor_t proc,
-    legion_memory_kind_t kind);
+  legion_memory_query_first(legion_memory_query_t query);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::next()
+   */
+  legion_memory_t
+  legion_memory_query_next(legion_memory_query_t query,
+                           legion_memory_t after);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::random()
+   */
+  legion_memory_t
+  legion_memory_query_random(legion_memory_query_t query);
 
   // -----------------------------------------------------------------------
   // Default Mapper Operations

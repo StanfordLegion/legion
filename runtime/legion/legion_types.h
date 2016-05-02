@@ -218,7 +218,8 @@ namespace LegionRuntime {
       DISTRIBUTED_VIRTUAL_CHANNEL = 3,
       MAPPER_VIRTUAL_CHANNEL = 4,
       SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
-      MAX_NUM_VIRTUAL_CHANNELS = 6, // this one must be last
+      VARIANT_VIRTUAL_CHANNEL = 6,
+      MAX_NUM_VIRTUAL_CHANNELS = 7, // this one must be last
     };
 
     enum MessageKind {
@@ -236,18 +237,18 @@ namespace LegionRuntime {
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
+      SEND_FIELD_ALLOC_REQUEST,
+      SEND_FIELD_ALLOC_NOTIFICATION,
+      SEND_FIELD_SPACE_TOP_ALLOC,
+      SEND_FIELD_FREE,
       SEND_TOP_LEVEL_REGION_REQUEST,
       SEND_TOP_LEVEL_REGION_RETURN,
-      SEND_DISTRIBUTED_ALLOC,
-      SEND_DISTRIBUTED_UPGRADE,
       SEND_LOGICAL_REGION_NODE,
       INDEX_SPACE_DESTRUCTION_MESSAGE,
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-      FIELD_ALLOCATION_MESSAGE,
-      FIELD_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
@@ -330,18 +331,18 @@ namespace LegionRuntime {
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
+        "Send Field Alloc Request",                                   \
+        "Send Field Alloc Notification",                              \
+        "Send Field Space Top Alloc",                                 \
+        "Send Field Free",                                            \
         "Send Top Level Region Request",                              \
         "Send Top Level Region Return",                               \
-        "Send Distributed Alloc",                                     \
-        "Send Distributed Upgrade",                                   \
         "Send Logical Region Node",                                   \
         "Index Space Destruction",                                    \
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Logical Partition Destruction",                              \
-        "Field Allocation",                                           \
-        "Field Destruction",                                          \
         "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
@@ -439,8 +440,10 @@ namespace LegionRuntime {
     struct CopyLauncher;
     struct AcquireLauncher;
     struct ReleaseLauncher;
+    struct FillLauncher;
     struct LayoutConstraintRegistrar;
     struct TaskVariantRegistrar;
+    struct TaskGeneratorArguments;
     class Future;
     class FutureMap;
     class Predicate;
@@ -487,6 +490,7 @@ namespace LegionRuntime {
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
+    class GeneratorImpl;
     class Internal;
 
     // legion_ops.h
@@ -700,6 +704,7 @@ namespace LegionRuntime {
     typedef ::legion_distributed_id_t DistributedID;
     typedef ::legion_address_space_id_t AddressSpaceID;
     typedef ::legion_tunable_id_t TunableID;
+    typedef ::legion_generator_id_t GeneratorID;
     typedef ::legion_mapping_tag_id_t MappingTagID;
     typedef ::legion_semantic_tag_t SemanticTag;
     typedef ::legion_variant_id_t VariantID;
@@ -708,6 +713,7 @@ namespace LegionRuntime {
     typedef ::legion_task_id_t TaskID;
     typedef ::legion_layout_constraint_id_t LayoutConstraintID;
     typedef SingleTask* Context;
+    typedef GeneratorImpl* GeneratorContext;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
     typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
@@ -716,6 +722,8 @@ namespace LegionRuntime {
     typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine machine, 
         Runtime *rt, const std::set<Processor> &local_procs);
+    typedef void (*GeneratorFnptr)(GeneratorContext, 
+                                   const TaskGeneratorArguments&, Runtime*);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
         const DomainPoint&, Runtime *rt);
     typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 

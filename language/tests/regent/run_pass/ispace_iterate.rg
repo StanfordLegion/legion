@@ -14,14 +14,10 @@
 
 import "regent"
 
-local i1d = index_type(int, "i1d")
-struct i2 { x : int, y : int }
-local i2d = index_type(i2, "i2d")
-
 task main()
   var is0 = ispace(ptr, 5)
-  var is1 = ispace(i1d, 7, 2)
-  var is2 = ispace(i2d, { x = 2, y = 2 }, { x = 3, y = 4 })
+  var is1 = ispace(int1d, 7, 2)
+  var is2 = ispace(int2d, { x = 2, y = 2 }, { x = 3, y = 4 })
 
   var s0 = 0
   for i0 in is0 do

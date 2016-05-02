@@ -36,6 +36,7 @@
 #include "machine_impl.h"
 
 #include "threads.h"
+#include "sampling.h"
 
 #include "module.h"
 
@@ -236,11 +237,16 @@ namespace Realm {
 
       CoreReservationSet core_reservations;
 
+      OperationTable optable;
+
+      SamplingProfiler sampling_profiler;
+
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
       void add_processor(ProcessorImpl *p);
       void add_dma_channel(DMAChannel *c);
+      void add_code_translator(CodeTranslator *t);
 
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
       void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
@@ -251,16 +257,25 @@ namespace Realm {
 
       const std::vector<DMAChannel *>& get_dma_channels(void) const;
 
+      const std::vector<CodeTranslator *>& get_code_translators(void) const;
+
     protected:
       ID::IDType num_local_memories, num_local_processors;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
       std::vector<DMAChannel *> dma_channels;
+      std::vector<CodeTranslator *> code_translators;
     };
 
     extern RuntimeImpl *runtime_singleton;
     inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
+
+    // due to circular dependencies in include files, we need versions of these that
+    //  hide the RuntimeImpl intermediate
+    inline EventImpl *get_event_impl(Event e) { return get_runtime()->get_event_impl(e); }
+    inline GenEventImpl *get_genevent_impl(Event e) { return get_runtime()->get_genevent_impl(e); }
+    inline BarrierImpl *get_barrier_impl(Event e) { return get_runtime()->get_barrier_impl(e); }
 
     // active messages
 
