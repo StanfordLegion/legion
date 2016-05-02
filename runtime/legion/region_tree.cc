@@ -5877,7 +5877,11 @@ namespace Legion {
         assert(rlast->first.get_dim() == 1);
 #endif
         // We know all colors for index spaces are 0-D
-        result = rlast->first[0] + stride;
+        Color new_color =
+          (rlast->first[0] + (stride - 1)) / stride * stride +
+          context->runtime->get_start_color();
+        if (new_color == (Color)rlast->first[0]) new_color += stride;
+        result = new_color;
       }
       else
         result = context->runtime->get_start_color();
@@ -6552,7 +6556,7 @@ namespace Legion {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, true/*down*/);
+      target->send_node(source, true/*up*/, false/*down*/);
       // Then send back the flush
       Serializer rez;
       rez.serialize(to_trigger);
@@ -7984,7 +7988,7 @@ namespace Legion {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, true/*down*/);
+      target->send_node(source, true/*up*/, false/*down*/);
       Serializer rez;
       rez.serialize(to_trigger);
       forest->runtime->send_index_partition_return(source, rez);
