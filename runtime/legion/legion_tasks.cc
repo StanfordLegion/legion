@@ -5690,8 +5690,6 @@ namespace Legion {
           const InstanceRef &ref = physical_instances[idx].get_composite_ref();
           CompositeView *composite_view = ref.get_composite_view();
           // First get any events necessary to make this view local
-          if (!ref.is_local())
-            composite_view->make_local(preconditions);
           // If we locally mapped and are now remote, we need to translate
           // this composite instance so that its views are specific to 
           // our context

@@ -127,6 +127,7 @@ namespace Legion {
                                            const VersionInfo &version_info,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
+                                           const AddressSpaceID source,
                      LegionMap<Event,FieldMask>::aligned &preconditions,
                                            std::set<Event> &applied_events) = 0;
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
@@ -134,6 +135,7 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
+                                 const AddressSpaceID source,
                                  std::set<Event> &applied_events) = 0;
       virtual Event find_user_precondition(const RegionUsage &user,
                                            Event term_event,
@@ -143,7 +145,7 @@ namespace Legion {
                                            std::set<Event> &applied_events) = 0;
       virtual void add_user(const RegionUsage &user, Event term_event,
                             const FieldMask &user_mask, Operation *op,
-                            const unsigned index,
+                            const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
                             std::set<Event> &applied_events) = 0;
       // This is a fused version of the above two methods
@@ -151,6 +153,7 @@ namespace Legion {
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
+                                   const AddressSpaceID source,
                                    std::set<Event> &applied_events,
                                    bool update_versions = true) = 0;
       virtual void add_initial_user(Event term_event,
@@ -190,14 +193,16 @@ namespace Legion {
                                UserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
                                            UserEvent done_event) = 0;
-      virtual void process_remote_update(Deserializer &derez) = 0;
+      virtual void process_remote_update(Deserializer &derez,
+                                         AddressSpaceID source) = 0;
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              UserEvent done_event) = 0;
     public:
       static void handle_view_update_request(Deserializer &derez, 
           Runtime *runtime, AddressSpaceID source); 
       static void handle_view_update_response(Deserializer &derez, Runtime *rt);
-      static void handle_view_remote_update(Deserializer &derez, Runtime *rt);
+      static void handle_view_remote_update(Deserializer &derez, Runtime *rt,
+                                            AddressSpaceID source);
       static void handle_view_remote_invalidate(Deserializer &derez,  
                                                 Runtime *rt);
     public:
@@ -278,6 +283,7 @@ namespace Legion {
                                            const VersionInfo &version_info,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
+                                           const AddressSpaceID source,
                          LegionMap<Event,FieldMask>::aligned &preconditions,
                                            std::set<Event> &applied_events);
     protected: 
@@ -287,6 +293,7 @@ namespace Legion {
                                          const VersionInfo &version_info,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
+                                         const AddressSpaceID source,
                        LegionMap<Event,FieldMask>::aligned &preconditions,
                                          std::set<Event> &applied_events);
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
@@ -295,6 +302,7 @@ namespace Legion {
                                          const VersionInfo &version_info,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
+                                         const AddressSpaceID source,
                            LegionMap<Event,FieldMask>::aligned &preconditions,
                                          std::set<Event> &applied_events);
     public:
@@ -303,6 +311,7 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
+                                 const AddressSpaceID source,
                                  std::set<Event> &applied_events);
     protected:
       void add_copy_user_above(const RegionUsage &usage, Event copy_term,
@@ -311,6 +320,7 @@ namespace Legion {
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
+                               const AddressSpaceID source,
                                std::set<Event> &applied_events);
       void add_local_copy_user(const RegionUsage &usage, 
                                Event copy_term, bool base_user,
@@ -319,6 +329,7 @@ namespace Legion {
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
+                               const AddressSpaceID source,
                                std::set<Event> &applied_events);
     public:
       virtual Event find_user_precondition(const RegionUsage &user,
@@ -340,6 +351,7 @@ namespace Legion {
       void find_local_user_preconditions(const RegionUsage &usage,
                                          Event term_event,
                                          const ColorPoint &child_color,
+                                         const VersionInfo &version_info,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          const FieldMask &user_mask,
@@ -348,7 +360,7 @@ namespace Legion {
     public:
       virtual void add_user(const RegionUsage &user, Event term_event,
                             const FieldMask &user_mask, Operation *op,
-                            const unsigned index,
+                            const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
                             std::set<Event> &applied_events);
     protected:
@@ -358,12 +370,14 @@ namespace Legion {
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const bool need_version_update,
+                          const AddressSpaceID source,
                           std::set<Event> &applied_events);
       bool add_local_user(const RegionUsage &usage, Event term_event,
                           const ColorPoint &child_color, 
                           const VersionInfo &version_info,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
+                          const AddressSpaceID source,
                           std::set<Event> &applied_events);
     public:
       // This is a fused version of the above two virtual methods
@@ -371,6 +385,7 @@ namespace Legion {
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
+                                   const AddressSpaceID source,
                                    std::set<Event> &applied_events,
                                    bool update_versions = true);
     protected:
@@ -380,6 +395,7 @@ namespace Legion {
                                 const UniqueID op_id,
                                 const unsigned index,
                                 const FieldMask &user_mask,
+                                const AddressSpaceID source,
                                 std::set<Event> &preconditions,
                                 std::set<Event> &applied_events,
                                 const bool need_version_update);
@@ -411,11 +427,13 @@ namespace Legion {
                             LegionMap<VersionID,FieldMask>::aligned &add_only);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
-                      const LegionMap<VersionID,FieldMask>::aligned &add_only);
+                      const LegionMap<VersionID,FieldMask>::aligned &add_only,
+                      AddressSpaceID source, std::set<Event> &applied_events);
       // This method does one phase update and advance for users
       // This one will take it's own lock
       bool update_version_numbers(const FieldMask &user_mask,
                                   const VersionInfo &version_info,
+                                  const AddressSpaceID source,
                                   std::set<Event> &applied_events);
     protected:
       void filter_and_add(FieldMask &filter_mask,
@@ -495,13 +513,23 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
     public:
       void perform_remote_valid_check(const FieldMask &check_mask,
+                                      const VersionInfo &version_info,
+                                      bool reading,
                                       std::set<Event> *wait_on = NULL);
+      void perform_read_invalidations(const FieldMask &check_mask,
+                                      const VersionInfo &version_info,
+                                      const AddressSpaceID source,
+                                      std::set<Event> &applied_events);
+      void send_invalidations(const FieldMask &invalidate_mask,
+                              const AddressSpaceID can_skip,
+                              std::set<Event> &applied_events);
     public:
       virtual void process_update_request(AddressSpaceID source,
                                UserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
                                            UserEvent done_event);
-      virtual void process_remote_update(Deserializer &derez);
+      virtual void process_remote_update(Deserializer &derez,
+                                         AddressSpaceID source);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              UserEvent done_event);
     public:
@@ -552,9 +580,13 @@ namespace Legion {
       // set of users gets filtered for a field from current to previous
       // then the logical owner send invalidate messages
       LegionMap<AddressSpaceID,FieldMask>::aligned valid_remote_instances;
-      // Remote nodes maintain a field mask that describes which fields
-      // they have a valid lease on from the logical owner node
+      // On remote nodes, this field mask tracks whether we have a
+      // valid lease from the logical owner node. On the owner node it
+      // tracks a summary of all the fields that have remote leases.
       FieldMask remote_valid_mask;
+      // These masks track whether we have sent the remote read requests
+      // for fields for the current and previous versions
+      FieldMask current_remote_read_requests, previous_remote_read_requests;
       // Remote nodes also have a data structure for deduplicating
       // requests to the logical owner for updates to particular fields
       LegionMap<Event,FieldMask>::aligned remote_update_requests;
@@ -632,6 +664,7 @@ namespace Legion {
                                            const VersionInfo &version_info,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
+                                           const AddressSpaceID source,
                          LegionMap<Event,FieldMask>::aligned &preconditions,
                                            std::set<Event> &applied_events);
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
@@ -639,6 +672,7 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
+                                 const AddressSpaceID source,
                                  std::set<Event> &applied_events);
       virtual Event find_user_precondition(const RegionUsage &user,
                                            Event term_event,
@@ -648,7 +682,7 @@ namespace Legion {
                                            std::set<Event> &applied_events);
       virtual void add_user(const RegionUsage &user, Event term_event,
                             const FieldMask &user_mask, Operation *op,
-                            const unsigned index,
+                            const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
                             std::set<Event> &applied_events);
       // This is a fused version of the above two methods
@@ -656,6 +690,7 @@ namespace Legion {
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
+                                   const AddressSpaceID source,
                                    std::set<Event> &applied_events,
                                    bool update_versions = true);
       virtual void add_initial_user(Event term_event,
@@ -703,7 +738,8 @@ namespace Legion {
                                UserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
                                            UserEvent done_event);
-      virtual void process_remote_update(Deserializer &derez);
+      virtual void process_remote_update(Deserializer &derez,
+                                         AddressSpaceID source);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              UserEvent done_event);
     public:
@@ -840,7 +876,6 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
-      void make_local(std::set<Event> &preconditions);
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);
@@ -924,8 +959,6 @@ namespace Legion {
       void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
                                  Runtime *runtime,std::set<Event> &ready_events,
                                  std::map<LogicalView*,unsigned> &pending_refs);
-      void make_local(std::set<Event> &preconditions, 
-                      std::set<DistributedID> &checked_views);
     public:
       void notify_active(void);
       void notify_inactive(void);

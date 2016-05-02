@@ -2003,7 +2003,8 @@ namespace Legion {
       void handle_view_update_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_view_update_response(Deserializer &derez);
-      void handle_view_remote_update(Deserializer &derez);
+      void handle_view_remote_update(Deserializer &derez,
+                                     AddressSpaceID source);
       void handle_view_remote_invalidate(Deserializer &derez);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);

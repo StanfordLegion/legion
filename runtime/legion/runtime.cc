@@ -4889,7 +4889,7 @@ namespace Legion {
             }
           case SEND_VIEW_REMOTE_UPDATE:
             {
-              runtime->handle_view_remote_update(derez);
+              runtime->handle_view_remote_update(derez, remote_address_space);
               break;
             }
           case SEND_VIEW_REMOTE_INVALIDATE:
@@ -14909,10 +14909,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_update(Deserializer &derez)
+    void Runtime::handle_view_remote_update(Deserializer &derez,
+                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_view_remote_update(derez, this);
+      InstanceView::handle_view_remote_update(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

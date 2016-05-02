@@ -43,6 +43,10 @@ namespace Legion {
         registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      if (did > 0)
+        assert(runtime->determine_owner(did) == owner_space);
+#endif
       if (do_registration)
       {
         runtime->register_distributed_collectable(did, this);

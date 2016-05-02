@@ -911,24 +911,28 @@ namespace Legion {
       if (!info.advance_mask)
         assert(state->advance_states.empty());
 #endif
-      size_t total_version_states = 0;
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 = 
-            state->version_states.begin(); it1 != 
-            state->version_states.end(); it1++)
+      const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
+        info.field_versions->get_field_versions();
+      rez.serialize<size_t>(field_versions.size()); 
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it1 = 
+            field_versions.begin(); it1 != field_versions.end(); it1++)
       {
-        const VersionStateInfo &state_info = it1->second;
-        total_version_states += state_info.states.size();
-      }
-      rez.serialize(total_version_states);
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator it1 = 
-            state->version_states.begin(); it1 != 
-            state->version_states.end(); it1++)
-      {
-        const VersionStateInfo &state_info = it1->second;
+        rez.serialize(it1->first);
+        // Special case for version number 0
+        if (it1->first == 0)
+        {
+          rez.serialize(it1->second);
+          continue;
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(state->version_states.find(it1->first) != 
+                state->version_states.end());
+#endif
+        const VersionStateInfo &state_info = state->version_states[it1->first];
+        rez.serialize<size_t>(state_info.states.size());
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               state_info.states.begin(); it != state_info.states.end(); it++)
         {
-          rez.serialize(it1->first);
           rez.serialize(it->first->did);
           rez.serialize(it->first->owner_space);
           rez.serialize(it->second);
@@ -981,9 +985,9 @@ namespace Legion {
       // Mark that we definitely need to recapture this node info
       info.set_needs_capture();
       // Unpack the version states
-      size_t num_states;
-      derez.deserialize(num_states);
-      if (num_states > 0)
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      if (num_versions > 0)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(info.field_versions == NULL);
@@ -991,25 +995,55 @@ namespace Legion {
         info.field_versions = new FieldVersions();
         info.field_versions->add_reference();
       }
-      for (unsigned idx = 0; idx < num_states; idx++)
+      const AddressSpaceID local_space = node->context->runtime->address_space;
+      for (unsigned idx1 = 0; idx1 < num_versions; idx1++)
       {
         VersionID vid;
         derez.deserialize(vid);
-        DistributedID did;
-        derez.deserialize(did);
-        AddressSpaceID owner;
-        derez.deserialize(owner);
-        FieldMask mask;
-        derez.deserialize(mask);
-        // Transform the field mask
-        VersionState *state = node->find_remote_version_state(ctx, vid, 
-                                                              did, owner);
-        info.physical_state->add_version_state(state, mask);
-        // Also add this to the version numbers
-        // Only need to do this for the non-advance states
-        info.field_versions->add_field_version(vid, mask);
+        // Special case for zero
+        if (vid == 0)
+        {
+          FieldMask zero_mask;
+          derez.deserialize(zero_mask);
+          info.field_versions->add_field_version(0, zero_mask);
+          continue;
+        }
+        FieldMask version_mask;
+        size_t num_states;
+        derez.deserialize(num_states);
+        for (unsigned idx2 = 0; idx2 < num_states; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          AddressSpaceID owner;
+          derez.deserialize(owner);
+          FieldMask mask;
+          derez.deserialize(mask);
+          // Transform the field mask
+          if (owner != local_space)
+          {
+            VersionState *state = node->find_remote_version_state(ctx, vid, 
+                                                                  did, owner);
+            info.physical_state->add_version_state(state, mask);
+          }
+          else
+          {
+            DistributedCollectable *dc = 
+              node->context->runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+            VersionState *state = dynamic_cast<VersionState*>(dc);
+            assert(state != NULL);
+#else
+            VersionState *state = static_cast<VersionState*>(dc);
+#endif
+            info.physical_state->add_version_state(state, mask);
+          }
+          version_mask |= mask;
+        }
+        info.field_versions->add_field_version(vid, version_mask);
       }
       // Unpack the advance states
+      size_t num_states;
       derez.deserialize(num_states);
       for (unsigned idx = 0; idx < num_states; idx++)
       {
@@ -5692,9 +5726,6 @@ namespace Legion {
         return;
       }
       std::set<Event> preconditions;
-      // Keep track of any composite veiws we need to check 
-      // for having recursive version states at here
-      std::vector<CompositeView*> composite_views;
       std::vector<LogicalView*> pending_views;
       {
         // Hold the lock when touching the data structures because we might
@@ -5779,9 +5810,6 @@ namespace Legion {
               pending_views.push_back(view);
               continue;
             }
-            // Check for composite view
-            if (view->is_composite_view())
-              composite_views.push_back(view->as_composite_view());
             view->add_nested_gc_ref(did);
             view->add_nested_valid_ref(did);
           }
@@ -5848,9 +5876,6 @@ namespace Legion {
               view->add_nested_gc_ref(did);
               view->add_nested_valid_ref(did);
             }
-            // Check for composite view
-            if (view->is_composite_view())
-              composite_views.push_back(view->as_composite_view());
           }
           size_t num_reduction_views;
           derez.deserialize(num_reduction_views);
@@ -5897,16 +5922,6 @@ namespace Legion {
         pending_ready = Runtime::merge_events<true>(preconditions);
         preconditions.clear();
       }
-      // If we have composite views, then we need to make sure
-      // that their version states are local as well
-      if (!composite_views.empty())
-      {
-        for (std::vector<CompositeView*>::const_iterator it = 
-              composite_views.begin(); it != composite_views.end(); it++)
-        {
-          (*it)->make_local(preconditions); 
-        }
-      }
       if (pending_ready.exists())
       {
         pending_ready.wait();
@@ -5915,8 +5930,6 @@ namespace Legion {
         {
           (*it)->add_nested_gc_ref(did);
           (*it)->add_nested_valid_ref(did);
-          if ((*it)->is_composite_view())
-            (*it)->as_composite_view()->make_local(preconditions);
         }
       }
       if (!preconditions.empty())
