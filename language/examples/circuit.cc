@@ -48,7 +48,7 @@ private:
 };
 
 CircuitMapper::CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : ShimMapper(machine, rt, local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
 {
   std::set<Processor> all_procs;
 	machine.get_all_processors(all_procs);
