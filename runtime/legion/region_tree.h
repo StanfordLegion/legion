@@ -292,7 +292,7 @@ namespace Legion {
                                   bool find_valid,
                                   std::set<Event> &map_applied,
                                   InstanceSet &valid_insts
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -306,7 +306,7 @@ namespace Legion {
                                  bool defer_add_users,
                                  std::set<Event> &map_applied,
                                  InstanceSet &targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
 #endif
@@ -317,7 +317,7 @@ namespace Legion {
                               VersionInfo &version_info,
                               SingleTask *target_ctx,
                               const bool needs_fields
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                               , unsigned index
                               , const char *log_name
                               , UniqueID uid
@@ -331,7 +331,7 @@ namespace Legion {
                                   bool defer_add_users,
                                   std::set<Event> &map_applied,
                                   InstanceSet &targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
 #endif
@@ -352,7 +352,7 @@ namespace Legion {
                     const std::set<ColorPoint> &next_children,
                     Event term_event, std::set<Event> &map_applied,
                     const InstanceSet &targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -363,7 +363,7 @@ namespace Legion {
                                    Operation *op, unsigned index,
                                    std::set<Event> &map_applied,
                                    InstanceSet &targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                    , const char *log_name
                                    , UniqueID uid
 #endif
@@ -555,7 +555,7 @@ namespace Legion {
     public:
       template<typename T>
       Color generate_unique_color(const std::map<Color,T> &current_map);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
@@ -756,7 +756,7 @@ namespace Legion {
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual IndexSpaceNode* as_index_space_node(void) = 0;
       virtual IndexPartNode* as_index_part_node(void) = 0;
 #else
@@ -856,7 +856,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
 #endif
@@ -1016,7 +1016,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
 #endif
@@ -1334,7 +1334,7 @@ namespace Legion {
       {
         // First check to see if the version info already has a state
         PhysicalState *result = info.find_physical_state(this, capture);  
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(result != NULL);
 #endif
         return result;
@@ -1602,7 +1602,7 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0; 
       virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const = 0;
       virtual PartitionNode* as_partition_node(void) const = 0;
 #else
@@ -1662,7 +1662,7 @@ namespace Legion {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask) = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
       virtual void dump_logical_context(ContextID ctx, 
@@ -1762,7 +1762,7 @@ namespace Legion {
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
@@ -1825,7 +1825,7 @@ namespace Legion {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
       virtual void dump_logical_context(ContextID ctx, 
@@ -1949,7 +1949,7 @@ namespace Legion {
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
 #endif
@@ -2018,7 +2018,7 @@ namespace Legion {
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
       virtual void dump_logical_context(ContextID ctx, 
@@ -2038,7 +2038,7 @@ namespace Legion {
     }; 
 
     // some inline implementations
-#ifndef DEBUG_HIGH_LEVEL
+#ifndef DEBUG_LEGION
     //--------------------------------------------------------------------------
     inline IndexSpaceNode* IndexTreeNode::as_index_space_node(void)
     //--------------------------------------------------------------------------

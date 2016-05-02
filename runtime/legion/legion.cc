@@ -337,7 +337,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       impl = Internal::legion_new<Internal::ArgumentMapImpl>();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->add_reference();
@@ -403,7 +403,7 @@ namespace Legion {
     bool ArgumentMap::has_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->has_point(point);
@@ -414,7 +414,7 @@ namespace Legion {
                                 const TaskArgument &arg, bool replace/*= true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->set_point(point, arg, replace);
@@ -424,7 +424,7 @@ namespace Legion {
     bool ArgumentMap::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->remove_point(point);
@@ -434,7 +434,7 @@ namespace Legion {
     TaskArgument ArgumentMap::get_point(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->get_point(point);
@@ -540,7 +540,7 @@ namespace Legion {
     void Lock::acquire(unsigned mode /*=0*/, bool exclusive /*=true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(reservation_lock.exists());
 #endif
       Event lock_event = reservation_lock.acquire(mode,exclusive);
@@ -552,7 +552,7 @@ namespace Legion {
     void Lock::release(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(reservation_lock.exists());
 #endif
       reservation_lock.release();
@@ -657,7 +657,7 @@ namespace Legion {
     void PhaseBarrier::arrive(unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
       phase_barrier.arrive(count);
@@ -667,7 +667,7 @@ namespace Legion {
     void PhaseBarrier::wait(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
       Event e = phase_barrier.get_previous_phase();
@@ -733,7 +733,7 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -758,7 +758,7 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -783,7 +783,7 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -808,7 +808,7 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -833,7 +833,7 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -858,7 +858,7 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -880,7 +880,7 @@ namespace Legion {
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -904,7 +904,7 @@ namespace Legion {
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -928,7 +928,7 @@ namespace Legion {
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
         Internal::log_region.error("ERROR: Use different RegionRequirement "
@@ -951,7 +951,7 @@ namespace Legion {
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -974,7 +974,7 @@ namespace Legion {
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -997,7 +997,7 @@ namespace Legion {
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (redop == 0)
       {
         Internal::log_region.error("Zero is not a valid ReductionOpID");
@@ -1519,7 +1519,7 @@ namespace Legion {
     void MPILegionHandshake::mpi_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->mpi_handoff_to_legion();
@@ -1529,7 +1529,7 @@ namespace Legion {
     void MPILegionHandshake::mpi_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->mpi_wait_on_legion();
@@ -1539,7 +1539,7 @@ namespace Legion {
     void MPILegionHandshake::legion_handoff_to_mpi(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->legion_handoff_to_mpi();
@@ -1549,7 +1549,7 @@ namespace Legion {
     void MPILegionHandshake::legion_wait_on_mpi(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->legion_wait_on_mpi();
@@ -1698,7 +1698,7 @@ namespace Legion {
     Future FutureMap::get_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->get_future(point);
@@ -1780,7 +1780,7 @@ namespace Legion {
     void PhysicalRegion::wait_until_valid(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->wait_until_valid();
@@ -1790,7 +1790,7 @@ namespace Legion {
     bool PhysicalRegion::is_valid(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->is_valid();
@@ -1800,7 +1800,7 @@ namespace Legion {
     LogicalRegion PhysicalRegion::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->get_logical_region();
@@ -1812,7 +1812,7 @@ namespace Legion {
         PhysicalRegion::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->get_accessor();
@@ -1824,7 +1824,7 @@ namespace Legion {
         PhysicalRegion::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       return impl->get_field_accessor(fid);
@@ -3716,7 +3716,7 @@ namespace Legion {
                                                         int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(mpi_participants > 0);
       assert(legion_participants > 0);
 #endif
@@ -3952,7 +3952,7 @@ namespace Legion {
       runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(datalen == sizeof(Context));
 #endif
       ctx = *((const Context*)data);

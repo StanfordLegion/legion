@@ -438,7 +438,7 @@ namespace Legion {
     protected:
       void filter_and_add(FieldMask &filter_mask,
                 const LegionMap<VersionID,FieldMask>::aligned &add_versions);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       void sanity_check_versions(void);
 #endif
     protected:
@@ -1153,7 +1153,7 @@ namespace Legion {
     inline InstanceView* LogicalView::as_instance_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_instance_view());
 #endif
       return static_cast<InstanceView*>(const_cast<LogicalView*>(this));
@@ -1163,7 +1163,7 @@ namespace Legion {
     inline DeferredView* LogicalView::as_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_deferred_view());
 #endif
       return static_cast<DeferredView*>(const_cast<LogicalView*>(this));
@@ -1173,7 +1173,7 @@ namespace Legion {
     inline MaterializedView* LogicalView::as_materialized_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_materialized_view());
 #endif
       return static_cast<MaterializedView*>(const_cast<LogicalView*>(this));
@@ -1183,7 +1183,7 @@ namespace Legion {
     inline ReductionView* LogicalView::as_reduction_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_reduction_view());
 #endif
       return static_cast<ReductionView*>(const_cast<LogicalView*>(this));
@@ -1193,7 +1193,7 @@ namespace Legion {
     inline FillView* LogicalView::as_fill_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_fill_view());
 #endif
       return static_cast<FillView*>(const_cast<LogicalView*>(this));
@@ -1203,7 +1203,7 @@ namespace Legion {
     inline CompositeView* LogicalView::as_composite_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_composite_view());
 #endif
       return static_cast<CompositeView*>(const_cast<LogicalView*>(this));

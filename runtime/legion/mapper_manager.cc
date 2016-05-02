@@ -1107,7 +1107,7 @@ namespace Legion {
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -1131,7 +1131,7 @@ namespace Legion {
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -1156,7 +1156,7 @@ namespace Legion {
                       "that layout constraint ID is invalid.",
                       mapper->get_mapper_name(), layout_id,
                       get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -1204,7 +1204,7 @@ namespace Legion {
                       "is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? set1 : set2, 
                       get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -1231,7 +1231,7 @@ namespace Legion {
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
                       get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -2047,7 +2047,7 @@ namespace Legion {
     {
       if (manager->is_virtual_manager())
         return;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
       std::map<PhysicalManager*,
@@ -2067,7 +2067,7 @@ namespace Legion {
     {
       if (manager->is_virtual_manager())
         return;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx->acquired_instances != NULL);
 #endif
       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired =
@@ -2101,7 +2101,7 @@ namespace Legion {
                           "must be from the same region tree (%d != %d).",
                           call_name, get_mapper_call_name(info->kind),
                           mapper->get_mapper_name(), tree_id, other_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -2652,7 +2652,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MAPPER_CALL_NAMES(call_names); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(kind < LAST_MAPPER_CALL);
 #endif
       return call_names[kind];
@@ -2722,7 +2722,7 @@ namespace Legion {
     bool SerializingManager::is_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
       // No need to hold the lock here since we are exclusive
@@ -2733,7 +2733,7 @@ namespace Legion {
     void SerializingManager::enable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
       // No need to hold the lock since we know we are exclusive 
@@ -2744,7 +2744,7 @@ namespace Legion {
     void SerializingManager::disable_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
       // No need to hold the lock since we know we are exclusive
@@ -2754,7 +2754,7 @@ namespace Legion {
         // to finish before we can continue execution 
         if (paused_calls > 0)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!info->resume.exists());
 #endif
           UserEvent ready_event = UserEvent::create_user_event();
@@ -2762,7 +2762,7 @@ namespace Legion {
           non_reentrant_calls.push_back(info);
           ready_event.wait();
           // When we wake up, we should be non-reentrant
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!permit_reentrant);
 #endif
         }
@@ -2812,7 +2812,7 @@ namespace Legion {
                       "for the mapper call to which they are passed. They "
                       "cannot be stored beyond the lifetime of the "
                       "mapper call.", mapper->get_mapper_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -2854,7 +2854,7 @@ namespace Legion {
       Event wait_on = Event::NO_EVENT;
       {
         AutoLock m_lock(mapper_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(paused_calls > 0);
 #endif
         paused_calls--;
@@ -2869,7 +2869,7 @@ namespace Legion {
       }
       if (wait_on.exists())
         wait_on.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
     }
@@ -2879,7 +2879,7 @@ namespace Legion {
                                                 bool first_invocation)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
       if (first_invocation)
@@ -2989,7 +2989,7 @@ namespace Legion {
           log_run.error("Invalid duplicate mapper lock request in mapper call "
                         "%s for mapper %s", get_mapper_call_name(info->kind),
                         mapper->get_mapper_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_SYNCHRONIZATION);
@@ -3052,7 +3052,7 @@ namespace Legion {
                         "in mapper call %s for mapper %s",
                         get_mapper_call_name(info->kind),
                         mapper->get_mapper_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_SYNCHRONIZATION);

@@ -43,7 +43,7 @@ namespace Legion {
         registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (did > 0)
         assert(runtime->determine_owner(did) == owner_space);
 #endif
@@ -61,7 +61,7 @@ namespace Legion {
     DistributedCollectable::~DistributedCollectable(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(gc_references == 0);
       assert(valid_references == 0);
       assert(resource_references == 0);
@@ -88,7 +88,7 @@ namespace Legion {
     void DistributedCollectable::add_gc_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
       bool need_activate = false;
@@ -111,7 +111,7 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!has_gc_references);
 #endif
           has_gc_references = true;
@@ -133,7 +133,7 @@ namespace Legion {
     bool DistributedCollectable::remove_gc_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
       bool need_activate = false;
@@ -156,7 +156,7 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(has_gc_references);
 #endif
           has_gc_references = false;
@@ -172,7 +172,7 @@ namespace Legion {
     void DistributedCollectable::add_valid_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
       assert(current_state != ACTIVE_DELETED_STATE);
       assert(current_state != PENDING_ACTIVE_DELETED_STATE);
@@ -199,7 +199,7 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!has_valid_references);
 #endif
           has_valid_references = true;
@@ -220,7 +220,7 @@ namespace Legion {
     bool DistributedCollectable::remove_valid_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
       assert(current_state != ACTIVE_DELETED_STATE);
       assert(current_state != PENDING_ACTIVE_DELETED_STATE);
@@ -247,7 +247,7 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(has_valid_references);
 #endif
           has_valid_references = false;
@@ -352,7 +352,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!has_resource_references);
 #endif
       has_resource_references = true;
@@ -363,7 +363,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(has_resource_references);
 #endif
       has_resource_references = false;
@@ -376,7 +376,7 @@ namespace Legion {
                                       AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(source != owner_space);
       assert(current_state != DELETED_STATE);
@@ -442,7 +442,7 @@ namespace Legion {
                                       AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(source != owner_space);
       assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
@@ -528,7 +528,7 @@ namespace Legion {
                                                           Event destroyed)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner()); // This should only happen on the owner node
 #endif
       AutoLock gc(gc_lock);
@@ -540,7 +540,7 @@ namespace Legion {
     void DistributedCollectable::register_with_runtime(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
@@ -553,7 +553,7 @@ namespace Legion {
     void DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(registered_with_runtime);
 #endif
@@ -571,7 +571,7 @@ namespace Legion {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -591,7 +591,7 @@ namespace Legion {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -611,7 +611,7 @@ namespace Legion {
                                 AddressSpaceID target, unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -640,7 +640,7 @@ namespace Legion {
       State copy = current_state;
       // We better be holding a gc reference or a valid reference when
       // we are doing this operation
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((copy == ACTIVE_INVALID_STATE) || (copy == VALID_STATE) ||
              (copy == PENDING_VALID_STATE) || (copy == PENDING_INVALID_STATE));
 #endif
@@ -812,7 +812,7 @@ namespace Legion {
           runtime->find_distributed_collectable(did);
         if (source == owner)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
           if (kind == VALID_REF_KIND)

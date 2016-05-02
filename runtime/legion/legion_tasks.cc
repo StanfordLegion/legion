@@ -59,7 +59,7 @@ namespace Legion {
     int TaskOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
       return (parent_ctx->get_depth() + 1);
@@ -91,7 +91,7 @@ namespace Legion {
     void TaskOp::set_current_proc(Processor current)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current.exists());
       assert(runtime->is_local(current));
 #endif
@@ -329,7 +329,7 @@ namespace Legion {
       {
         if (has_arg_manager)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(arg_manager == NULL);
 #endif
           arg_manager = legion_new<AllocManager>(arglen);
@@ -452,7 +452,7 @@ namespace Legion {
     size_t TaskOp::check_future_size(FutureImpl *impl)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       const size_t result_size = impl->get_untyped_size();
@@ -468,7 +468,7 @@ namespace Legion {
                       get_task_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id(),
                       result_size, variants->return_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
@@ -530,7 +530,7 @@ namespace Legion {
       bool task_complete = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!complete_received);
         assert(!commit_received);
 #endif
@@ -549,7 +549,7 @@ namespace Legion {
       bool task_commit = false; 
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(complete_received);
         assert(!commit_received);
 #endif
@@ -619,7 +619,7 @@ namespace Legion {
     unsigned TaskOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < parent_req_indexes.size());
 #endif
       return parent_req_indexes[idx];
@@ -708,7 +708,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       AddressSpaceID local_space = runtime->address_space;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(infos.size() == regions.size());
 #endif
       for (unsigned idx = 0; idx < infos.size(); idx++)
@@ -776,7 +776,7 @@ namespace Legion {
         {
           unsigned index;
           derez.deserialize(index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(index < infos.size());
 #endif
           infos[index].unpack_info(derez, source, runtime->forest);
@@ -806,7 +806,7 @@ namespace Legion {
       // Hold the operation lock when doing this since children could
       // be returning values from the utility processor
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(created_regions.find(handle) == created_regions.end());
 #endif
       created_regions.insert(handle); 
@@ -838,7 +838,7 @@ namespace Legion {
       for (std::set<LogicalRegion>::const_iterator it = regs.begin();
             it != regs.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(created_regions.find(*it) == created_regions.end());
 #endif
         created_regions.insert(*it);
@@ -868,7 +868,7 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock);
       std::pair<FieldSpace,FieldID> key(handle,fid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(created_fields.find(key) == created_fields.end());
 #endif
       created_fields.insert(key);
@@ -884,7 +884,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < fields.size(); idx++)
       {
         std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(created_fields.find(key) == created_fields.end());
 #endif
         created_fields.insert(key);
@@ -920,7 +920,7 @@ namespace Legion {
       for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(created_fields.find(*it) == created_fields.end());
 #endif
         created_fields.insert(*it);
@@ -951,7 +951,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(created_field_spaces.find(space) == created_field_spaces.end());
 #endif
       created_field_spaces.insert(space);
@@ -990,7 +990,7 @@ namespace Legion {
       for (std::set<FieldSpace>::const_iterator it = spaces.begin();
             it != spaces.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(created_field_spaces.find(*it) == created_field_spaces.end());
 #endif
         created_field_spaces.insert(*it);
@@ -1039,7 +1039,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(created_index_spaces.find(space) == created_index_spaces.end());
 #endif
       created_index_spaces.insert(space);
@@ -1066,7 +1066,7 @@ namespace Legion {
       for (std::set<IndexSpace>::const_iterator it = spaces.begin();
             it != spaces.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(created_index_spaces.find(*it) == created_index_spaces.end());
 #endif
         created_index_spaces.insert(*it);
@@ -1275,7 +1275,7 @@ namespace Legion {
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id(), get_task_name(),
                               get_unique_id(), indexes[idx].parent.id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_PARENT_INDEX);
@@ -1288,7 +1288,7 @@ namespace Legion {
                               indexes[idx].handle.id, 
                               indexes[idx].parent.id, idx,
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_INDEX_PATH);
@@ -1302,7 +1302,7 @@ namespace Legion {
                               indexes[idx].privilege, 
                               indexes[idx].handle.id, idx, 
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_INDEX_PRIVILEGES);
@@ -1338,7 +1338,7 @@ namespace Legion {
                               regions[idx].region.field_space.id, 
                               regions[idx].region.tree_id, idx, 
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_REGION_HANDLE);
@@ -1352,7 +1352,7 @@ namespace Legion {
                                regions[idx].partition.field_space.id, 
                                regions[idx].partition.tree_id, idx, 
                                get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_PARTITION_HANDLE);
@@ -1362,7 +1362,7 @@ namespace Legion {
               log_region.error("Projection region requirement %d used "
                                 "in non-index space task %s",
                                 idx, get_task_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_PROJECTION_USE);
@@ -1375,7 +1375,7 @@ namespace Legion {
                                 "which are not read-only and not reduce "
                                 "must be disjoint", 
                                 idx, get_task_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_NON_DISJOINT_PARTITION);
@@ -1391,7 +1391,7 @@ namespace Legion {
                               "(ID %lld)",
                               bad_field, sp.id, idx, get_task_name(),
                               get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -1403,7 +1403,7 @@ namespace Legion {
                                 "task %s (ID %lld)",
                                 bad_field, idx, get_task_name(), 
                                 get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -1414,7 +1414,7 @@ namespace Legion {
                                 "region %d of task %s (ID %lld)",
                                 bad_field, idx, get_task_name(), 
                                 get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -1432,7 +1432,7 @@ namespace Legion {
                                 regions[idx].region.index_space.id,
                                 regions[idx].region.field_space.id, 
                                 regions[idx].region.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_PARENT_REGION);
@@ -1448,7 +1448,7 @@ namespace Legion {
                                 regions[idx].region.tree_id,
                                 PRINT_REG(regions[idx].parent), idx,
                                 get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_REGION_PATH);
@@ -1464,7 +1464,7 @@ namespace Legion {
                                regions[idx].partition.tree_id, 
                                PRINT_REG(regions[idx].parent), idx,
                                get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_PARTITION_PATH);
@@ -1477,7 +1477,7 @@ namespace Legion {
                                      "parent task",
                                       idx, get_task_name(), 
                                       get_unique_id(), bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_REGION_TYPE);
@@ -1494,7 +1494,7 @@ namespace Legion {
                                regions[idx].region.field_space.id, 
                                regions[idx].region.tree_id, idx, 
                                get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -1511,7 +1511,7 @@ namespace Legion {
                                regions[idx].partition.field_space.id, 
                                regions[idx].partition.tree_id, idx, 
                                get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_BAD_PARTITION_PRIVILEGES);
@@ -1538,7 +1538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CLONE_TASK_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(p.exists());
 #endif
       // From Operation
@@ -1560,7 +1560,7 @@ namespace Legion {
       {
         if (duplicate_args)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(arg_manager == NULL);
 #endif
           this->arg_manager = legion_new<AllocManager>(this->arglen); 
@@ -1655,7 +1655,7 @@ namespace Legion {
                                "unsigned integers.  Points for task %s "
                                "have elements of %d dimensions",
                                 get_task_name(), index_point.get_dim());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
@@ -1764,7 +1764,7 @@ namespace Legion {
                                                 version_info, this, *it, 
                                                 true/*find valid*/, 
                                                 applied_conditions, valid
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -1811,7 +1811,7 @@ namespace Legion {
                           get_task_name(), get_unique_id(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1833,7 +1833,7 @@ namespace Legion {
                           "is from region tree %d.", mapper->get_mapper_name(),
                           bad_tree, *it, get_task_name(), get_unique_id(), 
                           regions[*it].region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1859,7 +1859,7 @@ namespace Legion {
               log_run.error("Missing instance for field %s (FieldID: %d)",
                             static_cast<const char*>(name), *it);
             }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1883,7 +1883,7 @@ namespace Legion {
                               "update the mapper to abide by proper mapping "
                               "conventions.", mapper->get_mapper_name(),
                               (*it), get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1907,7 +1907,7 @@ namespace Legion {
                           get_task_name(), get_unique_id(),
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1935,7 +1935,7 @@ namespace Legion {
                               get_task_name(), get_unique_id(), 
                               parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -1951,7 +1951,7 @@ namespace Legion {
                               regions[*it], version_info, this, *it,
                               completion_event, (regions.size() > 1), 
                               applied_conditions, chosen_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
                               );
@@ -2080,7 +2080,7 @@ namespace Legion {
                            regions[idx].parent.index_space.id,
                            regions[idx].parent.field_space.id, 
                            regions[idx].parent.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_BAD_PARENT_REGION);
@@ -2096,7 +2096,7 @@ namespace Legion {
       bool task_complete = false;
       {
         AutoLock o_lock(op_lock); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!children_complete);
         assert(!children_commit);
 #endif
@@ -2114,7 +2114,7 @@ namespace Legion {
       bool task_commit = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(children_complete);
         assert(!children_commit);
 #endif
@@ -2409,7 +2409,7 @@ namespace Legion {
           LogicalView::delete_logical_view(it->second);
       }
       instance_top_views.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
@@ -2485,7 +2485,7 @@ namespace Legion {
     void SingleTask::assign_context(RegionTreeContext ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!context.exists());
 #endif
       context = ctx;
@@ -2495,7 +2495,7 @@ namespace Legion {
     RegionTreeContext SingleTask::release_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       RegionTreeContext result = context;
@@ -2507,7 +2507,7 @@ namespace Legion {
     RegionTreeContext SingleTask::get_context(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       return context;
@@ -2517,7 +2517,7 @@ namespace Legion {
     ContextID SingleTask::get_context_id(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       return context.get_id();
@@ -2554,7 +2554,7 @@ namespace Legion {
     PhysicalRegion SingleTask::get_physical_region(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < physical_regions.size());
 #endif
       return physical_regions[idx];
@@ -2565,7 +2565,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < physical_instances.size());
 #endif
       set = physical_instances[idx];
@@ -2590,7 +2590,7 @@ namespace Legion {
         // lock because we know we are running in the application
         // thread in order to do this inlining
         unsigned local_index = child->find_parent_index(idx); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(local_index < physical_regions.size());
 #endif
         InstanceSet instances;
@@ -2619,7 +2619,7 @@ namespace Legion {
                       "(UID %lld).", child_mapper->get_mapper_name(),
                       output.chosen_variant, child->get_task_name(), 
                       child->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2866,7 +2866,7 @@ namespace Legion {
       // We already hold our lock from the callsite above
       if (outstanding_children_count >= context_configuration.max_window_size)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!valid_wait_event);
 #endif
         window_wait = UserEvent::create_user_event();
@@ -2904,7 +2904,7 @@ namespace Legion {
       // We have the lock
       if (op->is_tracking_parent())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
@@ -2932,7 +2932,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         std::set<Operation*>::iterator finder = executing_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
@@ -2947,7 +2947,7 @@ namespace Legion {
         executed_children.insert(op);
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
         if (valid_wait_event && (context_configuration.max_window_size > 0) &&
@@ -2971,7 +2971,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         std::set<Operation*>::iterator finder = executed_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
@@ -2999,7 +2999,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         std::set<Operation*>::iterator finder = complete_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
@@ -3032,7 +3032,7 @@ namespace Legion {
         complete_children.erase(op);
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(outstanding_count >= 0);
 #endif
         if (valid_wait_event && (context_configuration.max_window_size > 0) &&
@@ -3046,7 +3046,7 @@ namespace Legion {
         // No need to see if we trigger anything else because this
         // method is only called while the task is still executing
         // so 'executed' is still false.
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!executed);
 #endif
       }
@@ -3176,7 +3176,7 @@ namespace Legion {
         log_task.error("Illegal nested trace with ID %d attempted in "
                        "task %s (ID %lld)", tid, get_task_name(),
                        get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_NESTED_TRACE);
@@ -3206,7 +3206,7 @@ namespace Legion {
         log_task.error("Unmatched end trace for ID %d in task %s "
                        "(ID %lld)", tid, get_task_name(),
                        get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_UNMATCHED_END_TRACE);
@@ -3283,7 +3283,7 @@ namespace Legion {
       if (context_configuration.max_outstanding_frames > 0)
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(frame_events.front() == frame_termination);
 #endif
         frame_events.pop_front();
@@ -3294,7 +3294,7 @@ namespace Legion {
     void SingleTask::increment_outstanding(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((context_configuration.min_tasks_to_schedule == 0) || 
              (context_configuration.min_frames_to_schedule == 0));
       assert((context_configuration.min_tasks_to_schedule > 0) || 
@@ -3330,7 +3330,7 @@ namespace Legion {
     void SingleTask::decrement_outstanding(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((context_configuration.min_tasks_to_schedule == 0) || 
              (context_configuration.min_frames_to_schedule == 0));
       assert((context_configuration.min_tasks_to_schedule > 0) || 
@@ -3340,7 +3340,7 @@ namespace Legion {
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(outstanding_subtasks > 0);
 #endif
         outstanding_subtasks--;
@@ -3417,7 +3417,7 @@ namespace Legion {
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       // We already hold the lock from the dispatch site (see above)
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(pending_subtasks > 0);
 #endif
       if ((outstanding_subtasks > 0) &&
@@ -3478,7 +3478,7 @@ namespace Legion {
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(pending_frames > 0);
 #endif
         if ((outstanding_subtasks > 0) &&
@@ -3518,7 +3518,7 @@ namespace Legion {
                                       CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(fields.size() == field_sizes.size());
 #endif
       for (unsigned idx = 0; idx < fields.size(); idx++)
@@ -3672,7 +3672,7 @@ namespace Legion {
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->handle_type == SINGULAR);
 #endif
         if (top_regions.find(it->region) != top_regions.end())
@@ -3686,7 +3686,7 @@ namespace Legion {
       for (std::deque<RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->handle_type == SINGULAR);
 #endif
         if (top_regions.find(it->region) != top_regions.end())
@@ -3702,7 +3702,7 @@ namespace Legion {
                                                  Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3720,7 +3720,7 @@ namespace Legion {
                                                      Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3738,7 +3738,7 @@ namespace Legion {
                                                  Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3756,7 +3756,7 @@ namespace Legion {
                                             const std::set<FieldID> &to_delete)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3774,7 +3774,7 @@ namespace Legion {
                                                     Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3792,7 +3792,7 @@ namespace Legion {
                                                        Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
       std::map<LogicalRegion,RegionTreeContext> top_regions;
@@ -3843,7 +3843,7 @@ namespace Legion {
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -3862,7 +3862,7 @@ namespace Legion {
         if (!it->impl->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -3895,7 +3895,7 @@ namespace Legion {
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -3922,7 +3922,7 @@ namespace Legion {
         if (!it->impl->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -3961,7 +3961,7 @@ namespace Legion {
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -3992,7 +3992,7 @@ namespace Legion {
         if (!it->impl->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -4065,7 +4065,7 @@ namespace Legion {
           continue;
         const RegionRequirement &our_req = 
           physical_regions[our_idx].impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -4081,7 +4081,7 @@ namespace Legion {
         if (!it->impl->is_mapped())
           continue;
         const RegionRequirement &our_req = it->impl->get_requirement();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
 #endif
@@ -4202,7 +4202,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < physical_regions.size());
 #endif
       return physical_regions[idx].impl->is_mapped();
@@ -4216,7 +4216,7 @@ namespace Legion {
       {
         idx -= regions.size();
         AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx < created_requirements.size());
 #endif
         target = created_requirements[idx];
@@ -4320,7 +4320,7 @@ namespace Legion {
                         child->regions[index].region.index_space.id,
                         child->regions[index].region.field_space.id, 
                         child->regions[index].region.tree_id, index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_BAD_PARENT_REGION);
@@ -4343,7 +4343,7 @@ namespace Legion {
                             "index %d", get_task_name(), get_unique_id(),
                             child->get_task_name(), child->get_unique_id(),
                             child->indexes[index].handle.id, index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_BAD_PARENT_INDEX);
@@ -4358,7 +4358,7 @@ namespace Legion {
         return regions[idx].privilege;
       idx -= regions.size();
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < created_requirements.size());
 #endif
       return created_requirements[idx].privilege;
@@ -4429,7 +4429,7 @@ namespace Legion {
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->handle_type == SINGULAR); // better be singular
 #endif
         // Check to see if we found the requirement in the parent
@@ -4604,7 +4604,7 @@ namespace Legion {
     SingleTask* SingleTask::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
       return parent_ctx;
@@ -4654,7 +4654,7 @@ namespace Legion {
           }
           else
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(target_proc.exists());
 #endif
             // See if this task is going to be sent
@@ -4666,13 +4666,13 @@ namespace Legion {
             {
               if (perform_mapping())
               {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
                 bool still_local = 
 #endif
 #endif
                 distribute_task();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(!still_local);
 #endif
               }
@@ -4711,7 +4711,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_MAP_TASK_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(enclosing.size() == regions.size());
 #endif
       // Do the traversals for all the non-early mapped regions and find
@@ -4747,7 +4747,7 @@ namespace Legion {
         // See if we've already got an output from a must-epoch mapping
         if (!output.chosen_instances[idx].empty())
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(must_epoch_owner != NULL);
 #endif
           // We can skip this since we already know the result
@@ -4779,7 +4779,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(enclosing.size() == regions.size());
 #endif
       // first check the processors to make sure they are all on the
@@ -4878,7 +4878,7 @@ namespace Legion {
                                 "visible for task %s (ID %lld).", 
                                 "map_task", mapper->get_mapper_name(), idx,
                                 mem.id, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4909,7 +4909,7 @@ namespace Legion {
                         "map_task", mapper->get_mapper_name(), bad_tree,
                         idx, get_task_name(), get_unique_id(),
                         regions[idx].region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4933,7 +4933,7 @@ namespace Legion {
             log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4957,7 +4957,7 @@ namespace Legion {
                             "update the mapper to abide by proper mapping "
                             "conventions.", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4984,7 +4984,7 @@ namespace Legion {
                           "or a single composite instance is supported.",
                           "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4997,7 +4997,7 @@ namespace Legion {
                           "has only reduction privileges.", 
                           "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
@@ -5028,7 +5028,7 @@ namespace Legion {
                             "insufficient space for the requested logical "
                             "region.", "map_task", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5049,7 +5049,7 @@ namespace Legion {
                               "for task %s (ID %lld).", "map_task", 
                               mapper->get_mapper_name(), idx, mem.id, 
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5073,7 +5073,7 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5081,7 +5081,7 @@ namespace Legion {
               std::map<PhysicalManager*,std::pair<unsigned,bool> >::
                 const_iterator finder = acquired->find(
                     result[idx2].get_manager());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(finder != acquired->end());
 #endif
               if (!finder->second.second)
@@ -5093,7 +5093,7 @@ namespace Legion {
                               "instances are not currently permitted to be "
                               "recycled.", "map_task",mapper->get_mapper_name(),
                               idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5113,7 +5113,7 @@ namespace Legion {
                               "does not have reduction privileges.", "map_task",
                               mapper->get_mapper_name(), idx, 
                               get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5139,7 +5139,7 @@ namespace Legion {
                       mapper->get_mapper_name(), 
                       get_task_name(), get_unique_id());
         // TODO: invoke a generator if one exists
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false); 
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5153,7 +5153,7 @@ namespace Legion {
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5188,7 +5188,7 @@ namespace Legion {
                         Processor::get_kind_name(proc.kind()), get_task_name(),
                         get_unique_id(), this->target_proc.id, 
                         Processor::get_kind_name(kind));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5203,7 +5203,7 @@ namespace Legion {
                         mapper->get_mapper_name(), proc.id,
                         proc.address_space(), get_task_name(), get_unique_id(), 
                         this->target_proc.id, space);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5238,7 +5238,7 @@ namespace Legion {
                           "corresponding constraints.", 
                           local_mapper->get_mapper_name(), impl->vid,
                           get_task_name(), get_unique_id(), it->first);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5263,7 +5263,7 @@ namespace Legion {
                         execution_constraints.processor_constraint.get_kind()),
                       this->target_proc.id, Processor::get_kind_name(
                         this->target_proc.kind()));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5286,7 +5286,7 @@ namespace Legion {
         for (std::set<unsigned>::const_iterator it = con_it->indexes.begin();
               it != con_it->indexes.end(); it++, idx++)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(regions[*it].handle_type == SINGULAR);
           for (std::set<FieldID>::const_iterator fit = con_it->fields.begin();
                 fit != con_it->fields.end(); fit++)
@@ -5319,7 +5319,7 @@ namespace Legion {
                             local_mapper->get_mapper_name(), impl->vid, 
                             get_task_name(), get_unique_id(), 
                             *(con_it->indexes.begin()), *it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5342,7 +5342,7 @@ namespace Legion {
                         local_mapper->get_mapper_name(), impl->vid, 
                         get_task_name(), get_unique_id(), lin_indexes[bad1],
                         lin_indexes[bad2]);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5402,7 +5402,7 @@ namespace Legion {
         // See if we have to do any virtual mapping before registering
         if (virtual_mapped[idx])
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(physical_instances[idx].size() == 1);
           assert(physical_instances[idx][0].get_manager()->
                                       is_virtual_instance());
@@ -5420,7 +5420,7 @@ namespace Legion {
                                               physical_instances[idx][0],
                                               get_version_info(idx),
                                               target_ctx, false/*needs fields*/
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , idx, get_logging_name()
                                               , unique_op_id
 #endif
@@ -5439,7 +5439,7 @@ namespace Legion {
                                     (regions.size() > 1)/*defer add users*/,
                                     map_applied_conditions,
                                     physical_instances[idx]
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                     , get_logging_name()
                                     , unique_op_id
 #endif
@@ -5485,7 +5485,7 @@ namespace Legion {
                               path, regions[idx], get_version_info(idx), 
                               this, idx, true/*valid*/, 
                               map_applied_conditions, postmap_valid[idx]
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                               , get_logging_name()
                               , unique_op_id
 #endif
@@ -5553,7 +5553,7 @@ namespace Legion {
                         "%d.", mapper->get_mapper_name(), bad_tree, idx,
                         get_task_name(), get_unique_id(), 
                         regions[idx].region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5577,7 +5577,7 @@ namespace Legion {
                             "update the mapper to abide by proper mapping "
                             "conventions.", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5616,7 +5616,7 @@ namespace Legion {
                             "(ID %lld) that does not meet the logical region "
                             "requirement.", mapper->get_mapper_name(), idx, 
                             get_task_name(), get_unique_id()); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -5630,7 +5630,7 @@ namespace Legion {
                           Event::NO_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
                           map_applied_conditions, result
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
                           );
@@ -5645,7 +5645,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == no_access_regions.size());
@@ -5658,7 +5658,7 @@ namespace Legion {
       std::map<PhysicalManager*,InstanceView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // this better be true for single tasks
         assert(regions[idx].handle_type == SINGULAR);
 #endif
@@ -5672,7 +5672,7 @@ namespace Legion {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
               unmap_events[idx], this, idx, top_views);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
           // If we need to add restricted coherence, do that now
@@ -5684,7 +5684,7 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(physical_instances[idx].has_composite_ref());
 #endif
           const InstanceRef &ref = physical_instances[idx].get_composite_ref();
@@ -5698,7 +5698,7 @@ namespace Legion {
             CompositeCloser closer(context.get_id(),get_version_info(idx),this);
             DeferredView *translated_view = 
               composite_view->simplify(closer, ref.get_valid_fields());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(translated_view->is_composite_view());
 #endif
             composite_view = translated_view->as_composite_view();
@@ -5751,7 +5751,7 @@ namespace Legion {
         }
         runtime->send_create_top_view_request(manager->owner_space, rez);
         wait_on.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(result != NULL); // when we wake up we should have the result
 #endif
         return result;
@@ -5788,7 +5788,7 @@ namespace Legion {
         AutoLock o_lock(op_lock, 1, false/*exclusive*/);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
             instance_top_views.find(manager);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != instance_top_views.end());
 #endif
         return finder->second;
@@ -5858,14 +5858,14 @@ namespace Legion {
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(instance_top_views.find(manager) == 
                 instance_top_views.end());
 #endif
         instance_top_views[manager] = result;
         std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
           pending_top_views.find(manager);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(pending_finder != pending_top_views.end());
 #endif
         to_trigger = pending_finder->second;
@@ -5889,7 +5889,7 @@ namespace Legion {
           return;
         std::map<PhysicalManager*,InstanceView*>::iterator finder =  
           instance_top_views.find(deleted);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != instance_top_views.end());
 #endif
         removed = finder->second;
@@ -6022,7 +6022,7 @@ namespace Legion {
       // be registered in the set of distributed IDs
       DistributedCollectable *dc = 
         runtime->find_distributed_collectable(manager_did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
       assert(manager != NULL);
 #else
@@ -6067,7 +6067,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, LAUNCH_TASK_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == no_access_regions.size());
@@ -6111,7 +6111,7 @@ namespace Legion {
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(regions[idx].handle_type == SINGULAR);
 #endif
           // Convert any WRITE_ONLY or WRITE_DISCARD privleges to READ_WRITE
@@ -6212,7 +6212,7 @@ namespace Legion {
                           "'min_frames_to_schedule' must be non-zero for task "
                           "%s (ID %lld)", mapper->get_mapper_name(),
                           get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_CONTEXT_CONFIGURATION);
@@ -6221,7 +6221,7 @@ namespace Legion {
           if (context_configuration.min_frames_to_schedule > 0)
             context_configuration.min_tasks_to_schedule = 0;
           // otherwise we know min_frames_to_schedule is zero
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(context.exists());
           runtime->forest->check_context_state(context);
 #endif
@@ -6291,7 +6291,7 @@ namespace Legion {
       // that we need to save any variables we need for after the task
       // launch here on the stack before they can be invalidated.
       Event term_event = get_task_completion();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!target_processors.empty());
 #endif
       Processor launch_processor = target_processors[0];
@@ -6349,7 +6349,7 @@ namespace Legion {
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       log_task.debug("Task %s (ID %lld) starting on processor " IDFMT "",
                     get_task_name(), get_unique_id(), executing_processor.id);
       assert(regions.size() == physical_regions.size());
@@ -6376,7 +6376,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::ProfilingResponse response(buffer, size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(response.user_data_size() == sizeof(MapperProfilingInfo));
 #endif
       const MapperProfilingInfo *info = 
@@ -6391,7 +6391,7 @@ namespace Legion {
     void SingleTask::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((regions.size() + 
                 created_requirements.size()) == physical_regions.size());
 #endif
@@ -6400,7 +6400,7 @@ namespace Legion {
       {
         log_task.error("Task %s (UID %lld) failed to end trace before exiting!",
                         get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INCOMPLETE_TRACE);
@@ -6433,7 +6433,7 @@ namespace Legion {
           {
             if (!is_leaf())
             {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(!physical_instances[idx].empty());
 #endif
               PostCloseOp *close_op = 
@@ -6444,7 +6444,7 @@ namespace Legion {
           }
           else
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(physical_instances[idx].has_composite_ref());
 #endif
             // Make a virtual close op to close up the instance
@@ -6513,7 +6513,7 @@ namespace Legion {
           {
             preconditions.insert((*it)->get_mapped_event());
           }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!task_executed);
 #endif
           // Now that we know the last registration has taken place we
@@ -6543,7 +6543,7 @@ namespace Legion {
       {
         // Handle the leaf task case
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!task_executed);
 #endif
         // Now that we know the last registration has taken place we
@@ -6651,7 +6651,7 @@ namespace Legion {
       for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
             minimal_points.begin(); it != minimal_points.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->second != NULL);
 #endif
         delete it->second;
@@ -6674,7 +6674,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_INDEX_SPACE_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!sliced);
 #endif
       sliced = true;
@@ -6692,18 +6692,18 @@ namespace Legion {
                       "call on mapper %s. Mapper failed to specify an slices "
                       "for task %s (ID %lld).", mapper->get_mapper_name(),
                       get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(minimal_points_assigned == 0);
 #endif
       for (unsigned idx = 0; idx < output.slices.size(); idx++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
         const Domain &d = output.slices[idx].domain;
         bool empty = false;
@@ -6766,7 +6766,7 @@ namespace Legion {
                       mapper->get_mapper_name(), minimal_points_assigned,
                       index_domain.get_volume(), 
                       get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
@@ -6854,7 +6854,7 @@ namespace Legion {
                         "Mapper returned slices with additional points "
                         "beyond the original index space.", map_id,
                         current_proc.id, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
@@ -6865,7 +6865,7 @@ namespace Legion {
                         "on processor " IDFMT " for task %s (ID %lld). "
                         "Mapper returned overlapping slices.", map_id,
                         current_proc.id, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
@@ -6880,7 +6880,7 @@ namespace Legion {
     void MultiTask::add_point(const DomainPoint &p, MinimalPoint *point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(minimal_points.find(p) == minimal_points.end());
 #endif
       minimal_points[p] = point;
@@ -6936,13 +6936,13 @@ namespace Legion {
                 {
                   if (perform_mapping())
                   {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
                     bool still_local = 
 #endif
 #endif
                     distribute_task();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(!still_local);
 #endif
                   }
@@ -7049,7 +7049,7 @@ namespace Legion {
     void MultiTask::initialize_reduction_state(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
       assert(reduction_op->is_foldable);
       assert(reduction_state == NULL);
@@ -7071,7 +7071,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Apply the reduction operation
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(reduction_op != NULL);
       assert(reduction_op->is_foldable);
       assert(reduction_state != NULL);
@@ -7097,7 +7097,7 @@ namespace Legion {
     VersionInfo& MultiTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
@@ -7114,7 +7114,7 @@ namespace Legion {
     void MultiTask::recapture_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < version_infos.size());
 #endif
       version_infos[idx].recapture_state();
@@ -7284,7 +7284,7 @@ namespace Legion {
                                   "TaskLauncher struct.",
                                   get_task_name(), ctx->get_task_name(),
                                   ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
@@ -7304,13 +7304,13 @@ namespace Legion {
                                  get_task_name(), parent_ctx->get_task_name(),
                                  parent_ctx->get_unique_id(),
                                  predicate_false_size, variants->return_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
             }
 #endif
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(predicate_false_result == NULL);
 #endif
             predicate_false_result = 
@@ -7325,7 +7325,7 @@ namespace Legion {
         perform_privilege_checks();
       remote_outermost_context = 
         find_outermost_context()->get_context();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_outermost_context.exists());
 #endif
       initialize_paths(); 
@@ -7378,7 +7378,7 @@ namespace Legion {
         perform_privilege_checks();
       remote_outermost_context = 
         find_outermost_context()->get_context();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_outermost_context.exists());
 #endif
       initialize_paths();
@@ -7425,7 +7425,7 @@ namespace Legion {
     void IndividualTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif
       // First compute the parent indexes
@@ -7439,7 +7439,7 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
@@ -7469,7 +7469,7 @@ namespace Legion {
         // Make a local copy to avoid invalidating the iterator
         std::vector<unsigned> rerun(rerun_analysis_requirements.begin(),
                                     rerun_analysis_requirements.end());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         rerun_analysis_requirements.clear();
 #endif
         for (std::vector<unsigned>::const_iterator it = 
@@ -7566,7 +7566,7 @@ namespace Legion {
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
@@ -7764,7 +7764,7 @@ namespace Legion {
     bool IndividualTask::has_restrictions(unsigned idx, LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < restrict_infos.size());
 #endif
       // We know that if there are any restrictions they directly apply
@@ -7791,12 +7791,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_RETURN_VIRTUAL_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(refs.size() == 1);
       assert(refs[0].is_composite_ref());
 #endif
       RegionTreeContext virtual_ctx = get_parent_context(index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(virtual_mapped[index]);
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
@@ -7804,7 +7804,7 @@ namespace Legion {
                                               index, Event::NO_EVENT, 
                                               false/*defer add users*/, 
                                               map_applied_conditions, refs
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
@@ -7834,7 +7834,7 @@ namespace Legion {
     VersionInfo& IndividualTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
@@ -7851,7 +7851,7 @@ namespace Legion {
     RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < privilege_paths.size());
 #endif
       return privilege_paths[idx];
@@ -7861,7 +7861,7 @@ namespace Legion {
     void IndividualTask::recapture_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < version_infos.size());
 #endif
       version_infos[idx].recapture_state();
@@ -7888,7 +7888,7 @@ namespace Legion {
     RemoteTask* IndividualTask::find_outermost_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
       return parent_ctx->find_outermost_context();
@@ -7914,7 +7914,7 @@ namespace Legion {
                                              RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instance != runtime->address_space);
 #endif
       Serializer rez;
@@ -7925,7 +7925,7 @@ namespace Legion {
       }
       runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
@@ -8104,7 +8104,7 @@ namespace Legion {
                                               version_infos[idx], this, idx, 
                                               true/*find valid*/, 
                                               map_applied_conditions, valid
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name() 
                                               , get_unique_id()
 #endif
@@ -8162,7 +8162,7 @@ namespace Legion {
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // Need to make the deserializer happy in debug mode
         derez.advance_pointer(derez.get_remaining_bytes());
 #endif
@@ -8338,7 +8338,7 @@ namespace Legion {
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // No need for a lock here since we know
       // that it is a single task
       assert(!children_complete_invoked);
@@ -8359,7 +8359,7 @@ namespace Legion {
     void IndividualTask::unpack_remote_commit(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Don't need the lock here since we know that
       // this is an individual task
       assert(!children_commit_invoked);
@@ -8629,7 +8629,7 @@ namespace Legion {
     RemoteTask* PointTask::find_outermost_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
       return parent_ctx->find_outermost_context();
@@ -8655,7 +8655,7 @@ namespace Legion {
                                         RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instance != runtime->address_space);
 #endif
       Serializer rez;
@@ -8666,7 +8666,7 @@ namespace Legion {
       }
       runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
@@ -8741,7 +8741,7 @@ namespace Legion {
                                              slice_owner->get_version_info(idx),
                                              this, idx, true/*find valid*/,
                                              map_applied_conditions, valid
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                              , get_logging_name()
                                              , get_unique_id()
 #endif
@@ -9118,7 +9118,7 @@ namespace Legion {
       deactivate_wrapper();
       if (!remote_instances.empty())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(is_top_level_context);
 #endif
         UniqueID local_uid = get_unique_id();
@@ -9146,7 +9146,7 @@ namespace Legion {
       remote_owner_uid = context_uid;
       is_top_level_context = is_top_level;
       runtime->allocate_local_context(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(context.exists());
       runtime->forest->check_context_state(context);
 #endif
@@ -9170,7 +9170,7 @@ namespace Legion {
     VersionInfo& RemoteTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
@@ -9195,7 +9195,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Should only see this call if it is the top-level context
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_top_level_context);
 #endif
     }
@@ -9205,11 +9205,11 @@ namespace Legion {
                                          RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instance != runtime->address_space);
 #endif
       // should only see this call if it is the top-level context
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_top_level_context);
 #endif
       Serializer rez;
@@ -9220,7 +9220,7 @@ namespace Legion {
       }
       runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
@@ -9233,7 +9233,7 @@ namespace Legion {
       // See if we already have it
       if (parent_ctx != NULL)
         return parent_ctx;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_context_uid != 0);
 #endif
       // THIS IS ONLY SAFE BECAUSE THIS FUNCTION IS NEVER CALLED BY
@@ -9650,7 +9650,7 @@ namespace Legion {
       reduction_future = Future();
       rerun_analysis_requirements.clear();
       map_applied_conditions.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -9675,7 +9675,7 @@ namespace Legion {
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
         arg_manager = legion_new<AllocManager>(arglen);
@@ -9697,7 +9697,7 @@ namespace Legion {
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
@@ -9733,7 +9733,7 @@ namespace Legion {
       arglen = launcher.global_arg.get_size();
       if (arglen > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
         arg_manager = legion_new<AllocManager>(arglen);
@@ -9754,7 +9754,7 @@ namespace Legion {
         log_run.error("Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",
                       redop, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_UNFOLDABLE_REDUCTION_OP);
@@ -9807,7 +9807,7 @@ namespace Legion {
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
         arg_manager = legion_new<AllocManager>(arglen);
@@ -9826,7 +9826,7 @@ namespace Legion {
       initialize_paths();
       annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
@@ -9866,7 +9866,7 @@ namespace Legion {
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
         arg_manager = legion_new<AllocManager>(arglen);
@@ -9887,7 +9887,7 @@ namespace Legion {
         log_run.error("Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",
                       redop, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_UNFOLDABLE_REDUCTION_OP);
@@ -9942,7 +9942,7 @@ namespace Legion {
                           "IndexLauncher struct.",
                           get_task_name(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
@@ -9962,13 +9962,13 @@ namespace Legion {
                           get_task_name(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id(),
                           predicate_false_size, variants->return_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
           }
 #endif
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(predicate_false_result == NULL);
 #endif
           predicate_false_result = 
@@ -10005,7 +10005,7 @@ namespace Legion {
     void IndexTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif
       // First compute the parent indexes
@@ -10021,7 +10021,7 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it = futures.begin();
             it != futures.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
@@ -10051,7 +10051,7 @@ namespace Legion {
         // Make a local copy to avoid invalidating the iterator
         std::vector<unsigned> rerun(rerun_analysis_requirements.begin(),
                                     rerun_analysis_requirements.end());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         rerun_analysis_requirements.clear();
 #endif
         for (std::vector<unsigned>::const_iterator it = 
@@ -10126,7 +10126,7 @@ namespace Legion {
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
@@ -10152,7 +10152,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMPUTE_FAT_PATH_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < regions.size());
       assert(regions[idx].handle_type != SINGULAR);
 #endif
@@ -10188,7 +10188,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(regions[idx].handle_type == PART_PROJECTION);
 #endif
         IndexPartition parent_partition = 
@@ -10222,12 +10222,12 @@ namespace Legion {
                        "projection region requirement assumption for region "
                        "requirement %d!", get_task_name(), 
                        get_unique_id(), idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PROJECTION_USE);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       return result;
@@ -10237,7 +10237,7 @@ namespace Legion {
     RegionTreePath& IndexTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < privilege_paths.size());
 #endif
       return privilege_paths[idx];
@@ -10376,7 +10376,7 @@ namespace Legion {
       {
         // This will only get called if we had slices that couldn't map, but
         // they have now all mapped
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(slices.empty());
 #endif
         // We're never actually run
@@ -10387,14 +10387,14 @@ namespace Legion {
         if (!is_sliced() && target_proc.exists() && 
             (target_proc != current_proc))
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(minimal_points_assigned == 0);
 #endif
           // Make a slice copy and send it away
           SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(minimal_points_assigned == minimal_points.size());
 #endif
           minimal_points.clear();
@@ -10412,7 +10412,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_MAPPING_CALL);
       // This will only get called if we had slices that failed to map locally
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!slices.empty());
 #endif
       bool map_success = true;
@@ -10471,7 +10471,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This should only ever be called if we had slices which failed to map
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_sliced());
       assert(!slices.empty());
 #endif
@@ -10675,7 +10675,7 @@ namespace Legion {
       result->clone_multi_from(this, d, p, recurse, stealable);
       result->remote_outermost_context = 
         parent_ctx->find_outermost_context()->get_context();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result->remote_outermost_context.exists());
 #endif
       result->index_complete = this->completion_event;
@@ -10754,7 +10754,7 @@ namespace Legion {
                                "unsigned integers.  Points for task %s "
                                "have elements of %d dimensions",
                                get_task_name(), it->first.get_dim());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(false);
 #endif
                 exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
@@ -10795,7 +10795,7 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(regions[idx].handle_type == REG_PROJECTION);
 #endif
           if (regions[idx].projection != 0)
@@ -10923,7 +10923,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         complete_points += points;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!complete_received);
         assert(complete_points <= total_points);
 #endif
@@ -10953,7 +10953,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         committed_points += points;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(committed_points <= total_points);
 #endif
         if (slice_fraction.is_whole() &&
@@ -11009,7 +11009,7 @@ namespace Legion {
       }
       if (redop != 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(reduction_op != NULL);
         assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
@@ -11236,12 +11236,12 @@ namespace Legion {
                                         version_infos[idx], this, idx,
                                         false/*find valid*/, 
                                         empty_conditions, empty_set
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                         , get_logging_name(), unique_op_id
 #endif
                                         );
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(empty_conditions.empty());
 #endif
     }
@@ -11303,11 +11303,11 @@ namespace Legion {
           enumerate_points();
         for (unsigned idx = 0; idx < points.size(); idx++)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           bool point_success = 
 #endif
             points[idx]->perform_mapping(epoch_owner);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(point_success);
 #endif
         }
@@ -11321,11 +11321,11 @@ namespace Legion {
         for (std::list<SliceTask*>::iterator it = slices.begin();
               it != slices.end(); it++)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           bool slice_success = 
 #endif
             (*it)->trigger_execution();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(slice_success);
 #endif
         }
@@ -11348,7 +11348,7 @@ namespace Legion {
         deactivate();
         return;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!points.empty());
 #endif
       // Launch all of our child points
@@ -11369,7 +11369,7 @@ namespace Legion {
     {
       if (is_remote())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx < restrict_infos.size());
 #endif
         if (restrict_infos[idx].has_restrictions())
@@ -11394,7 +11394,7 @@ namespace Legion {
       // First enumerate all of our points if we haven't already done so
       if (points.empty())
         enumerate_points();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!points.empty());
       assert(mapping_index <= points.size());
 #endif
@@ -11409,11 +11409,11 @@ namespace Legion {
             it != local_points.end(); it++)
       {
         PointTask *next_point = *it;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         bool point_success = 
 #endif
           next_point->perform_mapping();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(point_success);
 #endif
         // Update the mapping index and then launch
@@ -11594,7 +11594,7 @@ namespace Legion {
         else
         {
           // Store it in our temporary futures
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(temporary_futures.find(point) == temporary_futures.end());
 #endif
           if (owner)
@@ -11623,7 +11623,7 @@ namespace Legion {
     void SliceTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(must_epoch != NULL);
 #endif
       if (points.empty())
@@ -11666,7 +11666,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index_domain.get_volume() > 0);
 #endif
       // Enumerate all the points
@@ -11679,7 +11679,7 @@ namespace Legion {
         delete it->second;
       }
       minimal_points.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index_domain.get_volume() == points.size());
 #endif
       mapping_index = 0;
@@ -11721,7 +11721,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_RETURN_VIRTUAL_CALL);
       // Add it to our state
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(refs.size() == 1);
       assert(refs[0].is_composite_ref());
 #endif
@@ -11736,12 +11736,12 @@ namespace Legion {
                                               index, Event::NO_EVENT, 
                                               false/*defer add users*/, 
                                               empty_conditions, refs
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(empty_conditions.empty());
 #endif
     }
@@ -11755,7 +11755,7 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (child_complete.exists())
           map_applied_conditions.insert(child_complete);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif
         num_unmapped_points--;
@@ -11773,7 +11773,7 @@ namespace Legion {
       bool needs_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(num_uncomplete_points > 0);
 #endif
         num_uncomplete_points--;
@@ -11794,7 +11794,7 @@ namespace Legion {
       bool needs_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(num_uncommitted_points > 0);
 #endif
         num_uncommitted_points--;
@@ -11973,7 +11973,7 @@ namespace Legion {
       else
       {
         // Already know how many futures we are packing 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(temporary_futures.size() == points.size());
 #endif
         for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
@@ -12150,7 +12150,7 @@ namespace Legion {
     {
       if (own_arg)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(arg != NULL);
         assert(arglen > 0);
 #endif
@@ -12171,7 +12171,7 @@ namespace Legion {
     void MinimalPoint::add_projection_region(unsigned idx, LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(projections.find(idx) == projections.end());
 #endif
       projections[idx] = handle;
@@ -12181,7 +12181,7 @@ namespace Legion {
     void MinimalPoint::add_argument(const TaskArgument &argument, bool own)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(arg == NULL);
 #endif
       arg = argument.get_ptr();
@@ -12217,7 +12217,7 @@ namespace Legion {
     {
       std::map<unsigned,LogicalRegion>::const_iterator finder = 
         projections.find(index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != projections.end());
 #endif
       return finder->second;

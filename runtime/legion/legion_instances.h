@@ -173,7 +173,7 @@ namespace Legion {
     public:
       inline PhysicalInstance get_instance(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
         return instance;
@@ -624,7 +624,7 @@ namespace Legion {
     inline InstanceManager* PhysicalManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_instance_manager());
 #endif
       return static_cast<InstanceManager*>(const_cast<PhysicalManager*>(this));
@@ -634,7 +634,7 @@ namespace Legion {
     inline ReductionManager* PhysicalManager::as_reduction_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_reduction_manager());
 #endif
       return static_cast<ReductionManager*>(const_cast<PhysicalManager*>(this));
@@ -644,7 +644,7 @@ namespace Legion {
     inline VirtualManager* PhysicalManager::as_virtual_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_virtual_manager());
 #endif
       return static_cast<VirtualManager*>(const_cast<PhysicalManager*>(this));
@@ -654,7 +654,7 @@ namespace Legion {
     inline ListReductionManager* PhysicalManager::as_list_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_list_manager());
 #endif
       return static_cast<ListReductionManager*>(
@@ -665,7 +665,7 @@ namespace Legion {
     inline FoldReductionManager* PhysicalManager::as_fold_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_fold_manager());
 #endif
       return static_cast<FoldReductionManager*>(

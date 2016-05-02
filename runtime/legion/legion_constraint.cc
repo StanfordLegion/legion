@@ -304,7 +304,7 @@ namespace Legion {
       : launch_kind(kind), dims(d)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dims < 3);
 #endif
       for (int i = 0; i < dims; i++)

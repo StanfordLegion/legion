@@ -81,7 +81,7 @@ namespace Legion {
             std::pair<FieldMask,FieldMask>(src_mask, compressed));
       }
       int pop_count = FieldMask::pop_count(compressed);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(src_mask));
 #endif
       unsigned offset = dst_fields.size();
@@ -116,7 +116,7 @@ namespace Legion {
       field_infos.resize(field_sizes.size());
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(mask_index_map.size() == 
                 size_t(FieldMask::pop_count(allocated_fields)));
 #endif
@@ -196,7 +196,7 @@ namespace Legion {
     void LayoutDescription::log_instance_layout(PhysicalInstance inst) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(Runtime::legion_spy_enabled);
 #endif
       std::vector<FieldID> fields;  
@@ -250,7 +250,7 @@ namespace Legion {
       // they line up in the same order with the source/destination infos
       // (depending on the calling context of this function
       int pop_count = FieldMask::pop_count(compressed);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
       unsigned offset = fields.size();
@@ -275,7 +275,7 @@ namespace Legion {
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
         field_indexes.find(fid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != field_indexes.end());
 #endif
       fields.push_back(field_infos[finder->second]);
@@ -297,7 +297,7 @@ namespace Legion {
       {
         std::map<FieldID,unsigned>::const_iterator
           finder = field_indexes.find(copy_fields[idx]);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != field_indexes.end());
 #endif
         Domain::CopySrcDstField &info = fields[offset+idx];
@@ -355,7 +355,7 @@ namespace Legion {
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
         field_indexes.find(fid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != field_indexes.end());
 #endif
       return field_infos[finder->second];
@@ -439,7 +439,7 @@ namespace Legion {
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
         field_indexes.find(fid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != field_indexes.end());
 #endif
       const Domain::CopySrcDstField &info = field_infos[finder->second];
@@ -509,7 +509,7 @@ namespace Legion {
         result = field_space_node->create_layout_description(mask, constraints,
                                        mask_index_map, serdez, field_sizes);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       // Record that the sender already has this layout
@@ -578,7 +578,7 @@ namespace Legion {
     void PhysicalManager::notify_active(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -594,7 +594,7 @@ namespace Legion {
     void PhysicalManager::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -610,7 +610,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to do anything
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -626,7 +626,7 @@ namespace Legion {
     void PhysicalManager::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
 #endif
@@ -646,7 +646,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
       assert(manager != NULL);
 #else
@@ -659,7 +659,7 @@ namespace Legion {
     void PhysicalManager::register_active_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner()); // should always be on the owner node
 #endif
       // Save the context to be notified when we deleted
@@ -674,7 +674,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(active_contexts.find(context) != active_contexts.end());
 #endif
       active_contexts.erase(context);
@@ -700,7 +700,7 @@ namespace Legion {
       const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(region_node != NULL); // only happens with VirtualManager
 #endif
       RegionTreeID tree_id = region_node->handle.get_tree_id();
@@ -753,7 +753,7 @@ namespace Legion {
               return false;
           }
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(common_ancestor != NULL);
 #endif
         return (common_ancestor == region_node);
@@ -895,7 +895,7 @@ namespace Legion {
     void PhysicalManager::perform_deletion(Event deferred_event) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       log_garbage.info("Deleting physical instance " IDFMT " in memory " 
@@ -1024,7 +1024,7 @@ namespace Legion {
         InstanceManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
       return instance.get_accessor();
@@ -1036,7 +1036,7 @@ namespace Legion {
         InstanceManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
       assert(layout != NULL);
 #endif
@@ -1051,7 +1051,7 @@ namespace Legion {
     size_t InstanceManager::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
       size_t field_sizes = layout->get_total_field_size();
@@ -1065,7 +1065,7 @@ namespace Legion {
                                                    AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       DistributedID view_did = 
@@ -1086,7 +1086,7 @@ namespace Legion {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
@@ -1098,7 +1098,7 @@ namespace Legion {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
@@ -1111,7 +1111,7 @@ namespace Legion {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
       // Pass in our physical instance so the layout knows how to specialize
@@ -1125,12 +1125,12 @@ namespace Legion {
                                      const std::vector<unsigned> &dst_indexes)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(src_indexes.size() == dst_indexes.size());
 #endif
       std::vector<Domain::CopySrcDstField> dst_fields;
       layout->compute_copy_offsets(dst_mask, instance, dst_fields);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dst_fields.size() == dst_indexes.size());
 #endif
       helper->offsets.resize(dst_fields.size());
@@ -1175,7 +1175,7 @@ namespace Legion {
     void InstanceManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       Serializer rez;
@@ -1320,7 +1320,7 @@ namespace Legion {
     void ReductionManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       Serializer rez;
@@ -1434,7 +1434,7 @@ namespace Legion {
                               SingleTask *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       DistributedID view_did = 
@@ -1570,7 +1570,7 @@ namespace Legion {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
       // Assume that it's all the fields for right now
@@ -1588,7 +1588,7 @@ namespace Legion {
         bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
       // TODO: use the "new" Realm interface for list instances
@@ -1729,7 +1729,7 @@ namespace Legion {
                                   std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
       // Assume that its all the fields for now
@@ -1747,7 +1747,7 @@ namespace Legion {
         bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
       // Doesn't matter if this one is precise or not
@@ -1998,7 +1998,7 @@ namespace Legion {
               log_run.error("ERROR: Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(false);
 #endif
               exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
@@ -2040,7 +2040,7 @@ namespace Legion {
         default:
           assert(false); // illegal specialized case
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       return result;
@@ -2095,7 +2095,7 @@ namespace Legion {
         non_empty_domains.push_back(&next_domain);
       }
       // At this point we have at least one non-empty region
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!non_empty_regions.empty());
 #endif
       ancestor = non_empty_regions[0];
@@ -2187,14 +2187,14 @@ namespace Legion {
       // Make them the same level
       while (one->row_source->depth > two->row_source->depth)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(one->parent != NULL);
 #endif
         one = one->parent->parent;
       }
       while (one->row_source->depth < two->row_source->depth)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(two->parent != NULL);
 #endif
         two = two->parent->parent;
@@ -2202,7 +2202,7 @@ namespace Legion {
       // While they are not the same, make them both go up
       while (one != two)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(one->parent != NULL);
         assert(two->parent != NULL);
 #endif

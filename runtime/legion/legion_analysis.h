@@ -615,7 +615,7 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
       PhysicalState(CurrentState *manager);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState(CurrentState *manager, RegionTreeNode *node);
 #endif
       PhysicalState(const PhysicalState &rhs);
@@ -668,7 +668,7 @@ namespace Legion {
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       RegionTreeNode *const node;
 #endif
@@ -813,7 +813,7 @@ namespace Legion {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Track our current state 
       bool currently_active;
       bool currently_valid;
@@ -1079,7 +1079,7 @@ namespace Legion {
     public:
       inline bool has_ref(void) const 
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!composite);
 #endif
         return (ptr.manager != NULL);
@@ -1088,7 +1088,7 @@ namespace Legion {
       inline void set_ready_event(Event ready) { ready_event = ready; }
       inline PhysicalManager* get_manager(void) const 
       { 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!composite);
 #endif
         return ptr.manager; 

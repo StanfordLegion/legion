@@ -235,7 +235,7 @@ namespace Legion {
       void wait_all_results(void);
       void complete_all_futures(void);
       bool reset_all_futures(void);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
       void add_valid_point(const DomainPoint &dp);
@@ -252,7 +252,7 @@ namespace Legion {
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
       Reservation lock;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
       std::set<DomainPoint> valid_points;
@@ -942,7 +942,7 @@ namespace Legion {
       inline bool exists(void) const { return (ctx >= 0); }
       inline ContextID get_id(void) const 
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(exists());
 #endif
         return ContextID(ctx);
@@ -2173,7 +2173,7 @@ namespace Legion {
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       void increment_total_outstanding_tasks(void);
       void decrement_total_outstanding_tasks(void);
 #else
@@ -2366,7 +2366,7 @@ namespace Legion {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       Reservation outstanding_task_lock;
 #endif
       unsigned total_outstanding_tasks;
@@ -2418,7 +2418,7 @@ namespace Legion {
       Reservation mapper_info_lock;
       // For every mapper remember its mapper ID and processor
       std::map<Mapper*,MapperInfo> mapper_infos;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     protected:
       friend class TreeStateLogger;
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
@@ -2557,7 +2557,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
+#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -2671,7 +2671,7 @@ namespace Legion {
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;
       static UserEvent mpi_rank_event;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
       static bool verbose_logging;
       static bool logical_logging_only;
@@ -2835,7 +2835,7 @@ namespace Legion {
       // Couldn't find one so make one
       if (result == NULL)
         result = legion_new<T>(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       result->activate();

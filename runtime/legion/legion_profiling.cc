@@ -144,7 +144,7 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(timeline->is_valid());
 #endif
       task_infos.push_back(TaskInfo()); 
@@ -178,7 +178,7 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(timeline->is_valid());
 #endif
       meta_infos.push_back(MetaInfo());
@@ -211,7 +211,7 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(timeline->is_valid());
 #endif
       copy_infos.push_back(CopyInfo());
@@ -233,7 +233,7 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(timeline->is_valid());
 #endif
       fill_infos.push_back(FillInfo());
@@ -539,7 +539,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -555,7 +555,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -570,7 +570,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -584,7 +584,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -598,7 +598,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -803,13 +803,13 @@ namespace Legion {
       long long t_start = Realm::Clock::current_time_in_nanoseconds();
 #endif
       size_t local_id = p.local_id(); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       Realm::ProfilingResponse response(buffer, size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(response.user_data_size() == sizeof(ProfilingInfo));
 #endif
       const ProfilingInfo *info = (const ProfilingInfo*)response.user_data();
@@ -817,7 +817,7 @@ namespace Legion {
       {
         case LEGION_PROF_TASK:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(response.has_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>());
             assert(response.has_measurement<
@@ -841,7 +841,7 @@ namespace Legion {
           }
         case LEGION_PROF_META:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(response.has_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>());
             assert(response.has_measurement<
@@ -865,7 +865,7 @@ namespace Legion {
           }
         case LEGION_PROF_COPY:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(response.has_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>());
             assert(response.has_measurement<
@@ -885,7 +885,7 @@ namespace Legion {
           }
         case LEGION_PROF_FILL:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(response.has_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>());
             assert(response.has_measurement<
@@ -908,7 +908,7 @@ namespace Legion {
           }
         case LEGION_PROF_INST:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(response.has_measurement<
                 Realm::ProfilingMeasurements::InstanceTimeline>());
             assert(response.has_measurement<
@@ -953,7 +953,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -980,7 +980,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -1006,7 +1006,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)
@@ -1033,7 +1033,7 @@ namespace Legion {
     {
       Processor current = Processor::get_executing_processor();
       size_t local_id = current.local_id();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(local_id < MAX_NUM_PROCS);
 #endif
       if (instances[local_id] == NULL)

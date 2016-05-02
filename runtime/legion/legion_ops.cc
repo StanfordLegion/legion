@@ -70,7 +70,7 @@ namespace Legion {
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
       outstanding_mapping_references = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       mapped = false;
       executed = false;
       resolved = false;
@@ -91,7 +91,7 @@ namespace Legion {
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(mapped_event.exists());
       assert(resolved_event.exists());
       assert(completion_event.exists());
@@ -148,7 +148,7 @@ namespace Legion {
     unsigned Operation::get_operation_depth(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
       return (parent_ctx->get_depth()+1);
@@ -166,7 +166,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(req.handle_type == PART_PROJECTION);
 #endif
         runtime->forest->initialize_path(req.partition.get_index_partition(),
@@ -180,7 +180,7 @@ namespace Legion {
                                             LogicalRegion start_node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
@@ -193,7 +193,7 @@ namespace Legion {
                                             LogicalPartition start_node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
@@ -204,7 +204,7 @@ namespace Legion {
     void Operation::set_trace(LegionTrace *t, bool is_tracing)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(trace == NULL);
       assert(t != NULL);
 #endif
@@ -216,7 +216,7 @@ namespace Legion {
     void Operation::set_must_epoch(MustEpochOp *epoch, bool do_registration)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(must_epoch == NULL);
       assert(epoch != NULL);
 #endif
@@ -229,7 +229,7 @@ namespace Legion {
     /*static*/ void Operation::localize_region_requirement(RegionRequirement &r)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(r.handle_type == SINGULAR);
 #endif
       r.parent = r.region;
@@ -256,7 +256,7 @@ namespace Legion {
                                          unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(completion_event.exists());
 #endif
@@ -343,7 +343,7 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !trigger_commit_invoked)
@@ -421,7 +421,7 @@ namespace Legion {
     void Operation::complete_mapping(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!mapped);
@@ -452,7 +452,7 @@ namespace Legion {
       // are executed to avoid race conditions
       if (track_parent)
         parent_ctx->register_child_executed(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!executed);
@@ -480,7 +480,7 @@ namespace Legion {
     void Operation::resolve_speculation(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!resolved);
@@ -502,7 +502,7 @@ namespace Legion {
         parent_ctx->register_child_complete(this);
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(mapped);
         assert(executed);
         assert(resolved);
@@ -524,7 +524,7 @@ namespace Legion {
         }
         else if (outstanding_mapping_references == 0)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dependence_tracker.commit != NULL);
 #endif
           CommitDependenceTracker *tracker = dependence_tracker.commit;
@@ -541,7 +541,7 @@ namespace Legion {
       for (std::map<Operation*,std::set<unsigned> >::const_iterator it =
             verify_regions.begin(); it != verify_regions.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(incoming.find(it->first) != incoming.end());
 #endif
         GenerationID ver_gen = incoming[it->first];
@@ -577,7 +577,7 @@ namespace Legion {
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(mapped);
         assert(executed);
         assert(resolved);
@@ -601,7 +601,7 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!hardened);
 #endif
         hardened = true;
@@ -635,7 +635,7 @@ namespace Legion {
     void Operation::begin_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping == NULL);
 #endif
       // Make a dependence tracker
@@ -652,7 +652,7 @@ namespace Legion {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       MappingDependenceTracker *tracker = dependence_tracker.mapping;
@@ -677,7 +677,7 @@ namespace Legion {
         if (tracing)
         {
           // Don't forget to record the dependence
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
@@ -689,7 +689,7 @@ namespace Legion {
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       bool prune = target->perform_registration(target_gen, this, gen,
@@ -700,7 +700,7 @@ namespace Legion {
         incoming[target] = target_gen;
       if (tracing)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(trace != NULL);
 #endif
         trace->record_dependence(target, target_gen, this, gen);
@@ -736,7 +736,7 @@ namespace Legion {
         if (tracing)
         {
           // Don't forget to record the dependence
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
@@ -754,7 +754,7 @@ namespace Legion {
       bool prune = false;
       if (do_registration)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(dependence_tracker.mapping != NULL);
 #endif
         prune = target->perform_registration(target_gen, this, gen,
@@ -771,7 +771,7 @@ namespace Legion {
       }
       if (tracing)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(trace != NULL);
 #endif
         trace->record_region_dependence(target, target_gen, 
@@ -793,14 +793,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
       // If the generations match and we haven't committed yet, 
       // register an outgoing dependence
       if ((our_gen == gen) && !committed)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // should still have some mapping references
         // if other operations are trying to register dependences
         assert(outstanding_mapping_references > 0);
@@ -817,7 +817,7 @@ namespace Legion {
           tracker->add_resolution_dependence(resolved_event);
           // Record that we have a commit dependence on the
           // registering operation
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dependence_tracker.commit != NULL);
 #endif
           dependence_tracker.commit->add_commit_dependence(other_commit_event);
@@ -851,7 +851,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
       if (our_gen == gen)
@@ -865,12 +865,12 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !committed)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(outstanding_mapping_references > 0);
 #endif
           outstanding_mapping_references--;
@@ -879,7 +879,7 @@ namespace Legion {
           // we can commit this operation
           if ((outstanding_mapping_references == 0) && !trigger_commit_invoked)
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(dependence_tracker.commit != NULL);
 #endif
             CommitDependenceTracker *tracker = dependence_tracker.commit;
@@ -949,7 +949,7 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !trigger_commit_invoked)
@@ -976,7 +976,7 @@ namespace Legion {
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!ref.is_composite_ref());
 #endif
       instance = ref.get_mapping_instance();
@@ -991,7 +991,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!ref.is_composite_ref());
 #endif
         MappingInstance &inst = input_valid[idx];
@@ -1010,7 +1010,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!ref.is_composite_ref());
 #endif
         if (visible_filter.find(ref.get_manager()->get_memory()) == 
@@ -1146,7 +1146,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(predicate_references == 0);
 #endif
       waiters.clear();
@@ -1175,7 +1175,7 @@ namespace Legion {
       GenerationID task_gen = 0;  // initialization to make gcc happy
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(predicate_references > 0);
 #endif
         predicate_references--;
@@ -1209,7 +1209,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(waiters.find(waiter) == waiters.end());
 #endif
         waiters[waiter] = waiter_gen;
@@ -1333,7 +1333,7 @@ namespace Legion {
           result = false;
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(predicate != NULL);
 #endif
           predicate_waiter = UserEvent::create_user_event();
@@ -1345,7 +1345,7 @@ namespace Legion {
         if (!wait_event.has_triggered())
           wait_event.wait();
         // Might be a little bit of a race here with cleanup
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
@@ -1364,7 +1364,7 @@ namespace Legion {
       // Quick out
       if (predicate == NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
@@ -1374,7 +1374,7 @@ namespace Legion {
           resolve_false();
         return;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(predicate != NULL);
 #endif
       // Register ourselves as a waiter on the predicate value
@@ -1470,7 +1470,7 @@ namespace Legion {
       bool need_trigger;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!received_trigger_resolution);
 #endif
         received_trigger_resolution = true;
@@ -1493,7 +1493,7 @@ namespace Legion {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(pred_gen == get_generation());
 #endif
         switch (speculation_state)
@@ -1755,7 +1755,7 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -1844,7 +1844,7 @@ namespace Legion {
                                                false/*defer add users*/,
                                                map_applied_conditions,
                                                mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
 #endif
@@ -1861,7 +1861,7 @@ namespace Legion {
                                                false/*defer add users*/,
                                                map_applied_conditions,
                                                mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
 #endif
@@ -1878,7 +1878,7 @@ namespace Legion {
                                                 true/*find valid*/,
                                                 map_applied_conditions,
                                                 valid_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -1892,13 +1892,13 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 map_applied_conditions,
                                                 mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!mapped_instances.empty());
 #endif 
       // We're done so apply our mapping changes
@@ -2004,7 +2004,7 @@ namespace Legion {
     unsigned MapOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -2075,7 +2075,7 @@ namespace Legion {
         log_region.error("Projection region requirements are not "
                                "permitted for inline mappings (in task %s)",
                                parent_ctx->get_task_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PROJECTION_USE);
@@ -2098,7 +2098,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -2112,7 +2112,7 @@ namespace Legion {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for inline mapping (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -2123,7 +2123,7 @@ namespace Legion {
                                    "privilege fields for inline mapping "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -2133,7 +2133,7 @@ namespace Legion {
             log_region.error("Instance field %d is a duplicate for "
                                     "inline mapping (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -2150,7 +2150,7 @@ namespace Legion {
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -2168,7 +2168,7 @@ namespace Legion {
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id,
                              unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -2179,7 +2179,7 @@ namespace Legion {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -2195,7 +2195,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -2224,7 +2224,7 @@ namespace Legion {
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -2278,7 +2278,7 @@ namespace Legion {
                       bad_tree, parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id(), 
                       requirement.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2302,7 +2302,7 @@ namespace Legion {
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2323,7 +2323,7 @@ namespace Legion {
                         "by proper mapping conventions.", 
                         mapper->get_mapper_name(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2344,7 +2344,7 @@ namespace Legion {
                       "instance for inline mapping in task %s (ID %lld).",
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2372,7 +2372,7 @@ namespace Legion {
                           mapper->get_mapper_name(), mem.id, exec_proc.id,
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2393,7 +2393,7 @@ namespace Legion {
                         "mapping operation was issued in task %s (ID %lld).",
                         mapper->get_mapper_name(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2414,7 +2414,7 @@ namespace Legion {
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2422,7 +2422,7 @@ namespace Legion {
           std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
             finder = acquired_instances.find(
                 chosen_instances[idx].get_manager());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(finder != acquired_instances.end());
 #endif
           if (!finder->second.second)
@@ -2435,7 +2435,7 @@ namespace Legion {
                           "recycled.", mapper->get_mapper_name(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2455,7 +2455,7 @@ namespace Legion {
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2479,7 +2479,7 @@ namespace Legion {
                           mapper->get_mapper_name(), get_unique_op_id(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -2498,7 +2498,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_inline_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       // Trigger the event indicating we are done reporting profiling
@@ -2616,7 +2616,7 @@ namespace Legion {
                         src_requirements.size(), dst_requirements.size(),
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
@@ -2636,7 +2636,7 @@ namespace Legion {
                           parent_ctx->get_unique_id(),
                           src_requirements[idx].privilege_fields.size(),
                           src_requirements[idx].instance_fields.size());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_FIELDS_SIZE);
@@ -2649,7 +2649,7 @@ namespace Legion {
                           idx, get_unique_id(),
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_PRIVILEGE);
@@ -2672,7 +2672,7 @@ namespace Legion {
                           parent_ctx->get_unique_id(),
                           dst_requirements[idx].privilege_fields.size(),
                           dst_requirements[idx].instance_fields.size());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_FIELDS_SIZE);
@@ -2686,7 +2686,7 @@ namespace Legion {
                           idx, get_unique_id(),
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_PRIVILEGE);
@@ -2710,7 +2710,7 @@ namespace Legion {
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id(),
                           src_space.id, dst_space.id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_COPY_SPACE_MISMATCH);
@@ -2725,7 +2725,7 @@ namespace Legion {
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id(),
                           src_space.id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_COPY_SPACE_MISMATCH);
@@ -2808,7 +2808,7 @@ namespace Legion {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -2983,7 +2983,7 @@ namespace Legion {
                                                 this, idx, true/*find valid*/,
                                                 map_applied_conditions,
                                                 valid_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -3007,7 +3007,7 @@ namespace Legion {
                                                 this, idx, true/*find valid*/,
                                                 map_applied_conditions,
                                                 valid_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -3071,7 +3071,7 @@ namespace Legion {
                                                 src_versions[idx],
                                                 parent_ctx,
                                                 false/*needs fields*/
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , idx, get_logging_name()
                                                 , unique_op_id
 #endif
@@ -3088,7 +3088,7 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   map_applied_conditions,
                                                   src_targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
 #endif
@@ -3108,7 +3108,7 @@ namespace Legion {
                                                  false/*defer add users*/,
                                                  map_applied_conditions,
                                                  src_targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                  , get_logging_name()
                                                  , unique_op_id
 #endif
@@ -3139,7 +3139,7 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   map_applied_conditions,
                                                   dst_targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
 #endif
@@ -3159,7 +3159,7 @@ namespace Legion {
                                                  false/*defer add users*/, 
                                                  map_applied_conditions,
                                                  dst_targets
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                  , get_logging_name()
                                                  , unique_op_id
 #endif
@@ -3206,7 +3206,7 @@ namespace Legion {
         else
         {
           // Composite instances are not valid sources for reductions across
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(src_composite == -1);
 #endif
           Event across_done = 
@@ -3289,7 +3289,7 @@ namespace Legion {
                     actual_idx2, is_src2 ? "source" : "destination",
                     unique_op_id, parent_ctx->get_task_name(),
                     parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
@@ -3309,7 +3309,7 @@ namespace Legion {
       if (idx >= src_parent_indexes.size())
       {
         idx -= src_parent_indexes.size();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx < dst_parent_indexes.size());
 #endif
         return dst_parent_indexes[idx];
@@ -3393,7 +3393,7 @@ namespace Legion {
         log_region.error("Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
                                parent_ctx->get_task_name());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PROJECTION_USE);
@@ -3417,7 +3417,7 @@ namespace Legion {
                                    requirement.region.tree_id, 
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -3434,7 +3434,7 @@ namespace Legion {
                                    bad_field, sp.id, idx, 
                                    (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -3447,7 +3447,7 @@ namespace Legion {
                                     bad_field, idx, 
                                     (src ? "source" : "destination"),
                                     unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -3460,7 +3460,7 @@ namespace Legion {
                                     bad_field, idx,
                                     (src ? "source" : "destination"),
                                     unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -3479,7 +3479,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id,
                                    idx, (src ? "source" : "destination"));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -3499,7 +3499,7 @@ namespace Legion {
                                    requirement.parent.tree_id,
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -3512,7 +3512,7 @@ namespace Legion {
                                    "region requirements",
                                    unique_op_id, bad_field, idx,
                                    (src ? "source" : "destination"));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -3530,7 +3530,7 @@ namespace Legion {
                                    requirement.region.tree_id, 
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -3565,7 +3565,7 @@ namespace Legion {
                                    src_requirements[idx].region.index_space.id,
                                    src_requirements[idx].region.field_space.id, 
                                    src_requirements[idx].region.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_BAD_PARENT_REGION);
@@ -3590,7 +3590,7 @@ namespace Legion {
                                    dst_requirements[idx].region.index_space.id,
                                    dst_requirements[idx].region.field_space.id, 
                                    dst_requirements[idx].region.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_BAD_PARENT_REGION);
@@ -3625,7 +3625,7 @@ namespace Legion {
                       IS_SRC ? "source" : "destination", idx, 
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       req.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3650,7 +3650,7 @@ namespace Legion {
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3674,7 +3674,7 @@ namespace Legion {
                           IS_SRC ? "source" : "destination", idx,
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3701,7 +3701,7 @@ namespace Legion {
                       "copy operations. Operation was issued in task %s "
                       "(ID %lld).", mapper->get_mapper_name(), idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT); 
@@ -3717,7 +3717,7 @@ namespace Legion {
                       "issued in task %s (ID %lld).", mapper->get_mapper_name(),
                       idx, parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3742,7 +3742,7 @@ namespace Legion {
                         IS_SRC ? "source" : "destination", idx,
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3764,7 +3764,7 @@ namespace Legion {
                         IS_SRC ? "source" : "destination", idx, 
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -3783,7 +3783,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_copy_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       profiling_reported.trigger();
@@ -4408,7 +4408,7 @@ namespace Legion {
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
@@ -4421,7 +4421,7 @@ namespace Legion {
     void CloseOp::initialize_close(SingleTask *ctx, unsigned idx, bool track)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
@@ -4468,7 +4468,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
     }
@@ -4580,7 +4580,7 @@ namespace Legion {
                                                const FieldMask &dependent_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(close_idx >= 0);
 #endif
       // Check to see if the target is also our creator
@@ -4603,7 +4603,7 @@ namespace Legion {
     void TraceCloseOp::add_next_child(const ColorPoint &next_child)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(next_child.is_valid());
 #endif
       next_children.insert(next_child);
@@ -4684,7 +4684,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_trace_close();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -4710,7 +4710,7 @@ namespace Legion {
     bool InterCloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       RegionTreeContext physical_ctx = 
@@ -4728,7 +4728,7 @@ namespace Legion {
                                                 true/*find valid*/,
                                                 map_applied_conditions,
                                                 valid_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -4748,7 +4748,7 @@ namespace Legion {
                                                 next_children, completion_event,
                                                 map_applied_conditions,
                                                 chosen_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -4789,7 +4789,7 @@ namespace Legion {
     unsigned InterCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
       assert(create_op != NULL);
 #endif
@@ -4858,7 +4858,7 @@ namespace Legion {
                       bad_tree, parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id(), 
                       requirement.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit (ERROR_INVALID_MAPPER_OUTPUT);
@@ -4882,7 +4882,7 @@ namespace Legion {
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4903,7 +4903,7 @@ namespace Legion {
                           "mapper to abide by proper mapping conventions.",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4933,7 +4933,7 @@ namespace Legion {
                         "operation was issued in task %s (ID %lld).",
                         mapper->get_mapper_name(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -4952,7 +4952,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_close_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       profiling_reported.trigger();
@@ -5045,7 +5045,7 @@ namespace Legion {
     unsigned ReadCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -5120,7 +5120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -5146,7 +5146,7 @@ namespace Legion {
     void PostCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       // This stage is only done for close operations issued
@@ -5173,7 +5173,7 @@ namespace Legion {
     bool PostCloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       RegionTreeContext physical_ctx = 
@@ -5187,7 +5187,7 @@ namespace Legion {
                                                 version_info, this, 0/*idx*/,
                                                 map_applied_conditions,
                                                 chosen_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -5230,7 +5230,7 @@ namespace Legion {
     unsigned PostCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_idx;
@@ -5273,7 +5273,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_close_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       profiling_reported.trigger();
@@ -5386,7 +5386,7 @@ namespace Legion {
       parent_ctx->get_physical_references(parent_idx, chosen_instances);
       // This should have exactly one instance and it should be 
       // composite reference
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(chosen_instances.size() == 1);
       assert(chosen_instances[0].is_composite_ref());
 #endif
@@ -5398,7 +5398,7 @@ namespace Legion {
                                           composite_refs[0], version_info,
                                           parent_ctx->get_parent(),
                                           true/*needs fields*/
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                           , 0/*idx*/, get_logging_name()
                                           , unique_op_id
 #endif
@@ -5415,7 +5415,7 @@ namespace Legion {
     unsigned VirtualCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_idx;
@@ -5488,7 +5488,7 @@ namespace Legion {
                          physical_req.region.index_space.id,
                          physical_req.region.field_space.id,
                          physical_req.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_ACQUIRE_MISMATCH);
@@ -5502,7 +5502,7 @@ namespace Legion {
             log_task.error("ERROR: Acquire operation requested on "
                            "field %d which is not contained in the "
                            "requested physical instance", *it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_ACQUIRE_MISMATCH);
@@ -5585,7 +5585,7 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -5721,7 +5721,7 @@ namespace Legion {
                                              false/*defer add users*/,
                                              map_applied_conditions,
                                              mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                              , get_logging_name()
                                              , unique_op_id
 #endif
@@ -5800,7 +5800,7 @@ namespace Legion {
     unsigned AcquireOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -5859,7 +5859,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -5874,7 +5874,7 @@ namespace Legion {
                                    "space %d of requirement for acquire "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -5890,7 +5890,7 @@ namespace Legion {
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
                              requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -5906,7 +5906,7 @@ namespace Legion {
                              requirement.parent.index_space.id,
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -5917,7 +5917,7 @@ namespace Legion {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -5949,7 +5949,7 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -5982,7 +5982,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_acquire_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       profiling_reported.trigger();
@@ -6055,7 +6055,7 @@ namespace Legion {
                                physical_req.region.index_space.id,
                                physical_req.region.field_space.id,
                                physical_req.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_RELEASE_MISMATCH);
@@ -6069,7 +6069,7 @@ namespace Legion {
             log_task.error("ERROR: Release operation requested on "
                                  "field %d which is not contained in the "
                                  "requested physical instance", *it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_RELEASE_MISMATCH);
@@ -6151,7 +6151,7 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -6287,7 +6287,7 @@ namespace Legion {
                                              false/*defer add users*/,
                                              map_applied_conditions,
                                              mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                              , get_logging_name()
                                              , unique_op_id
 #endif
@@ -6364,7 +6364,7 @@ namespace Legion {
     unsigned ReleaseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -6445,7 +6445,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -6460,7 +6460,7 @@ namespace Legion {
                                    "space %d of requirement for release "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -6476,7 +6476,7 @@ namespace Legion {
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
                              requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -6493,7 +6493,7 @@ namespace Legion {
                                    requirement.parent.index_space.id,
                                    requirement.parent.field_space.id,
                                    requirement.parent.tree_id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -6504,7 +6504,7 @@ namespace Legion {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -6535,7 +6535,7 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -6568,7 +6568,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_release_report_profiling(this, &profiling_results);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
 #endif
       profiling_reported.trigger();
@@ -6683,14 +6683,14 @@ namespace Legion {
       const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
       const size_t result_size = redop->sizeof_lhs;
       void *result_buffer = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
       bool result = 
 #endif
 #endif
       collective.phase_barrier.get_previous_phase().get_result(result_buffer,
 							       result_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result);
 #endif
       future.impl->set_result(result_buffer, result_size, true/*own*/);
@@ -6774,7 +6774,7 @@ namespace Legion {
     void FuturePredOp::initialize(SingleTask *ctx, Future f)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(f.impl != NULL);
 #endif
@@ -6791,7 +6791,7 @@ namespace Legion {
     {
       bool valid;
       bool value = future.impl->get_boolean_value(valid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(valid);
 #endif
       set_resolved_value(get_generation(), value);
@@ -6801,7 +6801,7 @@ namespace Legion {
     void FuturePredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(future.impl != NULL);
 #endif
       begin_dependence_analysis();
@@ -6875,7 +6875,7 @@ namespace Legion {
     void NotPredOp::initialize(SingleTask *ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -6889,7 +6889,7 @@ namespace Legion {
         set_resolved_value(get_generation(), true);
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p.impl != NULL);
 #endif
         pred_op = p.impl;
@@ -6962,7 +6962,7 @@ namespace Legion {
       // No short circuit in this one
       // We can test this without the lock because 
       // it is monotonically increasing
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(prev_gen == get_generation());
 #endif
       // Don't forget to negate the value
@@ -7010,7 +7010,7 @@ namespace Legion {
                                const Predicate &p2)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -7031,7 +7031,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p1.impl != NULL);
 #endif
         left_valid = false;
@@ -7045,7 +7045,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p2.impl != NULL);
 #endif
         right_valid = false;
@@ -7167,7 +7167,7 @@ namespace Legion {
           else
           {
             // Figure out which of the two values to fill in
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(!left_valid || !right_valid);
 #endif
             if (!left_valid)
@@ -7237,7 +7237,7 @@ namespace Legion {
                               const Predicate &p2)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -7388,7 +7388,7 @@ namespace Legion {
           else
           {
             // Figure out which of the two values to fill in
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(!left_valid || !right_valid);
 #endif
             if (!left_valid)
@@ -7497,7 +7497,7 @@ namespace Legion {
       // We'll fill it in later
       result_map = FutureMap(legion_new<FutureMapImpl>(ctx, 
                                              get_completion_event(), runtime));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
         result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
@@ -7563,7 +7563,7 @@ namespace Legion {
       result_map = FutureMap();
       constraints.clear();
       task_sets.clear();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -7683,7 +7683,7 @@ namespace Legion {
                                      dependences, dependence_count))
           return false;
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!single_tasks.empty());
 #endif 
         // Next build the set of single tasks and all their constraints.
@@ -7753,7 +7753,7 @@ namespace Legion {
                 mapper->get_mapper_name(), task->get_task_name(),
                 task->get_unique_id(), idx, parent_ctx->get_task_name(),
                 parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -7770,7 +7770,7 @@ namespace Legion {
                 other->get_unique_id(), task->get_task_name(),
                 task->get_unique_id(), proc.id, parent_ctx->get_task_name(),
                 parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -7810,7 +7810,7 @@ namespace Legion {
               t1->get_task_name(), t1->get_unique_id(), it->idx2,
               t2->get_task_name(), t2->get_unique_id(), 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
@@ -7854,7 +7854,7 @@ namespace Legion {
       bool need_complete;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_completes > 0);
 #endif
         remaining_subop_completes--;
@@ -7874,7 +7874,7 @@ namespace Legion {
       bool need_commit;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
         remaining_subop_commits--;
@@ -7898,7 +7898,7 @@ namespace Legion {
       if (src_index >= 0)
       {
         int dst_index = find_operation_index(dst_op, dst_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(dst_index >= 0);
 #endif
         TaskOp *src_task = find_task_by_index(src_index);
@@ -7907,7 +7907,7 @@ namespace Legion {
             "%s (ID %lld) and task %s (ID %lld)\n",
             src_task->get_task_name(), src_task->get_unique_id(),
             dst_task->get_task_name(), dst_task->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_MUST_EPOCH_FAILURE);
@@ -7943,7 +7943,7 @@ namespace Legion {
               (dtype == TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
                 (dtype == ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
                 "ATOMIC DEPENDENCE");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_MUST_EPOCH_FAILURE);
@@ -7952,7 +7952,7 @@ namespace Legion {
         {
           // Record the dependence kind
           int dst_index = find_operation_index(dst_op, dst_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dst_index >= 0);
 #endif
           dependences.push_back(DependenceRecord(src_index, dst_index,
@@ -7977,7 +7977,7 @@ namespace Legion {
       //    the results for as a result of our must epoch mapping
       // 3. Record that we premapped those regions
       // First find the index for this task
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       bool found = false;
 #endif
       unsigned index = 0;
@@ -7986,13 +7986,13 @@ namespace Legion {
         if (single_tasks[idx] == task)
         {
           index = idx;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           found = true;
 #endif
           break;
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(found);
 #endif
       // Set the target processor by the index 
@@ -8035,7 +8035,7 @@ namespace Legion {
     void MustEpochOp::add_mapping_dependence(Event precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       dependence_tracker.mapping->add_mapping_dependence(precondition);
@@ -8046,7 +8046,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Can do the first part without the lock 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index < task_sets.size());
 #endif
       task_sets[index].insert(single);
@@ -8096,7 +8096,7 @@ namespace Legion {
       bool need_complete;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_completes > 0);
 #endif
         remaining_subop_completes--;
@@ -8117,7 +8117,7 @@ namespace Legion {
       bool need_commit;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
         remaining_subop_commits--;
@@ -8223,7 +8223,7 @@ namespace Legion {
           {
             const MustEpochOp::DependenceRecord &record = 
               deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(idx == record.op1_idx);
             assert(record.op1_idx < triggered_events.size());
 #endif
@@ -8265,7 +8265,7 @@ namespace Legion {
           {
             const MustEpochOp::DependenceRecord &record = 
               deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(idx == record.op1_idx);
             assert(record.op1_idx < triggered_events.size());
 #endif
@@ -8454,7 +8454,7 @@ namespace Legion {
         Event mapped_event = Runtime::merge_events<true>(wait_events);
         mapped_event.wait();
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(success); // should always succeed now
 #endif
       return success;
@@ -8643,7 +8643,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new EqualPartitionThunk(pid, granularity);
@@ -8659,7 +8659,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new WeightedPartitionThunk(pid, granularity, weights);
@@ -8675,7 +8675,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new UnionPartitionThunk(pid, h1, h2);
@@ -8691,7 +8691,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new IntersectionPartitionThunk(pid, h1, h2);
@@ -8707,7 +8707,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new DifferencePartitionThunk(pid, h1, h2);
@@ -8723,7 +8723,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new CrossProductThunk(base, source, handles);
@@ -8738,7 +8738,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handles);
@@ -8753,7 +8753,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handle);
@@ -8767,7 +8767,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handles);
@@ -8781,7 +8781,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handle);
@@ -8796,7 +8796,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingDifference(target, initial, handles);
@@ -9045,7 +9045,7 @@ namespace Legion {
                                               false/*find valid*/,
                                               map_applied_conditions,
                                               empty_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
@@ -9083,7 +9083,7 @@ namespace Legion {
       }
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(handle_ready.exists() && !handle_ready.has_triggered());
 #endif
       handle_ready.trigger();
@@ -9103,7 +9103,7 @@ namespace Legion {
     unsigned DependentPartitionOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -9113,7 +9113,7 @@ namespace Legion {
     FatTreePath* DependentPartitionOp::compute_fat_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       if (requirement.handle_type == PART_PROJECTION)
@@ -9195,7 +9195,7 @@ namespace Legion {
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -9569,7 +9569,7 @@ namespace Legion {
                                               false/*find valid*/,
                                               map_applied_conditions,
                                               empty_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
@@ -9578,7 +9578,7 @@ namespace Legion {
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(value != NULL);
 #endif
         InstanceSet mapped_instances;
@@ -9593,7 +9593,7 @@ namespace Legion {
                                                  false/*defer add users*/,
                                                  map_applied_conditions,
                                                  mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                  , get_logging_name()
                                                  , unique_op_id
 #endif
@@ -9683,7 +9683,7 @@ namespace Legion {
                                                false/*defer add users*/,
                                                map_applied_conditions,
                                                mapped_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
 #endif
@@ -9729,7 +9729,7 @@ namespace Legion {
     unsigned FillOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -9764,7 +9764,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -9778,7 +9778,7 @@ namespace Legion {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for fill operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -9789,7 +9789,7 @@ namespace Legion {
                                    "privilege fields for fill operation"
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -9799,7 +9799,7 @@ namespace Legion {
             log_region.error("Instance field %d is a duplicate for "
                                     "fill operation (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -9816,7 +9816,7 @@ namespace Legion {
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -9834,7 +9834,7 @@ namespace Legion {
                                    requirement.parent.field_space.id,
                                    requirement.parent.tree_id,
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -9845,7 +9845,7 @@ namespace Legion {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -9861,7 +9861,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -9889,7 +9889,7 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -10113,7 +10113,7 @@ namespace Legion {
                       requirement.region.index_space.id,
                       requirement.region.field_space.id,
                       requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_FILE_ATTACH);
@@ -10159,7 +10159,7 @@ namespace Legion {
                                               false/*find valid*/,
                                               map_applied_conditions,
                                               empty_instances
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
@@ -10167,7 +10167,7 @@ namespace Legion {
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
                                                         requirement, this,
                                                         version_info);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
       version_info.apply_mapping(physical_ctx.get_id(),
@@ -10191,7 +10191,7 @@ namespace Legion {
     unsigned AttachOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -10225,7 +10225,7 @@ namespace Legion {
         // Now ask the low-level runtime to create the instance
         PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
                              field_files, (file_mode == LEGION_FILE_READ_ONLY));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result.exists());
 #endif
         return result;
@@ -10264,7 +10264,7 @@ namespace Legion {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -10278,7 +10278,7 @@ namespace Legion {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for attach operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -10289,7 +10289,7 @@ namespace Legion {
                                    "privilege fields for attach operation "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -10299,7 +10299,7 @@ namespace Legion {
             log_region.error("Instance field %d is a duplicate for "
                                     "attach operation (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -10316,7 +10316,7 @@ namespace Legion {
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -10334,7 +10334,7 @@ namespace Legion {
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id,
                              unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -10345,7 +10345,7 @@ namespace Legion {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -10373,7 +10373,7 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -10519,13 +10519,13 @@ namespace Legion {
       // Now we can get the reference we need for the detach operation
       InstanceSet references;
       region.impl->get_references(references);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(references.size() == 1);
 #endif
       InstanceRef reference = references[0];
       // Check that this is actually a file
       PhysicalManager *manager = reference.get_manager();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
       InstanceManager *inst_manager = manager->as_instance_manager(); 
@@ -10533,7 +10533,7 @@ namespace Legion {
       {
         log_run.error("Illegal detach operation on a physical region which "
                       "was not attached!");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
@@ -10562,7 +10562,7 @@ namespace Legion {
     unsigned DetachOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -10592,7 +10592,7 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);

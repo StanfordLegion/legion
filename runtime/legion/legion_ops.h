@@ -404,7 +404,7 @@ namespace Legion {
       // Set of events from operations we depend that describe when
       // all of their children have mapped
       //std::set<Event> dependent_children_mapped;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;

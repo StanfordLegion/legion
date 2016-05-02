@@ -90,7 +90,7 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       LogicalView *view = dynamic_cast<LogicalView*>(dc);
       assert(view != NULL);
 #else
@@ -151,7 +151,7 @@ namespace Legion {
       derez.deserialize(done_event);
       // We have to be able to find this or it is very bad for deadlock
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
       assert(inst_view != NULL);
 #else
@@ -172,7 +172,7 @@ namespace Legion {
       derez.deserialize(done_event);
       // We have to be able to find this or it is very bad for deadlock
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
       assert(inst_view != NULL);
 #else
@@ -191,7 +191,7 @@ namespace Legion {
       derez.deserialize(did);
       // We have to be able to find this or it is very bad for deadlock
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
       assert(inst_view != NULL);
 #else
@@ -214,7 +214,7 @@ namespace Legion {
       derez.deserialize(done_event);
       // We have to be able to find this or it is very bad for deadlock
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
       assert(inst_view != NULL);
 #else
@@ -240,7 +240,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
       logical_node->register_instance_view(manager, owner_context, this);
@@ -319,7 +319,7 @@ namespace Legion {
           filter_local_users(*it);
       }
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_HIGH_LEVEL)
+      defined(DEBUG_LEGION)
       // Don't forget to remove the initial user if there was one
       // before running these checks
       assert(current_epoch_users.empty());
@@ -436,7 +436,7 @@ namespace Legion {
           context->runtime->find_or_request_logical_view(child_did, ready);
         if (ready.exists())
           ready.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
         MaterializedView *mat_child = child_view->as_materialized_view();
@@ -463,7 +463,7 @@ namespace Legion {
       derez.deserialize(to_trigger);
       DistributedCollectable *dc = 
         runtime->find_distributed_collectable(parent_did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       MaterializedView *parent_view = dynamic_cast<MaterializedView*>(dc);
       assert(parent_view != NULL);
 #else
@@ -1155,7 +1155,7 @@ namespace Legion {
       if (issue_collect)
         defer_collect_user(term_event);
       // At this point tasks shouldn't be allowed to wait on themselves
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (term_event.exists())
         assert(wait_on_events.find(term_event) == wait_on_events.end());
 #endif
@@ -1282,7 +1282,7 @@ namespace Legion {
     void MaterializedView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       Serializer rez;
@@ -1335,11 +1335,11 @@ namespace Legion {
                               LegionMap<VersionID,FieldMask>::aligned &add_only)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
       FieldVersions *versions = version_info.get_versions(logical_node); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(versions != NULL);
 #endif
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
@@ -1410,14 +1410,14 @@ namespace Legion {
                         AddressSpaceID source, std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
       // If we have remote instances, we need to check to see 
       // if we need to send any invalidations
       if (!valid_remote_instances.empty())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(is_logical_owner());
 #endif
         // Keep track of any invalidations that we have to apply 
@@ -1494,7 +1494,7 @@ namespace Legion {
           }
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
     }
@@ -1545,7 +1545,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldVersions *versions = version_info.get_versions(logical_node); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(versions != NULL);
 #endif
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
@@ -1560,7 +1560,7 @@ namespace Legion {
       // send invalidates
       const bool need_invalidates = is_logical_owner() && 
           !valid_remote_instances.empty() && !(user_mask * remote_valid_mask);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
@@ -1657,7 +1657,7 @@ namespace Legion {
         need_check_above = true;
         filter_and_add(filter_mask, update_versions);  
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
       if (!!invalidate_mask)
@@ -1665,7 +1665,7 @@ namespace Legion {
       return need_check_above;
     }
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void MaterializedView::sanity_check_versions(void)
     //--------------------------------------------------------------------------
@@ -2050,7 +2050,7 @@ namespace Legion {
             {
               LegionMap<PhysicalUser*,FieldMask>::aligned::iterator 
                 first_it = current_users.users.multi_users->begin();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               // Should dominate as an upper bound
               assert(!(first_it->second - current_users.user_mask));
 #endif
@@ -2156,7 +2156,7 @@ namespace Legion {
           {
             LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
                           previous_users.users.multi_users->begin();     
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             // This summary mask should dominate
             assert(!(first_it->second - previous_users.user_mask));
 #endif
@@ -2519,7 +2519,7 @@ namespace Legion {
             {
               std::map<FieldID,Reservation>::const_iterator finder =
                 atomic_reservations.find(*it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               assert(finder != atomic_reservations.end());
 #endif
               op->update_atomic_locks(finder->second, excl);
@@ -2549,7 +2549,7 @@ namespace Legion {
                                     std::vector<Reservation> &results)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(needed_fields.size() == results.size());
 #endif
@@ -2586,7 +2586,7 @@ namespace Legion {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       MaterializedView *target = dynamic_cast<MaterializedView*>(dc);
       assert(target != NULL);
 #else
@@ -2615,7 +2615,7 @@ namespace Legion {
                                   const std::vector<Reservation> &reservations)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(fields.size() == reservations.size());
 #endif
@@ -2644,7 +2644,7 @@ namespace Legion {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       MaterializedView *target = dynamic_cast<MaterializedView*>(dc);
       assert(target != NULL);
 #else
@@ -2698,14 +2698,14 @@ namespace Legion {
           runtime->find_or_request_logical_view(parent_did, par_ready);
         if (par_ready.exists())
           par_ready.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(par_view->is_materialized_view());
 #endif
         parent = par_view->as_materialized_view();
       }
       if (man_ready.exists())
         man_ready.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
       InstanceManager *inst_manager = phy_man->as_instance_manager();
@@ -2735,7 +2735,7 @@ namespace Legion {
                   bool reading, std::set<Event> *wait_on)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
       FieldMask need_valid_update;
@@ -2747,7 +2747,7 @@ namespace Legion {
         // the right version number and whether we have done the read
         // request yet for our given version number
         FieldVersions *versions = version_info.get_versions(logical_node); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(versions != NULL);
 #endif
         const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
@@ -2891,7 +2891,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       // Quick test for intersection here to see if we are done early
@@ -2902,7 +2902,7 @@ namespace Legion {
       // for those fields.
       FieldMask invalidate_mask;
       FieldVersions *versions = version_info.get_versions(logical_node); 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(versions != NULL);
 #endif
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
@@ -2932,7 +2932,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       // No overlapping fields means we are done
@@ -2986,7 +2986,7 @@ namespace Legion {
                                       UserEvent done_event, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       FieldMask request_mask;
@@ -3097,7 +3097,7 @@ namespace Legion {
                                                    UserEvent done_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
       FieldMask response_mask;
@@ -3255,7 +3255,7 @@ namespace Legion {
         // Update our remote valid mask
         remote_valid_mask |= response_mask;
         // Prune out the request event
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remote_update_requests.find(done_event) != 
                 remote_update_requests.end());
 #endif
@@ -3277,7 +3277,7 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       UserEvent update_event;
@@ -3866,7 +3866,7 @@ namespace Legion {
     void CompositeNode::update_child(CompositeNode *child,const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(children.find(child) != children.end());
 #endif
       children[child] |= mask;
@@ -4253,7 +4253,7 @@ namespace Legion {
                   FieldMask overlap = written & it->second;
                   if (!overlap)
                     continue;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(temp_preconditions.find(it->first) == 
                          temp_preconditions.end());
 #endif
@@ -4447,7 +4447,7 @@ namespace Legion {
         {
           if (it->first->is_deferred_view())
             continue;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(it->first->is_materialized_view());
 #endif
           if (it->first->as_materialized_view()->manager == dst_manager)
@@ -4761,7 +4761,7 @@ namespace Legion {
                      owner_proc, local_proc, node, register_now), value(val)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(value != NULL);
 #endif
       value->add_reference();
@@ -4852,7 +4852,7 @@ namespace Legion {
     void FillView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(logical_node->is_region());
 #endif
@@ -4962,7 +4962,7 @@ namespace Legion {
         manager(man), remote_request_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
       logical_node->register_instance_view(manager, owner_context, this);
@@ -5016,7 +5016,7 @@ namespace Legion {
           filter_local_users(*it);
       }
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_HIGH_LEVEL)
+      defined(DEBUG_LEGION)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -5300,7 +5300,7 @@ namespace Legion {
                                       std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(redop == manager->redop);
 #endif
       if (!is_logical_owner())
@@ -5369,7 +5369,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REDUCTION_VIEW_FIND_USER_PRECONDITIONS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(usage))
         assert(usage.redop == manager->redop);
       else
@@ -5400,7 +5400,7 @@ namespace Legion {
                                  std::set<Event> &applied_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(usage))
         assert(usage.redop == manager->redop);
       else
@@ -5459,7 +5459,7 @@ namespace Legion {
                                         bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (IS_REDUCE(usage))
         assert(usage.redop == manager->redop);
       else
@@ -5722,7 +5722,7 @@ namespace Legion {
                                   CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(redop == manager->redop);
 #endif
       // Get the destination fields for this copy
@@ -5739,7 +5739,7 @@ namespace Legion {
                               std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(redop == manager->redop);
 #endif
       manager->find_field_offsets(reduce_mask, src_fields);
@@ -5814,7 +5814,7 @@ namespace Legion {
     void ReductionView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(logical_node->is_region()); // Always regions at the top
 #endif
@@ -5872,7 +5872,7 @@ namespace Legion {
         runtime->find_or_request_physical_manager(manager_did, man_ready);
       if (man_ready.exists())
         man_ready.wait();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(phy_man->is_reduction_manager());
 #endif
       ReductionManager *red_manager = phy_man->as_reduction_manager();
@@ -5899,7 +5899,7 @@ namespace Legion {
     void ReductionView::perform_remote_valid_check(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
       UserEvent request_event = UserEvent::NO_USER_EVENT;
@@ -5936,7 +5936,7 @@ namespace Legion {
                                       UserEvent done_event, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       // Send back all the reduction users
@@ -5978,7 +5978,7 @@ namespace Legion {
                                                 UserEvent done_event)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
       std::set<Event> deferred_collections;
@@ -5991,7 +5991,7 @@ namespace Legion {
         {
           Event term_event;
           derez.deserialize(term_event);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           // should never have this event before now
           assert(reduction_users.find(term_event) == reduction_users.end());
 #endif
@@ -6034,7 +6034,7 @@ namespace Legion {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
       UserEvent done_event;

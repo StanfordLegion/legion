@@ -859,7 +859,7 @@ namespace Legion {
           delete (*it);
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       dominator_node->check_state();
 #endif
       return dominator_node;
@@ -932,7 +932,7 @@ namespace Legion {
     {
       if (child->single_node)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(FieldMask::pop_count(child->local_mask) == 1);
         assert(child->local_mask != local_mask);
         assert(!(child->local_mask - local_mask));
@@ -941,7 +941,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(FieldMask::pop_count(child->local_mask) > 1);
         assert(child->local_mask != local_mask);
         assert(!(child->local_mask - local_mask));

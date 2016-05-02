@@ -349,7 +349,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unsigned prev = __sync_fetch_and_sub(&references,cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(prev >= cnt); // check for underflow
 #endif
       // If previous is equal to count, the value is now
@@ -399,14 +399,14 @@ namespace Legion {
                                                         int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<true>(GC_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -418,14 +418,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -437,14 +437,14 @@ namespace Legion {
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<false>(GC_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -457,14 +457,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -477,14 +477,14 @@ namespace Legion {
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -496,14 +496,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -515,14 +515,14 @@ namespace Legion {
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -535,14 +535,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -555,14 +555,14 @@ namespace Legion {
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -574,14 +574,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
@@ -593,14 +593,14 @@ namespace Legion {
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -613,14 +613,14 @@ namespace Legion {
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
       log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
@@ -633,7 +633,7 @@ namespace Legion {
                       ReferenceSource source, bool must_be_valid, int cnt/*=1*/) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC

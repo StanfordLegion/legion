@@ -118,7 +118,7 @@ namespace Legion {
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
       derez.deserialize(result->index);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       if (add_reference)
@@ -212,7 +212,7 @@ namespace Legion {
     VersionInfo::NodeInfo& VersionInfo::NodeInfo::operator=(const NodeInfo &rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(physical_state == NULL);
 #endif
       if (rhs.physical_state != NULL)
@@ -245,7 +245,7 @@ namespace Legion {
         packed(false), packed_buffer(NULL), packed_size(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!rhs.packed); // This shouldn't be called when packed
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
@@ -259,7 +259,7 @@ namespace Legion {
     VersionInfo::~VersionInfo(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -275,7 +275,7 @@ namespace Legion {
     VersionInfo& VersionInfo::operator=(const VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -293,7 +293,7 @@ namespace Legion {
     void VersionInfo::set_upper_bound_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(upper_bound_node == NULL);
       assert(!packed);
 #endif
@@ -304,7 +304,7 @@ namespace Legion {
     void VersionInfo::merge(const VersionInfo &rhs, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
       assert(!rhs.packed);
 #endif
@@ -355,7 +355,7 @@ namespace Legion {
 				    bool copy_previous/*=false*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
 #endif
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
@@ -365,7 +365,7 @@ namespace Legion {
           continue;
         if (it->second.close_node())
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           // There should be no leave-open nodes here
           assert(!it->second.leave_open());
 #endif
@@ -412,7 +412,7 @@ namespace Legion {
                                           std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
 #endif
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
@@ -429,7 +429,7 @@ namespace Legion {
                       it->second.advance_mask, target, applied_conditions);
           continue;
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(it->second.close_node());
 #endif
         if (it->second.close_top())
@@ -455,7 +455,7 @@ namespace Legion {
     void VersionInfo::reset(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
 #endif
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it =
@@ -492,7 +492,7 @@ namespace Legion {
     void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator it = 
             node_infos.begin(); it != node_infos.end(); it++)
       {
@@ -541,12 +541,12 @@ namespace Legion {
                                                     bool capture)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
 #endif
       LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator finder = 
         node_infos.find(node);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != node_infos.end());
 #endif
       // Check to see if we need a reset
@@ -567,7 +567,7 @@ namespace Legion {
     {
       LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
         node_infos.find(node);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(finder != node_infos.end());
 #endif
       // It's alright for this to return NULL
@@ -601,7 +601,7 @@ namespace Legion {
     void VersionInfo::unpack_version_info(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
       assert(packed_buffer == NULL);
 #endif
@@ -644,7 +644,7 @@ namespace Legion {
       // Copy over all the version infos from the logical region up to
       // the upper bound node
       RegionTreeNode *current = context->get_node(handle);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current != NULL);
 #endif
       LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator 
@@ -688,7 +688,7 @@ namespace Legion {
       {
         LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder =
           rhs.node_infos.find(current);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != rhs.node_infos.end());
 #endif
         node_infos.insert(*finder);
@@ -698,7 +698,7 @@ namespace Legion {
           break;
         }
         current = current->get_parent();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(current != NULL);
 #endif
         current_finder = node_infos.find(current);
@@ -709,7 +709,7 @@ namespace Legion {
     void VersionInfo::clone_from(const VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
       assert(!rhs.packed);
 #endif
@@ -718,14 +718,14 @@ namespace Legion {
             rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
       {
         const NodeInfo &current = nit->second;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(current.field_versions != NULL);
 #endif
         NodeInfo &next = node_infos[nit->first];
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(next.physical_state == NULL);
 #endif
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(next.physical_state == NULL); 
 #endif
         // Capture the physical state versions, but not the actual state
@@ -744,7 +744,7 @@ namespace Legion {
     void VersionInfo::clone_from(const VersionInfo &rhs,CompositeCloser &closer)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
       assert(!rhs.packed);
 #endif
@@ -755,7 +755,7 @@ namespace Legion {
             rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
       {
         const NodeInfo &current = nit->second;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(current.field_versions != NULL);
 #endif
         FieldMask clone_mask;         
@@ -771,7 +771,7 @@ namespace Legion {
         if (!clone_mask)
           continue;
         NodeInfo &next = node_infos[nit->first];
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(next.physical_state == NULL); 
 #endif
         if (current.physical_state != NULL)
@@ -783,7 +783,7 @@ namespace Legion {
         next.bit_mask = current.bit_mask & NodeInfo::BASE_FIELDS_MASK;
         // Needs capture is already set
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(node_infos.find(upper_bound_node) != node_infos.end());
 #endif
     }
@@ -793,7 +793,7 @@ namespace Legion {
                                   AddressSpaceID local_space, ContextID ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!packed);
 #endif
       rez.serialize(local_space);
@@ -827,7 +827,7 @@ namespace Legion {
       }
       if (node_infos.size() > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(upper_bound_node != NULL);
 #endif
         if (upper_bound_node->is_region())
@@ -847,7 +847,7 @@ namespace Legion {
     void VersionInfo::unpack_buffer(RegionTreeForest *forest, ContextID ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(packed);
       assert(packed_buffer != NULL);
 #endif
@@ -907,7 +907,7 @@ namespace Legion {
         info.physical_state = node->get_physical_state(ctx, *this,
                                                        false/*capture*/);
       PhysicalState *state = info.physical_state;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (!info.advance_mask)
         assert(state->advance_states.empty());
 #endif
@@ -924,7 +924,7 @@ namespace Legion {
           rez.serialize(it1->second);
           continue;
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(state->version_states.find(it1->first) != 
                 state->version_states.end());
 #endif
@@ -975,7 +975,7 @@ namespace Legion {
     {
       NodeInfo &info = node_infos[node];
       CurrentState *manager = node->get_current_state_ptr(ctx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       info.physical_state = legion_new<PhysicalState>(manager, node);
 #else
       info.physical_state = legion_new<PhysicalState>(manager);
@@ -989,7 +989,7 @@ namespace Legion {
       derez.deserialize(num_versions);
       if (num_versions > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(info.field_versions == NULL);
 #endif
         info.field_versions = new FieldVersions();
@@ -1030,7 +1030,7 @@ namespace Legion {
           {
             DistributedCollectable *dc = 
               node->context->runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             VersionState *state = dynamic_cast<VersionState*>(dc);
             assert(state != NULL);
 #else
@@ -1190,7 +1190,7 @@ namespace Legion {
       // until we have traversed the entire path.
       while (true)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(node != NULL);
 #endif
         depth = node->get_depth();
@@ -1642,7 +1642,7 @@ namespace Legion {
             // Skip any deferred views, they don't actually count here
             if (it->first->is_deferred_view())
               continue;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(it->first->as_instance_view()->is_materialized_view());
 #endif
             MaterializedView *cur_view = 
@@ -1752,7 +1752,7 @@ namespace Legion {
     void CurrentState::check_init(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
@@ -1894,7 +1894,7 @@ namespace Legion {
                                  const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_version_infos.empty() || 
               (current_version_infos.size() == 1));
       assert(previous_version_infos.empty());
@@ -1913,11 +1913,11 @@ namespace Legion {
       {
         LegionMap<VersionID,VersionStateInfo>::aligned::iterator finder = 
           current_version_infos.find(init_version);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder != current_version_infos.end());
 #endif
         finder->second.valid_fields |= user_mask;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(finder->second.states.size() == 1);
 #endif
         LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
@@ -1926,7 +1926,7 @@ namespace Legion {
                               targets, init_op_id, init_index, corresponding);
         it->second |= user_mask;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
     }
@@ -1944,7 +1944,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(owner->context->runtime, 
                         CURRENT_STATE_RECORD_VERSION_NUMBERS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
       version_info.sanity_check(owner);
       assert(!close_top || !leave_open);
@@ -1974,7 +1974,7 @@ namespace Legion {
         node_info.advance_mask |= mask;
       if (node_info.physical_state == NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         node_info.physical_state = legion_new<PhysicalState>(this, owner);
 #else
         node_info.physical_state = legion_new<PhysicalState>(this);
@@ -2011,7 +2011,7 @@ namespace Legion {
           }
           LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
             finder = current_version_infos.find(vit->first+1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(finder != current_version_infos.end());
           assert(!(overlap - finder->second.valid_fields));
 #endif
@@ -2114,7 +2114,7 @@ namespace Legion {
           state->add_version_state(init_state, unversioned);
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
     }
@@ -2125,7 +2125,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(owner->context->runtime, 
                         CURRENT_STATE_ADVANCE_VERSION_NUMBERS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
       // First filter out fields in the previous
@@ -2336,7 +2336,7 @@ namespace Legion {
         if (next_finder != current_version_infos.end())
         {
           // We know it doesn't exist yet
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           // Just to be completely safe
           assert(next_finder->second.states.find(new_state) ==
                  next_finder->second.states.end());
@@ -2376,7 +2376,7 @@ namespace Legion {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
               it = to_add.begin(); it != to_add.end(); it++)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(current_version_infos.find(it->first->version_number) ==
                  current_version_infos.end());
 #endif
@@ -2386,7 +2386,7 @@ namespace Legion {
           info.valid_fields = it->second;
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
     } 
@@ -2408,7 +2408,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AddressSpace local_space = owner->context->runtime->address_space;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(owner_space != local_space);
 #endif
       return legion_new<VersionState>(vid, owner->context->runtime, 
@@ -2430,7 +2430,7 @@ namespace Legion {
         {
           DistributedCollectable *dc = 
             runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           result = dynamic_cast<VersionState*>(dc);
           assert(result != NULL);
 #else
@@ -2450,7 +2450,7 @@ namespace Legion {
                                             TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState temp_state(this, node);
 #else
       PhysicalState temp_state(this);
@@ -2521,7 +2521,7 @@ namespace Legion {
         return (open_state == rhs.open_state);
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((open_state == OPEN_SINGLE_REDUCE) ||
                (open_state == OPEN_MULTI_REDUCE));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
@@ -2548,12 +2548,12 @@ namespace Legion {
         else
           finder->second |= it->second;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
 #endif
       if (redop > 0)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!open_children.empty());
 #endif
         // For the reductions, handle the case where we need to merge
@@ -2704,7 +2704,7 @@ namespace Legion {
                                             bool leave_open, bool read_only)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // should never be both, but can be neither
       assert(!(leave_open && read_only));
 #endif
@@ -2753,7 +2753,7 @@ namespace Legion {
     void LogicalCloser::record_flush_only_fields(const FieldMask &flush_only)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!flush_only_fields);
 #endif
       flush_only_fields = flush_only;
@@ -3032,7 +3032,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(node->context->runtime, 
                         LOGICAL_CLOSER_RECORD_VERSION_NUMBERS_CALL);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!!local_mask);
 #endif
       // If we have dirty below then we do need previous
@@ -3159,7 +3159,7 @@ namespace Legion {
                                   const InstanceSet &target_set)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(upper_targets.empty());
 #endif
       // Figure out which instances need updates before we can close to them
@@ -3217,7 +3217,7 @@ namespace Legion {
               const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(lower_targets.size() == close_targets.size());
 #endif
       // Iterate through all our instances and issue updates where necessary
@@ -3251,7 +3251,7 @@ namespace Legion {
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(lower_targets.size() == close_targets.size());
 #endif
       for (unsigned idx = 0; idx < lower_targets.size(); idx++)
@@ -3424,17 +3424,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(CurrentState *m)
       : manager(m)
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         , node(NULL)
 #endif
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(false); // shouldn't be calling this constructor in debug mode
 #endif
     }
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(CurrentState *m, RegionTreeNode *n)
       : manager(m), node(n)
@@ -3446,7 +3446,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalState::PhysicalState(const PhysicalState &rhs)
       : manager(NULL)
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         , node(NULL)
 #endif
     //--------------------------------------------------------------------------
@@ -3567,7 +3567,7 @@ namespace Legion {
                         PHYSICAL_STATE_CAPTURE_STATE_CALL);
       if (split_node)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!path_only);
 #endif
         // Capture everything but the open children below from the
@@ -3694,7 +3694,7 @@ namespace Legion {
                         PHYSICAL_STATE_APPLY_STATE_CALL);
       if (!advance_states.empty())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!!advance_mask);
 #endif
         FieldMask non_advance_mask = advance_mask;
@@ -3734,7 +3734,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!advance_mask);
 #endif
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
@@ -3764,7 +3764,7 @@ namespace Legion {
                         PHYSICAL_STATE_FILTER_AND_APPLY_STATE_CALL);
       if (!advance_states.empty())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!!advance_mask);
 #endif
         FieldMask non_advance_mask = advance_mask;
@@ -3806,7 +3806,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!advance_mask);
 #endif
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
@@ -3871,7 +3871,7 @@ namespace Legion {
     PhysicalState* PhysicalState::clone(bool capture_state, bool need_adv) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState *result = legion_new<PhysicalState>(manager, node);
 #else
       PhysicalState *result = legion_new<PhysicalState>(manager);
@@ -3916,7 +3916,7 @@ namespace Legion {
                                         bool capture_state, bool need_adv) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState *result = legion_new<PhysicalState>(manager, node);
 #else
       PhysicalState *result = legion_new<PhysicalState>(manager);
@@ -4079,7 +4079,7 @@ namespace Legion {
             continue;
           if (it->first->is_deferred_view())
             continue;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(it->first->as_instance_view()->is_materialized_view());
 #endif
           MaterializedView *current = 
@@ -4184,7 +4184,7 @@ namespace Legion {
                                CurrentState *man)
       : DistributedCollectable(rt, id, own_sp, local_sp), version_number(vid), 
         manager(man), state_lock(Reservation::create_reservation())
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         , currently_active(true), currently_valid(true)
 #endif
     //--------------------------------------------------------------------------
@@ -4219,7 +4219,7 @@ namespace Legion {
     {
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!currently_valid);
 #endif 
       // If we are the owner, then remote resource 
@@ -4281,7 +4281,7 @@ namespace Legion {
                                  const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -4322,7 +4322,7 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!term_event.exists());
 #endif
           LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
@@ -4700,7 +4700,7 @@ namespace Legion {
                         VERSION_STATE_FILTER_AND_MERGE_PHYSICAL_STATE_CALL);
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // If we are the top we should not be in final mode
       // Use filter_children as a proxy for the top of a close node
       // We'll see if this continues to be true in the future
@@ -4838,7 +4838,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(currently_active); // should be monotonic
 #endif
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -4859,7 +4859,7 @@ namespace Legion {
     {
       // Do nothing we only care about valid references
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(currently_active);
       currently_active = false;
 #endif
@@ -4890,7 +4890,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(currently_valid); // should be monotonic
 #endif
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -4910,7 +4910,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(currently_valid);
       currently_valid = false;
 #endif
@@ -5013,7 +5013,7 @@ namespace Legion {
       }
       if (!is_owner())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!!remaining_mask);
 #endif
         // If we make it here, then send a request to the owner
@@ -5072,7 +5072,7 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(!!remaining_mask);
 #endif
           // Make a user event and record it as a precondition   
@@ -5106,7 +5106,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner()); // should only be called on the owner node
 #endif
       // Iterate over the initial nodes and issue requests to the first
@@ -5171,7 +5171,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner()); // should only be called on the owner node
 #endif
       // First check to see if there are any final versions we can copy from
@@ -5451,7 +5451,7 @@ namespace Legion {
                                                       FieldMask &path_only_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       AutoLock s_lock(state_lock);
@@ -5463,7 +5463,7 @@ namespace Legion {
                                  AddressSpaceID source, FieldMask &initial_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       AutoLock s_lock(state_lock);
@@ -5482,7 +5482,7 @@ namespace Legion {
       {
         // If we are not the owner, we should definitely be able to handle this
         std::set<Event> launch_preconditions;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         FieldMask remaining_mask = request_mask;
 #endif
         if (request_kind == FINAL_VERSION_REQUEST)
@@ -5495,7 +5495,7 @@ namespace Legion {
               continue;
             launch_preconditions.insert(it->first);
           }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           remaining_mask -= final_fields;
 #endif
         }
@@ -5509,11 +5509,11 @@ namespace Legion {
               continue;
             launch_preconditions.insert(it->first);
           }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           remaining_mask -= initial_fields;
 #endif
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         else
         {
           assert(request_kind == PATH_ONLY_VERSION_REQUEST);
@@ -5609,14 +5609,14 @@ namespace Legion {
               // Handle cases where we were supposed to send something
               if (request_kind == INITIAL_VERSION_REQUEST)
               {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(it->kind == PATH_ONLY_VERSION_REQUEST);
 #endif
                 path_only_local_index = idx;
               }
               else
               {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((request_kind == FINAL_VERSION_REQUEST) &&
                        (it->kind == INITIAL_VERSION_REQUEST));
 #endif
@@ -5831,7 +5831,7 @@ namespace Legion {
               pending_views.push_back(view);
               continue;
             }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(view->is_instance_view());
             assert(view->as_instance_view()->is_reduction_view());
 #endif
@@ -5950,7 +5950,7 @@ namespace Legion {
       FieldMask path_only_mask;
       derez.deserialize(path_only_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       VersionState *vs = dynamic_cast<VersionState*>(target);
       assert(vs != NULL);
 #else
@@ -5974,7 +5974,7 @@ namespace Legion {
       FieldMask initial_mask;
       derez.deserialize(initial_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       VersionState *vs = dynamic_cast<VersionState*>(target);
       assert(vs != NULL);
 #else
@@ -6004,7 +6004,7 @@ namespace Legion {
       FieldMask request_mask;
       derez.deserialize(request_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       VersionState *vs = dynamic_cast<VersionState*>(target);
       assert(vs != NULL);
 #else
@@ -6027,7 +6027,7 @@ namespace Legion {
       VersionRequestKind req_kind;
       derez.deserialize(req_kind);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       VersionState *vs = dynamic_cast<VersionState*>(target);
       assert(vs != NULL);
 #else
@@ -6051,7 +6051,7 @@ namespace Legion {
     void RegionTreePath::initialize(unsigned min, unsigned max)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(min <= max);
 #endif
       min_depth = min;
@@ -6064,7 +6064,7 @@ namespace Legion {
                                         const ColorPoint &color)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(min_depth <= depth);
       assert(depth <= max_depth);
 #endif
@@ -6084,7 +6084,7 @@ namespace Legion {
     bool RegionTreePath::has_child(unsigned depth) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(min_depth <= depth);
       assert(depth <= max_depth);
 #endif
@@ -6095,7 +6095,7 @@ namespace Legion {
     const ColorPoint& RegionTreePath::get_child(unsigned depth) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(min_depth <= depth);
       assert(depth <= max_depth);
       assert(has_child(depth));
@@ -6155,7 +6155,7 @@ namespace Legion {
                                 FatTreePath *child)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(children.find(child_color) == children.end());
 #endif
       children[child_color] = child;
@@ -6166,7 +6166,7 @@ namespace Legion {
                                 FatTreePath *child, IndexTreeNode *tree_node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(children.find(child_color) == children.end());
 #endif
       bool overlap = false;
@@ -6324,7 +6324,7 @@ namespace Legion {
     CompositeView* InstanceRef::get_composite_view(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(composite);
       assert(ptr.view != NULL);
 #endif     
@@ -6335,7 +6335,7 @@ namespace Legion {
     MappingInstance InstanceRef::get_mapping_instance(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!composite);
 #endif
       return MappingInstance(ptr.manager);
@@ -6347,14 +6347,14 @@ namespace Legion {
     {
       if (composite)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(ptr.view != NULL);
 #endif
         ptr.view->add_base_valid_ref(source);
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(ptr.manager != NULL);
 #endif
         ptr.manager->add_base_valid_ref(source);
@@ -6367,7 +6367,7 @@ namespace Legion {
     {
       if (composite)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(ptr.view != NULL);
 #endif
         if (ptr.view->remove_base_valid_ref(source))
@@ -6375,7 +6375,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(ptr.manager != NULL);
 #endif
         if (ptr.manager->remove_base_valid_ref(source))
@@ -6398,7 +6398,7 @@ namespace Legion {
     Memory InstanceRef::get_memory(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!composite);
       assert(ptr.manager != NULL);
 #endif
@@ -6409,7 +6409,7 @@ namespace Legion {
     bool InstanceRef::is_field_set(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!composite);
       assert(ptr.manager != NULL);
 #endif
@@ -6424,7 +6424,7 @@ namespace Legion {
         InstanceRef::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!composite);
       assert(ptr.manager != NULL);
 #endif
@@ -6437,7 +6437,7 @@ namespace Legion {
         InstanceRef::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!composite);
       assert(ptr.manager != NULL);
 #endif
@@ -6599,7 +6599,7 @@ namespace Legion {
     void InstanceSet::make_copy(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(shared);
 #endif
       if (single)
@@ -6667,13 +6667,13 @@ namespace Legion {
         make_copy();
       if (single)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx == 0);
         assert(refs.single != NULL);
 #endif
         return *(refs.single);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < refs.multi->vector.size());
 #endif
       return refs.multi->vector[idx];
@@ -6686,13 +6686,13 @@ namespace Legion {
       // No need to make a copy if shared here since this is read-only
       if (single)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx == 0);
         assert(refs.single != NULL);
 #endif
         return *(refs.single);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < refs.multi->vector.size());
 #endif
       return refs.multi->vector[idx];
@@ -6898,7 +6898,7 @@ namespace Legion {
     {
       if (single)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(refs.single != NULL);
         assert(refs.single->is_composite_ref());
 #endif
@@ -7074,7 +7074,7 @@ namespace Legion {
     {
       if (single)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(refs.single != NULL);
 #endif
         return refs.single->get_field_accessor(fid);
