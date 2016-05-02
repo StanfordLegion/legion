@@ -201,7 +201,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Mapper::Mapper(void)
+    Mapper::Mapper(MapperRuntime *rt)
+      : mapper_runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -212,50 +213,66 @@ namespace Legion {
     {
     }
 
+    /////////////////////////////////////////////////////////////
+    // MapperRuntime
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_locked(MapperContext ctx) const
+    MapperRuntime::MapperRuntime(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MapperRuntime::~MapperRuntime(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::is_locked(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->is_locked(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_lock_mapper(MapperContext ctx, bool read_only) const
+    void MapperRuntime::lock_mapper(MapperContext ctx, bool read_only) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->lock_mapper(ctx, read_only);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_unlock_mapper(MapperContext ctx) const
+    void MapperRuntime::unlock_mapper(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->unlock_mapper(ctx);
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_reentrant(MapperContext ctx) const
+    bool MapperRuntime::is_reentrant(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->is_reentrant(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_enable_reentrant(MapperContext ctx) const
+    void MapperRuntime::enable_reentrant(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->enable_reentrant(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_disable_reentrant(MapperContext ctx) const
+    void MapperRuntime::disable_reentrant(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->disable_reentrant(ctx);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_send_message(MapperContext ctx, Processor target,
+    void MapperRuntime::send_message(MapperContext ctx, Processor target,
                                  const void *message, size_t message_size) const
     //--------------------------------------------------------------------------
     {
@@ -263,7 +280,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_broadcast(MapperContext ctx, const void *message,
+    void MapperRuntime::broadcast(MapperContext ctx, const void *message,
                                            size_t message_size, int radix) const
     //--------------------------------------------------------------------------
     {
@@ -271,14 +288,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MapperEvent Mapper::mapper_rt_create_mapper_event(MapperContext ctx) const
+    MapperEvent MapperRuntime::create_mapper_event(MapperContext ctx) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->create_mapper_event(ctx);
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_has_mapper_event_triggered(MapperContext ctx,
+    bool MapperRuntime::has_mapper_event_triggered(MapperContext ctx,
                                                       MapperEvent event) const
     //--------------------------------------------------------------------------
     {
@@ -286,7 +303,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_trigger_mapper_event(MapperContext ctx, 
+    void MapperRuntime::trigger_mapper_event(MapperContext ctx, 
                                                 MapperEvent event) const
     //--------------------------------------------------------------------------
     {
@@ -294,7 +311,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_wait_on_mapper_event(MapperContext ctx,
+    void MapperRuntime::wait_on_mapper_event(MapperContext ctx,
                                                 MapperEvent event) const
     //--------------------------------------------------------------------------
     {
@@ -302,7 +319,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const ExecutionConstraintSet& Mapper::mapper_rt_find_execution_constraints(
+    const ExecutionConstraintSet& MapperRuntime::find_execution_constraints(
                          MapperContext ctx, TaskID task_id, VariantID vid) const
     //--------------------------------------------------------------------------
     {
@@ -311,7 +328,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     const TaskLayoutConstraintSet& 
-      Mapper::mapper_rt_find_task_layout_constraints(MapperContext ctx, 
+      MapperRuntime::find_task_layout_constraints(MapperContext ctx, 
                                             TaskID task_id, VariantID vid) const
     //--------------------------------------------------------------------------
     {
@@ -320,7 +337,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     const LayoutConstraintSet&
-      Mapper::mapper_rt_find_layout_constraints(MapperContext ctx, 
+      MapperRuntime::find_layout_constraints(MapperContext ctx, 
                                                 LayoutConstraintID id) const
     //--------------------------------------------------------------------------
     {
@@ -328,7 +345,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LayoutConstraintID Mapper::mapper_rt_register_layout(MapperContext ctx,
+    LayoutConstraintID MapperRuntime::register_layout(MapperContext ctx,
                                    const LayoutConstraintSet &constraints,
                                    FieldSpace handle) const
     //--------------------------------------------------------------------------
@@ -337,7 +354,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_release_layout(MapperContext ctx,
+    void MapperRuntime::release_layout(MapperContext ctx,
                                           LayoutConstraintID layout_id) const
     //--------------------------------------------------------------------------
     {
@@ -345,7 +362,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_do_constraints_conflict(MapperContext ctx,
+    bool MapperRuntime::do_constraints_conflict(MapperContext ctx,
         LayoutConstraintID set1, LayoutConstraintID set2) const
     //--------------------------------------------------------------------------
     {
@@ -353,7 +370,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_do_constraints_entail(MapperContext ctx,
+    bool MapperRuntime::do_constraints_entail(MapperContext ctx,
         LayoutConstraintID source, LayoutConstraintID target) const
     //--------------------------------------------------------------------------
     {
@@ -361,7 +378,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_find_valid_variants(MapperContext ctx,TaskID task_id,
+    void MapperRuntime::find_valid_variants(MapperContext ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
                                          Processor::Kind kind) const
     //--------------------------------------------------------------------------
@@ -370,7 +387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_leaf_variant(MapperContext ctx, TaskID task_id,
+    bool MapperRuntime::is_leaf_variant(MapperContext ctx, TaskID task_id,
                                            VariantID variant_id) const
     //--------------------------------------------------------------------------
     {
@@ -378,7 +395,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_inner_variant(MapperContext ctx, TaskID task_id,
+    bool MapperRuntime::is_inner_variant(MapperContext ctx, TaskID task_id,
                                             VariantID variant_id) const
     //--------------------------------------------------------------------------
     {
@@ -386,7 +403,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_idempotent_variant(MapperContext ctx, 
+    bool MapperRuntime::is_idempotent_variant(MapperContext ctx, 
                                      TaskID task_id, VariantID variant_id) const
     //--------------------------------------------------------------------------
     {
@@ -394,7 +411,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_filter_variants(MapperContext ctx, const Task &task,
+    void MapperRuntime::filter_variants(MapperContext ctx, const Task &task,
             const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
                                            std::vector<VariantID> &variants)
     //--------------------------------------------------------------------------
@@ -403,7 +420,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+    void MapperRuntime::filter_instances(MapperContext ctx, const Task &task,
                                       VariantID chosen_variant, 
                         std::vector<std::vector<PhysicalInstance> > &instances,
                                std::vector<std::set<FieldID> > &missing_fields)
@@ -414,7 +431,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+    void MapperRuntime::filter_instances(MapperContext ctx, const Task &task,
                                       unsigned index, VariantID chosen_variant,
                                       std::vector<PhysicalInstance> &instances,
                                       std::set<FieldID> &missing_fields)
@@ -425,7 +442,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_create_physical_instance(
+    bool MapperRuntime::create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
@@ -438,7 +455,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_create_physical_instance(
+    bool MapperRuntime::create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
@@ -451,7 +468,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_find_or_create_physical_instance(
+    bool MapperRuntime::find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions, 
@@ -465,7 +482,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_find_or_create_physical_instance(
+    bool MapperRuntime::find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
@@ -479,7 +496,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_find_physical_instance(
+    bool MapperRuntime::find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -492,7 +509,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_find_physical_instance(
+    bool MapperRuntime::find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions, 
@@ -505,7 +522,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_set_garbage_collection_priority(MapperContext ctx,
+    void MapperRuntime::set_garbage_collection_priority(MapperContext ctx,
                     const PhysicalInstance &instance, GCPriority priority) const
     //--------------------------------------------------------------------------
     {
@@ -513,7 +530,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_acquire_instance(MapperContext ctx, 
+    bool MapperRuntime::acquire_instance(MapperContext ctx, 
                                          const PhysicalInstance &instance) const
     //--------------------------------------------------------------------------
     {
@@ -521,7 +538,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_acquire_instances(MapperContext ctx,
+    bool MapperRuntime::acquire_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const
     //--------------------------------------------------------------------------
     {
@@ -529,7 +546,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+    bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
                                 std::vector<PhysicalInstance> &instances) const
     //--------------------------------------------------------------------------
     {
@@ -537,7 +554,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_acquire_instances(MapperContext ctx,
+    bool MapperRuntime::acquire_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const
     //--------------------------------------------------------------------------
     {
@@ -545,7 +562,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+    bool MapperRuntime::acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances) const
     //--------------------------------------------------------------------------
     {
@@ -553,7 +570,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_release_instance(MapperContext ctx, 
+    void MapperRuntime::release_instance(MapperContext ctx, 
                                          const PhysicalInstance &instance) const
     //--------------------------------------------------------------------------
     {
@@ -561,7 +578,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_release_instances(MapperContext ctx,
+    void MapperRuntime::release_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const
     //--------------------------------------------------------------------------
     {
@@ -569,7 +586,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_release_instances(MapperContext ctx,
+    void MapperRuntime::release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const
     //--------------------------------------------------------------------------
     {
@@ -577,7 +594,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::mapper_rt_get_index_partition(MapperContext ctx,
+    IndexPartition MapperRuntime::get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
     {
@@ -585,7 +602,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::mapper_rt_get_index_subspace(MapperContext ctx, 
+    IndexSpace MapperRuntime::get_index_subspace(MapperContext ctx, 
                                           IndexPartition p, Color c) const
     //--------------------------------------------------------------------------
     {
@@ -593,7 +610,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::mapper_rt_get_index_subspace(MapperContext ctx, 
+    IndexSpace MapperRuntime::get_index_subspace(MapperContext ctx, 
                                IndexPartition p, const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
@@ -601,7 +618,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_has_multiple_domains(MapperContext ctx,
+    bool MapperRuntime::has_multiple_domains(MapperContext ctx,
                                                 IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -609,7 +626,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::mapper_rt_get_index_space_domain(MapperContext ctx, 
+    Domain MapperRuntime::get_index_space_domain(MapperContext ctx, 
                                                     IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -617,7 +634,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_get_index_space_domains(MapperContext ctx, 
+    void MapperRuntime::get_index_space_domains(MapperContext ctx, 
                           IndexSpace handle, std::vector<Domain> &domains) const
     //--------------------------------------------------------------------------
     {
@@ -625,7 +642,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::mapper_rt_get_index_partition_color_space(MapperContext ctx,
+    Domain MapperRuntime::get_index_partition_color_space(MapperContext ctx,
                                                          IndexPartition p) const
     //--------------------------------------------------------------------------
     {
@@ -633,7 +650,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_get_index_space_partition_colors(MapperContext ctx,
+    void MapperRuntime::get_index_space_partition_colors(MapperContext ctx,
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
     {
@@ -641,7 +658,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_is_index_partition_disjoint(MapperContext ctx,
+    bool MapperRuntime::is_index_partition_disjoint(MapperContext ctx,
                                                        IndexPartition p) const
     //--------------------------------------------------------------------------
     {
@@ -649,7 +666,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::mapper_rt_get_index_space_color(MapperContext ctx, 
+    Color MapperRuntime::get_index_space_color(MapperContext ctx, 
                                                   IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -657,7 +674,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::mapper_rt_get_index_partition_color(MapperContext ctx,
+    Color MapperRuntime::get_index_partition_color(MapperContext ctx,
                                                     IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -665,7 +682,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::mapper_rt_get_parent_index_space(MapperContext ctx,
+    IndexSpace MapperRuntime::get_parent_index_space(MapperContext ctx,
                                                     IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -673,7 +690,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_has_parent_index_partition(MapperContext ctx,
+    bool MapperRuntime::has_parent_index_partition(MapperContext ctx,
                                                       IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -681,7 +698,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::mapper_rt_get_parent_index_partition(
+    IndexPartition MapperRuntime::get_parent_index_partition(
                                      MapperContext ctx, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -689,7 +706,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t Mapper::mapper_rt_get_field_size(MapperContext ctx,
+    size_t MapperRuntime::get_field_size(MapperContext ctx,
                                            FieldSpace handle, FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -697,7 +714,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_get_field_space_fields(MapperContext ctx, 
+    void MapperRuntime::get_field_space_fields(MapperContext ctx, 
                           FieldSpace handle, std::vector<FieldID> &fields) const
     //--------------------------------------------------------------------------
     {
@@ -705,7 +722,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::mapper_rt_get_logical_partition(MapperContext ctx,
+    LogicalPartition MapperRuntime::get_logical_partition(MapperContext ctx,
                               LogicalRegion parent, IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -713,7 +730,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::mapper_rt_get_logical_partition_by_color(
+    LogicalPartition MapperRuntime::get_logical_partition_by_color(
                         MapperContext ctx, LogicalRegion par, Color color) const
     //--------------------------------------------------------------------------
     {
@@ -721,7 +738,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::mapper_rt_get_logical_partition_by_tree(
+    LogicalPartition MapperRuntime::get_logical_partition_by_tree(
                                       MapperContext ctx, IndexPartition part,
                                       FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
@@ -730,7 +747,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::mapper_rt_get_logical_subregion(MapperContext ctx,
+    LogicalRegion MapperRuntime::get_logical_subregion(MapperContext ctx,
                                LogicalPartition parent, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -738,7 +755,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::mapper_rt_get_logical_subregion_by_color(
+    LogicalRegion MapperRuntime::get_logical_subregion_by_color(
                      MapperContext ctx, LogicalPartition par, Color color) const
     //--------------------------------------------------------------------------
     {
@@ -746,7 +763,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::mapper_rt_get_logical_subregion_by_tree(
+    LogicalRegion MapperRuntime::get_logical_subregion_by_tree(
                                       MapperContext ctx, IndexSpace handle, 
                                       FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
@@ -755,7 +772,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::mapper_rt_get_logical_region_color(MapperContext ctx,
+    Color MapperRuntime::get_logical_region_color(MapperContext ctx,
                                                      LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
@@ -763,7 +780,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::mapper_rt_get_logical_partition_color(MapperContext ctx,
+    Color MapperRuntime::get_logical_partition_color(MapperContext ctx,
                                                   LogicalPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -771,7 +788,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::mapper_rt_get_parent_logical_region(MapperContext ctx,
+    LogicalRegion MapperRuntime::get_parent_logical_region(MapperContext ctx,
                                                     LogicalPartition part) const
     //--------------------------------------------------------------------------
     {
@@ -779,7 +796,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    bool Mapper::mapper_rt_has_parent_logical_partition(MapperContext ctx,
+    bool MapperRuntime::has_parent_logical_partition(MapperContext ctx,
                                                      LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
@@ -787,7 +804,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::mapper_rt_get_parent_logical_partition(
+    LogicalPartition MapperRuntime::get_parent_logical_partition(
                                        MapperContext ctx, LogicalRegion r) const
     //--------------------------------------------------------------------------
     {
@@ -795,7 +812,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
         TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
         bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -805,7 +822,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -815,7 +832,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -825,7 +842,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -835,7 +852,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -845,7 +862,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -855,7 +872,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
@@ -865,7 +882,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, TaskID task_id,
+    void MapperRuntime::retrieve_name(MapperContext ctx, TaskID task_id,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -873,7 +890,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, IndexSpace handle,
+    void MapperRuntime::retrieve_name(MapperContext ctx, IndexSpace handle,
                                          const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -881,7 +898,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, 
+    void MapperRuntime::retrieve_name(MapperContext ctx, 
                                      IndexPartition handle, const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -889,7 +906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx,
+    void MapperRuntime::retrieve_name(MapperContext ctx,
                                          FieldSpace handle, const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -897,7 +914,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle,
+    void MapperRuntime::retrieve_name(MapperContext ctx, FieldSpace handle,
                                          FieldID fid, const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -905,7 +922,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, 
+    void MapperRuntime::retrieve_name(MapperContext ctx, 
                                       LogicalRegion handle, const char *&result)
     //--------------------------------------------------------------------------
     {
@@ -913,7 +930,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::mapper_rt_retrieve_name(MapperContext ctx,
+    void MapperRuntime::retrieve_name(MapperContext ctx,
                                    LogicalPartition handle, const char *&result)
     //--------------------------------------------------------------------------
     {

@@ -124,10 +124,18 @@ namespace Legion {
       // TODO fill this in with the kinds of profiling requests
     };
 
+    /**
+     * \class Mapper
+     * This class is a pure virtual class that defines the mapper interface.
+     * Every mapper must be derived from this class and implement all of
+     * the virtual methods declared in this class.
+     */
     class Mapper {
     public:
-      Mapper(void);
+      Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
+    public:
+      MapperRuntime *const mapper_runtime;
     public:
       /**
        ** ----------------------------------------------------------------------
@@ -1164,161 +1172,163 @@ namespace Legion {
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
+    };
+
+    /**
+     * \class MapperRuntime
+     * This class defines the set of calls that a mapper can perform as part
+     * of its execution. All the calls must be given a MapperContext which 
+     * comes from the enclosing mapper call context in which the runtime 
+     * method is being invoked.
+     */
+    class MapperRuntime {
     protected:
-      /* 
-       * All of the methods below this point are utility methods that mappers
-       * can use as part of their execution. They all require that the 
-       * MapperContext handle passed into one of the mapper calls above
-       * be passed as an argument to ensure that they are only invoked as
-       * part of a standard mapper call (as opposed to an application invoked
-       * mapper call). Any one of these calls may result in the mapper being
-       * pre-empted. The mapper can control whether other mapper calls can
-       * be made during this time by setting the mapper model in the 
-       * 'get_mapper_sync_model' mapper call and/or enabling/disabling
-       * the re-entrancy of mapper calls using the methods below.
-       */
-    protected:
+      // These runtime objects will be created by Legion
+      friend class Internal::Runtime;
+      MapperRuntime(void);
+      ~MapperRuntime(void);
+    public:
       //------------------------------------------------------------------------
       // Methods for managing access to mapper state in the concurrent model
       // These calls are no-ops in the serialized mapper model 
       //------------------------------------------------------------------------
-      bool mapper_rt_is_locked(MapperContext ctx) const;
-      void mapper_rt_lock_mapper(MapperContext ctx, 
+      bool is_locked(MapperContext ctx) const;
+      void lock_mapper(MapperContext ctx, 
                                  bool read_only = false) const;
-      void mapper_rt_unlock_mapper(MapperContext ctx) const;
-    protected:
+      void unlock_mapper(MapperContext ctx) const;
+    public:
       //------------------------------------------------------------------------
       // Methods for managing the re-entrant state in the serialized model
       // These calls are no-ops in the concurrent mapper model
       //------------------------------------------------------------------------
-      bool mapper_rt_is_reentrant(MapperContext ctx) const;
-      void mapper_rt_enable_reentrant(MapperContext ctx) const;
-      void mapper_rt_disable_reentrant(MapperContext ctx) const;
-    protected:
+      bool is_reentrant(MapperContext ctx) const;
+      void enable_reentrant(MapperContext ctx) const;
+      void disable_reentrant(MapperContext ctx) const;
+    public:
       //------------------------------------------------------------------------
       // Methods for communicating with other mappers of the same kind
       //------------------------------------------------------------------------
-      void mapper_rt_send_message(MapperContext ctx, Processor target, 
+      void send_message(MapperContext ctx, Processor target, 
                                 const void *message, size_t message_size) const;
-      void mapper_rt_broadcast(MapperContext ctx, const void *message, 
+      void broadcast(MapperContext ctx, const void *message, 
                                size_t message_size, int radix = 4) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for managing the execution of mapper tasks 
       //------------------------------------------------------------------------
-      //MapperEvent mapper_rt_launch_mapper_task(MapperContext ctx, 
+      //MapperEvent launch_mapper_task(MapperContext ctx, 
       //                                         Processor::TaskFuncID tid,
       //                                         const TaskArgument &arg) const;
 
-      //void mapper_rt_defer_mapper_call(MapperContext ctx, 
+      //void defer_mapper_call(MapperContext ctx, 
       //                                 MapperEvent event) const;
 
-      //MapperEvent mapper_rt_merge_mapper_events(MapperContext ctx,
+      //MapperEvent merge_mapper_events(MapperContext ctx,
       //                              const std::set<MapperEvent> &events)const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for managing mapper events 
       //------------------------------------------------------------------------
-      MapperEvent mapper_rt_create_mapper_event(MapperContext ctx) const;
-      bool mapper_rt_has_mapper_event_triggered(MapperContext ctx,
+      MapperEvent create_mapper_event(MapperContext ctx) const;
+      bool has_mapper_event_triggered(MapperContext ctx,
                                                 MapperEvent event) const;
-      void mapper_rt_trigger_mapper_event(MapperContext ctx, 
+      void trigger_mapper_event(MapperContext ctx, 
                                           MapperEvent event) const;
-      void mapper_rt_wait_on_mapper_event(MapperContext ctx,
+      void wait_on_mapper_event(MapperContext ctx,
                                           MapperEvent event) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for managing constraint information
       //------------------------------------------------------------------------
-      const ExecutionConstraintSet& mapper_rt_find_execution_constraints(
+      const ExecutionConstraintSet& find_execution_constraints(
                        MapperContext ctx, TaskID task_id, VariantID vid) const;
-      const TaskLayoutConstraintSet& mapper_rt_find_task_layout_constraints(
+      const TaskLayoutConstraintSet& find_task_layout_constraints(
                        MapperContext ctx, TaskID task_id, VariantID vid) const;
-      const LayoutConstraintSet& mapper_rt_find_layout_constraints(
+      const LayoutConstraintSet& find_layout_constraints(
                                MapperContext ctx, LayoutConstraintID id) const;
-      LayoutConstraintID mapper_rt_register_layout(MapperContext ctx, 
+      LayoutConstraintID register_layout(MapperContext ctx, 
                           const LayoutConstraintSet &layout_constraints,
                           FieldSpace handle = FieldSpace::NO_SPACE) const;
-      void mapper_rt_release_layout(MapperContext ctx, 
+      void release_layout(MapperContext ctx, 
                                     LayoutConstraintID layout_id) const;
-      bool mapper_rt_do_constraints_conflict(MapperContext ctx,
+      bool do_constraints_conflict(MapperContext ctx,
                        LayoutConstraintID set1, LayoutConstraintID set2) const;
-      bool mapper_rt_do_constraints_entail(MapperContext ctx,
+      bool do_constraints_entail(MapperContext ctx,
                    LayoutConstraintID source, LayoutConstraintID target) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for manipulating variants 
       //------------------------------------------------------------------------
-      void mapper_rt_find_valid_variants(MapperContext ctx, TaskID task_id, 
+      void find_valid_variants(MapperContext ctx, TaskID task_id, 
                                          std::vector<VariantID> &valid_variants,
                                Processor::Kind kind = Processor::NO_KIND) const;
-      bool mapper_rt_is_leaf_variant(MapperContext ctx, TaskID task_id,
+      bool is_leaf_variant(MapperContext ctx, TaskID task_id,
                                      VariantID variant_id) const;
-      bool mapper_rt_is_inner_variant(MapperContext ctx, TaskID task_id,
+      bool is_inner_variant(MapperContext ctx, TaskID task_id,
                                       VariantID variant_id)const;
-      bool mapper_rt_is_idempotent_variant(MapperContext ctx, TaskID task_id,
+      bool is_idempotent_variant(MapperContext ctx, TaskID task_id,
                                            VariantID variant_id) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions
       //------------------------------------------------------------------------
       // Filter variants based on the chosen instances
-      void mapper_rt_filter_variants(MapperContext ctx, const Task &task,
+      void filter_variants(MapperContext ctx, const Task &task,
              const std::vector<std::vector<PhysicalInstance> > &chosen_intances,
                            std::vector<VariantID>              &variants);
       // Filter instances based on a chosen variant
-      void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+      void filter_instances(MapperContext ctx, const Task &task,
                                       VariantID chosen_variant, 
                         std::vector<std::vector<PhysicalInstance> > &instances,
                                std::vector<std::set<FieldID> > &missing_fields);
       // Filter a specific set of instances for one region requirement
-      void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+      void filter_instances(MapperContext ctx, const Task &task,
                                       unsigned index, VariantID chosen_variant,
                                       std::vector<PhysicalInstance> &instances,
                                       std::set<FieldID> &missing_fields);
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for managing physical instances 
       //------------------------------------------------------------------------
-      bool mapper_rt_create_physical_instance(
+      bool create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
                                     GCPriority priority = 0) const;
-      bool mapper_rt_create_physical_instance(
+      bool create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
                                     GCPriority priority = 0) const;
-      bool mapper_rt_find_or_create_physical_instance(
+      bool find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire = true,GCPriority priority = 0,
                                     bool tight_region_bounds = false) const;
-      bool mapper_rt_find_or_create_physical_instance(
+      bool find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
                                     bool acquire = true,GCPriority priority = 0,
                                     bool tight_region_bounds = false) const;
-      bool mapper_rt_find_physical_instance(
+      bool find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
                                     bool tight_region_bounds = false) const;
-      bool mapper_rt_find_physical_instance(
+      bool find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool acquire=true,
                                     bool tight_region_bounds = false) const;
-      void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
+      void set_garbage_collection_priority(MapperContext ctx, 
                 const PhysicalInstance &instance, GCPriority priority) const;
       // These methods will atomically check to make sure that these instances
       // are still valid and then add an implicit reference to them to ensure
@@ -1329,176 +1339,176 @@ namespace Legion {
       // release the references after the call. Instances can also be released
       // as might be expected if a mapper opts to attempt to map a different
       // instance, but this is an optional performance improvement.
-      bool mapper_rt_acquire_instance(MapperContext ctx, 
+      bool acquire_instance(MapperContext ctx, 
                                       const PhysicalInstance &instance) const;
-      bool mapper_rt_acquire_instances(MapperContext ctx,
+      bool acquire_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
-      bool mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+      bool acquire_and_filter_instances(MapperContext ctx,
                                 std::vector<PhysicalInstance> &instances) const;
-      bool mapper_rt_acquire_instances(MapperContext ctx,
+      bool acquire_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
-      bool mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+      bool acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances) const;
-      void mapper_rt_release_instance(MapperContext ctx, 
+      void release_instance(MapperContext ctx, 
                                         const PhysicalInstance &instance) const;
-      void mapper_rt_release_instances(MapperContext ctx,
+      void release_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
-      void mapper_rt_release_instances(MapperContext ctx,
+      void release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
-      IndexPartition mapper_rt_get_index_partition(MapperContext ctx,
+      IndexPartition get_index_partition(MapperContext ctx,
                                          IndexSpace parent, Color color) const;
 
-      IndexSpace mapper_rt_get_index_subspace(MapperContext ctx, 
+      IndexSpace get_index_subspace(MapperContext ctx, 
                                     IndexPartition p, Color c) const;
-      IndexSpace mapper_rt_get_index_subspace(MapperContext ctx, 
+      IndexSpace get_index_subspace(MapperContext ctx, 
                    IndexPartition p, const DomainPoint &color) const;
 
-      bool mapper_rt_has_multiple_domains(MapperContext ctx, 
+      bool has_multiple_domains(MapperContext ctx, 
                                           IndexSpace handle) const;
 
-      Domain mapper_rt_get_index_space_domain(MapperContext ctx, 
+      Domain get_index_space_domain(MapperContext ctx, 
                                               IndexSpace handle) const;
 
-      void mapper_rt_get_index_space_domains(MapperContext ctx, 
+      void get_index_space_domains(MapperContext ctx, 
                          IndexSpace handle, std::vector<Domain> &domains) const;
 
-      Domain mapper_rt_get_index_partition_color_space(MapperContext ctx,
+      Domain get_index_partition_color_space(MapperContext ctx,
                                                        IndexPartition p) const;
 
-      void mapper_rt_get_index_space_partition_colors(MapperContext ctx, 
+      void get_index_space_partition_colors(MapperContext ctx, 
                                   IndexSpace sp, std::set<Color> &colors) const;
 
-      bool mapper_rt_is_index_partition_disjoint(MapperContext ctx, 
+      bool is_index_partition_disjoint(MapperContext ctx, 
                                                  IndexPartition p) const;
 
       template<unsigned DIM>
-      IndexSpace mapper_rt_get_index_subspace(MapperContext ctx, 
+      IndexSpace get_index_subspace(MapperContext ctx, 
         IndexPartition p, LegionRuntime::Arrays::Point<DIM> &color_point) const;
 
-      Color mapper_rt_get_index_space_color(MapperContext ctx, 
+      Color get_index_space_color(MapperContext ctx, 
                                             IndexSpace handle) const;
 
-      Color mapper_rt_get_index_partition_color(MapperContext ctx, 
+      Color get_index_partition_color(MapperContext ctx, 
                                                 IndexPartition handle) const;
 
-      IndexSpace mapper_rt_get_parent_index_space(MapperContext ctx,
+      IndexSpace get_parent_index_space(MapperContext ctx,
                                                   IndexPartition handle) const;
 
-      bool mapper_rt_has_parent_index_partition(MapperContext ctx, 
+      bool has_parent_index_partition(MapperContext ctx, 
                                                 IndexSpace handle) const;
       
-      IndexPartition mapper_rt_get_parent_index_partition(MapperContext ctx,
+      IndexPartition get_parent_index_partition(MapperContext ctx,
                                                 IndexSpace handle) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for introspecting field spaces 
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
-      size_t mapper_rt_get_field_size(MapperContext ctx, 
+      size_t get_field_size(MapperContext ctx, 
                             FieldSpace handle, FieldID fid) const;
 
-      void mapper_rt_get_field_space_fields(MapperContext ctx, 
+      void get_field_space_fields(MapperContext ctx, 
            FieldSpace handle, std::vector<FieldID> &fields) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees
       //------------------------------------------------------------------------
-      LogicalPartition mapper_rt_get_logical_partition(MapperContext ctx, 
+      LogicalPartition get_logical_partition(MapperContext ctx, 
                              LogicalRegion parent, IndexPartition handle) const;
 
-      LogicalPartition mapper_rt_get_logical_partition_by_color(
+      LogicalPartition get_logical_partition_by_color(
                     MapperContext ctx, LogicalRegion parent, Color color) const;
 
-      LogicalPartition mapper_rt_get_logical_partition_by_tree(
+      LogicalPartition get_logical_partition_by_tree(
                     MapperContext ctx, IndexPartition handle, 
                     FieldSpace fspace, RegionTreeID tid) const;
 
-      LogicalRegion mapper_rt_get_logical_subregion(MapperContext ctx, 
+      LogicalRegion get_logical_subregion(MapperContext ctx, 
                               LogicalPartition parent, IndexSpace handle) const;
 
-      LogicalRegion mapper_rt_get_logical_subregion_by_color(MapperContext ctx,
+      LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
                                     LogicalPartition parent, Color color) const;
       
-      LogicalRegion mapper_rt_get_logical_subregion_by_tree(MapperContext ctx,
+      LogicalRegion get_logical_subregion_by_tree(MapperContext ctx,
                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const;
 
-      Color mapper_rt_get_logical_region_color(MapperContext ctx, 
+      Color get_logical_region_color(MapperContext ctx, 
                                      LogicalRegion handle) const;
 
-      Color mapper_rt_get_logical_partition_color(MapperContext ctx,
+      Color get_logical_partition_color(MapperContext ctx,
                                                 LogicalPartition handle) const;
 
-      LogicalRegion mapper_rt_get_parent_logical_region(MapperContext ctx,
+      LogicalRegion get_parent_logical_region(MapperContext ctx,
                                                 LogicalPartition handle) const;
 
-      bool mapper_rt_has_parent_logical_partition(MapperContext ctx, 
+      bool has_parent_logical_partition(MapperContext ctx, 
                                                   LogicalRegion handle) const;
 
-      LogicalPartition mapper_rt_get_parent_logical_partition(MapperContext ctx,
+      LogicalPartition get_parent_logical_partition(MapperContext ctx,
                                                     LogicalRegion handle) const;
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Methods for getting access to semantic info
       //------------------------------------------------------------------------
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+      void retrieve_semantic_information(MapperContext ctx, 
           TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+      void retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+      void retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+      void retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+      void retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+      void retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+      void retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, TaskID task_id,
+      void retrieve_name(MapperContext ctx, TaskID task_id,
                                    const char *&result);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, IndexSpace handle,
+      void retrieve_name(MapperContext ctx, IndexSpace handle,
                                    const char *&result);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, IndexPartition handle,
+      void retrieve_name(MapperContext ctx, IndexPartition handle,
                                    const char *&result);
       
-      void mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle,
+      void retrieve_name(MapperContext ctx, FieldSpace handle,
                                    const char *&result);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle, 
+      void retrieve_name(MapperContext ctx, FieldSpace handle, 
                                    FieldID fid, const char *&result);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, LogicalRegion handle,
+      void retrieve_name(MapperContext ctx, LogicalRegion handle,
                                    const char *&result);
 
-      void mapper_rt_retrieve_name(MapperContext ctx, LogicalPartition handle,
+      void retrieve_name(MapperContext ctx, LogicalPartition handle,
                                    const char *&result);
-    protected:
+    public:
       //------------------------------------------------------------------------
       // Support for packing tunable values
       //------------------------------------------------------------------------
       template<typename T>
-      void mapper_rt_pack_tunable(const T &result, SelectTunableOutput &output);
+      void pack_tunable(const T &result, Mapper::SelectTunableOutput &output);
     };
 
   }; // namespace Mapping

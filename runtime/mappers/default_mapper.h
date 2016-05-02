@@ -98,7 +98,7 @@ namespace Legion {
         Utilities::MappingProfiler::Profile sample;
       };
     public:
-      DefaultMapper(Machine machine, Processor local, 
+      DefaultMapper(MapperRuntime *rt, Machine machine, Processor local, 
                     const char *maper_name = NULL);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);

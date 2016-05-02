@@ -190,7 +190,12 @@ namespace Legion {
     class MapperEvent;
     class ProfilingRequestSet;
     class Mapper;
+    class MapperRuntime;
     class DefaultMapper;
+    class ShimMapper;
+    class TestMapper;
+    class DebugMapper;
+    class ReplayMapper;
   };
   
   namespace Internal {
@@ -1320,7 +1325,7 @@ namespace Legion {
   typedef std::map<DomainPoint,Domain> DomainPointColoring;
   typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-      Runtime *rt, const std::set<Processor> &local_procs);
+                Runtime *rt, const std::set<Processor> &local_procs);
   typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
       const DomainPoint&, Runtime *rt);
   typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 

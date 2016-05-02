@@ -4246,6 +4246,12 @@ namespace Legion {
       // function called before start-up.  This function is specified
       // by calling the 'set_registration_callback' static method.
       //------------------------------------------------------------------------
+      
+      /**
+       * Get the mapper runtime for passing to a newly created mapper.
+       * @return a pointer to the mapper runtime for this Legion instance
+       */
+      Mapping::MapperRuntime* get_mapper_runtime(void);
 
       /**
        * Dynamically generate a unique Mapper ID for use across the machine
@@ -4930,6 +4936,23 @@ namespace Legion {
                                          VariantID vid = AUTO_GENERATE_ID,
                               TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
+    public:
+      //------------------------------------------------------------------------
+      // Runtime calls for Mappers 
+      //------------------------------------------------------------------------
+      /* 
+       * All of the methods in this block are utility methods that mappers
+       * can use as part of their execution. They are differentiated from
+       * normal runtime calls by the requirement that they take a mapper
+       * context instead of a normal context. These contexts can only be 
+       * obtained through a normal mapper call. Any one of these calls may 
+       * result in the mapper being pre-empted. The mapper can control 
+       * whether other mapper calls can be made during this time by setting 
+       * the mapper model in the 'get_mapper_sync_model' mapper call and/or 
+       * enabling/disabling the re-entrancy of mapper calls using the 
+       * methods below.
+       */
+
     public:
       /**
        * Provide a mechanism for finding the high-level runtime

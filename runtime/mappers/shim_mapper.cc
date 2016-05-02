@@ -368,9 +368,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShimMapper::ShimMapper(Machine m, Runtime *rt, 
+    ShimMapper::ShimMapper(Machine m, Runtime *rt, MapperRuntime *mrt, 
                            Processor local, const char *name/*=NULL*/)
-      : DefaultMapper(m, local,(name == NULL) ? create_shim_name(local) : name),
+      : DefaultMapper(mrt, m, local,(name == NULL) ? 
+          create_shim_name(local) : name),
         local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -421,7 +422,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(const ShimMapper &rhs)
-      : DefaultMapper(Machine::get_machine(), Processor::NO_PROC),
+      : DefaultMapper(rhs.mapper_runtime, Machine::get_machine(), 
+          Processor::NO_PROC),
         local_kind(Processor::LOC_PROC), machine(rhs.machine), runtime(NULL),
         machine_interface(Utilities::MachineQueryInterface(rhs.machine))
     //--------------------------------------------------------------------------
@@ -580,7 +582,7 @@ namespace Legion {
           local_task.regions[idx].mapping_failed = false;
           local_task.regions[idx].selected_memory = Memory::NO_MEMORY;
         }
-        mapper_rt_release_instances(ctx, output.chosen_instances);
+        mapper_runtime->release_instances(ctx, output.chosen_instances);
         // Back around the loop we go
       }
     }
@@ -776,8 +778,8 @@ namespace Legion {
           local_copy.dst_requirements[idx].mapping_failed = false;
           local_copy.dst_requirements[idx].selected_memory = Memory::NO_MEMORY;
         }
-        mapper_rt_release_instances(ctx, output.src_instances);
-        mapper_rt_release_instances(ctx, output.dst_instances);
+        mapper_runtime->release_instances(ctx, output.src_instances);
+        mapper_runtime->release_instances(ctx, output.dst_instances);
         // Back around the loop we go
       }
     }
@@ -863,7 +865,7 @@ namespace Legion {
         notify_mapping_failed(&local_inline);
         local_inline.requirement.mapping_failed = false;
         local_inline.requirement.selected_memory = Memory::NO_MEMORY;
-        mapper_rt_release_instances(ctx, output.chosen_instances);
+        mapper_runtime->release_instances(ctx, output.chosen_instances);
         // Back around the loop we go
       }
     }
@@ -1040,14 +1042,14 @@ namespace Legion {
     Color ShimMapper::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return mapper_rt_get_logical_region_color(current_ctx, handle);
+      return mapper_runtime->get_logical_region_color(current_ctx, handle);
     }
 
     //--------------------------------------------------------------------------
     bool ShimMapper::has_parent_logical_partition(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return mapper_rt_has_parent_logical_partition(current_ctx, handle);
+      return mapper_runtime->has_parent_logical_partition(current_ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -1055,21 +1057,21 @@ namespace Legion {
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return mapper_rt_get_parent_logical_partition(current_ctx, handle);
+      return mapper_runtime->get_parent_logical_partition(current_ctx, handle);
     }
     
     //--------------------------------------------------------------------------
     LogicalRegion ShimMapper::get_parent_logical_region(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return mapper_rt_get_parent_logical_region(current_ctx, handle);
+      return mapper_runtime->get_parent_logical_region(current_ctx, handle);
     }
 
     //--------------------------------------------------------------------------
     void ShimMapper::broadcast_message(const void *message, size_t message_size)
     //--------------------------------------------------------------------------
     {
-      mapper_rt_broadcast(current_ctx, message, message_size);
+      mapper_runtime->broadcast(current_ctx, message, message_size);
     }
 
     //--------------------------------------------------------------------------
@@ -1085,33 +1087,33 @@ namespace Legion {
                                                 task_name, false, 0/*ret*/);
       // Get all the variants for each of the processor kinds
       std::vector<VariantID> cpu_variants, gpu_variants, io_variants;  
-      mapper_rt_find_valid_variants(ctx, task_id, 
+      mapper_runtime->find_valid_variants(ctx, task_id, 
                                     cpu_variants, Processor::LOC_PROC);
-      mapper_rt_find_valid_variants(ctx, task_id,
+      mapper_runtime->find_valid_variants(ctx, task_id,
                                     gpu_variants, Processor::TOC_PROC);
-      mapper_rt_find_valid_variants(ctx, task_id,
+      mapper_runtime->find_valid_variants(ctx, task_id,
                                     io_variants, Processor::IO_PROC);
       for (std::vector<VariantID>::const_iterator it = cpu_variants.begin();
             it != cpu_variants.end(); it++)
       {
-        bool is_leaf = mapper_rt_is_leaf_variant(ctx, task_id, *it);
-        bool is_inner = mapper_rt_is_inner_variant(ctx, task_id, *it);
+        bool is_leaf = mapper_runtime->is_leaf_variant(ctx, task_id, *it);
+        bool is_inner = mapper_runtime->is_inner_variant(ctx, task_id, *it);
         collection->add_variant(*it, Processor::LOC_PROC, true, true,
                                 is_inner, is_leaf, *it);
       }
       for (std::vector<VariantID>::const_iterator it = gpu_variants.begin();
             it != gpu_variants.end(); it++)
       {
-        bool is_leaf = mapper_rt_is_leaf_variant(ctx, task_id, *it);
-        bool is_inner = mapper_rt_is_inner_variant(ctx, task_id, *it);
+        bool is_leaf = mapper_runtime->is_leaf_variant(ctx, task_id, *it);
+        bool is_inner = mapper_runtime->is_inner_variant(ctx, task_id, *it);
         collection->add_variant(*it, Processor::TOC_PROC, true, true,
                                 is_inner, is_leaf, *it);
       }
       for (std::vector<VariantID>::const_iterator it = io_variants.begin();
             it != io_variants.end(); it++)
       {
-        bool is_leaf = mapper_rt_is_leaf_variant(ctx, task_id, *it);
-        bool is_inner = mapper_rt_is_inner_variant(ctx, task_id, *it);
+        bool is_leaf = mapper_runtime->is_leaf_variant(ctx, task_id, *it);
+        bool is_inner = mapper_runtime->is_inner_variant(ctx, task_id, *it);
         collection->add_variant(*it, Processor::IO_PROC, true, true,
                                 is_inner, is_leaf, *it);
       }
@@ -1194,7 +1196,7 @@ namespace Legion {
         PhysicalInstance instance;
         if (create_only)
         {
-          if (mapper_rt_create_physical_instance(ctx, *it, constraints,
+          if (mapper_runtime->create_physical_instance(ctx, *it, constraints,
                 space_regions, instance, true/*acquire*/, gc_priority))
           {
             result.push_back(instance);
@@ -1205,7 +1207,7 @@ namespace Legion {
         else
         {
           bool created;
-          if (mapper_rt_find_or_create_physical_instance(ctx, *it,
+          if (mapper_runtime->find_or_create_physical_instance(ctx, *it,
                 constraints, space_regions, instance, created, 
                 true/*acquire*/, gc_priority))
           {

@@ -1710,6 +1710,7 @@ namespace Legion {
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
+      Mapping::MapperRuntime* get_mapper_runtime(void);
       MapperID generate_dynamic_mapper_id(void);
       static MapperID& get_current_static_mapper_id(void);
       static MapperID generate_static_mapper_id(void);
@@ -2354,6 +2355,8 @@ namespace Legion {
     public:
       // The Runtime wrapper for this class
       Legion::Runtime *const external;
+      // The Mapper Runtime for this class
+      Legion::Mapping::MapperRuntime *const mapper_runtime;
       // The machine object for this runtime
       const Machine machine;
       const AddressSpaceID address_space; 

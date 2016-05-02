@@ -30,9 +30,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplayMapper::ReplayMapper(Machine m, Processor local,
+    ReplayMapper::ReplayMapper(MapperRuntime *rt, Machine m, Processor local,
                                const char *replay_file, const char *name)
-      : machine(m), local_proc(local), 
+      : Mapper(rt), machine(m), local_proc(local), 
         mapper_name((name == NULL) ? create_replay_name(local) : name)
     //--------------------------------------------------------------------------
     {
@@ -40,8 +40,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplayMapper::ReplayMapper(const ReplayMapper &rhs)
-      : machine(rhs.machine), local_proc(rhs.local_proc), 
-        mapper_name(rhs.mapper_name)
+      : Mapper(rhs.mapper_runtime), machine(rhs.machine), 
+        local_proc(rhs.local_proc), mapper_name(rhs.mapper_name)
     //--------------------------------------------------------------------------
     {
       // should never be called

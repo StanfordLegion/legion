@@ -6904,7 +6904,9 @@ namespace Legion {
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
                      const std::map<Processor,AddressSpaceID> &processor_spaces)
-      : external(new Legion::Runtime(this)),machine(m),address_space(unique),
+      : external(new Legion::Runtime(this)),
+        mapper_runtime(new Legion::Mapping::MapperRuntime()),
+        machine(m), address_space(unique),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
@@ -7074,8 +7076,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
-      : external(NULL), machine(rhs.machine), address_space(0), 
-        runtime_stride(0), profiler(NULL), forest(NULL),
+      : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
+        address_space(0), runtime_stride(0), profiler(NULL), forest(NULL),
         has_explicit_utility_procs(false),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
@@ -7096,6 +7098,7 @@ namespace Legion {
       }
       delete forest;
       delete external;
+      delete mapper_runtime;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
@@ -7550,7 +7553,8 @@ namespace Legion {
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
-            Mapper *mapper = new Mapping::TestMapper(machine, it->first);
+            Mapper *mapper = 
+              new Mapping::TestMapper(mapper_runtime, machine, it->first);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
@@ -7561,7 +7565,8 @@ namespace Legion {
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
-            Mapper *mapper = new Mapping::DefaultMapper(machine, it->first);
+            Mapper *mapper = 
+              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
@@ -7583,8 +7588,8 @@ namespace Legion {
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
-            Mapper *mapper = 
-              new Mapping::DebugMapper(machine, it->first, replay_file);
+            Mapper *mapper = new Mapping::DebugMapper(mapper_runtime, 
+                                            machine, it->first, replay_file);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
@@ -7594,8 +7599,8 @@ namespace Legion {
           for (std::map<Processor,ProcessorManager*>::const_iterator it =
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
-            Mapper *mapper = 
-              new Mapping::ReplayMapper(machine, it->first, replay_file);
+            Mapper *mapper = new Mapping::ReplayMapper(mapper_runtime, 
+                                            machine, it->first, replay_file);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
@@ -12711,6 +12716,13 @@ namespace Legion {
         proc_managers[proc]->add_mapper(map_id, manager, 
                                         true/*check*/, true/*own*/);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    Mapping::MapperRuntime* Runtime::get_mapper_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_runtime;
     }
 
     //--------------------------------------------------------------------------
