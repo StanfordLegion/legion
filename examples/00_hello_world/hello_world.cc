@@ -19,8 +19,8 @@
 #include "legion.h"
 
 // All of the important user-level objects live 
-// in the high-level runtime namespace.
-using namespace LegionRuntime::HighLevel;
+// in the Legion namespace.
+using namespace Legion;
 
 // We use an enum to declare the IDs for user-level tasks
 enum TaskID {
@@ -31,7 +31,7 @@ enum TaskID {
 // the extension that they can have different return values.
 void hello_world_task(const Task *task, 
                       const std::vector<PhysicalRegion> &regions,
-                      Context ctx, HighLevelRuntime *runtime)
+                      Context ctx, Runtime *runtime)
 {
   // A task runs just like a normal C++ function.
   printf("Hello World!\n");
@@ -43,7 +43,7 @@ int main(int argc, char **argv)
 {
   // Before starting the Legion runtime, you first have to tell it
   // what the ID is for the top-level task.
-  HighLevelRuntime::set_top_level_task_id(HELLO_WORLD_ID);
+  Runtime::set_top_level_task_id(HELLO_WORLD_ID);
   // Before starting the Legion runtime, all possible tasks that the
   // runtime can potentially run must be registered with the runtime.
   // The function pointer is passed as a template argument.  The second
@@ -53,11 +53,11 @@ int main(int argc, char **argv)
   // task can be run as a single task or an index space task (covered
   // in more detail in later examples).  The top-level task must always
   // be able to be run as a single task.
-  HighLevelRuntime::register_legion_task<hello_world_task>(HELLO_WORLD_ID,
+  Runtime::register_legion_task<hello_world_task>(HELLO_WORLD_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
 
   // Now we're ready to start the runtime, so tell it to begin the
   // execution.  We'll never return from this call, but its return 
   // signature will return an int to satisfy the type checker.
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }
