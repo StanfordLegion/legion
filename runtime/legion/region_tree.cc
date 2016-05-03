@@ -13618,7 +13618,7 @@ namespace Legion {
         std::vector<PhysicalManager*> to_convert;
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          PhysicalManager *manager = targets[0].get_manager();
+          PhysicalManager *manager = targets[idx].get_manager();
           target_views[idx] = find_instance_view(manager, context);
           // Quick check to see if we are done early
           if (target_views[idx] != NULL)
@@ -13635,7 +13635,10 @@ namespace Legion {
         if (to_convert.size() == 1)
         {
           // Easy case, there is only one deduplicated instance
-          InstanceView *result = convert_reference(to_convert[0], context);
+          InstanceView *result = is_region() ? 
+            as_region_node()->convert_reference_region(to_convert[0], context) :
+            as_partition_node()->convert_reference_partition(to_convert[0], 
+                                                             context);
           for (unsigned idx = 0; idx < target_views.size(); idx++)
           {
             if (target_views[idx] != NULL) // skip if we already did it
