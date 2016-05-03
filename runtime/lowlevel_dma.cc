@@ -62,6 +62,7 @@ namespace LegionRuntime {
     typedef Realm::CoreReservationParameters CoreReservationParameters;
 
     Logger::Category log_dma("dma");
+    extern Logger::Category log_new_dma;
     Logger::Category log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
@@ -4218,7 +4219,13 @@ namespace LegionRuntime {
 	state = STATE_QUEUED;
 	// <NEWDMA>
 	mark_ready();
-	perform_dma();
+	bool ok_to_run = mark_started();
+	if (ok_to_run) {
+	  perform_dma();
+	  mark_finished(true/*successful*/);
+	} else {
+	  mark_finished(false/*!successful*/);
+	}
 	return true;
 	// </NEWDMA>
 	assert(rq != 0);
@@ -4764,7 +4771,13 @@ namespace LegionRuntime {
 	state = STATE_QUEUED;
 	// <NEWDMA>
 	mark_ready();
-	perform_dma();
+	bool ok_to_run = mark_started();
+	if (ok_to_run) {
+	  perform_dma();
+	  mark_finished(true/*successful*/);
+	} else {
+	  mark_finished(false/*!successful*/);
+	}
 	return true;
 	// </NEWDMA>
 	assert(rq != 0);
@@ -5222,6 +5235,7 @@ namespace Realm {
     {
       if(redop_id == 0) {
 	// not a reduction, so sort fields by src/dst mem pairs
+        log_new_dma.info("Performing copy op");
 
 	OASByMem oas_by_mem;
 
@@ -5384,6 +5398,7 @@ namespace Realm {
 	// final event is merge of all individual copies' events
 	return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
       } else {
+        log_new_dma.info("Performing reduction op redop_id(%d)", redop_id);
 	// we're doing a reduction - the semantics require that all source fields be pulled
 	//  together and applied as a "structure" to the reduction op
 
