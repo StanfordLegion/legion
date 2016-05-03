@@ -1508,7 +1508,13 @@ namespace Legion {
       // Support for packing tunable values
       //------------------------------------------------------------------------
       template<typename T>
-      void pack_tunable(const T &result, Mapper::SelectTunableOutput &output);
+      void pack_tunable(const T &result, Mapper::SelectTunableOutput &output)
+      {
+        T *output_result = new T();
+        *output_result = result;
+        output.value = output_result;
+        output.size = sizeof(T);
+      }
     };
 
   }; // namespace Mapping
