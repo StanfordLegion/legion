@@ -505,7 +505,7 @@ namespace Legion {
             chosen--;
           index++;
         }
-        while (!handled[index])
+        while (handled[index])
           index++;
         assert(index < int(sources.size()));
         ranking.push_back(sources[index]);
