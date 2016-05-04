@@ -666,7 +666,7 @@ PartitionEqualShim::task(const Task *task,
     ptr_t start = it.next_span(count);
     size_t chunk = chunksize + (leftover > 0 ? 1 : 0);
 
-    while (elt + count >= chunk) {
+    while (count > 0 && elt + count >= chunk) {
       size_t rest = chunk - elt;
       assert(c);
       coloring[upgrade_point(c.p)].ranges.insert(std::pair<ptr_t, ptr_t>(start, start.value + rest - 1));
