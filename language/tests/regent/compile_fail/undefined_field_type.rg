@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- undefined_field_type.rg:43: field type is undefined or nil
+--   solution_n    : Solution,
+--            ^
+
 import "regent"
 
 -- This test ensures that the compiler complains about fields

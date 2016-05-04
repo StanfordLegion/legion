@@ -1661,6 +1661,9 @@ function specialize.stat_fspace_field(cx, node)
   cx.env:insert(node, node.field_name, symbol)
 
   local field_type = node.type_expr(cx.env:env())
+  if not field_type then
+    log.error(node, "field type is undefined or nil")
+  end
   symbol:settype(field_type)
 
   return  {
