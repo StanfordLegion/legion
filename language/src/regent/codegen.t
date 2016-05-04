@@ -1343,7 +1343,7 @@ function vref:reduce(cx, value, op, expr_type)
                 [std.quote_binary_op(fold_op, field_value, result)]
             end
           else
-            local v = terralib.newsymbol()
+            local v = terralib.newsymbol(expr_type.type)
             local assignment = quote
               var [v] = [result][ [i - 1] ]
             end
