@@ -3292,7 +3292,7 @@ function codegen.expr_partition_equal(cx, node)
            local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
            local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
            return quote
-             [blockify].block_size.x[ [i] ] = [block] / [colors]
+             [blockify].block_size.x[ [i] ] = ([block] + [colors] - 1) / [colors]
            end
          end)]
       var [ip] = [create_index_partition](

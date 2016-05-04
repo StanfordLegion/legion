@@ -68,6 +68,6 @@ end
 
 task main()
   regentlib.assert(f() == 70, "test failed")
-  regentlib.assert(g() == 18, "test failed")
+  regentlib.assert(g() == 28, "test failed")
 end
 regentlib.start(main)
