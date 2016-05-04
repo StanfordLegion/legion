@@ -1459,7 +1459,7 @@ namespace LegionRuntime {
         assert(mapping.preimage_is_dense(pir.p));
 #endif
         c[DomainPoint::from_point<T::IDIM>(pir.p)] =
-          Domain::from_rect<T::IDIM>(preimage);
+          Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
       }
       IndexPartition result = create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
