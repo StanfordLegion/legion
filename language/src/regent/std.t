@@ -1780,28 +1780,51 @@ function std.index_type(base_type, displayname)
       return quote
         var v = [expr].__ptr
       in
-        pt { x = arrayof(int64, [fields:map(function(field) return `(v.[field]) end)]) }
+        pt { x = arrayof(c.coord_t, [fields:map(function(field) return `(v.[field]) end)]) }
       end
     else
-      return quote var v = [expr].__ptr in pt { x = arrayof(int64, v) } end
+      return quote var v = [expr].__ptr in pt { x = arrayof(c.coord_t, v) } end
+    end
+  end
+
+  function st:to_domain_point(expr)
+    local index = terralib.newsymbol(self.impl_type)
+
+    local values
+    if self.fields then
+      values = self.fields:map(function(field) return `(index.[field]) end)
+    else
+      values = terralib.newlist({index})
+    end
+    for _ = #values + 1, 3 do
+      values:insert(0)
+    end
+
+    return quote
+      var [index] = [expr].__ptr
+    in
+      c.legion_domain_point_t {
+        dim = [data.max(self.dim, 1)],
+        point_data = arrayof(c.coord_t, [values]),
+      }
     end
   end
 
   return setmetatable(st, index_type)
 end
 
-local struct int2d { x : int, y : int }
-terra int2d.metamethods.__add(a : int2d, b : int2d) : int2d
-  return int2d { x = a.x + b.x, y = a.y + b.y }
+local struct __int2d { x : int, y : int }
+terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
+  return __int2d { x = a.x + b.x, y = a.y + b.y }
 end
-local struct int3d { x : int, y : int, z : int }
-terra int3d.metamethods.__add(a : int3d, b : int3d) : int3d
-  return int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+local struct __int3d { x : int, y : int, z : int }
+terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
+  return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
 end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
-std.int2d = std.index_type(int2d, "int2d")
-std.int3d = std.index_type(int3d, "int3d")
+std.int2d = std.index_type(__int2d, "int2d")
+std.int3d = std.index_type(__int3d, "int3d")
 
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
@@ -1916,14 +1939,26 @@ std.wild = std.newsymbol(std.untyped, "wild")
 std.disjoint = terralib.types.newstruct("disjoint")
 std.aliased = terralib.types.newstruct("aliased")
 
-function std.partition(disjointness, region)
+function std.partition(disjointness, region_symbol, colors_symbol)
+  if colors_symbol == nil then
+    colors_symbol = std.newsymbol(std.ispace(std.ptr))
+  end
+
   assert(disjointness == std.disjoint or disjointness == std.aliased,
          "Partition type requires disjointness to be one of disjoint or aliased")
-  assert(std.is_symbol(region),
+  assert(std.is_symbol(region_symbol),
          "Partition type requires region to be a symbol")
-  if region:hastype() then
-    assert(terralib.types.istype(region:gettype()) and std.is_region(region:gettype()),
+  if region_symbol:hastype() then
+    assert(terralib.types.istype(region_symbol:gettype()) and
+             std.is_region(region_symbol:gettype()),
            "Parition type requires region")
+  end
+  assert(std.is_symbol(colors_symbol),
+         "Partition type requires colors to be a symbol")
+  if colors_symbol:hastype() then
+    assert(terralib.types.istype(colors_symbol:gettype()) and
+             std.is_ispace(colors_symbol:gettype()),
+           "Parition type requires colors")
   end
 
   local st = terralib.types.newstruct("partition")
@@ -1933,7 +1968,8 @@ function std.partition(disjointness, region)
 
   st.is_partition = true
   st.disjointness = disjointness
-  st.parent_region_symbol = region
+  st.parent_region_symbol = region_symbol
+  st.colors_symbol = colors_symbol
   st.subregions = {}
 
   function st:is_disjoint()
@@ -1950,6 +1986,14 @@ function std.partition(disjointness, region)
              std.is_region(region),
            "Parition type requires region")
     return region
+  end
+
+  function st:colors()
+    local colors = self.colors_symbol:gettype()
+    assert(terralib.types.istype(colors) and
+             std.is_ispace(colors),
+           "Parition type requires colors")
+    return colors
   end
 
   function st:fspace()
