@@ -2187,7 +2187,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   function st:bounds()
     local bounds = terralib.newlist()
     for i, region_symbol in ipairs(self.bounds_symbols) do
-      local region = region_symbol.type
+      local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
         log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region.type))
@@ -2208,6 +2208,10 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     return "vptr(" .. st.N .. ", " ..
            tostring(st.points_to_type) .. ", " ..
            tostring(bounds:mkstring(", ")) .. ")"
+  end
+
+  function st:isvector()
+    return true
   end
 
   return st
@@ -2235,6 +2239,10 @@ std.sov = terralib.memoize(function(struct_type, width)
 
   function st.metamethods.__typename(st)
     return "sov(" .. tostring(st.type) .. ", " .. tostring(st.N) .. ")"
+  end
+
+  function st:isvector()
+    return true
   end
 
   return st
