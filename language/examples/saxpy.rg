@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-finlines", "0"]]
+
+-- FIXME: This test breaks inline optimization.
+
 import "regent"
 
 -- This code has not been optimized and is not high performance.
@@ -34,17 +39,21 @@ do
   end
 end
 
-task test(n: int)
+task test(n: int, np : int)
   var is = ispace(int1d, n)
   var x = region(is, float)
   var y = region(is, float)
 
-  for i in is do
-    x[i] = 1.0
-    y[i] = 0.0
-  end
+  var cs = ispace(int1d, np)
+  var px = partition(equal, x, cs)
+  var py = partition(equal, y, cs)
 
-  saxpy(is, x, y, 0.5)
+  fill(x, 1.0)
+  fill(y, 0.0)
+
+  for c in cs do
+    saxpy(px[c].ispace, px[c], py[c], 0.5)
+  end
 
   for i in is do
     regentlib.assert(abs(y[i] - 0.5) < 0.00001, "test failed")
@@ -52,7 +61,7 @@ task test(n: int)
 end
 
 task main()
-  test(10)
-  test(20)
+  test(10, 2)
+  test(20, 4)
 end
 regentlib.start(main)
