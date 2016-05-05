@@ -1872,6 +1872,9 @@ function std.region(ispace_symbol, fspace_type)
     fspace_type = ispace_symbol
     ispace_symbol = std.newsymbol(std.ispace(std.ptr))
   end
+  if terralib.types.istype(ispace_symbol) then
+    ispace_symbol = std.newsymbol(ispace_symbol)
+  end
 
   if not std.is_symbol(ispace_symbol) then
     error("region expected ispace as argument 1, got " .. tostring(ispace_symbol), 2)

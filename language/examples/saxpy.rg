@@ -29,7 +29,7 @@ terra abs(a : double) : double
   end
 end
 
-task saxpy(is : ispace(int1d), x: region(is, float), y: region(is, float), a: float)
+task saxpy(is : ispace(int1d), x: region(is, float), y: region(ispace(int1d), float), a: float)
 where
   reads(x, y), writes(y)
 do
