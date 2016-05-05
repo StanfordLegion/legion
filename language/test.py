@@ -179,7 +179,7 @@ class Counter:
         self.failed = 0
 
 
-def get_test_specs(spy):
+def get_test_specs(include_spy):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -203,7 +203,7 @@ def get_test_specs(spy):
           os.path.join('examples'),
          )),
     ]
-    if spy:
+    if include_spy:
         return spy
     else:
         return base
