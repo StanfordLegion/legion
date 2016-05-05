@@ -114,9 +114,9 @@ end
 
 task sssp(g : GraphCfg, subgraphs : int,
 	  rn : region(Node), re : region(Edge(wild, wild)),
-	  psrc : partition(aliased, rn),
-	  pdst : partition(disjoint, rn),
-          pe : partition(disjoint, re),
+	  psrc : partition(aliased, rn, ispace(int1d)),
+	  pdst : partition(disjoint, rn, ispace(int1d)),
+          pe : partition(disjoint, re, ispace(int1d)),
 	  root : ptr(Node, rn))
   where reads(re.{n1,n2,cost}), reads writes(rn.{distance,dist_next})
 do

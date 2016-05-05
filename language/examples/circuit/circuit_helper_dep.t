@@ -119,10 +119,10 @@ end
 task helper.dump_graph(conf : CktConfig,
                        rn : region(Node),
                        rw : region(Wire(rn, rn, rn)),
-                       pn_private : partition(disjoint, rn),
-                       pn_shared : partition(disjoint, rn),
-                       pn_ghost : partition(aliased, rn),
-                       pw_outgoing : partition(disjoint, rw))
+                       pn_private : partition(disjoint, rn, ispace(int1d)),
+                       pn_shared : partition(disjoint, rn, ispace(int1d)),
+                       pn_ghost : partition(aliased, rn, ispace(int1d)),
+                       pw_outgoing : partition(disjoint, rw, ispace(int1d)))
 where reads(rn, rw)
 do
   for i = 0, conf.num_pieces do
