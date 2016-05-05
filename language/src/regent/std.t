@@ -898,7 +898,7 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
     local fspace_type = std.type_sub(param_type.element_type.fspace_type, mapping)
     return std.list(std.region(fspace_type))
   else
-    assert(false)
+    return std.type_sub(param_type, mapping)
   end
 end
 
@@ -973,7 +973,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                   " but got " .. tostring(arg_type))
     end
   end
-  return std.type_sub(return_type, mapping)
+  return reconstruct_param_as_arg_type(return_type, mapping)
 end
 
 function std.validate_fields(fields, constraints, params, args)
