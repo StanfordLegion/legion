@@ -846,17 +846,27 @@ end
 local function unify_param_type_args(param, param_type, arg_type, mapping)
   if std.is_region(param_type) and
     type_compatible(param_type:ispace(), arg_type:ispace()) and
-    not (mapping[param] or mapping[param_type]) and
+    not (mapping[param] or mapping[param_type] or mapping[param_type:ispace()]) and
     type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
   then
     mapping[param_type:ispace()] = arg_type:ispace()
   elseif std.is_partition(param_type) and
     type_compatible(param_type:colors(), arg_type:colors()) and
-    not (mapping[param] or mapping[param_type]) and
+    not (mapping[param] or mapping[param_type] or mapping[param_type:colors()]) and
     type_isomorphic(param_type:colors(), arg_type:colors(), mapping)
   then
     mapping[param_type:colors()] = arg_type:colors()
   end
+end
+
+local function reconstruct_param_as_arg_symbol(param_type, mapping)
+  local param_as_arg_symbol = mapping[param_type]
+  for k, v in pairs(mapping) do
+    if std.is_symbol(v) and v:gettype() == mapping[param_type] then
+      param_as_arg_symbol = v
+    end
+  end
+  return param_as_arg_symbol
 end
 
 local function reconstruct_param_as_arg_type(param_type, mapping)
@@ -864,29 +874,24 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
     local index_type = std.type_sub(param_type.index_type, mapping)
     return std.ispace(index_type)
   elseif std.is_region(param_type) then
+    local param_ispace_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:ispace(), mapping) or
+      param_type:ispace()
     local fspace_type = std.type_sub(param_type.fspace_type, mapping)
-    return std.region(fspace_type)
+    return std.region(param_ispace_as_arg_type, fspace_type)
   elseif std.is_partition(param_type) then
-    local param_parent_region = param_type:parent_region()
-    local param_parent_region_as_arg_type = mapping[param_parent_region]
-    for k, v in pairs(mapping) do
-      if std.is_symbol(v) and v:gettype() == mapping[param_parent_region] then
-        param_parent_region_as_arg_type = v
-      end
-    end
+    local param_parent_region_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:parent_region(), mapping)
+    local param_colors_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:colors(), mapping)
     return std.partition(
-      param_type.disjointness, param_parent_region_as_arg_type)
+      param_type.disjointness, param_parent_region_as_arg_type,
+      param_colors_as_arg_type)
   elseif std.is_cross_product(param_type) then
     local param_partitions = param_type:partitions()
     local param_partitions_as_arg_type = param_partitions:map(
       function(param_partition)
-        local param_partition_as_arg_type = mapping[param_partition]
-        for k, v in pairs(mapping) do
-          if std.is_symbol(v) and v:gettype() == mapping[param_partition] then
-            param_partition_as_arg_type = v
-          end
-        end
-        return param_partition_as_arg_type
+        return reconstruct_param_as_arg_symbol(param_partition, mapping)
     end)
     return std.cross_product(unpack(param_partitions_as_arg_type))
   elseif std.is_list_of_regions(param_type) then
@@ -1932,7 +1937,7 @@ function std.region(ispace_symbol, fspace_type)
       if st:is_opaque() then
         return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
       else
-        return "region#" .. tostring(id) .. "(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        return "region#" .. tostring(id) .. "(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
       end
     end
   else
@@ -1940,7 +1945,7 @@ function std.region(ispace_symbol, fspace_type)
       if st:is_opaque() then
         return "region(" .. tostring(st.fspace_type) .. ")"
       else
-        return "region(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        return "region(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
       end
     end
   end
@@ -1954,7 +1959,6 @@ std.disjoint = terralib.types.newstruct("disjoint")
 std.aliased = terralib.types.newstruct("aliased")
 
 function std.partition(disjointness, region_symbol, colors_symbol)
-  local original_colors_symbol = colors_symbol
   if colors_symbol == nil then
     colors_symbol = std.newsymbol(std.ispace(std.ptr))
   end
@@ -1987,7 +1991,6 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   st.is_partition = true
   st.disjointness = disjointness
   st.parent_region_symbol = region_symbol
-  st.original_colors_symbol = original_colors_symbol
   st.colors_symbol = colors_symbol
   st.subregions = {}
 
@@ -2051,18 +2054,18 @@ function std.partition(disjointness, region_symbol, colors_symbol)
     local id = next_region_id
     next_region_id = next_region_id + 1
     function st.metamethods.__typename(st)
-      if st.original_colors_symbol then
-        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring(st.original_colors_symbol) .. ")"
-      else
+      if st:colors():is_opaque() then
         return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      else
+        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
       end
     end
   else
     function st.metamethods.__typename(st)
-      if st.original_colors_symbol then
-        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring(original_colors_symbol) .. ")"
-      else
+      if st:colors():is_opaque() then
         return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      else
+        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
       end
     end
   end
