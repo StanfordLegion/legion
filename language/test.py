@@ -72,7 +72,7 @@ def run(filename, debug, verbose, flags, env):
 
 def run_spy(logfile, verbose):
     cmd = [os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
-           '-l', logfile]
+           '-lpa', logfile]
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
