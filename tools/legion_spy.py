@@ -2052,10 +2052,10 @@ class IndexSpace(object):
                 self.shape |= update
                 # Help with dynamic allocation
                 if self.parent is not None:
-                    self.parent.parent.add_rect(rec)
+                    self.parent.parent.add_rect(rect)
 
     def update_index_sets(self, index_sets):
-        if self.shape.empty():
+        if self.shape is None or self.shape.empty():
             return
         print '    Reducing index sub-space '+str(self)
         local_points = self.shape.copy()
