@@ -290,6 +290,49 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
 }
 
 // -----------------------------------------------------------------------
+// Point Coloring Operations
+// -----------------------------------------------------------------------
+
+legion_point_coloring_t
+legion_point_coloring_create(void)
+{
+  return CObjectWrapper::wrap(new PointColoring());
+}
+
+void
+legion_point_coloring_destroy(
+  legion_point_coloring_t handle_)
+{
+  delete CObjectWrapper::unwrap(handle_);
+}
+
+void
+legion_point_coloring_add_point(legion_point_coloring_t handle_,
+                                legion_domain_point_t color_,
+                                legion_ptr_t point_)
+{
+  PointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  ptr_t point = CObjectWrapper::unwrap(point_);
+
+  (*handle)[color].points.insert(point);
+}
+
+void
+legion_point_coloring_add_range(legion_point_coloring_t handle_,
+                                legion_domain_point_t color_,
+                                legion_ptr_t start_,
+                                legion_ptr_t end_ /**< inclusive */)
+{
+  PointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  ptr_t start = CObjectWrapper::unwrap(start_);
+  ptr_t end = CObjectWrapper::unwrap(end_);
+
+  (*handle)[color].ranges.insert(std::pair<ptr_t, ptr_t>(start, end));
+}
+
+// -----------------------------------------------------------------------
 // Domain Point Coloring Operations
 // -----------------------------------------------------------------------
 
@@ -467,6 +510,28 @@ legion_index_partition_create_domain_coloring(
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     disjoint, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_point_coloring(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_t color_space_,
+  legion_point_coloring_t coloring_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+  PointColoring *coloring = CObjectWrapper::unwrap(coloring_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, color_space, *coloring,
+                                    part_kind, color);
   return CObjectWrapper::wrap(ip);
 }
 
