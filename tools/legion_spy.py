@@ -394,7 +394,7 @@ class Shape(object):
         result -= other
         return result
 
-    def future_rect_sub_helper(self, rect, other, to_add):
+    def rect_sub_helper(self, rect, other, to_add):
         #print str(rect)+' - '+str(other)
         # We are guaranteed to intersect but not dominate
         if rect.lo.dim == 1:
@@ -1775,153 +1775,6 @@ class Shape(object):
             print 'ERROR: Need support for >3 dimensions!'
             assert False   
 
-    def rect_sub_helper(self, rect, other, to_add):
-        print str(rect)+' - '+str(other)
-        new_rects = list()
-        def already_handled(point, skip, prev):
-            if skip.contains_point(point):
-                return True
-            for nrect in prev:
-                if nrect.contains_point(point):
-                    return True
-            return False
-        for point in rect.iterator():
-            # If we already did this point keep going
-            if already_handled(point, other, new_rects):
-                continue
-            # Haven't handled this point yet
-            # Get a 1-D strip
-            lower_x = point.vals[0]
-            next_point = point.copy()
-            next_point.vals[0] -= 1
-            while not already_handled(next_point, other, new_rects):
-                lower_x -= 1
-                next_point.vals[0] -= 1
-                if next_point.vals[0] < rect.lo.vals[0]:
-                    break
-            upper_x = point.vals[0]
-            next_point = point.copy()
-            next_point.vals[0] += 1
-            while not already_handled(next_point, other, new_rects):
-                upper_x += 1
-                next_point.vals[0] += 1
-                if next_point.vals[0] > rect.hi.vals[0]:
-                    break
-            if point.dim == 1:
-                # If we are 1-D then we are done
-                if lower_x == upper_x:
-                    self.points.add(point)
-                else:
-                    lo = Point(1)
-                    lo.vals[0] = lower_x
-                    hi = Point(1)
-                    hi.vals[0] = upper_x
-                    new_rects.append(Rect(lo, hi))
-            else: # More dims so build a 2-D plane
-                lower_y = point.vals[1]
-                while True:
-                    next_point = point.copy()
-                    next_point.vals[1] = lower_y - 1
-                    if next_point.vals[1] < rect.lo.vals[1]:
-                        break
-                    for idx in range(lower_x,upper_x+1):
-                        next_point.vals[0] = idx
-                        if already_handled(next_point, other, new_rects):
-                            add_next = False
-                            break
-                    if add_next:
-                        lower_y -= 1
-                    else:
-                        break
-                upper_y = point.vals[1]
-                while True:
-                    next_point = point.copy()
-                    next_point.vals[1] = upper_y + 1
-                    if next_point.vals[1] > rect.hi.vals[1]:
-                        break
-                    add_next = True
-                    for idx in range(lower_x,upper_x+1):
-                        next_point.vals[0] = idx
-                        if already_handled(next_point, other, new_rects):
-                            add_next = False
-                            break
-                    if add_next:
-                        upper_y += 1
-                    else:
-                        break
-                if point.dim == 2:
-                    # If we are 2-D we are done
-                    if lower_x == upper_x and lower_y == upper_y:
-                        self.points.add(point)
-                    else:
-                        lo = Point(2)
-                        lo.vals[0] = lower_x
-                        lo.vals[1] = lower_y
-                        hi = Point(2)
-                        hi.vals[0] = upper_x
-                        hi.vals[1] = upper_y
-                        new_rects.append(Rect(lo,hi))
-                else: # More dims so build a 3-D volume
-                    lower_z = point.vals[2]
-                    while True:
-                        next_point = point.copy()
-                        next_point.vals[2] = lower_z - 1
-                        if next_point.vals[2] < rect.lo.vals[2]:
-                            break
-                        add_next = True
-                        for idx in range(lower_x,upper_x+1):
-                            next_point.vals[0] = idx
-                            for idy in range(lower_y,upper_y+1):
-                                next_point.vals[1] = idy
-                                if already_handled(next_point, other, new_rects):
-                                    add_next = False
-                                    break
-                            if not add_next:
-                                break
-                        if add_next:
-                            lower_z -= 1
-                        else:
-                            break
-                    upper_z = point.vals[2]
-                    while True:
-                        next_point = point.copy()
-                        next_point.vals[2] = upper_z + 1
-                        if next_point.vals[2] > rect.hi.vals[2]:
-                            break
-                        add_next = True
-                        for idx in range(lower_x,upper_x+1):
-                            next_point.vals[0] = idx
-                            for idy in range(lower_y,upper_y+1):
-                                next_point.vals[1] = idy
-                                if already_handled(next_point, other, new_rects):
-                                    add_next = False
-                                    break
-                            if not add_next:
-                                break
-                        if add_next:
-                            upper_z += 1
-                        else:
-                            break
-                    if point.dim == 3:
-                        if lower_x == upper_x and lower_y == upper_y and \
-                            lower_z == upper_z:
-                            self.points.add(point)
-                        else:
-                            lo = Point(3)
-                            lo.vals[0] = lower_x
-                            lo.vals[1] = lower_y
-                            lo.vals[2] = lower_z
-                            hi = Point(3)
-                            hi.vals[0] = upper_x
-                            hi.vals[1] = upper_y
-                            hi.vals[2] = upper_z
-                            new_rects.append(Rect(lo,hi))
-                    else:
-                        print 'ERROR: Need support for >3 dimensions!'
-                        assert False
-        for nrect in new_rects:
-            to_add.append(nrect)
-
     def __isub__(self, other):
         for orect in other.rects:
             to_remove = list()
@@ -1933,7 +1786,7 @@ class Shape(object):
                     if orect.dominates(rect):
                         continue
                     else:
-                        self.future_rect_sub_helper(rect, orect, to_add)
+                        self.rect_sub_helper(rect, orect, to_add)
             if to_remove:
                 for rect in to_remove:
                     self.rects.remove(rect)
@@ -1951,7 +1804,7 @@ class Shape(object):
                     if prect.dominates(rect):
                         continue
                     else:
-                        self.future_rect_sub_helper(rect, prect, to_add)
+                        self.rect_sub_helper(rect, prect, to_add)
             if to_remove:
                 for rect in to_remove:
                     self.rects.remove(rect)
