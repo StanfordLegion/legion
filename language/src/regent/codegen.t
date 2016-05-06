@@ -3197,36 +3197,74 @@ function codegen.expr_region(cx, node)
 end
 
 function codegen.expr_partition(cx, node)
-  local region_expr = codegen.expr(cx, node.region):read(cx)
-  local coloring_expr = codegen.expr(cx, node.coloring):read(cx)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local coloring_type = std.as_read(node.coloring.expr_type)
+  local coloring = codegen.expr(cx, node.coloring):read(cx)
+  local colors = node.colors and codegen.expr(cx, node.colors):read(cx)
   local partition_type = std.as_read(node.expr_type)
   local actions = quote
-    [region_expr.actions];
-    [coloring_expr.actions];
+    [region.actions];
+    [coloring.actions];
+    [(colors and colors.actions) or (quote end)];
     [emit_debuginfo(node)]
   end
 
   local index_partition_create
   local args = terralib.newlist({
       cx.runtime, cx.context,
-      `([region_expr.value].impl.index_space),
+      `([region.value].impl.index_space),
   })
-  if partition_type:parent_region():is_opaque() then
-    index_partition_create = c.legion_index_partition_create_coloring
-  else
-    index_partition_create = c.legion_index_partition_create_domain_coloring
+
+  if colors then
     local color_space = terralib.newsymbol(c.legion_domain_t)
     args:insert(color_space)
     actions = quote
       [actions]
-      var [color_space] = c.legion_domain_coloring_get_color_space([coloring_expr.value])
+      var [color_space] = c.legion_index_space_get_domain(
+        [cx.runtime], [cx.context], [colors.value].impl)
+    end
+  elseif coloring_type == std.c.legion_domain_coloring_t then
+    local color_space = terralib.newsymbol(c.legion_domain_t)
+    args:insert(color_space)
+    actions = quote
+      [actions]
+      var [color_space] = c.legion_domain_coloring_get_color_space([coloring.value])
     end
   end
-  args:insertall({
-      coloring_expr.value,
-      node.disjointness == std.disjoint,
-      -1,
-  })
+
+  if coloring_type == std.c.legion_coloring_t then
+    index_partition_create = c.legion_index_partition_create_coloring
+  elseif coloring_type == std.c.legion_domain_coloring_t then
+    index_partition_create = c.legion_index_partition_create_domain_coloring
+  elseif coloring_type == std.c.legion_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_point_coloring
+  elseif coloring_type == std.c.legion_domain_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_domain_point_coloring
+  elseif coloring_type == std.c.legion_multi_domain_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_multi_domain_point_coloring
+  else
+    assert(false)
+  end
+
+  args:insert(coloring.value)
+
+
+  if coloring_type == std.c.legion_coloring_t or
+    coloring_type == std.c.legion_domain_coloring_t
+  then
+    args:insert(partition_type:is_disjoint())
+  elseif coloring_type == std.c.legion_point_coloring_t or
+    coloring_type == std.c.legion_domain_point_coloring_t or
+    coloring_type == std.c.legion_multi_domain_point_coloring_t
+  then
+    args:insert(
+      (partition_type:is_disjoint() and c.DISJOINT_KIND) or c.ALIASED_KIND)
+  else
+    assert(false)
+  end
+
+  args:insert(-1) -- AUTO_GENERATE_ID
+
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
@@ -3234,7 +3272,7 @@ function codegen.expr_partition(cx, node)
     [actions]
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region_expr.value].impl, [ip])
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
 
   return values.value(

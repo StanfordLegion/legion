@@ -1293,6 +1293,8 @@ function type_check.expr_partition(cx, node)
   local region_type = std.check_read(cx, region)
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring)
+  local colors = node.colors and type_check.expr(cx, node.colors)
+  local colors_type = colors and std.check_read(cx, colors)
 
   -- Note: This test can't fail because disjointness is tested in the parser.
   assert(disjointness == std.disjoint or disjointness == std.aliased)
@@ -1302,17 +1304,45 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
+  if colors and not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 4: expected ispace but got " ..
+                tostring(colors_type))
+  end
+  if colors and data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
+    log.error(node, "type mismatch in argument 4: expected ispace with " ..
+                tostring(region_type:ispace().dim) .. " dimensions but got " ..
+                tostring(colors_type))
+  end
+
   if region_type:is_opaque() then
-    if coloring_type ~= std.c.legion_coloring_t then
-      log.error(node,
-                "type mismatch in argument 3: expected legion_coloring_t but got " ..
-                  tostring(coloring_type))
+    if colors then
+      if coloring_type ~= std.c.legion_point_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_point_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
+    else
+      if coloring_type ~= std.c.legion_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
     end
   else
-    if coloring_type ~= std.c.legion_domain_coloring_t then
-      log.error(node,
-                "type mismatch in argument 3: expected legion_domain_coloring_t but got " ..
-                  tostring(coloring_type))
+    if colors then
+      if coloring_type ~= std.c.legion_domain_point_coloring_t and
+        coloring_type ~= std.c.legion_multi_domain_point_coloring_t
+      then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_domain_point_coloring_t or legion_multi_domain_point_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
+    else
+      if coloring_type ~= std.c.legion_domain_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_domain_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
     end
   end
 
@@ -1322,7 +1352,13 @@ function type_check.expr_partition(cx, node)
   else
     region_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(disjointness, region_symbol)
+  local colors_symbol
+  if colors and colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  elseif colors then
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1335,6 +1371,7 @@ function type_check.expr_partition(cx, node)
     disjointness = disjointness,
     region = region,
     coloring = coloring,
+    colors = colors,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
