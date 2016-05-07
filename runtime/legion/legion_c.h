@@ -49,6 +49,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
+  NEW_OPAQUE_TYPE(legion_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_multi_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
@@ -563,6 +564,44 @@ typedef long long int coord_t;
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
 
   // -----------------------------------------------------------------------
+  // Point Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::PointColoring
+   */
+  legion_point_coloring_t
+  legion_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::PointColoring
+   */
+  void
+  legion_point_coloring_destroy(
+    legion_point_coloring_t handle);
+
+  /**
+   * @see Legion::PointColoring
+   */
+  void
+  legion_point_coloring_add_point(legion_point_coloring_t handle,
+                                  legion_domain_point_t color,
+                                  legion_ptr_t point);
+
+  /**
+   * @see Legion::PointColoring
+   */
+  void
+  legion_point_coloring_add_range(legion_point_coloring_t handle,
+                                  legion_domain_point_t color,
+                                  legion_ptr_t start,
+                                  legion_ptr_t end /**< inclusive */);
+
+  // -----------------------------------------------------------------------
   // Domain Point Coloring Operations
   // -----------------------------------------------------------------------
 
@@ -619,7 +658,7 @@ typedef long long int coord_t;
   void
   legion_multi_domain_point_coloring_color_domain(
     legion_multi_domain_point_coloring_t handle,
-    legion_color_t color,
+    legion_domain_point_t color,
     legion_domain_t domain);
 
   // -----------------------------------------------------------------------
@@ -717,6 +756,22 @@ typedef long long int coord_t;
     legion_domain_coloring_t coloring,
     bool disjoint,
     int part_color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, PointColoring, PartitionKind, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.

@@ -247,7 +247,7 @@ namespace Legion {
         std::map<VariantID,Variant> variants;
       };
     public:
-      ShimMapper(Machine machine, Runtime *rt, 
+      ShimMapper(Machine machine, Runtime *rt, MapperRuntime *mrt, 
                  Processor local, const char *name = NULL);
       ShimMapper(const ShimMapper &rhs);
       virtual ~ShimMapper(void);

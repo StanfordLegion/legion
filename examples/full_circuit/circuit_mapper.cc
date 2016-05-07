@@ -20,7 +20,7 @@ using namespace LegionRuntime::HighLevel;
 LegionRuntime::Logger::Category log_mapper("mapper");
 
 CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
-  : ShimMapper(m, rt, p)
+  : ShimMapper(m, rt, rt->get_mapper_runtime(), p)
 {
   std::set<Processor> all_procs;
   machine.get_all_processors(all_procs);

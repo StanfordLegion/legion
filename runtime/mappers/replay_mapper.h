@@ -36,7 +36,7 @@ namespace Legion {
      */
     class ReplayMapper : public Mapper {
     public:
-      ReplayMapper(Machine machine, Processor local, 
+      ReplayMapper(MapperRuntime *rt, Machine machine, Processor local, 
                    const char *replay_file, const char *mapper_name = NULL);
       ReplayMapper(const ReplayMapper &rhs);
       virtual ~ReplayMapper(void);

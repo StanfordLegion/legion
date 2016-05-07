@@ -129,7 +129,7 @@ namespace Legion {
                   FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       if (Runtime::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();

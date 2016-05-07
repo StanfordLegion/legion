@@ -649,11 +649,17 @@ function parser.expr_prefix(p)
       local region = p:expr()
       p:expect(",")
       local coloring = p:expr()
+      local colors = false
+      if not p:matches(")") then
+        p:expect(",")
+        colors = p:expr()
+      end
       p:expect(")")
       return ast.unspecialized.expr.Partition {
         disjointness = disjointness,
         region = region,
         coloring = coloring,
+        colors = colors,
         options = ast.default_options(),
         span = ast.span(start, p),
       }

@@ -158,13 +158,14 @@ namespace Legion {
         { return is_virtual_manager(); }
     public:
       // Methods for creating/finding/destroying logical top views
-      InstanceView* create_instance_top_view(SingleTask *context);
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner) = 0;
+      void register_active_context(SingleTask *context);
       void unregister_active_context(SingleTask *context);
-    protected:
-      virtual InstanceView* create_top_view(SingleTask *context) const = 0;
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
-      bool meets_regions(const std::vector<LogicalRegion> &regions) const;
+      bool meets_regions(const std::vector<LogicalRegion> &regions,
+                         bool tight_region_bounds = false) const;
       bool entails(LayoutConstraints *constraints) const;
       bool entails(const LayoutConstraintSet &constraints) const;
       bool conflicts(LayoutConstraints *constraints) const;
@@ -172,7 +173,7 @@ namespace Legion {
     public:
       inline PhysicalInstance get_instance(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
         return instance;
@@ -259,7 +260,8 @@ namespace Legion {
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
-      virtual InstanceView* create_top_view(SingleTask *context) const;
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
@@ -348,7 +350,8 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      virtual InstanceView* create_top_view(SingleTask *context) const;
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
@@ -475,7 +478,8 @@ namespace Legion {
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
-      virtual InstanceView* create_top_view(SingleTask *context) const;
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
     public:
       static inline VirtualManager* get_virtual_instance(void)
         { return get_singleton(); }
@@ -620,7 +624,7 @@ namespace Legion {
     inline InstanceManager* PhysicalManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_instance_manager());
 #endif
       return static_cast<InstanceManager*>(const_cast<PhysicalManager*>(this));
@@ -630,7 +634,7 @@ namespace Legion {
     inline ReductionManager* PhysicalManager::as_reduction_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_reduction_manager());
 #endif
       return static_cast<ReductionManager*>(const_cast<PhysicalManager*>(this));
@@ -640,7 +644,7 @@ namespace Legion {
     inline VirtualManager* PhysicalManager::as_virtual_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_virtual_manager());
 #endif
       return static_cast<VirtualManager*>(const_cast<PhysicalManager*>(this));
@@ -650,7 +654,7 @@ namespace Legion {
     inline ListReductionManager* PhysicalManager::as_list_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_list_manager());
 #endif
       return static_cast<ListReductionManager*>(
@@ -661,7 +665,7 @@ namespace Legion {
     inline FoldReductionManager* PhysicalManager::as_fold_manager(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_fold_manager());
 #endif
       return static_cast<FoldReductionManager*>(

@@ -98,7 +98,7 @@ namespace Legion {
         Utilities::MappingProfiler::Profile sample;
       };
     public:
-      DefaultMapper(Machine machine, Processor local, 
+      DefaultMapper(MapperRuntime *rt, Machine machine, Processor local, 
                     const char *maper_name = NULL);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
@@ -243,6 +243,10 @@ namespace Legion {
             // All method calls start with 'default_policy_'
       virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
+      virtual void default_policy_select_target_processors(
+                                    MapperContext ctx,
+                                    const Task &task,
+                                    std::vector<Processor> &target_procs);
       virtual void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task, 
                                     std::vector<Processor::Kind> &ranking);

@@ -190,7 +190,12 @@ namespace Legion {
     class MapperEvent;
     class ProfilingRequestSet;
     class Mapper;
+    class MapperRuntime;
     class DefaultMapper;
+    class ShimMapper;
+    class TestMapper;
+    class DebugMapper;
+    class ReplayMapper;
   };
   
   namespace Internal {
@@ -261,6 +266,7 @@ namespace Legion {
       HLR_ISSUE_FRAME_TASK_ID,
       HLR_CONTINUATION_TASK_ID,
       HLR_MAPPER_CONTINUATION_TASK_ID,
+      HLR_FINISH_MAPPER_CONTINUATION_TASK_ID,
       HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -321,6 +327,7 @@ namespace Legion {
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
         "Mapper Continuation",                                    \
+        "Finish Mapper Continuation",                             \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
@@ -493,6 +500,7 @@ namespace Legion {
       SEND_VIEW_UPDATE_REQUEST,
       SEND_VIEW_UPDATE_RESPONSE,
       SEND_VIEW_REMOTE_UPDATE,
+      SEND_VIEW_REMOTE_INVALIDATE,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -596,6 +604,7 @@ namespace Legion {
         "Send View Update Request",                                   \
         "Send View Update Response",                                  \
         "Send View Remote Update",                                    \
+        "Send View Remote Invalidate",                                \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
@@ -1316,7 +1325,7 @@ namespace Legion {
   typedef std::map<DomainPoint,Domain> DomainPointColoring;
   typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-      Runtime *rt, const std::set<Processor> &local_procs);
+                Runtime *rt, const std::set<Processor> &local_procs);
   typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
       const DomainPoint&, Runtime *rt);
   typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 

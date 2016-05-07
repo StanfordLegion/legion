@@ -316,8 +316,11 @@ namespace Legion {
         { __sync_fetch_and_add(&total_outstanding_requests,1); }
       inline void decrement_total_outstanding_requests(void)
         { __sync_fetch_and_sub(&total_outstanding_requests,1); }
-
-      LegionProfInstance **const instances;
+    private:
+      void create_thread_local_profiling_instance(void);
+    private:
+      Reservation profiler_lock;
+      std::vector<LegionProfInstance*> instances;
       unsigned total_outstanding_requests;
     };
 

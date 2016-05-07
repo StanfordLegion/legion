@@ -19,9 +19,11 @@
 #include <cstdlib>
 #include "legion.h"
 
+#include "test_mapper.h"
 #include "default_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
+using namespace Legion::Mapping;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
@@ -109,26 +111,33 @@ enum {
 // In this example, we'll override four
 // of the mapping calls to illustrate
 // how they work.
-class AdversarialMapper : public DefaultMapper {
+class AdversarialMapper : public TestMapper {
 public:
   AdversarialMapper(Machine machine, 
-      HighLevelRuntime *rt, Processor local);
+      Runtime *rt, Processor local);
 public:
-  virtual void select_task_options(Task *task);
-  virtual void slice_domain(const Task *task, const Domain &domain,
-                            std::vector<DomainSplit> &slices);
-  virtual bool map_task(Task *task); 
-  virtual void notify_mapping_result(const Mappable *mappable);
+  virtual void select_task_options(const MapperContext    ctx,
+                                       const Task&            task,
+                                             TaskOptions&     output);
+  virtual void slice_task(const MapperContext ctx,
+                          const Task& task,
+                          const SliceTaskInput& input,
+                                SliceTaskOutput& output);
+  virtual void map_task(const MapperContext ctx,
+                        const Task& task,
+                        const MapTaskInput& input,
+                              MapTaskOutput& output);
 };
 
 class PartitioningMapper : public DefaultMapper {
 public:
   PartitioningMapper(Machine machine,
-      HighLevelRuntime *rt, Processor local);
+      Runtime *rt, Processor local);
 public:
-  virtual int get_tunable_value(const Task *task,
-                                TunableID tid,
-                                MappingTagID tag);
+  virtual void select_tunable_value(const MapperContext ctx,
+                                    const Task& task,
+                                    const SelectTunableInput& input,
+                                          SelectTunableOutput& output);
 };
 
 // Mappers are created after the Legion runtime
@@ -167,7 +176,7 @@ public:
 // DefaultMapper will now use our AdversarialMapper.
 // We create one new mapper for each processor
 // and register it with the runtime.
-void mapper_registration(Machine machine, HighLevelRuntime *rt,
+void mapper_registration(Machine machine, Runtime *rt,
                           const std::set<Processor> &local_procs)
 {
   for (std::set<Processor>::const_iterator it = local_procs.begin();
@@ -184,8 +193,8 @@ void mapper_registration(Machine machine, HighLevelRuntime *rt,
 // We'll use the constructor to illustrate how mappers can
 // get access to information regarding the current machine.
 AdversarialMapper::AdversarialMapper(Machine m, 
-                                     HighLevelRuntime *rt, Processor p)
-  : DefaultMapper(m, rt, p) // pass arguments through to DefaultMapper
+                                     Runtime *rt, Processor p)
+  : TestMapper(rt->get_mapper_runtime(), m, p) // pass arguments through to TestMapper 
 {
   // The machine object is a singleton object that can be
   // used to get information about the underlying hardware.
@@ -198,7 +207,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
   // of which is not directly needed by application code.
   // Typedefs in legion_types.h ensure that all necessary
   // types for querying the machine object are in scope
-  // in the Legion HighLevel namespace.
+  // in the Legion namespace.
   std::set<Processor> all_procs;
   machine.get_all_processors(all_procs);
   // Recall that we create one mapper for every processor.  We
@@ -220,13 +229,19 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // Latency-optimized cores (LOCs) are CPUs
         case Processor::LOC_PROC:
           {
-            printf("  Processor ID %x is CPU\n", it->id); 
+            printf("  Processor ID " IDFMT " is CPU\n", it->id); 
             break;
           }
         // Throughput-optimized cores (TOCs) are GPUs
         case Processor::TOC_PROC:
           {
-            printf("  Processor ID %x is GPU\n", it->id);
+            printf("  Processor ID " IDFMT " is GPU\n", it->id);
+            break;
+          }
+        // Processor for doing I/O
+        case Processor::IO_PROC:
+          {
+            printf("  Processor ID " IDFMT " is I/O Proc\n", it->id);
             break;
           }
         // Utility processors are helper processors for
@@ -234,7 +249,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // should not be used for running application tasks
         case Processor::UTIL_PROC:
           {
-            printf("  Processor ID %x is utility\n", it->id);
+            printf("  Processor ID " IDFMT " is utility\n", it->id);
             break;
           }
         default:
@@ -256,28 +271,28 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // RDMA addressable memory when running with GASNet
         case Memory::GLOBAL_MEM:
           {
-            printf("  GASNet Global Memory ID %x has %ld KB\n", 
+            printf("  GASNet Global Memory ID " IDFMT " has %ld KB\n", 
                     it->id, memory_size_in_kb);
             break;
           }
         // DRAM on a single node
         case Memory::SYSTEM_MEM:
           {
-            printf("  System Memory ID %x has %ld KB\n",
+            printf("  System Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Pinned memory on a single node
         case Memory::REGDMA_MEM:
           {
-            printf("  Pinned Memory ID %x has %ld KB\n",
+            printf("  Pinned Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // A memory associated with a single socket
         case Memory::SOCKET_MEM:
           {
-            printf("  Socket Memory ID %x has %ld KB\n",
+            printf("  Socket Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -285,56 +300,56 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // all GPUs on a single node
         case Memory::Z_COPY_MEM:
           {
-            printf("  Zero-Copy Memory ID %x has %ld KB\n",
+            printf("  Zero-Copy Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // GPU framebuffer memory for a single GPU
         case Memory::GPU_FB_MEM:
           {
-            printf("  GPU Frame Buffer Memory ID %x has %ld KB\n",
+            printf("  GPU Frame Buffer Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Disk memory on a single node
         case Memory::DISK_MEM:
           {
-            printf("  Disk Memory ID %x has %ld KB\n",
+            printf("  Disk Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // HDF framebuffer memory for a single GPU
         case Memory::HDF_MEM:
           {
-            printf("  HDF Memory ID %x has %ld KB\n",
+            printf("  HDF Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // File memory on a single node
         case Memory::FILE_MEM:
           {
-            printf("  File Memory ID %x has %ld KB\n",
+            printf("  File Memory ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L3 cache
         case Memory::LEVEL3_CACHE:
           {
-            printf("  Level 3 Cache ID %x has %ld KB\n",
+            printf("  Level 3 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L2 cache
         case Memory::LEVEL2_CACHE:
           {
-            printf("  Level 2 Cache ID %x has %ld KB\n",
+            printf("  Level 2 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L1 cache
         case Memory::LEVEL1_CACHE:
           {
-            printf("  Level 1 Cache ID %x has %ld KB\n",
+            printf("  Level 1 Cache ID " IDFMT " has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -357,7 +372,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
     // using the 'get_visible_memories' method on the machine.
     std::set<Memory> vis_mems;
     machine.get_visible_memories(local_proc, vis_mems);
-    printf("There are %ld memories visible from processor %x\n",
+    printf("There are %ld memories visible from processor " IDFMT "\n",
             vis_mems.size(), local_proc.id);
     for (std::set<Memory>::const_iterator it = vis_mems.begin();
           it != vis_mems.end(); it++)
@@ -375,7 +390,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
       // We should only have found 1 results since we
       // explicitly specified both values.
       assert(results == 1);
-      printf("  Memory %x has bandwidth %d and latency %d\n",
+      printf("  Memory " IDFMT " has bandwidth %d and latency %d\n",
               it->id, affinities[0].bandwidth, affinities[0].latency);
     }
   }
@@ -413,17 +428,15 @@ AdversarialMapper::AdversarialMapper(Machine m,
 //  choices for all options except the last one.  Here
 //  we choose a random processor in our system to 
 //  send the task to.
-void AdversarialMapper::select_task_options(Task *task)
+void AdversarialMapper::select_task_options(const MapperContext ctx,
+                                            const Task& task,
+                                                  TaskOptions& output)
 {
-  task->inline_task = false;
-  task->spawn_task = false;
-  task->map_locally = false;
-  task->profile_task = false;
-  task->task_priority = 0;
-  std::set<Processor> all_procs;
-  machine.get_all_processors(all_procs);
-  task->target_proc = 
-    DefaultMapper::select_random_processor(all_procs, Processor::LOC_PROC, machine);
+  output.inline_task = false;
+  output.stealable = false;
+  output.map_locally = true;
+  Processor::Kind kind = select_random_processor_kind(ctx, task.task_id);
+  output.initial_proc = select_random_processor(kind);
 }
 
 // The second call that we override is the slice_domain
@@ -447,28 +460,57 @@ void AdversarialMapper::select_task_options(Task *task)
 // a single point in them. This creates a tree of slices of
 // depth log(N) in the number of points in the domain with
 // each slice being sent to a random processor.
-void AdversarialMapper::slice_domain(const Task *task, const Domain &domain,
-                                     std::vector<DomainSplit> &slices)
+void AdversarialMapper::slice_task(const MapperContext      ctx,
+                                   const Task&              task,
+                                   const SliceTaskInput&    input,
+                                         SliceTaskOutput&   output)
 {
-  std::set<Processor> all_procs;
-  machine.get_all_processors(all_procs);
-  std::vector<Processor> split_set;
-  for (unsigned idx = 0; idx < 2; idx++)
+  // Iterate over all the points and send them all over the world
+  output.slices.resize(input.domain.get_volume());
+  unsigned idx = 0;
+  switch (input.domain.get_dim())
   {
-    split_set.push_back(DefaultMapper::select_random_processor(
-                        all_procs, Processor::LOC_PROC, machine));
-  }
-
-  DefaultMapper::decompose_index_space(domain, split_set, 
-                                        1/*splitting factor*/, slices);
-  for (std::vector<DomainSplit>::iterator it = slices.begin();
-        it != slices.end(); it++)
-  {
-    Rect<1> rect = it->domain.get_rect<1>();
-    if (rect.volume() == 1)
-      it->recurse = false;
-    else
-      it->recurse = true;
+    case 1:
+      {
+        LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
+              pir; pir++, idx++)
+        {
+          Rect<1> slice(pir.p, pir.p);
+          output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+              select_random_processor(task.target_proc.kind()),
+              false/*recurse*/, true/*stealable*/);
+        }
+        break;
+      }
+    case 2:
+      {
+        LegionRuntime::Arrays::Rect<2> rect = input.domain.get_rect<2>();
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<2> pir(rect);
+              pir; pir++, idx++)
+        {
+          Rect<2> slice(pir.p, pir.p);
+          output.slices[idx] = TaskSlice(Domain::from_rect<2>(slice),
+              select_random_processor(task.target_proc.kind()),
+              false/*recurse*/, true/*stealable*/);
+        }
+        break;
+      }
+    case 3:
+      {
+        LegionRuntime::Arrays::Rect<3> rect = input.domain.get_rect<3>();
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<3> pir(rect);
+              pir; pir++, idx++)
+        {
+          Rect<3> slice(pir.p, pir.p);
+          output.slices[idx] = TaskSlice(Domain::from_rect<3>(slice),
+              select_random_processor(task.target_proc.kind()),
+              false/*recurse*/, true/*stealable*/);
+        }
+        break;
+      }
+    default:
+      assert(false);
   }
 }
 
@@ -500,78 +542,95 @@ void AdversarialMapper::slice_domain(const Task *task, const Domain &domain,
 // in a random order as the target set of memories, thereby
 // challenging the Legion runtime to maintain correctness
 // of data moved through random sets of memories.
-bool AdversarialMapper::map_task(Task *task)
-{ 
-  std::set<Memory> vis_mems;
-  machine.get_visible_memories(task->target_proc, vis_mems);  
-  assert(!vis_mems.empty());
-  for (unsigned idx = 0; idx < task->regions.size(); idx++)
-  {
-    std::set<Memory> mems_copy = vis_mems;  
-    // Assign memories in a random order
-    while (!mems_copy.empty())
-    {
-      unsigned mem_idx = (lrand48() % mems_copy.size());
-      std::set<Memory>::iterator it = mems_copy.begin();
-      for (unsigned i = 0; i < mem_idx; i++)
-        it++;
-      task->regions[idx].target_ranking.push_back(*it);
-      mems_copy.erase(it);
-    }
-    task->regions[idx].virtual_map = false;
-    task->regions[idx].enable_WAR_optimization = false;
-    task->regions[idx].reduction_list = false;
-    task->regions[idx].blocking_factor = 1;
-  }
-  // Report successful mapping results
-  return true;
-}
-
-// The last mapper call we override is the notify_mapping_result
-// call which is invoked by the runtime if the mapper indicated
-// that it wanted to know the result of the mapping following
-// the map_task call by returning true. The runtime invokes
-// this call and the chosen memories for each RegionRequirement
-// are set in the 'selected_memory' field. We use this call in
-// this example to record the memories in which physical instances
-// were mapped for each logical region of each task so we can
-// see that the assignment truly is random.
-void AdversarialMapper::notify_mapping_result(const Mappable *mappable)
+void AdversarialMapper::map_task(const MapperContext         ctx,
+                                 const Task&                 task,
+                                 const MapTaskInput&         input,
+                                       MapTaskOutput&        output)
 {
-  if (mappable->get_mappable_kind() == Mappable::TASK_MAPPABLE)
+  // Pick a random variant, then pick separate instances for all the 
+  // fields in a region requirement
+  const std::map<VariantID,Processor::Kind> &variant_kinds = 
+    find_task_variants(ctx, task.task_id);
+  std::vector<VariantID> variants;
+  for (std::map<VariantID,Processor::Kind>::const_iterator it = 
+        variant_kinds.begin(); it != variant_kinds.end(); it++)
   {
-    const Task *task = mappable->as_mappable_task();
-    assert(task != NULL);
-    for (unsigned idx = 0; idx < task->regions.size(); idx++)
-    {
-      printf("Mapped region %d of task %s (ID %lld) to memory %x\n",
-              idx, task->variants->name, 
-              task->get_unique_task_id(),
-              task->regions[idx].selected_memory.id);
-    }
+    if (task.target_proc.kind() == it->second)
+      variants.push_back(it->first);
   }
+  assert(!variants.empty());
+  if (variants.size() > 1)
+  {
+    int chosen = default_generate_random_integer() % variants.size();
+    output.chosen_variant = variants[chosen];
+  }
+  else
+    output.chosen_variant = variants[0];
+  output.target_procs.push_back(task.target_proc);
+  std::vector<bool> premapped(task.regions.size(), false);
+  for (unsigned idx = 0; idx < input.premapped_regions.size(); idx++)
+  {
+    unsigned index = input.premapped_regions[idx];
+    output.chosen_instances[index] = input.valid_instances[index];
+    premapped[index] = true;
+  }
+  // Get the execution layout constraints for this variant
+  const TaskLayoutConstraintSet &layout_constraints = 
+    mapper_runtime->find_task_layout_constraints(ctx, task.task_id, 
+                                           output.chosen_variant);
+  for (unsigned idx = 0; idx < task.regions.size(); idx++)
+  {
+    if (premapped[idx])
+      continue;
+    if (task.regions[idx].is_restricted())
+    {
+      output.chosen_instances[idx] = input.valid_instances[idx];
+      continue;
+    }
+    // See if we have any layout constraints for this index
+    // If we do we have to follow them, otherwise we can 
+    // let all hell break loose and do what we want
+    if (layout_constraints.layouts.find(idx) != 
+          layout_constraints.layouts.end())
+    {
+      std::vector<LayoutConstraintID> constraints;
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.lower_bound(idx); it !=
+            layout_constraints.layouts.upper_bound(idx); it++)
+        constraints.push_back(it->second);
+      map_constrained_requirement(ctx, task.regions[idx], TASK_MAPPING,
+          constraints, output.chosen_instances[idx], task.target_proc);
+    }
+    else
+      map_random_requirement(ctx, task.regions[idx], 
+                             output.chosen_instances[idx],
+                             task.target_proc);
+  }
+  // Give it a random priority
+  output.task_priority = default_generate_random_integer();
 }
 
 PartitioningMapper::PartitioningMapper(Machine m,
-                                       HighLevelRuntime *rt,
+                                       Runtime *rt,
                                        Processor p)
-  : DefaultMapper(m, rt, p)
+  : DefaultMapper(rt->get_mapper_runtime(), m, p)
 {
 }
 
-int PartitioningMapper::get_tunable_value(const Task *task,
-                                          TunableID tid,
-                                          MappingTagID tag)
+void PartitioningMapper::select_tunable_value(const MapperContext ctx,
+                                              const Task& task,
+                                              const SelectTunableInput& input,
+                                                    SelectTunableOutput& output)
 {
-  if (tid == SUBREGION_TUNABLE)
+  if (input.tunable_id == SUBREGION_TUNABLE)
   {
-    const std::set<Processor> &cpu_procs = 
-      machine_interface.filter_processors(Processor::LOC_PROC);
-    return cpu_procs.size();
+    Machine::ProcessorQuery all_procs(machine);
+    all_procs.only_kind(Processor::LOC_PROC);
+    mapper_runtime->pack_tunable<size_t>(all_procs.count(), output);
+    return;
   }
   // Should never get here
   assert(false);
-  return 0;
 }
 
 /*
@@ -583,11 +642,11 @@ int PartitioningMapper::get_tunable_value(const Task *task,
  */
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   int num_elements = 1024; 
   {
-    const InputArgs &command_args = HighLevelRuntime::get_input_args();
+    const InputArgs &command_args = Runtime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
     {
       if (!strcmp(command_args.argv[i],"-n"))
@@ -699,7 +758,7 @@ void top_level_task(const Task *task,
 
 void init_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1); 
   assert(task->regions.size() == 1);
@@ -723,7 +782,7 @@ void init_field_task(const Task *task,
 
 void daxpy_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
@@ -753,7 +812,7 @@ void daxpy_task(const Task *task,
 
 void check_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
@@ -789,20 +848,20 @@ void check_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
-  HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
+  Runtime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
-  HighLevelRuntime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
+  Runtime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
-  HighLevelRuntime::register_legion_task<check_task>(CHECK_TASK_ID,
+  Runtime::register_legion_task<check_task>(CHECK_TASK_ID,
       Processor::LOC_PROC, true/*single*/, true/*index*/);
 
   // Here is where we register the callback function for 
   // creating custom mappers.
-  HighLevelRuntime::set_registration_callback(mapper_registration);
+  Runtime::set_registration_callback(mapper_registration);
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }
 

@@ -98,7 +98,7 @@ namespace Legion {
       // Check for WAR or WAW with write-only
       if (IS_READ_ONLY(u1))
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // We know at least req1 or req2 is a writers, so if req1 is not...
         assert(HAS_WRITE(u2)); 
 #endif
@@ -152,7 +152,7 @@ namespace Legion {
       else
       {
         // Everything in here has at least one right
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(HAS_WRITE(u1) || HAS_WRITE(u2));
 #endif
         // If anything exclusive 
@@ -293,7 +293,7 @@ namespace Legion {
       inline bool is_valid(void) const { return valid; }
       inline int get_index(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         // This will help with the conversion for now
@@ -304,14 +304,14 @@ namespace Legion {
       }
       inline int get_dim(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point.get_dim();
       }
       inline bool is_null(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point.is_null();
@@ -343,7 +343,7 @@ namespace Legion {
     public:
       inline int operator[](unsigned index) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
         assert(index < unsigned(point.get_dim()));
 #endif
@@ -352,7 +352,7 @@ namespace Legion {
     public:
       inline const DomainPoint& get_point(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point;
@@ -374,7 +374,7 @@ namespace Legion {
       Serializer(size_t base_bytes = 4096)
         : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
           index(0) 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           , context_bytes(0)
 #endif
       { }
@@ -429,7 +429,7 @@ namespace Legion {
       size_t total_bytes;
       char *buffer;
       size_t index;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       size_t context_bytes;
 #endif
     };
@@ -441,7 +441,7 @@ namespace Legion {
     public:
       Deserializer(const void *buf, size_t buffer_size)
         : total_bytes(buffer_size), buffer((const char*)buf), index(0)
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           , context_bytes(0)
 #endif
       { }
@@ -454,7 +454,7 @@ namespace Legion {
     public:
       ~Deserializer(void)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // should have used the whole buffer
         assert(index == total_bytes); 
 #endif
@@ -496,7 +496,7 @@ namespace Legion {
       const size_t total_bytes;
       const char *buffer;
       size_t index;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       size_t context_bytes;
 #endif
     };
@@ -1362,7 +1362,7 @@ namespace Legion {
         resize();
       *((T*)(buffer+index)) = element;
       index += sizeof(T);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
     }
@@ -1376,7 +1376,7 @@ namespace Legion {
         resize();
       *((bool*)buffer+index) = element;
       index += 4;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += 4;
 #endif
     }
@@ -1456,7 +1456,7 @@ namespace Legion {
         resize();
       memcpy(buffer+index,src,bytes);
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
     }
@@ -1465,7 +1465,7 @@ namespace Legion {
     inline void Serializer::begin_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       while ((index + sizeof(size_t)) > total_bytes)
         resize();
       *((size_t*)(buffer+index)) = context_bytes;
@@ -1478,7 +1478,7 @@ namespace Legion {
     inline void Serializer::end_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Save the size into the buffer
       while ((index + sizeof(size_t)) > total_bytes)
         resize();
@@ -1496,7 +1496,7 @@ namespace Legion {
         resize();
       void *result = buffer+index;
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
       return result;
@@ -1508,11 +1508,11 @@ namespace Legion {
     {
       // Double the buffer size
       total_bytes *= 2;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(total_bytes != 0); // this would cause deallocation
 #endif
       char *next = (char*)realloc(buffer,total_bytes);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(next != NULL);
 #endif
       buffer = next;
@@ -1532,13 +1532,13 @@ namespace Legion {
     inline void Deserializer::deserialize(T &element)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+sizeof(T)) <= total_bytes);
 #endif
       element = *((const T*)(buffer+index));
       index += sizeof(T);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
     }
@@ -1548,13 +1548,13 @@ namespace Legion {
     inline void Deserializer::deserialize<bool>(bool &element)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+4) <= total_bytes);
 #endif
       element = *((const bool *)(buffer+index));
       index += 4;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += 4;
 #endif
     }
@@ -1630,12 +1630,12 @@ namespace Legion {
     inline void Deserializer::deserialize(void *dst, size_t bytes)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((index + bytes) <= total_bytes);
 #endif
       memcpy(dst,buffer+index,bytes);
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
     }
@@ -1644,7 +1644,7 @@ namespace Legion {
     inline void Deserializer::begin_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Save our enclosing context on the stack
 #ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
@@ -1660,7 +1660,7 @@ namespace Legion {
     inline void Deserializer::end_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Read the send context size out of the buffer      
 #ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
@@ -1676,7 +1676,7 @@ namespace Legion {
     inline size_t Deserializer::get_remaining_bytes(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index <= total_bytes);
 #endif
       return total_bytes - index;
@@ -1686,7 +1686,7 @@ namespace Legion {
     inline const void* Deserializer::get_current_pointer(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index <= total_bytes);
 #endif
       return (const void*)(buffer+index);
@@ -1696,7 +1696,7 @@ namespace Legion {
     inline void Deserializer::advance_pointer(size_t bytes)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((index+bytes) <= total_bytes);
       context_bytes += bytes;
 #endif
@@ -1750,7 +1750,7 @@ namespace Legion {
       : numerator(num), denominator(denom)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denom > 0);
 #endif
     }
@@ -1760,7 +1760,7 @@ namespace Legion {
     Fraction<T>::Fraction(const Fraction<T> &f)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(f.denominator > 0);
 #endif
       numerator = f.numerator;
@@ -1772,12 +1772,12 @@ namespace Legion {
     void Fraction<T>::divide(T factor)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(factor != 0);
       assert(denominator > 0);
 #endif
       T new_denom = denominator * factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(new_denom > 0); // check for integer overflow
 #endif
       denominator = new_denom;
@@ -1788,7 +1788,7 @@ namespace Legion {
     void Fraction<T>::add(const Fraction<T> &rhs)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denominator > 0);
 #endif
       if (denominator == rhs.denominator)
@@ -1811,7 +1811,7 @@ namespace Legion {
           T factor = rhs.denominator/denominator;
           numerator = (numerator*factor) + rhs.numerator;
           denominator *= factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1823,12 +1823,12 @@ namespace Legion {
           T rhs_num = rhs.numerator * denominator;
           numerator = lhs_num + rhs_num;
           denominator *= rhs.denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Should always be less than or equal to 1
       assert(numerator <= denominator); 
 #endif
@@ -1839,12 +1839,12 @@ namespace Legion {
     void Fraction<T>::subtract(const Fraction<T> &rhs)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denominator > 0);
 #endif
       if (denominator == rhs.denominator)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(numerator >= rhs.numerator); 
 #endif
         numerator -= rhs.numerator;
@@ -1855,7 +1855,7 @@ namespace Legion {
         {
           // Our denominator is bigger
           T factor = denominator/rhs.denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(numerator >= (rhs.numerator*factor));
 #endif
           numerator -= (rhs.numerator*factor);
@@ -1864,12 +1864,12 @@ namespace Legion {
         {
           // Rhs denominator is bigger
           T factor = rhs.denominator/denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert((numerator*factor) >= rhs.numerator);
 #endif
           numerator = (numerator*factor) - rhs.numerator;
           denominator *= factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1879,12 +1879,12 @@ namespace Legion {
           // compute a common denominator
           T lhs_num = numerator * rhs.denominator;
           T rhs_num = rhs.numerator * denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(lhs_num >= rhs_num);
 #endif
           numerator = lhs_num - rhs_num;
           denominator *= rhs.denominator; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1895,7 +1895,7 @@ namespace Legion {
       {
         numerator *= MIN_FRACTION_SPLIT;
         denominator *= MIN_FRACTION_SPLIT;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(denominator > 0); // check for integer overflow
 #endif
       }
@@ -1906,7 +1906,7 @@ namespace Legion {
     Fraction<T> Fraction<T>::get_part(T ways)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ways > 0);
       assert(denominator > 0);
       assert(numerator > 0);
@@ -1924,12 +1924,12 @@ namespace Legion {
         }
         numerator *= ways;
         T new_denom = denominator * ways;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(new_denom > 0); // check for integer overflow
 #endif
         denominator = new_denom;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(numerator >= ways);
 #endif
       return Fraction(1,denominator);
@@ -1999,7 +1999,7 @@ namespace Legion {
     inline void BitMask<T,MAX,SHIFT,MASK>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2011,7 +2011,7 @@ namespace Legion {
     inline void BitMask<T,MAX,SHIFT,MASK>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2034,7 +2034,7 @@ namespace Legion {
     inline bool BitMask<T,MAX,SHIFT,MASK>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2670,7 +2670,7 @@ namespace Legion {
     inline void TLBitMask<T,MAX,SHIFT,MASK>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2684,7 +2684,7 @@ namespace Legion {
     inline void TLBitMask<T,MAX,SHIFT,MASK>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2713,7 +2713,7 @@ namespace Legion {
     inline bool TLBitMask<T,MAX,SHIFT,MASK>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -3390,7 +3390,7 @@ namespace Legion {
     inline void SSEBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3402,7 +3402,7 @@ namespace Legion {
     inline void SSEBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3425,7 +3425,7 @@ namespace Legion {
     inline bool SSEBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4022,7 +4022,7 @@ namespace Legion {
     inline void SSETLBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4036,7 +4036,7 @@ namespace Legion {
     inline void SSETLBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4065,7 +4065,7 @@ namespace Legion {
     inline bool SSETLBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4737,7 +4737,7 @@ namespace Legion {
     inline void AVXBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4749,7 +4749,7 @@ namespace Legion {
     inline void AVXBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4772,7 +4772,7 @@ namespace Legion {
     inline bool AVXBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5458,7 +5458,7 @@ namespace Legion {
     inline void AVXTLBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5472,7 +5472,7 @@ namespace Legion {
     inline void AVXTLBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5501,7 +5501,7 @@ namespace Legion {
     inline bool AVXTLBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -6446,14 +6446,14 @@ namespace Legion {
       {
         case COMPOUND_SINGLE:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(index == 0);
 #endif
             return mask.index;
           }
         case COMPOUND_SPARSE:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(index < mask.sparse->size());
 #endif
             std::set<unsigned>::const_iterator it = 
@@ -8137,7 +8137,7 @@ namespace Legion {
     IntegerSet<IT,DT,BIDIR>::~IntegerSet(void)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(set_ptr.sparse != NULL);
 #endif
       if (sparse)
@@ -8262,14 +8262,14 @@ namespace Legion {
     {
       if (sparse)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!set_ptr.sparse->empty());
 #endif
         return *(set_ptr.sparse->begin());
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!!(set_ptr.dense->set));
 #endif
         return set_ptr.dense->set.find_first_set();
@@ -8281,7 +8281,7 @@ namespace Legion {
     inline IT IntegerSet<IT,DT,BIDIR>::find_index_set(int index) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index >= 0);
       assert(index < int(size()));
 #endif
@@ -8646,7 +8646,7 @@ namespace Legion {
       if (!n || (n->level < level_needed))
         return false;
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // when we get here, root is high enough
       assert((level_needed <= n->level) &&
 	     (index >= n->first_index) &&
@@ -8660,13 +8660,13 @@ namespace Legion {
           static_cast<typename ALLOCATOR::INNER_TYPE*>(n);
         IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
             ALLOCATOR::INNER_BITS)) & ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
         NodeBase *child = inner->elems[i];
         if (child == 0)
           return false;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((child != 0) && 
                (child->level == (n->level -1)) &&
                (index >= child->first_index) &&
@@ -8697,7 +8697,7 @@ namespace Legion {
           leaf->elems[offset] = new ET();
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8723,7 +8723,7 @@ namespace Legion {
           leaf->elems[offset] = new ET(arg);
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8750,7 +8750,7 @@ namespace Legion {
           leaf->elems[offset] = new ET(arg1, arg2);
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8799,7 +8799,7 @@ namespace Legion {
         n = root;
       }
       // root should be high-enough now
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((level_needed <= n->level) &&
              (index >= n->first_index) &&
              (index <= n->last_index));
@@ -8813,7 +8813,7 @@ namespace Legion {
         IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
                 ALLOCATOR::INNER_BITS)) & 
                 ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
         NodeBase *child = inner->elems[i];
@@ -8834,7 +8834,7 @@ namespace Legion {
           }
           child = inner->elems[i];
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((child != 0) &&
                (child->level == (n->level - 1)) &&
                (index >= child->first_index) &&
@@ -8842,7 +8842,7 @@ namespace Legion {
 #endif
         n = child;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(n->level == 0);
 #endif
       return n;

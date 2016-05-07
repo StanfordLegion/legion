@@ -300,8 +300,9 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
-                    const RegionRequirement &req,
-                    VersionInfo &version_info, const FieldMask &traversal_mask);
+                    const RegionRequirement &req, VersionInfo &version_info, 
+                    const FieldMask &traversal_mask, 
+                    std::set<Event> &map_applied_events);
     public:
       const ContextID ctx;
       Operation *const op;
@@ -310,6 +311,7 @@ namespace Legion {
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;
+      std::set<Event> &map_applied_events;
     };
 
     /**
@@ -613,7 +615,7 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
       PhysicalState(CurrentState *manager);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState(CurrentState *manager, RegionTreeNode *node);
 #endif
       PhysicalState(const PhysicalState &rhs);
@@ -666,7 +668,7 @@ namespace Legion {
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       RegionTreeNode *const node;
 #endif
@@ -811,7 +813,7 @@ namespace Legion {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Track our current state 
       bool currently_active;
       bool currently_valid;
@@ -1039,7 +1041,8 @@ namespace Legion {
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
                       VersionInfo &version_info, 
-                      Operation *op, unsigned index);
+                      Operation *op, unsigned index,
+                      std::set<Event> &map_applied_events);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1052,6 +1055,7 @@ namespace Legion {
       VersionInfo &version_info;
       Operation *const op;
       const unsigned index;
+      std::set<Event> &map_applied_events;
     protected:
       std::set<ReductionView*> issued_reductions;
     };
@@ -1075,7 +1079,7 @@ namespace Legion {
     public:
       inline bool has_ref(void) const 
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!composite);
 #endif
         return (ptr.manager != NULL);
@@ -1084,7 +1088,7 @@ namespace Legion {
       inline void set_ready_event(Event ready) { ready_event = ready; }
       inline PhysicalManager* get_manager(void) const 
       { 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!composite);
 #endif
         return ptr.manager; 
@@ -1221,21 +1225,11 @@ namespace Legion {
       InstanceSet *const targets;
     };
 
-    struct CopyTracker {
-    public:
-      CopyTracker(void);
-    public:
-      inline void add_copy_event(Event e) { copy_events.insert(e); } 
-      Event get_termination_event(void) const;
-    protected:
-      std::set<Event> copy_events;
-    };
-
     /**
      * \struct PhysicalCloser
      * Class for helping with the closing of physical region trees
      */
-    class PhysicalCloser : public CopyTracker {
+    class PhysicalCloser {
     public:
       PhysicalCloser(const TraversalInfo &info,
                      LogicalRegion closing_handle);
@@ -1276,7 +1270,6 @@ namespace Legion {
       std::vector<MaterializedView*> upper_targets;
       std::vector<MaterializedView*> lower_targets;
       InstanceSet                    close_targets;
-      std::set<Event>                 close_events;
     }; 
 
     /**

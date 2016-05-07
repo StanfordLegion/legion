@@ -33,7 +33,7 @@ namespace Legion {
      */
     class DebugMapper : public ReplayMapper {
     public:
-      DebugMapper(Machine machine, Processor local, 
+      DebugMapper(MapperRuntime *rt, Machine machine, Processor local, 
                   const char *replay_file, const char *mapper_name = NULL);
       DebugMapper(const DebugMapper &rhs);
       virtual ~DebugMapper(void);

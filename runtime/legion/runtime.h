@@ -235,7 +235,7 @@ namespace Legion {
       void wait_all_results(void);
       void complete_all_futures(void);
       bool reset_all_futures(void);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
       void add_valid_point(const DomainPoint &dp);
@@ -252,7 +252,7 @@ namespace Legion {
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
       Reservation lock;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
       std::set<DomainPoint> valid_points;
@@ -638,6 +638,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
@@ -645,15 +646,16 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool remote = false);
+                                    bool tight_bounds, bool remote = false);
       bool find_physical_instance(  LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool remote = false);
+                                    bool tight_bounds, bool remote = false);
       void set_garbage_collection_priority(PhysicalManager *manager,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority);
@@ -669,30 +671,30 @@ namespace Legion {
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_satisfying_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
                                     std::set<PhysicalManager*> &candidates,
-                                    bool acquire, bool remote);
+                                    bool acquire,bool tight_bounds,bool remote);
       bool find_satisfying_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
                                     std::set<PhysicalManager*> &candidates,
-                                    bool acquire, bool remote);
+                                    bool acquire,bool tight_bounds,bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_valid_instance(     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
     protected:
       PhysicalManager* allocate_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -704,14 +706,14 @@ namespace Legion {
                                     const std::set<PhysicalManager*> &cands,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
-                                    bool remote);
+                                    bool tight_region_bounds, bool remote);
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     const std::set<PhysicalManager*> &cands,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
-                                    bool remote);
+                                    bool tight_region_bounds, bool remote);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
@@ -940,7 +942,7 @@ namespace Legion {
       inline bool exists(void) const { return (ctx >= 0); }
       inline ContextID get_id(void) const 
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(exists());
 #endif
         return ContextID(ctx);
@@ -1062,6 +1064,7 @@ namespace Legion {
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
+      std::map<VariantID,Event> outstanding_requests;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
       // Track whether all these variants have a return type or not
       bool has_return_type;
@@ -1707,6 +1710,7 @@ namespace Legion {
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
+      Mapping::MapperRuntime* get_mapper_runtime(void);
       MapperID generate_dynamic_mapper_id(void);
       static MapperID& get_current_static_mapper_id(void);
       static MapperID generate_static_mapper_id(void);
@@ -1868,6 +1872,7 @@ namespace Legion {
       void send_view_update_request(AddressSpaceID target, Serializer &rez);
       void send_view_update_response(AddressSpaceID target, Serializer &rez);
       void send_view_remote_update(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -1999,7 +2004,9 @@ namespace Legion {
       void handle_view_update_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_view_update_response(Deserializer &derez);
-      void handle_view_remote_update(Deserializer &derez);
+      void handle_view_remote_update(Deserializer &derez,
+                                     AddressSpaceID source);
+      void handle_view_remote_invalidate(Deserializer &derez);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
@@ -2082,22 +2089,24 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    UniqueID creator_id);
+                                    bool tight_bounds, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    UniqueID creator_id);
+                                    bool tight_bounds, UniqueID creator_id);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
       bool find_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -2164,7 +2173,7 @@ namespace Legion {
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       void increment_total_outstanding_tasks(void);
       void decrement_total_outstanding_tasks(void);
 #else
@@ -2346,6 +2355,8 @@ namespace Legion {
     public:
       // The Runtime wrapper for this class
       Legion::Runtime *const external;
+      // The Mapper Runtime for this class
+      Legion::Mapping::MapperRuntime *const mapper_runtime;
       // The machine object for this runtime
       const Machine machine;
       const AddressSpaceID address_space; 
@@ -2355,7 +2366,7 @@ namespace Legion {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       Reservation outstanding_task_lock;
 #endif
       unsigned total_outstanding_tasks;
@@ -2407,7 +2418,7 @@ namespace Legion {
       Reservation mapper_info_lock;
       // For every mapper remember its mapper ID and processor
       std::map<Mapper*,MapperInfo> mapper_infos;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     protected:
       friend class TreeStateLogger;
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
@@ -2546,7 +2557,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
+#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -2660,7 +2671,7 @@ namespace Legion {
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;
       static UserEvent mpi_rank_event;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
       static bool verbose_logging;
       static bool logical_logging_only;
@@ -2824,7 +2835,7 @@ namespace Legion {
       // Couldn't find one so make one
       if (result == NULL)
         result = legion_new<T>(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       result->activate();

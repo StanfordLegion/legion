@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, traceback
+import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
 from collections import OrderedDict
 import regent
 
@@ -70,8 +70,20 @@ def run(filename, debug, verbose, flags, env):
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
+def run_spy(logfile, verbose):
+    cmd = [os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
+           '-lpa', logfile]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
-def find_labeled_prefix(filename, label):
+def find_labeled_text(filename, label):
     re_label = re.compile(_re_label.format(label=label), re.MULTILINE)
     with _open(filename, 'r') as f:
         program_text = f.read()
@@ -82,8 +94,18 @@ def find_labeled_prefix(filename, label):
     match_text = '\n'.join([line.strip()[2:].strip() for line in match_lines])
     return match_text
 
+def find_labeled_flags(filename, prefix):
+    flags = [[]]
+    flags_text = find_labeled_text(filename, prefix)
+    if flags_text is not None:
+        flags = json.loads(flags_text)
+        assert isinstance(flags, list), "%s declaration must be a json-formatted nested list" % prefix
+        for flag in flags:
+            assert isinstance(flag, list), "%s declaration must be a json-formatted nested list" % prefix
+    return flags
+
 def test_compile_fail(filename, debug, verbose, flags, env):
-    expected_failure = find_labeled_prefix(filename, 'fails-with')
+    expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
 
@@ -103,18 +125,27 @@ def test_compile_fail(filename, debug, verbose, flags, env):
         raise Exception('Expected failure, but test passed')
 
 def test_run_pass(filename, debug, verbose, flags, env):
-    runs_with = [[]]
-    runs_with_text = find_labeled_prefix(filename, 'runs-with')
-    if runs_with_text is not None:
-        runs_with = json.loads(runs_with_text)
-        assert isinstance(runs_with, list), "runs-with declaration must be a json-formatted nested list"
-
+    runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            assert isinstance(params, list), "runs-with declaration must be a json-formatted nested list"
             run(filename, debug, verbose, flags + params, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+
+def test_spy(filename, debug, verbose, flags, env):
+    spy_fd, spy_log = tempfile.mkstemp()
+    os.close(spy_fd)
+    spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
+
+    runs_with = find_labeled_flags(filename, 'runs-with')
+    try:
+        for params in runs_with:
+            run(filename, debug, verbose, flags + params + spy_flags, env)
+            run_spy(spy_log, verbose)
+    except TestFailure as e:
+        raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+    finally:
+        os.remove(spy_log)
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -147,29 +178,42 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-tests = [
-    # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
-    # Don't include backtraces on those expected to fail
-    ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
-     (os.path.join('tests', 'regent', 'compile_fail'),
-      os.path.join('tests', 'bishop', 'compile_fail'),
-     )),
-    ('pretty', (test_run_pass, (['-fpretty', '1', '-fvectorize', '0'], {})),
-     (os.path.join('tests', 'regent', 'run_pass'),
-      os.path.join('examples'),
-     )),
-    ('run_pass', (test_run_pass, (['-fvectorize', '0'], {'REALM_BACKTRACE': '1'})),
-     (os.path.join('tests', 'regent', 'run_pass'),
-      #os.path.join('tests', 'bishop', 'run_pass'),
-      os.path.join('examples'),
-     )),
-]
 
-def run_all_tests(thread_count, debug, verbose, quiet):
+def get_test_specs(include_spy):
+    base = [
+        # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
+        # Don't include backtraces on those expected to fail
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
+         (os.path.join('tests', 'regent', 'compile_fail'),
+          os.path.join('tests', 'bishop', 'compile_fail'),
+         )),
+        ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
+         (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('examples'),
+         )),
+        ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
+         (os.path.join('tests', 'regent', 'run_pass'),
+          #os.path.join('tests', 'bishop', 'run_pass'),
+          os.path.join('examples'),
+         )),
+    ]
+    spy = [
+        ('spy', (test_spy, ([], {})),
+         (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('examples'),
+         )),
+    ]
+    if include_spy:
+        return spy
+    else:
+        return base
+
+def run_all_tests(thread_count, debug, spy, verbose, quiet):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
+    tests = get_test_specs(spy)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -262,6 +306,10 @@ def test_driver(argv):
                         action='store_true',
                         help='enable debug mode',
                         dest='debug')
+    parser.add_argument('--spy', '-s',
+                        action='store_true',
+                        help='enable Legion Spy mode',
+                        dest='spy')
     parser.add_argument('-v',
                         action='store_true',
                         help='display verbose output',
@@ -275,6 +323,7 @@ def test_driver(argv):
     run_all_tests(
         args.thread_count,
         args.debug,
+        args.spy,
         args.verbose,
         args.quiet)
 

@@ -1109,6 +1109,10 @@ class MapperCallKind(object):
         self.desc = desc
         self.color = None
 
+    def assign_color(self, color):
+        assert self.color is None
+        self.color = color
+
 class MapperCall(object):
     def __init__(self, kind, op, start, stop):
         self.kind = kind
@@ -1131,6 +1135,10 @@ class RuntimeCallKind(object):
         self.runtime_call_kind = runtime_call_kind
         self.desc = desc
         self.color = None
+
+    def assign_color(self, color):
+        assert self.color is None
+        self.color = color
 
 class RuntimeCall(object):
     def __init__(self, kind, start, stop):
@@ -1321,7 +1329,8 @@ class State(object):
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
 
-    def parse_log_file(self, file_name):
+    def parse_log_file(self, file_name, verbose):
+        skipped = 0
         with open(file_name, 'rb') as log:  
             matches = 0
             # Keep track of the first and last times
@@ -1509,7 +1518,11 @@ class State(object):
                     continue
                 # If we made it here then we failed to match
                 matches -= 1 
-                print 'Skipping line: %s' % line.strip()
+                skipped += 1
+                if verbose:
+                    print 'Skipping line: %s' % line.strip()
+        if skipped > 0:
+            print 'WARNING: Skipped %d lines in %s' % (skipped, file_name)
         return matches
 
     def log_task_info(self, op_id, variant_id, proc_id,
@@ -1860,7 +1873,8 @@ class State(object):
     def assign_colors(self):
         # Subtract out some colors for which we have special colors
         num_colors = len(self.variants) + len(self.meta_variants) + \
-                     len(self.op_kinds) + len(self.message_kinds)
+                     len(self.op_kinds) + len(self.message_kinds) + \
+                     len(self.mapper_call_kinds) + len(self.runtime_call_kinds)
         # Use a LFSR to randomize these colors
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
@@ -1888,8 +1902,11 @@ class State(object):
         for op in self.operations.itervalues():
             op.assign_color(op_colors)
         # Assign all the message kinds different colors
-        for kind in self.message_kinds.itervalues():
-            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
+        for kinds in (self.message_kinds,
+                      self.mapper_call_kinds,
+                      self.runtime_call_kinds):
+            for kind in kinds.itervalues():
+                kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def emit_visualization(self, output_prefix, show_procs,
                            show_channels, show_instances):
@@ -2075,7 +2092,7 @@ def main():
     has_matches = False
     for file_name in file_names:
         print 'Reading log file %s...' % file_name
-        total_matches = state.parse_log_file(file_name)
+        total_matches = state.parse_log_file(file_name, verbose)
         print 'Matched %s lines' % total_matches
         if total_matches > 0:
             has_matches = True

@@ -1343,7 +1343,7 @@ function vref:reduce(cx, value, op, expr_type)
                 [std.quote_binary_op(fold_op, field_value, result)]
             end
           else
-            local v = terralib.newsymbol()
+            local v = terralib.newsymbol(expr_type.type)
             local assignment = quote
               var [v] = [result][ [i - 1] ]
             end
@@ -1613,6 +1613,7 @@ end
 
 function codegen.expr_index_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
+  local index_type = std.as_read(node.index.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
   if std.is_partition(value_type) then
@@ -1643,11 +1644,17 @@ function codegen.expr_index_access(cx, node)
     if cache_index_iterator then
       it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
     end
+
+    local color_type = value_type:colors().index_type
+    local dim = color_type.dim
+    local color = std.implicit_cast(index_type, color_type, index.value)
+
     actions = quote
       [actions]
-      var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
+      var dp = [color_type:to_domain_point(color)]
+      var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
         [cx.runtime], [cx.context],
-        [value.value].impl, [index.value])
+        [value.value].impl, dp)
       var [is] = [lr].index_space
       var [r] = [expr_type] { impl = [lr] }
     end
@@ -1764,7 +1771,6 @@ function codegen.expr_index_access(cx, node)
     local index = codegen.expr(cx, node.index):read(cx)
     return values.ref(index, node.expr_type.pointer_type)
   elseif std.is_list(value_type) then
-    local index_type = std.as_read(node.index.expr_type)
     local index = codegen.expr(cx, node.index):read(cx)
     if not std.is_list(index_type) then
       -- Single indexing
@@ -1812,7 +1818,6 @@ function codegen.expr_index_access(cx, node)
     else
       -- List indexing
       local value = codegen.expr(cx, node.value):read(cx)
-      local index_type = std.as_read(node.index.expr_type)
 
       local list_type = node.expr_type
       local list = terralib.newsymbol(list_type, "list")
@@ -3192,36 +3197,74 @@ function codegen.expr_region(cx, node)
 end
 
 function codegen.expr_partition(cx, node)
-  local region_expr = codegen.expr(cx, node.region):read(cx)
-  local coloring_expr = codegen.expr(cx, node.coloring):read(cx)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local coloring_type = std.as_read(node.coloring.expr_type)
+  local coloring = codegen.expr(cx, node.coloring):read(cx)
+  local colors = node.colors and codegen.expr(cx, node.colors):read(cx)
   local partition_type = std.as_read(node.expr_type)
   local actions = quote
-    [region_expr.actions];
-    [coloring_expr.actions];
+    [region.actions];
+    [coloring.actions];
+    [(colors and colors.actions) or (quote end)];
     [emit_debuginfo(node)]
   end
 
   local index_partition_create
   local args = terralib.newlist({
       cx.runtime, cx.context,
-      `([region_expr.value].impl.index_space),
+      `([region.value].impl.index_space),
   })
-  if partition_type:parent_region():is_opaque() then
-    index_partition_create = c.legion_index_partition_create_coloring
-  else
-    index_partition_create = c.legion_index_partition_create_domain_coloring
+
+  if colors then
     local color_space = terralib.newsymbol(c.legion_domain_t)
     args:insert(color_space)
     actions = quote
       [actions]
-      var [color_space] = c.legion_domain_coloring_get_color_space([coloring_expr.value])
+      var [color_space] = c.legion_index_space_get_domain(
+        [cx.runtime], [cx.context], [colors.value].impl)
+    end
+  elseif coloring_type == std.c.legion_domain_coloring_t then
+    local color_space = terralib.newsymbol(c.legion_domain_t)
+    args:insert(color_space)
+    actions = quote
+      [actions]
+      var [color_space] = c.legion_domain_coloring_get_color_space([coloring.value])
     end
   end
-  args:insertall({
-      coloring_expr.value,
-      node.disjointness == std.disjoint,
-      -1,
-  })
+
+  if coloring_type == std.c.legion_coloring_t then
+    index_partition_create = c.legion_index_partition_create_coloring
+  elseif coloring_type == std.c.legion_domain_coloring_t then
+    index_partition_create = c.legion_index_partition_create_domain_coloring
+  elseif coloring_type == std.c.legion_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_point_coloring
+  elseif coloring_type == std.c.legion_domain_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_domain_point_coloring
+  elseif coloring_type == std.c.legion_multi_domain_point_coloring_t then
+    index_partition_create = c.legion_index_partition_create_multi_domain_point_coloring
+  else
+    assert(false)
+  end
+
+  args:insert(coloring.value)
+
+
+  if coloring_type == std.c.legion_coloring_t or
+    coloring_type == std.c.legion_domain_coloring_t
+  then
+    args:insert(partition_type:is_disjoint())
+  elseif coloring_type == std.c.legion_point_coloring_t or
+    coloring_type == std.c.legion_domain_point_coloring_t or
+    coloring_type == std.c.legion_multi_domain_point_coloring_t
+  then
+    args:insert(
+      (partition_type:is_disjoint() and c.DISJOINT_KIND) or c.ALIASED_KIND)
+  else
+    assert(false)
+  end
+
+  args:insert(-1) -- AUTO_GENERATE_ID
+
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
@@ -3229,7 +3272,7 @@ function codegen.expr_partition(cx, node)
     [actions]
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region_expr.value].impl, [ip])
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
 
   return values.value(
@@ -3251,15 +3294,51 @@ function codegen.expr_partition_equal(cx, node)
 
   local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
-  actions = quote
-    [actions]
-    var domain = c.legion_index_space_get_domain(
-      [cx.runtime], [cx.context], [colors.value].impl)
-    var [ip] = c.legion_index_partition_create_equal(
-    [cx.runtime], [cx.context], [region.value].impl.index_space,
-    domain, 1, -1, false)
-    var [lp] = c.legion_logical_partition_create(
-      [cx.runtime], [cx.context], [region.value].impl, [ip])
+
+  if region_type:is_opaque() then
+    actions = quote
+      [actions]
+      var domain = c.legion_index_space_get_domain(
+        [cx.runtime], [cx.context], [colors.value].impl)
+      var [ip] = c.legion_index_partition_create_equal(
+      [cx.runtime], [cx.context], [region.value].impl.index_space,
+      domain, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]], false)
+      var [lp] = c.legion_logical_partition_create(
+        [cx.runtime], [cx.context], [region.value].impl, [ip])
+    end
+  else
+    local dim = region_type:ispace().dim
+    local blockify = terralib.newsymbol(
+      c["legion_blockify_" .. tostring(dim) .. "d_t"], "blockify")
+    local domain_get_rect =
+      c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
+    local create_index_partition =
+      c["legion_index_partition_create_blockify_" .. tostring(dim) .. "d"]
+
+    actions = quote
+      [actions]
+      var region_domain = c.legion_index_space_get_domain(
+        [cx.runtime], [cx.context], [region.value].impl.index_space)
+      var region_rect = [domain_get_rect](region_domain)
+      var color_domain = c.legion_index_space_get_domain(
+        [cx.runtime], [cx.context], [colors.value].impl)
+      var color_rect = [domain_get_rect](color_domain)
+
+      var [blockify]
+      [data.range(dim):map(
+         function(i)
+           local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
+           local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
+           return quote
+             [blockify].block_size.x[ [i] ] = ([block] + [colors] - 1) / [colors]
+           end
+         end)]
+      var [ip] = [create_index_partition](
+      [cx.runtime], [cx.context], [region.value].impl.index_space,
+      [blockify], -1 --[[ AUTO_GENERATE_ID ]])
+      var [lp] = c.legion_logical_partition_create(
+        [cx.runtime], [cx.context], [region.value].impl, [ip])
+    end
   end
 
   return values.value(

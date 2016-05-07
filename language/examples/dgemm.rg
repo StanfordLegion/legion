@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-finlines", "0"]]
+
+-- FIXME: This test breaks inline optimization.
+
 import "regent"
 
 -- This code has not been optimized and is not high performance.
@@ -24,54 +29,70 @@ terra abs(a : double) : double
   end
 end
 
-task dgemm(isa : ispace(int2d), a: region(isa, double),
-           isb : ispace(int2d), b: region(isb, double),
-           isc : ispace(int2d), c: region(isc, double),
-           isx : ispace(int1d))
+task dgemm(isl : ispace(int1d),
+           ismn : ispace(int2d),
+           a : region(ispace(int2d), double),
+           b : region(ispace(int2d), double),
+           c : region(ismn, double))
 where
   reads(a, b, c),
   writes(c)
 do
-  for ic in isc do
-    for ix in isx do
-      var ia = int2d {x = ix, y = ic.y}
-      var ib = int2d {x = ic.x, y = ix}
+  for mn in ismn do
+    for l in isl do
+      var ia = int2d {x = l, y = mn.y}
+      var ib = int2d {x = mn.x, y = l}
+      var ic = mn
       c[ic] += a[ia] * b[ib]
     end
   end
 end
 
-task test(l: int, m : int, n : int)
-  var isa = ispace(int2d, { x = l, y = n })
-  var isb = ispace(int2d, { x = m, y = l })
-  var isc = ispace(int2d, { x = m, y = n })
-  var isx = ispace(int1d, l)
+task test(l: int, m : int, n : int, bl : int, bm : int, bn : int)
+  var isl, ism, isn = ispace(int1d, l), ispace(int1d, m), ispace(int1d, n)
+  var isln = ispace(int2d, { x = l, y = n })
+  var isml = ispace(int2d, { x = m, y = l })
+  var ismn = ispace(int2d, { x = m, y = n })
+  var a = region(isln, double)
+  var b = region(isml, double)
+  var c = region(ismn, double)
 
-  var a = region(isa, double)
-  var b = region(isb, double)
-  var c = region(isc, double)
+  var cln = ispace(int2d, { x = bl, y = bn })
+  var cml = ispace(int2d, { x = bm, y = bl })
+  var cmn = ispace(int2d, { x = bm, y = bn })
+  var pa = partition(equal, a, cln)
+  var pb = partition(equal, b, cml)
+  var pc = partition(equal, c, cmn)
 
-  for ia in isa do
-    a[ia] = 1.0
+  var rl = region(isl, bool) -- FIXME: Need index space partitioning.
+  var cl = ispace(int1d, bl)
+  var pl = partition(equal, rl, cl)
+
+  fill(a, 1.0)
+  fill(b, 1.0)
+  fill(c, 0.0)
+
+  for mn in cmn do
+    for l in cl do
+      var ia = int2d {x = l, y = mn.y}
+      var ib = int2d {x = mn.x, y = l}
+      var ic = mn
+      var sl = pl[l]
+      var sa = pa[ia]
+      var sb = pb[ib]
+      var sc = pc[ic]
+
+      dgemm(sl.ispace, sc.ispace, sa, sb, sc)
+    end
   end
 
-  for ib in isb do
-    b[ib] = 1.0
-  end
-
-  for ic in isc do
-    c[ic] = 0.0
-  end
-
-  dgemm(isa, a, isb, b, isc, c, isx)
-
-  for ic in isc do
+  for ic in c do
     regentlib.assert(abs(c[ic] - l) < 0.00001, "test failed")
   end
 end
 
 task main()
-  test(3, 4, 5)
-  test(10, 10, 20)
+  test(3, 4, 5, 1, 2, 3)
+  test(10, 10, 20, 2, 5, 4)
 end
 regentlib.start(main)

@@ -821,8 +821,9 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
     return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
       std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
   elseif std.is_partition(param_type) and std.is_partition(arg_type) then
-    return (param_type:is_disjoint() == arg_type:is_disjoint()) and
-      (check(param_type:parent_region(), arg_type:parent_region(), mapping))
+    return param_type:is_disjoint() == arg_type:is_disjoint() and
+      check(param_type:parent_region(), arg_type:parent_region(), mapping) and
+      check(param_type:colors(), arg_type:colors(), mapping)
   elseif
     std.is_cross_product(param_type) and std.is_cross_product(arg_type)
   then
@@ -842,42 +843,74 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   end
 end
 
-local function reconstruct_param_as_arg_type(param_type, mapping)
+local function unify_param_type_args(param, param_type, arg_type, mapping)
+  if std.is_region(param_type) and
+    type_compatible(param_type:ispace(), arg_type:ispace()) and
+    not (mapping[param] or mapping[param_type] or mapping[param_type:ispace()]) and
+    type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
+  then
+    mapping[param_type:ispace()] = arg_type:ispace()
+  elseif std.is_partition(param_type) and
+    type_compatible(param_type:colors(), arg_type:colors()) and
+    not (mapping[param] or mapping[param_type] or mapping[param_type:colors()]) and
+    type_isomorphic(param_type:colors(), arg_type:colors(), mapping)
+  then
+    mapping[param_type:colors()] = arg_type:colors()
+  end
+end
+
+local function reconstruct_param_as_arg_symbol(param_type, mapping)
+  local param_as_arg_symbol = mapping[param_type]
+  for k, v in pairs(mapping) do
+    if std.is_symbol(v) and v:gettype() == mapping[param_type] then
+      param_as_arg_symbol = v
+    end
+  end
+  return param_as_arg_symbol
+end
+
+local function reconstruct_param_as_arg_type(param_type, mapping, optional)
   if std.is_ispace(param_type) then
     local index_type = std.type_sub(param_type.index_type, mapping)
     return std.ispace(index_type)
   elseif std.is_region(param_type) then
+    local param_ispace_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:ispace(), mapping) or
+      param_type:ispace()
     local fspace_type = std.type_sub(param_type.fspace_type, mapping)
-    return std.region(fspace_type)
+    return std.region(param_ispace_as_arg_type, fspace_type)
   elseif std.is_partition(param_type) then
-    local param_parent_region = param_type:parent_region()
-    local param_parent_region_as_arg_type = mapping[param_parent_region]
-    for k, v in pairs(mapping) do
-      if std.is_symbol(v) and v:gettype() == mapping[param_parent_region] then
-        param_parent_region_as_arg_type = v
-      end
-    end
+    local param_parent_region_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:parent_region(), mapping)
+    local param_colors_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:colors(), mapping)
     return std.partition(
-      param_type.disjointness, param_parent_region_as_arg_type)
+      param_type.disjointness, param_parent_region_as_arg_type,
+      param_colors_as_arg_type)
   elseif std.is_cross_product(param_type) then
     local param_partitions = param_type:partitions()
     local param_partitions_as_arg_type = param_partitions:map(
       function(param_partition)
-        local param_partition_as_arg_type = mapping[param_partition]
-        for k, v in pairs(mapping) do
-          if std.is_symbol(v) and v:gettype() == mapping[param_partition] then
-            param_partition_as_arg_type = v
-          end
-        end
-        return param_partition_as_arg_type
+        return reconstruct_param_as_arg_symbol(param_partition, mapping)
     end)
     return std.cross_product(unpack(param_partitions_as_arg_type))
   elseif std.is_list_of_regions(param_type) then
     local fspace_type = std.type_sub(param_type.element_type.fspace_type, mapping)
     return std.list(std.region(fspace_type))
   else
-    assert(false)
+    assert(optional)
   end
+end
+
+local function reconstruct_return_as_arg_type(return_type, mapping)
+  if mapping[return_type] then
+    return std.type_sub(return_type, mapping)
+  end
+
+  local result = reconstruct_param_as_arg_type(return_type, mapping, true)
+  if result then return result end
+
+  return std.type_sub(return_type, mapping)
 end
 
 function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
@@ -933,14 +966,8 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                     " but got " .. tostring(arg))
       end
 
-      -- Special case for regions: allow the index spaces to unify.
-      if std.is_region(param_type) and
-        type_compatible(param_type:ispace(), arg_type:ispace()) and
-        not (mapping[param] or mapping[param_type]) and
-        type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
-      then
-        mapping[param_type:ispace()] = arg_type:ispace()
-      end
+      -- Allow type arguments to unify (if any).
+      unify_param_type_args(param, param_type, arg_type, mapping)
 
       mapping[param] = arg
       mapping[param_type] = arg_type
@@ -957,7 +984,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                   " but got " .. tostring(arg_type))
     end
   end
-  return std.type_sub(return_type, mapping)
+  return reconstruct_return_as_arg_type(return_type, mapping)
 end
 
 function std.validate_fields(fields, constraints, params, args)
@@ -1780,28 +1807,51 @@ function std.index_type(base_type, displayname)
       return quote
         var v = [expr].__ptr
       in
-        pt { x = arrayof(int64, [fields:map(function(field) return `(v.[field]) end)]) }
+        pt { x = arrayof(c.coord_t, [fields:map(function(field) return `(v.[field]) end)]) }
       end
     else
-      return quote var v = [expr].__ptr in pt { x = arrayof(int64, v) } end
+      return quote var v = [expr].__ptr in pt { x = arrayof(c.coord_t, v) } end
+    end
+  end
+
+  function st:to_domain_point(expr)
+    local index = terralib.newsymbol(self.impl_type)
+
+    local values
+    if self.fields then
+      values = self.fields:map(function(field) return `(index.[field]) end)
+    else
+      values = terralib.newlist({index})
+    end
+    for _ = #values + 1, 3 do
+      values:insert(0)
+    end
+
+    return quote
+      var [index] = [expr].__ptr
+    in
+      c.legion_domain_point_t {
+        dim = [data.max(self.dim, 1)],
+        point_data = arrayof(c.coord_t, [values]),
+      }
     end
   end
 
   return setmetatable(st, index_type)
 end
 
-local struct int2d { x : int, y : int }
-terra int2d.metamethods.__add(a : int2d, b : int2d) : int2d
-  return int2d { x = a.x + b.x, y = a.y + b.y }
+local struct __int2d { x : int, y : int }
+terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
+  return __int2d { x = a.x + b.x, y = a.y + b.y }
 end
-local struct int3d { x : int, y : int, z : int }
-terra int3d.metamethods.__add(a : int3d, b : int3d) : int3d
-  return int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+local struct __int3d { x : int, y : int, z : int }
+terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
+  return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
 end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
-std.int2d = std.index_type(int2d, "int2d")
-std.int3d = std.index_type(int3d, "int3d")
+std.int2d = std.index_type(__int2d, "int2d")
+std.int3d = std.index_type(__int3d, "int3d")
 
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
@@ -1837,6 +1887,9 @@ function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
     fspace_type = ispace_symbol
     ispace_symbol = std.newsymbol(std.ispace(std.ptr))
+  end
+  if terralib.types.istype(ispace_symbol) then
+    ispace_symbol = std.newsymbol(ispace_symbol)
   end
 
   if not std.is_symbol(ispace_symbol) then
@@ -1895,7 +1948,7 @@ function std.region(ispace_symbol, fspace_type)
       if st:is_opaque() then
         return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
       else
-        return "region#" .. tostring(id) .. "(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        return "region#" .. tostring(id) .. "(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
       end
     end
   else
@@ -1903,7 +1956,7 @@ function std.region(ispace_symbol, fspace_type)
       if st:is_opaque() then
         return "region(" .. tostring(st.fspace_type) .. ")"
       else
-        return "region(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+        return "region(" .. tostring((st.ispace_symbol:hasname() and st.ispace_symbol) or st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
       end
     end
   end
@@ -1916,14 +1969,29 @@ std.wild = std.newsymbol(std.untyped, "wild")
 std.disjoint = terralib.types.newstruct("disjoint")
 std.aliased = terralib.types.newstruct("aliased")
 
-function std.partition(disjointness, region)
+function std.partition(disjointness, region_symbol, colors_symbol)
+  if colors_symbol == nil then
+    colors_symbol = std.newsymbol(std.ispace(std.ptr))
+  end
+  if terralib.types.istype(colors_symbol) then
+    colors_symbol = std.newsymbol(colors_symbol)
+  end
+
   assert(disjointness == std.disjoint or disjointness == std.aliased,
          "Partition type requires disjointness to be one of disjoint or aliased")
-  assert(std.is_symbol(region),
+  assert(std.is_symbol(region_symbol),
          "Partition type requires region to be a symbol")
-  if region:hastype() then
-    assert(terralib.types.istype(region:gettype()) and std.is_region(region:gettype()),
+  if region_symbol:hastype() then
+    assert(terralib.types.istype(region_symbol:gettype()) and
+             std.is_region(region_symbol:gettype()),
            "Parition type requires region")
+  end
+  assert(std.is_symbol(colors_symbol),
+         "Partition type requires colors to be a symbol")
+  if colors_symbol:hastype() then
+    assert(terralib.types.istype(colors_symbol:gettype()) and
+             std.is_ispace(colors_symbol:gettype()),
+           "Parition type requires colors")
   end
 
   local st = terralib.types.newstruct("partition")
@@ -1933,7 +2001,8 @@ function std.partition(disjointness, region)
 
   st.is_partition = true
   st.disjointness = disjointness
-  st.parent_region_symbol = region
+  st.parent_region_symbol = region_symbol
+  st.colors_symbol = colors_symbol
   st.subregions = {}
 
   function st:is_disjoint()
@@ -1950,6 +2019,14 @@ function std.partition(disjointness, region)
              std.is_region(region),
            "Parition type requires region")
     return region
+  end
+
+  function st:colors()
+    local colors = self.colors_symbol:gettype()
+    assert(terralib.types.istype(colors) and
+             std.is_ispace(colors),
+           "Parition type requires colors")
+    return colors
   end
 
   function st:fspace()
@@ -1988,11 +2065,19 @@ function std.partition(disjointness, region)
     local id = next_region_id
     next_region_id = next_region_id + 1
     function st.metamethods.__typename(st)
-      return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      if st:colors():is_opaque() then
+        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      else
+        return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
+      end
     end
   else
     function st.metamethods.__typename(st)
-      return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      if st:colors():is_opaque() then
+        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+      else
+        return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ", " .. tostring((st.colors_symbol:hasname() and st.colors_symbol) or st:colors()) .. ")"
+      end
     end
   end
 
@@ -2143,7 +2228,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   function st:bounds()
     local bounds = terralib.newlist()
     for i, region_symbol in ipairs(self.bounds_symbols) do
-      local region = region_symbol.type
+      local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
         log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region.type))
@@ -2164,6 +2249,10 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     return "vptr(" .. st.N .. ", " ..
            tostring(st.points_to_type) .. ", " ..
            tostring(bounds:mkstring(", ")) .. ")"
+  end
+
+  function st:isvector()
+    return true
   end
 
   return st
@@ -2191,6 +2280,10 @@ std.sov = terralib.memoize(function(struct_type, width)
 
   function st.metamethods.__typename(st)
     return "sov(" .. tostring(st.type) .. ", " .. tostring(st.N) .. ")"
+  end
+
+  function st:isvector()
+    return true
   end
 
   return st

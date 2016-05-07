@@ -159,7 +159,7 @@ namespace Legion {
       void *result;
       if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((alloc_size % ALIGNMENT) == 0);
 #endif
       // memalign is faster than posix_memalign so use it if we have it

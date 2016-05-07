@@ -803,7 +803,7 @@ namespace Legion {
     inline void TaskLauncher::add_field(unsigned idx, FieldID fid, bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < region_requirements.size());
 #endif
       region_requirements[idx].add_field(fid, inst);
@@ -873,7 +873,7 @@ namespace Legion {
     inline void IndexLauncher::add_field(unsigned idx, FieldID fid, bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < region_requirements.size());
 #endif
       region_requirements[idx].add_field(fid, inst);
@@ -934,7 +934,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unsigned result = src_requirements.size();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result == dst_requirements.size());
 #endif
       src_requirements.push_back(src);
@@ -946,7 +946,7 @@ namespace Legion {
     inline void CopyLauncher::add_src_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < src_requirements.size());
 #endif
       src_requirements[idx].add_field(fid, inst);
@@ -956,7 +956,7 @@ namespace Legion {
     inline void CopyLauncher::add_dst_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx < dst_requirements.size());
 #endif
       dst_requirements[idx].add_field(fid, inst);
@@ -1364,7 +1364,7 @@ namespace Legion {
     inline ptr_t IndexIterator::next(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!finished);
 #endif
       ptr_t result = current_pointer;
@@ -1384,7 +1384,7 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!finished);
 #endif
       ptr_t result = current_pointer;
@@ -1420,16 +1420,16 @@ namespace Legion {
           pir; pir++) 
       {
         LegionRuntime::Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(mapping.preimage_is_dense(pir.p));
 #endif
         c[DomainPoint::from_point<T::IDIM>(pir.p)] =
-          Domain::from_rect<T::IDIM>(preimage);
+          Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
       }
       IndexPartition result = create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
               DISJOINT_KIND, part_color);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // We don't actually know if we're supposed to check disjointness
       // so if we're in debug mode then just do it.
       {
@@ -1526,7 +1526,7 @@ namespace Legion {
       if (redop_id == 0)
       {
         fprintf(stderr,"ERROR: ReductionOpID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_REDOP_ID);
@@ -1537,7 +1537,7 @@ namespace Legion {
       {
         fprintf(stderr,"ERROR: ReductionOpID %d has already been used " 
                        "in the reduction table\n",redop_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_REDOP_ID);
@@ -1558,7 +1558,7 @@ namespace Legion {
       if (serdez_id == 0)
       {
         fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_SERDEZ_ID);
@@ -1569,7 +1569,7 @@ namespace Legion {
       {
         fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
                        "in the serdez operation table\n", serdez_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_SERDEZ_ID);
@@ -1670,7 +1670,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1700,7 +1700,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1733,7 +1733,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1765,7 +1765,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);

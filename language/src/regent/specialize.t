@@ -236,8 +236,9 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Partition) then
-    if get_num_accessed_fields(node.disjointness) > 1 then return false end
     if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.coloring) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.PartitionEqual) then
@@ -899,6 +900,7 @@ function specialize.expr_partition(cx, node)
     disjointness = specialize.disjointness_kind(cx, node.disjointness),
     region = specialize.expr(cx, node.region),
     coloring = specialize.expr(cx, node.coloring),
+    colors = node.colors and specialize.expr(cx, node.colors),
     options = node.options,
     span = node.span,
   }
@@ -1661,6 +1663,9 @@ function specialize.stat_fspace_field(cx, node)
   cx.env:insert(node, node.field_name, symbol)
 
   local field_type = node.type_expr(cx.env:env())
+  if not field_type then
+    log.error(node, "field type is undefined or nil")
+  end
   symbol:settype(field_type)
 
   return  {

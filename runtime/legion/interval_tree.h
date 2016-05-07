@@ -140,7 +140,7 @@ namespace Legion {
         if (left_node != NULL)
         {
           // Insert in the side with fewer segments
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(right_node != NULL);
 #endif
           return insert_local(left, right);
@@ -169,7 +169,7 @@ namespace Legion {
         left_bound = left;
         if (left_node != NULL)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(right_node != NULL);
 #endif
           return insert_local(left, right);
@@ -180,7 +180,7 @@ namespace Legion {
         right_bound = right;
         if (left_node != NULL)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(right_node != NULL);
 #endif
           return insert_local(left, right);
@@ -231,7 +231,7 @@ namespace Legion {
       }
       else
         assert(false); // should never hit this case
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
       return this;
@@ -243,7 +243,7 @@ namespace Legion {
                                                                 T left, T right)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(left_node != NULL);
       assert(right_node != NULL);
 #endif
@@ -256,7 +256,7 @@ namespace Legion {
         // make sure we don't delete the new tree
         left_node = NULL;
         delete this;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         result->sanity_check();
 #endif
         return result;
@@ -274,7 +274,7 @@ namespace Legion {
         else
           right_node = right_node->insert(left, right);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
       return this;
@@ -291,7 +291,7 @@ namespace Legion {
         return false;
       if (left_node != NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(right_node != NULL);
 #endif
         if (left_node->intersects(left, right))
@@ -324,7 +324,7 @@ namespace Legion {
         // if any of our children dominate it
         if (left_node != NULL)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(right_node != NULL);
 #endif
           if (left_node->dominates(left, right))
@@ -356,7 +356,7 @@ namespace Legion {
     IntervalTreeNode<T,DISCRETE>* IntervalTreeNode<T,DISCRETE>::merge(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(((left_node == NULL) && (right_node == NULL)) ||
              ((left_node != NULL) && (right_node != NULL)));
 #endif
@@ -370,7 +370,7 @@ namespace Legion {
                               right_node->reinsert(left_node);
           left_node = NULL;
           delete this;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           result->sanity_check();
 #endif
           return result;
@@ -386,7 +386,7 @@ namespace Legion {
               right_node->reinsert(left_node);
             left_node = NULL;
             delete this;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             result->sanity_check();
 #endif
             return result;
@@ -401,7 +401,7 @@ namespace Legion {
                               right_node->reinsert(left_node);
           left_node = NULL;
           delete this;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           result->sanity_check();
 #endif
           return result;
@@ -417,7 +417,7 @@ namespace Legion {
                               right_node->reinsert(left_node);
             left_node = NULL;
             delete this;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             result->sanity_check();
 #endif
             return result;
@@ -435,7 +435,7 @@ namespace Legion {
     {
       if (left_node != NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(right_node != NULL);
 #endif
         target = left_node->reinsert(target);
@@ -509,7 +509,7 @@ namespace Legion {
     void IntervalTree<T,DISCRETE>::insert(T left, T right)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(left <= right);
 #endif
       if (root == NULL)
@@ -526,7 +526,7 @@ namespace Legion {
     bool IntervalTree<T,DISCRETE>::intersects(T left, T right) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(left <= right);
 #endif
       if (root == NULL)

@@ -19,6 +19,7 @@ import subprocess
 import sys, os, re, gc, shutil, copy
 import string
 import tempfile
+import random
 from getopt import getopt,GetoptError
 from array import *
 from collections import deque
@@ -228,6 +229,14 @@ class Rect(object):
                 return True
         return False
 
+    def volume(self):
+        if self.empty():
+            return 0
+        result = 1
+        for i in range(self.dim):
+            result *= (self.hi.vals[i] - self.lo.vals[i] + 1)
+        return result
+
     def dominates(self, rect):
         for i in range(self.dim):
             if rect.lo.vals[i] < self.lo.vals[i] or self.hi.vals[i] < rect.hi.vals[i]:
@@ -320,6 +329,15 @@ class Shape(object):
     def empty(self):
         return not self.points and not self.rects
 
+    def has_point(self, point):
+        for rect in self.rects:
+            if rect.contains_point(point):
+                return True
+        for p in self.points:
+            if p == point:
+                return True
+        return False
+
     def copy(self):
         result = Shape()
         for point in self.points:
@@ -376,36 +394,1424 @@ class Shape(object):
         result -= other
         return result
 
-    def __isub__(self, other):
-        to_remove = set()
-        # Do rectangles first, then do points
-        for rect in self.rects:
-            for orect in other.rects:
-                if rect.intersects(orect):
-                    # See if it dominates
-                    if orect.dominates(rect):
-                        to_remove.add(rect)
-                        break
+    def rect_sub_helper(self, rect, other, to_add):
+        #print str(rect)+' - '+str(other)
+        # We are guaranteed to intersect but not dominate
+        if rect.lo.dim == 1:
+            # 3 cases: 2 edges, 1 center 
+            if other.lo.vals[0] <= rect.lo.vals[0]:
+                # Lower edge
+                lo = Point(1)
+                lo.vals[0] = other.hi.vals[0]+1
+                to_add.append(Rect(lo,rect.hi))
+            elif other.hi.vals[0] >= rect.hi.vals[0]:
+                # Upper edge
+                hi = Point(1)
+                hi.vals[0] = other.lo.vals[0]-1
+                to_add.append(Rect(rect.lo,hi))
+            else:
+                # Center
+                hi = Point(1)
+                hi.vals[0] = other.lo.vals[0]-1
+                lo = Point(1)
+                lo.vals[0] = other.hi.vals[0]+1
+                to_add.append(Rect(rect.lo,hi))
+                to_add.append(Rect(lo,rect.hi))
+        elif rect.lo.dim == 2:
+            # 9 cases: 4 corners, 4 edges, 1 center
+            if other.lo.vals[0] <= rect.lo.vals[0]:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    # Lower-left corner
+                    #print "Lower left"
+                    if other.hi.vals[0] >= rect.hi.vals[0]:
+                        # Just have above
+                        lo = Point(2)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        to_add.append(Rect(lo,rect.hi))
+                    elif other.hi.vals[1] >= rect.hi.vals[1]:
+                        # Just have to the right
+                        lo = Point(2)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        to_add.append(Rect(lo,rect.hi))
                     else:
-                        # break it into points
-                        for point in rect.iterator():
-                            if not orect.contains_point(point):
-                                self.points.add(point)
-                        to_remove.add(rect)
-                        break
-            if rect not in to_remove:
-                # Check the rectangle agains the points
-                for point in other.points:
-                    if rect.contains_point(point):
-                        # break it into points
-                        for new_point in rect.iterator():
-                            if new_point <> point:
-                                self.points.add(new_point) 
-                        to_remove.add(rect)
-                        break
-        if to_remove:
-            for rect in to_remove:
-                self.rects.remove(rect)
+                        # Have both above and to the right
+                        lo = Point(2)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(2)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        hi = Point(2)
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        to_add.append(Rect(lo,hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    # Upper-left corner (can't overlap lower-level corner)
+                    #print "Upper left"
+                    if other.hi.vals[0] >= rect.hi.vals[0]:
+                        # Overlap with upper right,  only have below
+                        hi = Point(2)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        to_add.append(Rect(rect.lo,hi))
+                    else:
+                        # Have below and to the right
+                        lo = Point(2)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        to_add.append(Rect(lo,rect.hi))
+                        hi = Point(2)
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        to_add.append(Rect(rect.lo,hi))
+                else:
+                    # Left edge but neither of the two left corners
+                    #print "Left edge"
+                    lo = Point(2)
+                    lo.vals[0] = rect.lo.vals[0]
+                    lo.vals[1] = other.hi.vals[1]+1
+                    to_add.append(Rect(lo,rect.hi))
+                    hi = Point(2)
+                    hi.vals[0] = rect.hi.vals[0]
+                    hi.vals[1] = other.lo.vals[1]-1
+                    to_add.append(Rect(rect.lo,hi))
+                    # Check to see if we have an overlap with left edge
+                    if other.hi.vals[0] < rect.hi.vals[0]:
+                        # No overlap with right edge
+                        lo = Point(2)
+                        hi = Point(2)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = other.lo.vals[1]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.hi.vals[1]
+                        to_add.append(Rect(lo,hi))
+            elif other.hi.vals[0] >= rect.hi.vals[0]:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    #print "Lower right"
+                    # Lower-right corner (can't overlap with any left corners)
+                    hi = Point(2)
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(rect.lo,hi))
+                    if other.hi.vals[1] < rect.hi.vals[1]:
+                        # No overlap with top-right corner 
+                        lo = Point(2)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        to_add.append(Rect(lo,rect.hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    #print "Upper right"
+                    # Upper-right corner (can't overlap with any other corners)
+                    hi = Point(2)
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(rect.lo,hi))
+                    lo = Point(2)
+                    lo.vals[0] = other.lo.vals[0]
+                    lo.vals[1] = rect.lo.vals[1]
+                    hi = Point(2)
+                    hi.vals[0] = rect.hi.vals[0]
+                    hi.vals[1] = other.lo.vals[1]-1
+                    to_add.append(Rect(lo,hi))
+                else:
+                    #print "Right edge"
+                    # Right edge (no overlap with left edge)
+                    hi = Point(2)
+                    hi.vals[0] = rect.hi.vals[0]
+                    hi.vals[1] = other.lo.vals[1]-1
+                    to_add.append(Rect(rect.lo,hi))
+                    lo = Point(2)
+                    lo.vals[0] = rect.lo.vals[0]
+                    lo.vals[1] = other.hi.vals[1]+1
+                    to_add.append(Rect(lo,rect.hi))
+                    lo = Point(2)
+                    hi = Point(2)
+                    lo.vals[0] = rect.lo.vals[0]
+                    lo.vals[1] = other.lo.vals[1]
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = other.hi.vals[1]
+                    to_add.append(Rect(lo,hi))
+            else:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    #print "Bottom edge"
+                    # Bottom edge
+                    hi = Point(2)
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(rect.lo,hi))
+                    lo = Point(2)
+                    lo.vals[0] = other.hi.vals[0]+1
+                    lo.vals[1] = rect.lo.vals[1]
+                    to_add.append(Rect(lo,rect.hi))
+                    # See if it intersects with top edge
+                    if other.hi.vals[1] < rect.hi.vals[1]:
+                        # Doesn't intersect
+                        lo = Point(2)
+                        hi = Point(2)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        to_add.append(Rect(lo,hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    #print "Top edge"
+                    # Top edge (can't overlap with bottom edge)
+                    hi = Point(2)
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(rect.lo,hi))
+                    lo = Point(2)
+                    lo.vals[0] = other.hi.vals[0]+1
+                    lo.vals[1] = rect.lo.vals[1]
+                    to_add.append(Rect(lo,rect.hi))
+                    lo = Point(2)
+                    hi = Point(2)
+                    lo.vals[0] = other.lo.vals[0]
+                    lo.vals[1] = rect.lo.vals[1]
+                    hi.vals[0] = other.hi.vals[0]
+                    hi.vals[1] = other.lo.vals[1]-1
+                    to_add.append(Rect(lo,hi))
+                else:
+                    #print "Center"
+                    # Center (with no overlaps)
+                    hi = Point(2)
+                    hi.vals[0] = other.lo.vals[0]-1
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(rect.lo,hi))
+                    lo = Point(2)
+                    lo.vals[0] = other.hi.vals[0]+1
+                    lo.vals[1] = rect.lo.vals[1]
+                    to_add.append(Rect(lo,rect.hi))
+                    lo = Point(2)
+                    hi = Point(2)
+                    lo.vals[0] = other.lo.vals[0]
+                    lo.vals[1] = rect.lo.vals[1]
+                    hi.vals[0] = other.hi.vals[0]
+                    hi.vals[1] = other.lo.vals[1]-1
+                    to_add.append(Rect(lo,hi))
+                    lo = Point(2)
+                    hi = Point(2)
+                    lo.vals[0] = other.lo.vals[0]
+                    lo.vals[1] = other.hi.vals[1]+1
+                    hi.vals[0] = other.hi.vals[0]
+                    hi.vals[1] = rect.hi.vals[1]
+                    to_add.append(Rect(lo,hi))
+        elif rect.lo.dim == 3:
+            # 27 cases: 6 faces, 8 corners, 12 edges, 1 center
+            if other.lo.vals[0] <= rect.lo.vals[0]:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        # Front lower-left corner
+                        #print "Front lower left corner"
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            # Front lower-right corner
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # Overlaps with front face
+                                if other.hi.vals[2] >= rect.hi.vals[2]:
+                                    assert False # overlap all should never happen
+                                else:
+                                    # Overlaps with just front face
+                                    lo = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = other.hi.vals[2]+1
+                                    to_add.append(Rect(lo,rect.hi))
+                            else:
+                                # Overlaps with front lower corners
+                                if other.hi.vals[2] >= rect.hi.vals[2]:
+                                    # Overlaps with all lower corners
+                                    lo = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = other.hi.vals[1]+1
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    to_add.append(Rect(lo,rect.hi))
+                                else:
+                                    # Only overlaps with front lower corners 
+                                    lo = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = other.hi.vals[2]+1
+                                    to_add.append(Rect(lo,rect.hi))
+                                    lo = Point(3)
+                                    hi = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = other.hi.vals[1]+1
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    hi.vals[0] = rect.hi.vals[0]
+                                    hi.vals[1] = rect.hi.vals[1]
+                                    hi.vals[2] = other.hi.vals[2]
+                                    to_add.append(Rect(lo,hi))
+                        else:
+                            # No overlap with front right corner
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # Overlaps with front left corners
+                                if other.hi.vals[2] >= rect.hi.vals[2]:
+                                    # Overlaps with all left corners
+                                    lo = Point(3)
+                                    lo.vals[0] = other.hi.vals[0]+1
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    to_add.append(Rect(lo,rect.hi))
+                                else:
+                                    # Only overlaps with front left corners
+                                    lo = Point(3)
+                                    lo.vals[0] = other.hi.vals[0]+1
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    to_add.append(Rect(lo,rect.hi))
+                                    lo = Point(3)
+                                    hi = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = other.hi.vals[2]+1
+                                    hi.vals[0] = other.hi.vals[0]
+                                    hi.vals[1] = rect.hi.vals[1]
+                                    hi.vals[2] = rect.hi.vals[2]
+                                    to_add.append(Rect(lo,hi))
+                            else:
+                                # Overlaps with front lower-left
+                                if other.hi.vals[2] >= rect.hi.vals[2]:
+                                    # Overlaps front and back lower-left corners
+                                    lo = Point(3)
+                                    lo.vals[0] = other.hi.vals[0]+1
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    to_add.append(Rect(lo,rect.hi))
+                                    lo = Point(3)
+                                    hi = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = other.hi.vals[1]+1
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    hi.vals[0] = other.hi.vals[0]
+                                    hi.vals[1] = rect.hi.vals[1]
+                                    hi.vals[2] = rect.hi.vals[2]
+                                    to_add.append(Rect(lo,hi))
+                                else:
+                                    # Overlaps with just front lower-left
+                                    lo = Point(3)
+                                    lo.vals[0] = other.hi.vals[0]+1
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    to_add.append(Rect(lo,rect.hi))
+                                    lo = Point(3)
+                                    hi = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = rect.lo.vals[1]
+                                    lo.vals[2] = other.hi.vals[2]+1
+                                    hi.vals[0] = other.hi.vals[0]
+                                    hi.vals[1] = other.hi.vals[1]
+                                    hi.vals[2] = rect.hi.vals[2]
+                                    to_add.append(Rect(lo,hi))
+                                    lo = Point(3)
+                                    hi = Point(3)
+                                    lo.vals[0] = rect.lo.vals[0]
+                                    lo.vals[1] = other.hi.vals[1]+1
+                                    lo.vals[2] = rect.lo.vals[2]
+                                    hi.vals[0] = other.hi.vals[0]
+                                    hi.vals[1] = rect.hi.vals[1]
+                                    hi.vals[2] = rect.hi.vals[2]
+                                    to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back lower left corner"
+                        # Back lower-left corner (no overlap with any front corners)
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            # Overlap with back lower-right
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # Overlap with back face so we're done
+                                pass
+                            else:
+                                # Overlap with back lower corners
+                                lo = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = other.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                        else:
+                            # No overlaps with back right corners 
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # Overlap with back upper-left
+                                lo = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                            else:
+                                # Just back lower-left corner
+                                lo = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = other.lo.vals[2]
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Lower left z edge"
+                        # Lower-left z edge
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # cutting plane through z so we're done
+                                pass
+                            else:
+                                # only bottom half cutting plane
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = other.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = other.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                        else:
+                            if other.hi.vals[1] >= rect.hi.vals[1]:
+                                # only left half cutting plane
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = other.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                            else:
+                                # only lower-left z edge
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = other.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = other.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = other.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front upper left corner"
+                        # Front upper-left corner 
+                        # No overlap with any lower corners
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Overlap with whole top
+                                hi = Point(3)
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.lo.vals[1]-1
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(rect.lo,hi))
+                            else:
+                                # Overlap with front upper corners
+                                hi = Point(3)
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.lo.vals[1]-1
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(rect.lo,hi))
+                                lo = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                to_add.append(Rect(lo,rect.hi))
+                        else:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Overlap with left upper corners 
+                                hi = Point(3)
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.lo.vals[1]-1
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(rect.lo,hi))
+                                lo = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = rect.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                            else:
+                                # Overlap with just front upper-left
+                                hi = Point(3)
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.lo.vals[1]-1
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(rect.lo,hi))
+                                lo = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = rect.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back upper left corner"
+                        # Back upper-left corner (can overlap with back upper right)
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        if other.hi.vals[0] < rect.hi.vals[0]:
+                            # No overlap with back upper right corner
+                            lo = Point(3)
+                            lo.vals[0] = other.hi.vals[0]+1
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.lo.vals[2]
+                            to_add.append(Rect(lo,rect.hi))
+                    else:
+                        #print "Upper left z edge"
+                        # Upper-left z edge
+                        # No overlap with lower-left z edge
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            # Overlap with upper-right z edge so we are done 
+                            pass
+                        else:
+                            # Just upper-left z edge
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.hi.vals[0]+1
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = rect.hi.vals[1]
+                            hi.vals[2] = other.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                else:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front left y edge"
+                        # Front-left y edge
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Cutting plane, so we are done
+                                pass
+                            else:
+                                # Only cuts front y edges
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                        else:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Cuts left y edges
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = rect.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                            else:
+                                # Only cuts front left y edge
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = rect.lo.vals[0]
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.hi.vals[0]+1
+                                lo.vals[1] = other.lo.vals[1]
+                                lo.vals[2] = rect.lo.vals[2]
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = other.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back left y edge"
+                        # Back-left y edge, no intersect with front-left
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        if other.hi.vals[0] >= rect.hi.vals[0]:
+                            # Interset with both back edges
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = rect.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = rect.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = other.lo.vals[2]-1
+                            to_add.append(Rect(lo,hi))
+                        else:
+                            # Just back-left y edge (same as above + 1 more)
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = rect.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = rect.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = other.lo.vals[2]-1
+                            to_add.append(Rect(lo,hi))
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.hi.vals[0]+1
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = rect.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                    else: 
+                        #print "Left face"
+                        # Left face
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if we intersect with right face
+                        if other.hi.vals[0] < rect.hi.vals[0]:
+                            # No intersect so one more rectangle
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.hi.vals[0]+1
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = other.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+            elif other.hi.vals[0] >= rect.hi.vals[0]:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front lower-right corner"
+                        # Front lower-right corner
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        # No overlap with front lower-left corner
+                        if other.hi.vals[1] >= rect.hi.vals[1]:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Overlap with full right face so we are done
+                                pass 
+                            else:
+                                # Just front right corners
+                                lo = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                to_add.append(Rect(lo,rect.hi))
+                        else:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Lower-right corners only
+                                lo = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = rect.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                            else:
+                                # Just front lower-right corner
+                                lo = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = rect.lo.vals[2]
+                                to_add.append(Rect(lo,rect.hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = rect.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back lower-right corner"
+                        # Back lower-right corner
+                        # No intersection with front lower-right
+                        # of back lower-left
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                        if other.hi.vals[1] < rect.hi.vals[1]:
+                            # No intersect with back upper right
+                            lo = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.hi.vals[1]+1
+                            lo.vals[2] = other.lo.vals[2]
+                            to_add.append(Rect(lo,rect.hi))
+                    else:
+                        #print "Lower right z edge"
+                        # Lower-right z edge
+                        # No intersect with lower-left z-edge
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if we intersect the upper right z edge
+                        if other.hi.vals[1] < rect.hi.vals[1]:
+                            # No intersect so we have another box
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.hi.vals[1]+1
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = rect.hi.vals[1]
+                            hi.vals[2] = other.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front upper right corner"
+                        # Front upper-right corner
+                        # No intersect with other front corners
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if we intersect the back-right corner 
+                        if other.hi.vals[2] < rect.hi.vals[2]:
+                            # no intersect, so we have an extra rectangle
+                            lo = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.hi.vals[2]+1
+                            to_add.append(Rect(lo,rect.hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back upper right corner"
+                        # Back upper-right corner
+                        # No intersect with any other corners
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Upper right z edge"
+                        # Upper-right z edge
+                        # No intersect with other z edges
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                else:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front right y edge"
+                        # Front-right y edge
+                        # No intersect with front-left y edge
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if it intersects with back-right y edge
+                        if other.hi.vals[2] < rect.hi.vals[2]:
+                            # No intersect so another rectangle
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.hi.vals[2]+1
+                            hi.vals[0] = rect.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = rect.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back right y edge"
+                        # Back-right y edge
+                        # No intesect with other y edges
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Right face"
+                        # Right face
+                        # No intersect with left face
+                        hi = Point(3)
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = rect.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = rect.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+            else:
+                if other.lo.vals[1] <= rect.lo.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front bottom x edge"
+                        # Front bottom x edge
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        if other.hi.vals[1] >= rect.hi.vals[1]:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Cutting plane so we are done
+                                pass
+                            else:
+                                # Intersects with top x edge but not back
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                        else:
+                            if other.hi.vals[2] >= rect.hi.vals[2]:
+                                # Intersects with back x edge
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = rect.lo.vals[2]
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                            else:
+                                # No intersection with any other edges
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = other.hi.vals[1]+1
+                                lo.vals[2] = rect.lo.vals[2]
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = rect.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                                lo = Point(3)
+                                hi = Point(3)
+                                lo.vals[0] = other.lo.vals[0]
+                                lo.vals[1] = rect.lo.vals[1]
+                                lo.vals[2] = other.hi.vals[2]+1
+                                hi.vals[0] = other.hi.vals[0]
+                                hi.vals[1] = other.hi.vals[1]
+                                hi.vals[2] = rect.hi.vals[2]
+                                to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back bottom x edge"
+                        # Back bottom x edge
+                        # No intersection with front bottom x edge
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                        if other.hi.vals[1] < rect.hi.vals[1]:
+                            # No intersect so we have another rect to add
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.hi.vals[1]+1
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = other.hi.vals[0]
+                            hi.vals[1] = rect.hi.vals[1]
+                            hi.vals[2] = rect.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Bottom face"
+                        # Bottom face
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if it intersects with the top face
+                        if other.hi.vals[1] < rect.hi.vals[1]:
+                            # No intersect so we have another rect
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.hi.vals[1]+1
+                            lo.vals[2] = other.lo.vals[2]
+                            hi.vals[0] = other.hi.vals[0]
+                            hi.vals[1] = rect.hi.vals[1]
+                            hi.vals[2] = other.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                elif other.hi.vals[1] >= rect.hi.vals[1]:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front top x edge"
+                        # Front top x edge
+                        # No overlap with bottom x edges
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if we intersect with the back top x edge
+                        if other.hi.vals[2] < rect.hi.vals[2]:
+                            # No intersect so there is another rect
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.hi.vals[2]+1
+                            hi.vals[0] = other.hi.vals[0]
+                            hi.vals[1] = rect.hi.vals[1]
+                            hi.vals[2] = rect.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back top x edge"
+                        # Back top x edge
+                        # Cannot intersect with any other edges
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Top face"
+                        # Top face
+                        # No intersect with bottom face
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = other.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = other.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                else:
+                    if other.lo.vals[2] <= rect.lo.vals[2]:
+                        #print "Front face"
+                        # Front face
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        # See if it intersects with the back face
+                        if other.hi.vals[2] < rect.hi.vals[2]:
+                            # No intersect with the back so add another rect
+                            lo = Point(3)
+                            hi = Point(3)
+                            lo.vals[0] = other.lo.vals[0]
+                            lo.vals[1] = other.lo.vals[1]
+                            lo.vals[2] = other.hi.vals[2]+1
+                            hi.vals[0] = other.hi.vals[0]
+                            hi.vals[1] = other.hi.vals[1]
+                            hi.vals[2] = rect.hi.vals[2]
+                            to_add.append(Rect(lo,hi))
+                    elif other.hi.vals[2] >= rect.hi.vals[2]:
+                        #print "Back face"
+                        # Back face
+                        # No intersect with front face
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                    else:
+                        #print "Center"
+                        # Center
+                        hi = Point(3)
+                        hi.vals[0] = other.lo.vals[0]-1
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(rect.lo,hi))
+                        lo = Point(3)
+                        lo.vals[0] = other.hi.vals[0]+1
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        to_add.append(Rect(lo,rect.hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = rect.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.lo.vals[1]-1
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.hi.vals[1]+1
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = rect.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = rect.lo.vals[2]
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = other.lo.vals[2]-1
+                        to_add.append(Rect(lo,hi))
+                        lo = Point(3)
+                        hi = Point(3)
+                        lo.vals[0] = other.lo.vals[0]
+                        lo.vals[1] = other.lo.vals[1]
+                        lo.vals[2] = other.hi.vals[2]+1
+                        hi.vals[0] = other.hi.vals[0]
+                        hi.vals[1] = other.hi.vals[1]
+                        hi.vals[2] = rect.hi.vals[2]
+                        to_add.append(Rect(lo,hi))
+        else:
+            print 'ERROR: Need support for >3 dimensions!'
+            assert False   
+
+    def __isub__(self, other):
+        for orect in other.rects:
+            to_remove = list()
+            to_add = list()
+            for rect in self.rects:
+                if rect.intersects(orect):
+                    to_remove.append(rect)
+                    # See if it dominates:
+                    if orect.dominates(rect):
+                        continue
+                    else:
+                        self.rect_sub_helper(rect, orect, to_add)
+            if to_remove:
+                for rect in to_remove:
+                    self.rects.remove(rect)
+            if to_add:
+                for rect in to_add:
+                    self.rects.add(rect)
+        for point in other.points:
+            prect = Rect(point,point)
+            to_remove = list()
+            to_add = list()
+            for rect in self.rects:
+                if rect.intersects(prect):
+                    to_remove.append(rect)
+                    # See if it dominates:
+                    if prect.dominates(rect):
+                        continue
+                    else:
+                        self.rect_sub_helper(rect, prect, to_add)
+            if to_remove:
+                for rect in to_remove:
+                    self.rects.remove(rect)
+            if to_add:
+                for rect in to_add:
+                    self.rects.add(rect)
+        # Now remove any of our points
         to_remove = set()
         for point in self.points:
             if point in other.points:
@@ -417,6 +1823,81 @@ class Shape(object):
                     continue
         if to_remove:
             for point in to_remove:
+                self.points.remove(point)
+        return self
+
+class PointSet(object):
+    __slots__ = ['points']
+    def __init__(self):
+        self.points = set()
+
+    def __str__(self):
+        result = ''
+        first = True
+        for point in self.points:
+            if first:
+                first = False
+            else:
+                result += ' '
+            result += str(point)
+        return result
+
+    __repr__ = __str__
+
+    def add_point(self, point):
+        self.points.add(point)
+
+    def empty(self):
+        return not self.points
+
+    def has_point(self, point):
+        for p in self.points:
+            if p == point:
+                return True
+        return False
+
+    def copy(self):
+        result = PointSet()
+        for point in self.points:
+            result.points.add(point)
+        return result
+
+    # Set intersection
+    def __and__(self, other):
+        result = self.copy()
+        result &= other
+        return result
+
+    def __iand__(self, other):
+        to_remove = list()
+        for point in self.points:
+            if point in other.points:
+                continue
+            to_remove.append(point)
+        for point in to_remove:
+            self.points.remove(point)
+        return self
+
+    # Set union
+    def __or__(self, other):
+        result = self.copy()
+        result |= other
+        return result
+
+    def __ior__(self, other):
+        for point in other.points:
+            self.points.add(point)
+        return self
+
+    # Set substraction
+    def __sub__(self, other):
+        result = self.copy()
+        result -= other
+        return result
+
+    def __isub__(self, other):
+        for point in other.points:
+            if point in self.points:
                 self.points.remove(point)
         return self
 
@@ -502,8 +1983,8 @@ class Memory(object):
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
                  'instances', 'name', 'independent_children',
-                 'depth', 'shape', 'node_name', 'intersections',
-                 'dominated']
+                 'depth', 'shape', 'point_set', 'node_name', 
+                 'intersections', 'dominated']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -514,6 +1995,7 @@ class IndexSpace(object):
         self.name = None
         self.depth = 0
         self.shape = None
+        self.point_set = None
         self.node_name = 'index_space_node_'+str(uid)
         self.intersections = dict() 
         self.dominated = dict()
@@ -570,11 +2052,57 @@ class IndexSpace(object):
                 self.shape |= update
                 # Help with dynamic allocation
                 if self.parent is not None:
-                    self.parent.parent.add_rect(rec)
+                    self.parent.parent.add_rect(rect)
+
+    def update_index_sets(self, index_sets):
+        if self.shape is None or self.shape.empty():
+            return
+        print '    Reducing index sub-space '+str(self)
+        local_points = self.shape.copy()
+        new_sets = dict()
+        del_sets = list()
+        for shape,index_set in index_sets.iteritems():
+            intersect = local_points & shape
+            # No overlap so keep going
+            if intersect.empty():
+                continue
+            # Now see if the intersect split the initial shape
+            residual = shape - intersect
+            local_points -= intersect
+            if residual.empty():
+                index_set.add(self)
+                if local_points.empty():
+                    # Both empty means that this is an exact match
+                    break
+                # Else we keep going 
+            else:
+                # Need to split
+                new_sets[residual] = index_set.copy()
+                index_set.add(self)
+                new_sets[intersect] = index_set
+                del_sets.append(shape)
+                if local_points.empty():
+                    # We were dominated so we're done now
+                    break
+        # Remove the deleted entries
+        for key in del_sets:
+            del index_sets[key]
+        # Add the new entries
+        for shape,index_set in new_sets.iteritems():
+            index_sets[shape] = index_set
+        # Traverse the children
+        for child in self.children.itervalues():
+            child.update_index_sets(index_sets)                
+
+    def add_refined_point(self, point):
+        if self.point_set is None:
+            self.point_set = PointSet()
+        self.point_set.add_point(point.copy())
 
     def set_empty(self):
         assert self.shape is None
         self.shape = Shape()
+        self.point_set = PointSet()
 
     def __str__(self):
         if self.name is None:
@@ -583,6 +2111,32 @@ class IndexSpace(object):
           return self.name + ' ('+str(self.uid)+')'
 
     __repr__ = __str__
+
+    def check_partition_properties(self):
+        # Check all the partitions
+        for child in self.children.itervalues():
+            child.check_partition_properties()
+
+    def compute_reduced_shapes(self):
+        if self.shape is None:
+            return
+        print 'Reducing '+str(self)+'...'
+        # Iterate over all the points and find which 
+        # index spaces they belong to
+        index_sets = dict()
+        initial_set = set()
+        initial_set.add(self)
+        index_sets[self.shape.copy()] = initial_set
+        for child in self.children.itervalues():
+            child.update_index_sets(index_sets)
+        # Each index set is now a point in the each of the index spaces
+        point_value = 0
+        for index_set in index_sets.itervalues():
+            point = Point(1)
+            point.vals[0] = point_value
+            point_value += 1
+            for index in index_set:
+                index.add_refined_point(point)
 
     def are_all_children_disjoint(self):
         return False
@@ -598,12 +2152,18 @@ class IndexSpace(object):
         assert self.shape is not None
         return self.shape
 
+    def get_point_set(self):
+        if self.point_set is None:
+            print "No Point set for "+str(self)
+        assert self.point_set is not None
+        return self.point_set
+
     def intersection(self, other):
         if other in self.intersections:
             if self.intersections is None:
                 return Shape() # empty shape
             return self.intersections[other]
-        intersection = self.get_shape() & other.get_shape()
+        intersection = self.get_point_set() & other.get_point_set()
         if intersection.empty():
             self.intersections[other] = None
             return None
@@ -616,7 +2176,7 @@ class IndexSpace(object):
     def dominates(self, other):
         if other in self.dominated:
             return self.dominated[other]
-        non_dominated = other.get_shape() - self.get_shape()
+        non_dominated = other.get_point_set() - self.get_point_set()
         if non_dominated.empty():
             self.dominated[other] = True
             return True
@@ -661,8 +2221,8 @@ class IndexSpace(object):
 
 class IndexPartition(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 
-                 'disjoint', 'complete', 'name', 'depth', 'shape', 'node_name',
-                 'intersections', 'dominated']
+                 'disjoint', 'complete', 'name', 'depth', 'shape', 'point_set',
+                 'node_name', 'intersections', 'dominated']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -675,6 +2235,7 @@ class IndexPartition(object):
         self.name = None
         self.depth = None
         self.shape = None
+        self.point_set = None
         self.node_name = 'index_part_node_'+str(uid)
         self.intersections = dict()
         self.dominated = dict()
@@ -710,6 +2271,30 @@ class IndexPartition(object):
 
     __repr__ = __str__
 
+    def check_partition_properties(self):
+        # Check for dominance of children by parent
+        for child in self.children.itervalues():
+            if not self.parent.dominates(child):
+                print 'WARNING: child '+str(child)+' is not dominated by parent '+\
+                        str(self.parent)+' in '+str(self)+'. This is definitely '+\
+                        'an application bug.'
+        # Check disjointness
+        if self.disjoint:
+            previous = Shape()
+            for child in self.children.itervalues():
+                child_shape = child.get_shape()
+                if not (child_shape & previous).empty():
+                    print 'WARNING: '+str(self)+' was logged disjoint '+\
+                            'but there are overlapping children. This '+\
+                            'is definitely an application bug.'
+                    break
+                previous |= child_shape
+        # TODO: Check completeness
+
+    def update_index_sets(self, index_sets):
+        for child in self.children.itervalues():
+            child.update_index_sets(index_sets)
+
     def are_all_children_disjoint(self):
         return self.disjoint
 
@@ -729,12 +2314,21 @@ class IndexPartition(object):
                     self.shape |= child.get_shape()
         return self.shape
 
+    def get_point_set(self):
+        if self.point_set is None:
+            for child in self.children.itervalues():
+                if self.point_set is None:
+                    self.point_set = child.get_point_set().copy()
+                else:
+                    self.point_set | child.get_point_set()
+        return self.point_set
+
     def intersection(self, other):
         if other in self.intersections:
             if self.intersections[other] is None:
                 return Shape() # empty shape
             return self.intersections[other]
-        intersection = self.get_shape() & other.get_shape()
+        intersection = self.get_point_set() & other.get_point_set()
         if intersection.empty():
             self.intersections[other] = None
             return None 
@@ -747,7 +2341,7 @@ class IndexPartition(object):
     def dominates(self, other):
         if other in self.dominated:
             return self.dominated[other]
-        non_dominated = other.get_shape() - self.get_shape()
+        non_dominated = other.get_point_set() - self.get_point_set()
         if non_dominated.empty():
             self.dominated[other] = True
             return True
@@ -758,7 +2352,8 @@ class IndexPartition(object):
     def is_complete(self):
         if self.complete is None:
             # Figure out if this partition is complete or not 
-            self.complete = (self.parent.get_shape() - self.get_shape()).empty()
+            self.complete = (self.parent.get_point_set() - 
+                             self.get_point_set()).empty()
         return self.complete
 
     def get_num_children(self):
@@ -903,6 +2498,9 @@ class LogicalRegion(object):
 
     def get_shape(self):
         return self.index_space.get_shape()
+
+    def get_point_set(self):
+        return self.index_space.get_point_set()
 
     def intersection(self, other):
         if isinstance(other, LogicalRegion):
@@ -1129,6 +2727,9 @@ class LogicalPartition(object):
 
     def get_shape(self):
         return self.index_partition.get_shape()
+
+    def get_point_set(self):
+        return self.index_partition.get_point_set()
 
     def intersection(self, other):
         if isinstance(other, LogicalRegion):
@@ -1828,7 +3429,7 @@ class PhysicalState(object):
     def perform_physical_registration(self, op, req, inst, perform_checks):
         # Find our preconditions for using this instance
         preconditions = inst.find_use_dependences(depth=self.depth, field=self.field, 
-                                              op=op, req=req, precise=perform_checks)
+                                              op=op, req=req, precise=True)
         if perform_checks:
             bad = check_preconditions(preconditions, op)
             if bad is not None:
@@ -1963,7 +3564,7 @@ class PhysicalState(object):
         # need to know them no matter what
         dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
             field=self.field, op=op, index=index, region=self.node, 
-            reading=False, redop=0, precise=perform_checks)
+            reading=False, redop=0, precise=True)
         if perform_checks:
             # Find the copy that was generated by this operation
             copy = op.find_generated_copy(self.field, dst.region, dst, 0, self.node)
@@ -1987,7 +3588,7 @@ class PhysicalState(object):
             # Now check for event preconditions 
             src_preconditions = src.find_copy_dependences(depth=self.depth, 
                 field=self.field, op=op, index=index, region=self.node, 
-                reading=True, redop=0, precise=perform_checks)
+                reading=True, redop=0, precise=True)
             # Have to fill in the reachable cache
             if copy.reachable_cache is None:
                 copy.reachable_cache = set()
@@ -2014,11 +3615,11 @@ class PhysicalState(object):
             src = next(iter(valid)) 
             src_preconditions = src.find_copy_dependences(depth=self.depth, 
                 field=self.field, op=op, index=index, region=self.node, 
-                reading=True, redop=0, precise=perform_checks)
+                reading=True, redop=0, precise=True)
             # Make a realm copy from the source to the dst for this field
             copy = dst.state.create_copy(op)
-            copy.add_field(self.field.fid, src, self.field.fid, dst, 0) 
             copy.set_region(self.node)
+            copy.add_field(self.field.fid, src, self.field.fid, dst, 0) 
             # Add the preconditions to the physical graph
             for src_op in src_preconditions:
                 src_op.physical_outgoing.add(copy)
@@ -2092,13 +3693,13 @@ class PhysicalState(object):
                 reduction.add_field(self.field.fid, src, self.field.fid, dst, src.redop) 
                 src_preconditions = src.find_copy_dependences(depth=self.depth, 
                     field=self.field, op=op, index=index, region=self.node, 
-                    reading=True, redop=0, precise=False)
+                    reading=True, redop=0, precise=True)
                 for src_op in src_preconditions:
                     src_op.physical_outgoing.add(reduction)
                     reduction.add_physical_incoming(src_op)
                 dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
                     field=self.field, op=op, index=index, region=self.node, 
-                    reading=False, redop=src.redop, precise=False)
+                    reading=False, redop=src.redop, precise=True)
                 for dst_op in dst_preconditions:
                     dst_op.physical_outgoing.add(reduction)
                     reduction.physical_incoming.add(dst_op)
@@ -2550,12 +4151,12 @@ class Operation(object):
                 if copy.intersect is not None:
                     copy_shape = copy.region.intersection(copy.intersect)
                 else:
-                    copy_shape = copy.region.get_shape()
-                base_shape = region.get_shape()
+                    copy_shape = copy.region.get_point_set()
+                base_shape = region.get_point_set()
                 if intersect is not None:
                     base_shape = region.intersection(intersect)
                 else:
-                    base_shape = region.get_shape()
+                    base_shape = region.get_point_set()
                 one = copy_shape - base_shape
                 if not one.empty():
                     continue
@@ -2587,14 +4188,14 @@ class Operation(object):
                 continue
             if intersect is not None or copy.intersect is not None:
                 if copy.intersect is not None:
-                    copy_shape = copy.region.get_shape()
+                    copy_shape = copy.region.get_point_set()
                 else:
                     copy_shape = copy.region.intersection(copy.intersect)
-                base_shape = region.get_shape()
+                base_shape = region.get_point_set()
                 if intersect is not None:
                     base_shape =  region.intersection(intersect)
                 else:
-                    base_shape = region.get_shape()
+                    base_shape = region.get_point_set()
                 one = copy_shape - base_shape
                 if not one.empty():
                     continue
@@ -2921,9 +4522,9 @@ class Operation(object):
             else:
                 # Normal reduction, find the source and destination dependences
                 src_preconditions = src_inst.find_use_dependences(depth=depth, 
-                    field=src_field, op=self, req=src_req, precise=perform_checks)
+                    field=src_field, op=self, req=src_req, precise=True)
                 dst_preconditions = dst_inst.find_use_dependences(depth=depth, 
-                    field=dst_field, op=self, req=dst_req, precise=perform_checks)
+                    field=dst_field, op=self, req=dst_req, precise=True)
                 if perform_checks:
                     reduction = self.find_generated_copy_across(src_field, dst_field,
                                   dst_req.logical_node, src_inst, dst_inst, dst_req.redop)
@@ -2991,9 +4592,9 @@ class Operation(object):
             else:
                 # Normal copy
                 src_preconditions = src_inst.find_use_dependences(depth=depth, 
-                    field=src_field, op=self, req=src_req, precise=perform_checks)
+                    field=src_field, op=self, req=src_req, precise=True)
                 dst_preconditions = dst_inst.find_use_dependences(depth=depth, 
-                    field=dst_field, op=self, req=dst_req, precise=perform_checks)
+                    field=dst_field, op=self, req=dst_req, precise=True)
                 if perform_checks:
                     copy = self.find_generated_copy_across(src_field, dst_field,
                                           dst_req.logical_node, src_inst, dst_inst)
@@ -3198,6 +4799,29 @@ class Operation(object):
                     if not fill.analyzed:
                         print '    '+str(fill)+' was unnecessary'
 
+    def print_op_mapping_decisions(self, depth):
+        # If we are an index task just do our points and return
+        if self.kind == INDEX_TASK_KIND:
+            assert self.points is not None
+            for point in self.points.itervalues():
+                point.print_op_mapping_decisions(depth)
+        # Print our mapping decisions
+        if self.mappings is not None:
+            prefix = ''
+            for idx in range(depth):
+                prefix += '  '
+            print prefix+'-------------------------------------------------'
+            print prefix+' Mapping Decisions for '+str(self)
+            for index,mappings in self.mappings.iteritems():
+                print prefix+'  Region Requirement '+str(index)
+                for fid,inst in mappings.iteritems():
+                    field = inst.region.field_space.get_field(fid)
+                    print prefix+'    '+str(field)+': '+str(inst)
+            print prefix+'-------------------------------------------------'
+        # If we are a single task recurse
+        if self.kind == SINGLE_TASK_KIND and self.task is not None:
+            self.task.print_task_mapping_decisions()
+
     def get_color(self):
         return {
             NO_OP_KIND : "white",
@@ -3272,7 +4896,7 @@ class Operation(object):
             for fill in self.realm_fills:
                 if fill not in elevate:
                     #elevate[fill] = fill.get_event_context()
-                    elevate[copy] = copy.get_context()
+                    elevate[fill] = fill.get_context()
         if self.is_physical_operation():
             # Finally put ourselves in the set if we are a physical operation
             assert self.context is not None
@@ -3524,6 +5148,11 @@ class Task(object):
         self.op.state.reset_physical_state(depth)
         return success
 
+    def print_task_mapping_decisions(self):
+        depth = self.get_depth()
+        for op in self.operations:
+            op.print_op_mapping_decisions(depth)
+
     def print_dataflow_graph(self, path, simplify_graphs):
         if len(self.operations) < 2:
             return 0
@@ -3582,7 +5211,7 @@ class Task(object):
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
         printer.print_pdf_after_close(False)
         # We printed our dataflow graph
-        return 1
+        return 1   
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
@@ -3744,7 +5373,7 @@ class Instance(object):
         if field not in users:
             return result
         if precise:
-            points = req.logical_node.get_shape().copy()
+            points = req.logical_node.get_point_set().copy()
         logical_op = op.get_logical_op()
         for user in reversed(users[field]):
             # If this is another user generated by the same operation
@@ -3786,9 +5415,9 @@ class Instance(object):
             inst = InstanceUser(None, index, region, READ_WRITE, EXCLUSIVE, 0)
         if precise:
             if intersect is None:
-                points = region.get_shape().copy()
+                points = region.get_point_set().copy()
             else:
-                points = region.get_shape() & intersect.get_shape()
+                points = region.get_point_set() & intersect.get_point_set()
         logical_op = op.get_logical_op()
         for user in reversed(users[field]):
             # If this user was generated by the same operation check to 
@@ -3834,7 +5463,7 @@ class Instance(object):
         if field not in users:
             users[field] = list()
         users[field].append(InstanceUser(op, req.index, req.logical_node, 
-                req.priv, req.coher, req.redop, req.logical_node.get_shape()))
+                req.priv, req.coher, req.redop, req.logical_node.get_point_set()))
 
     def add_copy_user(self, depth, field, region, op, index, 
                       reading, redop, intersect=None):
@@ -3844,9 +5473,9 @@ class Instance(object):
         if field not in users:
             users[field] = list()
         if intersect is None:
-            shape = region.get_shape()
+            shape = region.get_point_set()
         else:
-            shape = region.get_shape() & intersect.get_shape()
+            shape = region.get_point_set() & intersect.get_point_set()
         if reading:
             assert redop == 0
             users[field].append(InstanceUser(op, index, region,
@@ -3900,12 +5529,12 @@ class FillInstance(object):
         # Find the destination preconditions
         if self.region is not region:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
-                redop=0, precise=perform_checks, intersect=self.region)
+                field=dst_field, op=op, index=index, region=region, reading=False, 
+                redop=0, precise=True, intersect=self.region)
         else:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
-                redop=0, precise=perform_checks)
+                field=dst_field, op=op, index=index, region=region, reading=False, 
+                redop=0, precise=True)
         if perform_checks:
             if self.region is not region:
                 fill = op.find_generated_fill(dst_field, region, dst, self.region)
@@ -3943,6 +5572,8 @@ class FillInstance(object):
                 return False
         else:
             fill = self.state.create_fill(op)
+            fill.set_region(region)
+            fill.set_intersect(self.region)
             fill.add_field(dst_field.fid, dst)    
             for pre in preconditions:
                 pre.physical_outgoing.add(fill)
@@ -4064,12 +5695,12 @@ class CompositeNode(object):
                     if self.node is not region:
                         dst_preconditions = dst.find_copy_dependences(depth=dst_depth, 
                             field=dst_field, op=op, index=index, region=region, 
-                            reading=False, redop=0, precise=perform_checks, 
+                            reading=False, redop=0, precise=True, 
                             intersect=self.node)
                     else:
                         dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
                             field=dst_field, op=op, index=index, region=region, 
-                            reading=False, redop=0, precise=perform_checks)
+                            reading=False, redop=0, precise=True)
                     if perform_checks:
                         # Find the copy
                         if self.node is not region:
@@ -4097,12 +5728,12 @@ class CompositeNode(object):
                             src_preconditions = src.find_copy_dependences(
                                 depth=self.owner.depth, field=self.owner.field, 
                                 op=op, index=index, region=region, reading=True, 
-                                redop=0, precise=perform_checks, intersect=self.node)
+                                redop=0, precise=True, intersect=self.node)
                         else:
                             src_preconditions = src.find_copy_dependences(
                                 depth=self.owner.depth, field=self.owner.field, 
                                 op=op, index=index, region=region, reading=True, 
-                                redop=0, precise=perform_checks)
+                                redop=0, precise=True)
                         if copy.reachable_cache is None:
                             copy.reachable_cache = set()
                             copy.get_physical_reachable(copy.reachable_cache, False)
@@ -4150,12 +5781,12 @@ class CompositeNode(object):
                             src_preconditions = src.find_copy_dependences(
                                 depth=self.owner.depth, field=self.owner.field, 
                                 op=op, index=index, region=region, reading=True, 
-                                redop=0, precise=perform_checks, intersect=self.node)
+                                redop=0, precise=True, intersect=self.node)
                         else:
                             src_preconditions = src.find_copy_dependences(
                                 depth=self.owner.depth, field=self.owner.field, 
                                 op=op, index=index, region=region, reading=True, 
-                                redop=0, precise=perform_checks)
+                                redop=0, precise=True)
                         # Make a realm copy from the source to the destination
                         copy = self.owner.state.create_copy(op)
                         copy.set_region(region)
@@ -4323,12 +5954,12 @@ class CompositeInstance(object):
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, 
                                 region=region, reading=True, redop=0, 
-                                precise=perform_checks, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, 
                                 region=region, reading=True, redop=0, 
-                                precise=perform_checks)
+                                precise=True)
                         if reduction.reachable_cache is None:
                             reduction.reachable_cache = set()
                             reduction.get_physical_reachable(
@@ -4352,12 +5983,12 @@ class CompositeInstance(object):
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, 
                                 region=region, reading=False, redop=reduction_inst.redop,
-                                precise=perform_checks, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_inst.region)
                         else:
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, 
                                 region=region, reading=False, redop=reduction_inst.redop, 
-                                precise=perform_checks)
+                                precise=True)
                         bad = check_preconditions(dst_preconditions, reduction)
                         if bad is not None:
                             if actually_across:
@@ -4401,20 +6032,20 @@ class CompositeInstance(object):
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, 
                                 region=region, reading=True, redop=0,
-                                precise=perform_checks, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_inst.region)
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op,
                                 region=region, reading=False, redop=reduction_inst.redop,
-                                precise=perform_checks, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, 
                                 region=region, reading=True, redop=0, 
-                                precise=perform_checks)
+                                precise=True)
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, 
                                 region=region, reading=False, redop=reduction_inst.redop, 
-                                precise=perform_checks)
+                                precise=True)
                         for src_op in src_preconditions:
                             src_op.physical_outgoing.add(reduction)
                             reduction.physical_incoming.add(src_op)
@@ -4965,7 +6596,37 @@ class EventGraphTraverser(object):
                 self.visit_event(node.start_event)
         if self.post_copy_fn is not None:
             self.post_copy_fn(node, self)
-        
+
+class PhysicalTraverser(object):
+    def __init__(self, forwards, use_gen, generation,
+                 node_fn = None, post_node_fn = None):
+        self.forwards = forwards
+        self.use_gen = use_gen
+        self.generation = generation
+        self.node_fn = node_fn
+        self.post_node_fn = post_node_fn
+
+    def visit_node(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.node_fn is not None:
+            do_next = self.node_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.physical_outgoing is not None:
+                for next_node in node.physical_outgoing:
+                    self.visit_node(next_node)
+        else:
+            if node.physical_incoming is not None:
+                for next_node in node.physical_incoming:
+                    self.visit_node(next_node)
+        if self.post_node_fn is not None:
+            self.post_node_fn(node, self)
 
 class GraphPrinter(object):
     __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
@@ -5776,25 +7437,37 @@ class State(object):
             print 'Legion Spy will now exit'
             sys.exit(1)
         matches = 0
+        skipped = 0
         for line in log:
             if parse_legion_spy_line(line, self):
                 matches += 1
-            elif self.verbose:
-                print 'Skipping line: ' + line
+            else:
+                skipped += 1
+                if self.verbose:
+                    print 'Skipping line: ' + line
         log.close()
         if matches == 0:
             print 'WARNING: file %s contained no valid lines!' % file_name
         if self.verbose:
             print 'Matched %d lines in %s' % (matches,file_name)
+        if skipped > 0:
+            print 'WARNING: Skipped %d lines' % skipped
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
+        print 'INFO: Reducing top-level index space shapes...'
+        for space in self.index_spaces.itervalues():
+            if space.parent is None:
+                space.compute_reduced_shapes()            
+        print 'Done'
         # Find the top-level index spaces
         num_index_trees = 0
         for space in self.index_spaces.itervalues():
             if space.parent is None:
                 self.top_spaces[num_index_trees] = space
                 num_index_trees += 1
+                # Check for the dominance property
+                space.check_partition_properties()
         # Find the top-level regions
         for region in self.regions.itervalues():
             if region.parent is None:
@@ -5813,15 +7486,6 @@ class State(object):
         op = self.get_operation(self.top_level_uid)
         assert op.context is not None
         op.context.depth = 0
-        # Compute the physical reachable
-        for op in self.ops.itervalues():
-            op.compute_physical_reachable()
-        for copy in self.copies.itervalues():
-            copy.compute_physical_reachable()
-        for fill in self.fills.itervalues():
-            fill.compute_physical_reachable()
-        if need_physical and simplify_graphs:
-            self.simplify_physical_graph() 
         # Check to see if we have any unknown operations
         unknown = None
         for op in self.ops.itervalues():
@@ -5840,6 +7504,18 @@ class State(object):
         self.slice_index = None
         self.slice_slice = None
         self.point_slice = None
+        logical_enabled = self.has_mapping_deps
+        physical_enabled = not not self.events
+        if physical_enabled:
+            # Compute the physical reachable
+            for op in self.ops.itervalues():
+                op.compute_physical_reachable()
+            for copy in self.copies.itervalues():
+                copy.compute_physical_reachable()
+            for fill in self.fills.itervalues():
+                fill.compute_physical_reachable()
+            if need_physical and simplify_graphs:
+                self.simplify_physical_graph()
         if self.verbose:
             print "Found %d processors" % len(self.processors)
             print "Found %d memories" % len(self.memories)
@@ -5855,15 +7531,13 @@ class State(object):
             print "Found %d events" % len(self.events)
             print "Found %d copies" % len(self.copies)
             print "Found %d fills" % len(self.fills)
-        logical_enabled = self.has_mapping_deps
-        physical_enabled = not not self.events
         return logical_enabled,physical_enabled
 
-    def simplify_physical_graph(self):
+    def simplify_physical_graph(self, need_cycle_check=True):
         print "Simplifying event graph..."
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        if self.perform_cycle_checks(print_result=False):
+        if need_cycle_check and self.perform_cycle_checks(print_result=False):
             print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
             print "  This usually indicates a runtime bug and should be reported."
             print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
@@ -5873,23 +7547,26 @@ class State(object):
                 traverser.order.append(node)
             return True
         # Build a topological order of everything 
-        topological_sorter = EventGraphTraverser(False, True,
-            self.get_next_traversal_generation(), None,
-            traverse_node, traverse_node, traverse_node)
+        topological_sorter = PhysicalTraverser(False, True,
+            self.get_next_traversal_generation(), traverse_node)
         topological_sorter.order = list()
         # Traverse all the sinks
         for op in self.ops.itervalues():
             if not op.physical_outgoing:
-                topological_sorter.visit_op(op)
+                topological_sorter.visit_node(op)
         for copy in self.ops.itervalues():
             if not copy.physical_outgoing:
-                topological_sorter.visit_copy(op)
+                topological_sorter.visit_node(op)
         for fill in self.fills.itervalues():
             if not fill.physical_outgoing:
-                toplogical_sorter.visit_fill(fill)
+                topological_sorter.visit_node(fill)
         # Now that we have everything sorter based on topology
         # Do the simplification in reverse order
+        count = 0;
         for src in topological_sorter.order:
+            if self.verbose:
+                print 'Simplifying node %d of %d' % (count, len(topological_sorter.order))
+                count += 1
             if src.physical_outgoing is None:
                 continue
             actual_out = src.physical_outgoing.copy()
@@ -6017,6 +7694,26 @@ class State(object):
         for node in all_nodes:
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
+
+    def print_instance_descriptions(self):
+        for inst in self.instances.itervalues():
+            # Skip the virtual instance
+            if inst.is_virtual():
+                continue
+            if inst.redop > 0:
+                print str(inst)+' (Reduction Op '+str(inst.redop)+')'
+            else:
+                print str(inst)
+            print '  Memory '+str(inst.memory)
+            print '  '+str(inst.region)
+            print '  Fields:'
+            for field in inst.fields:
+                print '    '+str(field)
+
+    def print_mapping_decisions(self):
+        assert self.top_level_uid is not None
+        top_task = self.get_task(self.top_level_uid) 
+        top_task.print_task_mapping_decisions()
 
     def get_processor(self, proc_id):
         if proc_id in self.processors:
@@ -6172,7 +7869,8 @@ class State(object):
         gc.collect()
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -z -s -k -u -v -a] <file_name(s)>+"
+    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -k -u -v -a -g] "+\
+          "<file_name(s)>+"
     print "  -l : perform logical checks"
     print "  -p : perform physical checks"
     print "  -c : check for cycles"
@@ -6180,19 +7878,99 @@ def usage():
     print "  -m : make machine graphs"
     print "  -d : make dataflow graphs"
     print "  -e : make event graphs"
+    print "  -i : print instance descriptions"
+    print "  -q : print mapping decisions"
     print "  -z : add extra detail to graphs"
     print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
     print "  -k : keep temporary files"
     print "  -u : keep graphs unsimplified (maintains all redundant edges)"
     print "  -v : verbose"
     print "  -a : assert on analysis failure (useful for self-debugging)"
+    print "  -g : test computational geometry"
     sys.exit(1)
+
+def generate_random_intersecting_rects(dim, max_size):
+    lo1 = Point(dim)
+    hi1 = Point(dim)
+    lo2 = Point(dim)
+    hi2 = Point(dim)
+    for d in range(dim):
+        lo1.vals[d] = random.randint(0,max_size)
+        hi1.vals[d] = random.randint(lo1.vals[d],max_size)
+        lo2.vals[d] = random.randint(0,hi1.vals[d])
+        if lo2.vals[d] < lo1.vals[d]:
+            # Constrained to get in range
+            hi2.vals[d] = random.randint(lo1.vals[d],hi1.vals[d])
+        else:
+            #Unconstrained since we're going to be in range
+            hi2.vals[d] = random.randint(lo2.vals[d],max_size)
+    return Rect(lo1,hi1),Rect(lo2,hi2)
+
+def print_bad_geometry_result(dim, first, second, result):
+    print '  First rectangle: '+str(first)
+    print '  Second rectangle: '+str(second)
+    print '  Result rectangles:'
+    for rect in result.rects:
+        print '    '+str(rect)
+
+def perform_geometry_test(dim, max_size=100):
+    assert dim >= 1
+    first = Shape()
+    second = Shape()
+    first_rect,second_rect = generate_random_intersecting_rects(dim,max_size)
+    first.add_rect(first_rect)
+    second.add_rect(second_rect)
+    result = first - second
+    total_points = 0
+    for point in first_rect.iterator():
+        if second_rect.contains_point(point):
+            for rect in result.rects:
+                if rect.contains_point(point):
+                    print 'Point '+str(point)+' should have been removed'
+                    print_bad_geometry_result(dim, first_rect, second_rect, result)
+                    return False
+        else:
+            total_points += 1
+            contain_rect = None
+            for rect in result.rects:
+                if rect.contains_point(point):
+                    if contain_rect is None:
+                        contain_rect = rect
+                    else:
+                        print 'Point '+str(point)+' in duplicate result rectangles'
+                        print_bad_geometry_result(dim, first_rect, second_rect, result)
+                        return False
+            if contain_rect is None:
+                print 'Point '+str(point)+' not in result rectangles'
+                print_bad_geometry_result(dim, first_rect, second_rect, result)
+                return False
+    actual_points = 0
+    for rect in result.rects:
+        actual_points += rect.volume()
+    if actual_points <> total_points:
+        print "Point total mismatch! exp="+str(total_points)+" != act="+str(actual_points)
+        print_bad_geometry_result(dim, first_rect, second_rect, result)
+        return False
+    return True
+
+def run_geometry_tests(num_tests=10000):
+    success = True
+    for dim in range(1,4):
+        print "Testing dimension... "+str(dim)
+        for i in range(num_tests):
+            print '  Running test '+str(i)
+            success = perform_geometry_test(dim)
+            if not success:
+                break
+        if not success:
+            break
+    return success
 
 def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
     try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeszkuva')
+        opts, args = getopt(sys.argv[1:],'lpcrmdeiqszkuvag')
     except GetoptError as err:
         print "ERROR: "+str(err)
         sys.exit(1)
@@ -6206,12 +7984,15 @@ def main(temp_dir):
     machine_graphs = False
     dataflow_graphs = False
     event_graphs = False
+    instance_descriptions = False
+    mapping_decisions = False
     detailed_graphs = False
     sanity_checks = False
     keep_temp_files = False
     simplify_graphs = True # Note that this defaults to true
     verbose = False
     assert_on_fail = False
+    test_geometry = False
     for opt in opts:
         if opt == '-l':
             logical_checks = True
@@ -6233,6 +8014,12 @@ def main(temp_dir):
         if opt == '-e':
             event_graphs = True
             continue;
+        if opt == '-i':
+            instance_descriptions = True
+            continue
+        if opt == '-q':
+            mapping_decisions = True
+            continue
         if opt == '-z':
             detailed_graphs = True
             continue
@@ -6251,6 +8038,12 @@ def main(temp_dir):
         if opt == '-a':
             assert_on_fail = True
             continue
+        if opt == '-g':
+            test_geometry = True
+            continue
+
+    if test_geometry:
+        run_geometry_tests()
 
     state = State(verbose, detailed_graphs, assert_on_fail)
     total_matches = 0 
@@ -6304,6 +8097,9 @@ def main(temp_dir):
                   "should compute. This is not the actual event graph computed."
         print "Performing physical analysis..."
         state.perform_physical_analysis(physical_checks, sanity_checks)
+        # If we generated the graph for printing, then simplify it 
+        if need_physical:
+            state.simplify_physical_graph(need_cycle_check=False)
     if cycle_checks:
         print "Performing cycle checks..."
         state.perform_cycle_checks()
@@ -6319,6 +8115,10 @@ def main(temp_dir):
     if event_graphs:
         print "Making event graphs..."
         state.make_event_graph(temp_dir)
+    if instance_descriptions:
+        state.print_instance_descriptions()
+    if mapping_decisions:
+        state.print_mapping_decisions()
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:

@@ -48,7 +48,7 @@ namespace LegionRuntime {
     typedef Realm::Logger Category;
   };
 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 #define PTHREAD_SAFE_CALL(cmd)			\
 	{					\
 		int ret = (cmd);		\

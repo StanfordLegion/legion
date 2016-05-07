@@ -1005,7 +1005,7 @@ private:
 };
 
 PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : ShimMapper(machine, rt, local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
 {
   local_sysmem =
     machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);

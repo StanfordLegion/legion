@@ -37,7 +37,7 @@ namespace Legion {
      */
     class TestMapper : public DefaultMapper {
     public:
-      TestMapper(Machine machine, Processor local, 
+      TestMapper(MapperRuntime *rt, Machine machine, Processor local, 
                  const char *mapper_name = NULL);
       TestMapper(const TestMapper &rhs);
       virtual ~TestMapper(void);
