@@ -32,7 +32,7 @@ namespace Legion {
 		Processor WrapperMapper::ownerprocessor;
 		MapperEvent WrapperMapper::mapevent;			
 		
-		WrapperMapper::WrapperMapper(Mapper* dmapper, Machine machine, Processor local):Mapper(), dmapper(dmapper), local_proc(local), local_kind(local.kind()), 
+		WrapperMapper::WrapperMapper(Mapper* dmapper,MapperRuntime *rt, Machine machine, Processor local):Mapper(rt), dmapper(dmapper), local_proc(local), local_kind(local.kind()), 
 		node_id(local.address_space()), machine(machine),
 		max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
 		max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -427,6 +427,9 @@ namespace Legion {
 				}
 				
 				else if (strValue.compare("exit")==0){
+//get_input_message message = {"get_input_message", WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map};
+				//void *message_point = &message;
+				//WrapperMapper::broadcast(ctx, message_point, sizeof(get_input_message));
 					break;
 				}
 				
@@ -578,7 +581,7 @@ namespace Legion {
 			if (!WrapperMapper::databroadcasted && node_id==0 && WrapperMapper::ownerprocessor==local_proc){
 				get_input_message message = {"get_input_message", WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map};
 				void *message_point = &message;
-				WrapperMapper::mapper_rt_broadcast(ctx, message_point, sizeof(get_input_message));
+				mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message), 1);
 				WrapperMapper::databroadcasted=1;
 			}
 
@@ -602,9 +605,9 @@ namespace Legion {
 					wait_task_options = output;
 					select_task_options_message message ={"select_task_options_message",task.get_task_name(),wait_task_options};
 					void *message_point = &message;
-					WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
-					WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
-					mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
+					WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
+					mapper_runtime->send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
+					mapper_runtime->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 					output = wait_task_options;
 				}
 			}
@@ -843,7 +846,7 @@ namespace Legion {
 
 					select_task_options_message mess ={"select_task_options_message",task_name,output};
 					void *message_point = &mess;
-					WrapperMapper::mapper_rt_send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
+					mapper_runtime->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
 				}
 			}
 			else{
@@ -859,7 +862,7 @@ std::cout<<node_id<<"broadcast message\n";
 				else {
 					select_task_options_message *rec_message =const_cast<select_task_options_message*>(reinterpret_cast<const select_task_options_message*>(message.message));
 					wait_task_options = rec_message->output;
-					mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
+					mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
 				}
 			}
 		}

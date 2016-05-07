@@ -7566,15 +7566,11 @@ namespace Legion {
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
-<<<<<<< HEAD
-            Mapper *mapper = new Mapping::DefaultMapper(machine, it->first);
-	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, wrapper_mapper, 0, it->first);
-=======
             Mapper *mapper = 
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
->>>>>>> master
+	      Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, mapper_runtime, machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this, wrapper_mapper, 0, it->first);
+
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
@@ -12773,7 +12769,7 @@ namespace Legion {
     void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
-	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, machine, proc);
+	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper,mapper_runtime, machine, proc);
       // First, wrap this mapper in a mapper manager
       MapperManager *manager = wrap_mapper(this, wrapper_mapper, 0, proc); 
       if (!proc.exists())

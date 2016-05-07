@@ -47,7 +47,7 @@ namespace Legion {
 			static bool databroadcasted;
 			static Processor ownerprocessor;
 			static MapperEvent mapevent;
-			WrapperMapper(Mapper* dmapper, Machine machine, Processor local);
+			WrapperMapper(Mapper* dmapper, MapperRuntime *rt, Machine machine, Processor local);
 			~WrapperMapper(void);
 			void get_input();
 			//void get_input(const MapperContext ctx);
