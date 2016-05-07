@@ -13364,6 +13364,7 @@ namespace Legion {
         // If we've handled all of our nodes then we are done
         if (offset > total_nodes)
           break;
+
         AddressSpaceID target = (init + offset - 1) % total_nodes;
         Serializer rez;
         {
