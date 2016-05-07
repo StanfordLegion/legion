@@ -31,7 +31,8 @@ namespace Legion {
 		bool WrapperMapper::databroadcasted = 0;
 		Processor WrapperMapper::ownerprocessor;
 		MapperEvent WrapperMapper::mapevent;			
-		
+		int WrapperMapper::broadcastcount=0;	
+	
 		WrapperMapper::WrapperMapper(Mapper* dmapper,MapperRuntime *rt, Machine machine, Processor local):Mapper(rt), dmapper(dmapper), local_proc(local), local_kind(local.kind()), 
 		node_id(local.address_space()), machine(machine),
 		max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
@@ -46,12 +47,14 @@ namespace Legion {
 				WrapperMapper::inputtaken=1;
 				WrapperMapper::ownerprocessor = local;
 			}
+
+			if (node_id!=0)  WrapperMapper::ownerprocessor.id = 0;
 			//	if (node_id!=0) WrapperMapper::ownerprocessor.id = node_id;
 			//	std::cout<<"Cons Node id"<<node_id;
 			//	std::cout<<"	local"<<local.id<<"\n";
 		}
 		WrapperMapper::~WrapperMapper(){
-			//if (node_id==0) std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
+			//if (node_id==1) std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 			//std::cout<<"Des Node id"<< node_id<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 		}
 
@@ -136,7 +139,7 @@ namespace Legion {
 						WrapperMapper::tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
 						std::cout<<"The tasks added are: ";
 						for (std::map<std::string, int>::const_iterator i = WrapperMapper::tasks_map.begin(); i != WrapperMapper::tasks_map.end(); ++i) std::cout<< i->first << "  ";
-						std::cout<<"\n>    ";
+					std::cout<<"\n>    ";
 					}
 					else{
 						WrapperMapper::tasks_map.erase(it);
@@ -578,12 +581,6 @@ namespace Legion {
 		void WrapperMapper::select_task_options(const MapperContext    ctx,
 		const Task&            task,
 		TaskOptions&     output){
-			if (!WrapperMapper::databroadcasted && node_id==0 && WrapperMapper::ownerprocessor==local_proc){
-				get_input_message message = {"get_input_message", WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map};
-				void *message_point = &message;
-				mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message), 1);
-				WrapperMapper::databroadcasted=1;
-			}
 
 
 			dmapper->select_task_options(ctx, task, output);
@@ -603,7 +600,7 @@ namespace Legion {
 				}
 				else{
 					wait_task_options = output;
-					select_task_options_message message ={"select_task_options_message",task.get_task_name(),wait_task_options};
+					select_task_options_message message ={11,task.get_task_name(),wait_task_options};
 					void *message_point = &message;
 					WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
 					mapper_runtime->send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
@@ -611,6 +608,17 @@ namespace Legion {
 					output = wait_task_options;
 				}
 			}
+                        if (WrapperMapper::databroadcasted==0 && node_id==0  && WrapperMapper::ownerprocessor==local_proc){
+                                get_input_message message = {12, WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map};
+				
+				WrapperMapper::broadcastcount=0;
+				void *message_point = &message;
+				WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
+                                        mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message));
+                                        //mapper_runtime->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
+                                WrapperMapper::databroadcasted=1;
+
+                        }
 		}
 
 		void WrapperMapper::premap_task(const MapperContext      ctx,
@@ -823,10 +831,11 @@ namespace Legion {
 
 		void WrapperMapper::handle_message(const MapperContext           ctx,
 		const MapperMessage&          message){
-			std::cout<<node_id<<"handle message\n";	
-			if (local_proc==WrapperMapper::ownerprocessor){
-				select_task_options_message *rec_message =const_cast<select_task_options_message*>(reinterpret_cast<const select_task_options_message*>(message.message));
-				if (rec_message->tag == "select_task_options_message"){
+			const select_task_options_message *rec_message = (select_task_options_message*)message.message;
+			std::cout<<node_id<<rec_message->tag<<"handle message\n";	
+		
+		if (rec_message->tag == 11){
+					if (node_id==0 && WrapperMapper::ownerprocessor.id==local_proc.id){
 					std::string task_name = rec_message->task_name;
 					TaskOptions output = rec_message->output;
 
@@ -844,28 +853,37 @@ namespace Legion {
 						}
 					}
 
-					select_task_options_message mess ={"select_task_options_message",task_name,output};
+					select_task_options_message mess ={11,task_name,output};
 					void *message_point = &mess;
 					mapper_runtime->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
 				}
-			}
-			else{
-std::cout<<node_id<<"broadcast message\n";
-				get_input_message *rec_message =const_cast<get_input_message*>(reinterpret_cast<const get_input_message*>(message.message));
-				if (rec_message->tag == "get_input_message" && local_proc!=WrapperMapper::ownerprocessor){
-					WrapperMapper::ownerprocessor =  rec_message->processor;
-					WrapperMapper::procs_map =rec_message->procs_map;
-					WrapperMapper::tasks_map =rec_message->tasks_map;
-					WrapperMapper::mems_map =rec_message->mems_map;
-				}
+		}	
+				
 
-				else {
-					select_task_options_message *rec_message =const_cast<select_task_options_message*>(reinterpret_cast<const select_task_options_message*>(message.message));
-					wait_task_options = rec_message->output;
-					mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
-				}
-			}
-		}
+						
+const get_input_message *rec1_message =( get_input_message*)(message.message);			
+	if (rec1_message->tag == 12){
+		if (node_id == 0 && WrapperMapper::ownerprocessor.id==local_proc.id){
+//WrapperMapper::broadcastcount++;
+//std::cout<<WrapperMapper::broadcastcount;
+//if(WrapperMapper::broadcastcount==(signed)all_procs.size()-1) mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
+
+}
+		else {
+ WrapperMapper::ownerprocessor =  rec1_message->processor;
+                                        WrapperMapper::procs_map =rec1_message->procs_map;
+                                        WrapperMapper::tasks_map =rec1_message->tasks_map;
+                                        WrapperMapper::mems_map =rec1_message->mems_map;
+					                                get_input_message mess = {12, rec1_message->processor, rec1_message->procs_map, rec1_message->tasks_map, rec1_message->mems_map};
+					
+                                        void *message_point = &mess;
+
+//mapper_runtime->send_message(ctx,message.sender,message_point,sizeof(int));
+
+}
+
+}
+}
 
 		void WrapperMapper::handle_task_result(const MapperContext           ctx,
 		const MapperTaskResult&       result){

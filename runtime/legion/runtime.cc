@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* assopyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7568,8 +7568,8 @@ namespace Legion {
           {
             Mapper *mapper = 
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-	      Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this, wrapper_mapper, 0, it->first);
+	     Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, mapper_runtime, machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this,wrapper_mapper, 0, it->first);
 
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }

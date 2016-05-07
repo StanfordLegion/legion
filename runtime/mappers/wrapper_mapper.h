@@ -14,13 +14,13 @@ namespace Legion {
   namespace Mapping {
 
 	struct select_task_options_message{
-	std::string tag;
+	int tag;
 	std::string task_name;
 	Mapper::TaskOptions output;
 	};
 
 	struct get_input_message{
-	std::string tag;
+	int tag;
 	Processor processor;
 	std::map<Processor, int> procs_map;
 	std::map<std::string, int> tasks_map;
@@ -47,6 +47,7 @@ namespace Legion {
 			static bool databroadcasted;
 			static Processor ownerprocessor;
 			static MapperEvent mapevent;
+			static int broadcastcount;
 			WrapperMapper(Mapper* dmapper, MapperRuntime *rt, Machine machine, Processor local);
 			~WrapperMapper(void);
 			void get_input();
