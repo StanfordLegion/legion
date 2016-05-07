@@ -18,13 +18,9 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
-<<<<<<< HEAD
-#include "wrapper_mapper.h"
 #include "default_mapper.h"
-using namespace LegionRuntime::HighLevel;
-=======
+
 using namespace Legion;
->>>>>>> master
 
 /*
  * To illustrate task launches and futures in Legion
@@ -40,18 +36,6 @@ enum TaskIDs {
   FIBONACCI_TASK_ID,
   SUM_TASK_ID,
 };
-
-void mapper_registration(Machine machine, HighLevelRuntime *rt,
-                          const std::set<Processor> &local_procs)
-{
-  for (std::set<Processor>::const_iterator it = local_procs.begin();
-        it != local_procs.end(); it++)
-  {
-    rt->replace_default_mapper(
-        new Legion::Mapping::WrapperMapper(new DefaultMapper(machine, *it) ,machine, *it), *it);
-  }
-}
-
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -235,11 +219,6 @@ int main(int argc, char **argv)
   Runtime::register_legion_task<int,sum_task>(SUM_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/, 
       AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf*/), "sum_task");
-<<<<<<< HEAD
-  HighLevelRuntime::set_registration_callback(mapper_registration);
-  return HighLevelRuntime::start(argc, argv);
-=======
 
   return Runtime::start(argc, argv);
->>>>>>> master
 }
