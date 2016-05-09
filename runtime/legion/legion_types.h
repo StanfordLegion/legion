@@ -276,6 +276,7 @@ namespace Legion {
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_SELECT_TUNABLE_TASK_ID,
       HLR_DEFERRED_ENQUEUE_TASK_ID,
+      HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -337,6 +338,7 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Select Tunable",                                         \
         "Deferred Task Enqueue",                                  \
+        "Deferred Mapper Message",                                \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \

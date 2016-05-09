@@ -20076,6 +20076,11 @@ namespace Legion {
                                                       enqueue_args->prev_fail);
             break;
           }
+        case HLR_DEFER_MAPPER_MESSAGE_TASK_ID:
+          {
+            MapperManager::handle_deferred_message(args);
+            break;
+          }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
           {
             Runtime::get_runtime(p)->attempt_runtime_shutdown();
