@@ -335,7 +335,7 @@ void spmd_task(const Task *task,
     IndexPartition ghost_ip = runtime->get_parent_index_partition(ctx, ghost_is);
     IndexSpace local_is = runtime->get_parent_index_space(ctx, ghost_ip);
     local_fs = runtime->create_field_space(ctx);
-    sprintf(buf, "local_fs_%d", task->index_point.get_index());
+    sprintf(buf, "local_fs_%lld", task->index_point.get_index());
     runtime->attach_name(local_fs, buf);
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, local_fs);
@@ -344,7 +344,7 @@ void spmd_task(const Task *task,
     allocator.allocate_field(sizeof(double),FID_DERIV);
     runtime->attach_name(local_fs, FID_DERIV, "DERIV");
     local_lr = runtime->create_logical_region(ctx, local_is, local_fs);
-    sprintf(buf, "local_lr_%d", task->index_point.get_index());
+    sprintf(buf, "local_lr_%lld", task->index_point.get_index());
     runtime->attach_name(local_lr, buf);
   }
   // Run a bunch of steps
@@ -638,7 +638,7 @@ int check_field_task(const Task *task,
  	                         (act_value == 0));
 
     if(!ok) {
-      printf("ERROR: check for location %d failed: expected=%g, actual=%g\n",
+      printf("ERROR: check for location %lld failed: expected=%g, actual=%g\n",
 	     pir.p[0], exp_value, act_value);
       errors++;
     }

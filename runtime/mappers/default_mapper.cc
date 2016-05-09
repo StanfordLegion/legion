@@ -2432,13 +2432,10 @@ namespace Legion {
       if (total_nodes > 1)
       {
         Machine::ProcessorQuery all_procs(machine);
+        all_procs.only_kind(Processor::LOC_PROC);
         Machine::ProcessorQuery::iterator proc_finder = all_procs.begin();
         for (unsigned idx = 0; idx < input.tasks.size(); idx++)
         {
-          // Find the next CPU
-          while ((proc_finder != all_procs.end()) && 
-              (proc_finder->kind() != Processor::LOC_PROC))
-            proc_finder++;
           if (proc_finder == all_procs.end())
           {
             log_mapper.error("Default mapper error. Not enough CPUs for must "
@@ -2447,7 +2444,7 @@ namespace Legion {
                              input.tasks.size());
             assert(false);
           }
-          output.task_processors[idx] = *proc_finder;
+          output.task_processors[idx] = *proc_finder++;
         }
       }
       else
