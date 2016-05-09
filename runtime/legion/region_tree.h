@@ -489,12 +489,12 @@ namespace Legion {
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
       RegionNode*     get_tree(RegionTreeID tid);
     public:
-      bool has_node(IndexSpace space) const;
-      bool has_node(IndexPartition part) const;
-      bool has_node(FieldSpace space) const;
-      bool has_node(LogicalRegion handle) const;
-      bool has_node(LogicalPartition handle) const;
-      bool has_tree(RegionTreeID tid) const;
+      bool has_node(IndexSpace space, bool local_only = false);
+      bool has_node(IndexPartition part, bool local_only = false);
+      bool has_node(FieldSpace space, bool local_only = false);
+      bool has_node(LogicalRegion handle, bool local_only = false);
+      bool has_node(LogicalPartition handle, bool local_only = false);
+      bool has_tree(RegionTreeID tid, bool local_only = false);
       bool has_field(FieldSpace space, FieldID fid);
     public:
       bool is_subregion(LogicalRegion child, LogicalRegion parent);
@@ -945,7 +945,8 @@ namespace Legion {
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
       static void handle_node_child_request(RegionTreeForest *context,
-                                            Deserializer &derez);
+                            Deserializer &derez, AddressSpaceID source);
+      static void handle_node_child_response(Deserializer &derez);
     public:
       IndexSpaceAllocator* get_allocator(void);
     public:
@@ -1098,7 +1099,8 @@ namespace Legion {
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
       static void handle_node_child_request(
-                                 RegionTreeForest *forest, Deserializer &derez);
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
+      static void handle_node_child_response(Deserializer &derez);
     public:
       const IndexPartition handle;
       const Domain color_space;

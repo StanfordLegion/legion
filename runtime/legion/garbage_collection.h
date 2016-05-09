@@ -309,32 +309,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<bool ADD>
     static inline void log_base_ref(ReferenceKind kind, DistributedID did,
-                                    ReferenceSource src, unsigned cnt)
+                  AddressSpaceID local_space, ReferenceSource src, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       if (ADD)
-        log_garbage.info("GC Add Base Ref %d %ld %d %d",
-                          kind, did, src, cnt);
+        log_garbage.info("GC Add Base Ref %d %ld %d %d %d",
+                          kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Base Ref %d %ld %d %d",
-                          kind, did, src, cnt);
+        log_garbage.info("GC Remove Base Ref %d %ld %d %d %d",
+                          kind, did, local_space, src, cnt);
     }
 
     //--------------------------------------------------------------------------
     template<bool ADD>
     static inline void log_nested_ref(ReferenceKind kind, DistributedID did, 
-                                      DistributedID src, unsigned cnt)
+                    AddressSpaceID local_space, DistributedID src, unsigned cnt)
     //--------------------------------------------------------------------------
     {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       src = LEGION_DISTRIBUTED_ID_FILTER(src);
       if (ADD)
-        log_garbage.info("GC Add Nested Ref %d %ld %ld %d",
-                          kind, did, src, cnt);
+        log_garbage.info("GC Add Nested Ref %d %ld %d %ld %d",
+                          kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Nested Ref %d %ld %ld %d",
-                          kind, did, src, cnt);
+        log_garbage.info("GC Remove Nested Ref %d %ld %d %ld %d",
+                          kind, did, local_space, src, cnt);
     }
 
     //--------------------------------------------------------------------------
@@ -403,7 +403,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<true>(GC_REF_KIND, did, source, cnt);
+      log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
@@ -422,7 +422,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<true>(GC_REF_KIND, did, source, cnt);
+      log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
@@ -441,7 +441,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<false>(GC_REF_KIND, did, source, cnt);
+      log_base_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -461,7 +461,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<false>(GC_REF_KIND, did, source, cnt);
+      log_nested_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -481,7 +481,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
@@ -500,7 +500,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<true>(VALID_REF_KIND, did, source, cnt);
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
@@ -519,7 +519,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<false>(VALID_REF_KIND, did, source, cnt);
+      log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -539,7 +539,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<false>(VALID_REF_KIND, did, source, cnt);
+      log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -559,7 +559,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+      log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
@@ -578,7 +578,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<true>(RESOURCE_REF_KIND, did, source, cnt);
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
@@ -597,7 +597,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+      log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -617,7 +617,7 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
-      log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
@@ -639,7 +639,7 @@ namespace Legion {
 #ifdef LEGION_GC
       bool result = try_add_valid_reference(must_be_valid, cnt);
       if (result)
-        log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+        log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
       return result; 
 #else
       return try_add_valid_reference(must_be_valid, cnt);

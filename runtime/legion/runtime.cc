@@ -416,8 +416,8 @@ namespace Legion {
       if (!is_owner())
         add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Future %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Future %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 
@@ -456,8 +456,8 @@ namespace Legion {
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Deletion %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 
@@ -4641,7 +4641,13 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_CHILD_REQUEST:
             {
-              runtime->handle_index_space_child_request(derez);
+              runtime->handle_index_space_child_request(derez, 
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_CHILD_RESPONSE:
+            {
+              runtime->handle_index_space_child_response(derez);
               break;
             }
           case SEND_INDEX_PARTITION_NODE:
@@ -4662,7 +4668,13 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_CHILD_REQUEST:
             {
-              runtime->handle_index_partition_child_request(derez);
+              runtime->handle_index_partition_child_request(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_CHILD_RESPONSE:
+            {
+              runtime->handle_index_partition_child_response(derez);
               break;
             }
           case SEND_FIELD_SPACE_NODE:
@@ -6393,11 +6405,20 @@ namespace Legion {
                                      Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Either it is local or it is a group that we made
+      assert(runtime->is_local(target) || 
+              (target.kind() == Processor::PROC_GROUP));
+#endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
         runtime->profiler->add_task_request(requests, vid, task);
       // Increment the number of outstanding tasks
+#ifdef DEBUG_LEGION
+      runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);
+#else
       runtime->increment_total_outstanding_tasks();
+#endif
       DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
       // If our ready event hasn't triggered, include it in the precondition
       if (!ready_event.has_triggered())
@@ -13209,7 +13230,11 @@ namespace Legion {
         SingleTask *ctx = static_cast<SingleTask*>(task);
 #endif
         ctx->end_task(result, result_size, owned);
+#ifdef DEBUG_LEGION
+        decrement_total_outstanding_tasks(task->task_id, false/*meta*/);
+#else
         decrement_total_outstanding_tasks();
+#endif
       }
       else
         task->end_inline_task(result, result_size, owned);
@@ -13438,13 +13463,13 @@ namespace Legion {
       int init = source.address_space();
       // The runtime stride is the same as the number of nodes
       const int total_nodes = runtime_stride;
-      for (int r = 0; r < radix; r++)
+      for (int r = 1; r <= radix; r++)
       {
         int offset = base + r;
         // If we've handled all of our nodes then we are done
-        if (offset > total_nodes)
+        if (offset >= total_nodes)
           break;
-        AddressSpaceID target = (init + offset - 1) % total_nodes;
+        AddressSpaceID target = (init + offset) % total_nodes;
         Serializer rez;
         {
           RezCheck z(rez);
@@ -13653,7 +13678,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13662,7 +13687,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_REQUEST, 
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13671,7 +13696,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13680,7 +13705,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_REQUEST,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_child_response(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_RESPONSE,
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13689,7 +13723,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13698,7 +13732,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_REQUEST,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13707,7 +13741,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13717,7 +13751,17 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
                                 SEND_INDEX_PARTITION_CHILD_REQUEST,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_child_response(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                                SEND_INDEX_PARTITION_CHILD_RESPONSE, 
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -13725,7 +13769,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_NODE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                               FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13734,7 +13778,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_REQUEST,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13743,7 +13787,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_RETURN,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13752,7 +13796,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_REQUEST,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13761,7 +13805,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13770,7 +13814,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13778,7 +13822,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_FREE,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13819,7 +13863,7 @@ namespace Legion {
         rez.serialize(handle);
       }
       find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13833,7 +13877,7 @@ namespace Legion {
         rez.serialize(handle);
       }
       find_messenger(target)->send_message(rez, 
-        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
+        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_SPACE_VIRTUAL_CHANNEL,
                                                              false/*flush*/);
     }
 
@@ -13848,7 +13892,7 @@ namespace Legion {
         rez.serialize(handle);
       }
       find_messenger(target)->send_message(rez, 
-          FIELD_SPACE_DESTRUCTION_MESSAGE, INDEX_AND_FIELD_VIRTUAL_CHANNEL,
+          FIELD_SPACE_DESTRUCTION_MESSAGE, FIELD_SPACE_VIRTUAL_CHANNEL,
                                                               false/*flush*/);
     }
 
@@ -14554,10 +14598,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_child_request(Deserializer &derez)
+    void Runtime::handle_index_space_child_request(Deserializer &derez,
+                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_child_request(forest, derez);
+      IndexSpaceNode::handle_node_child_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_child_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_node_child_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -14584,10 +14636,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_child_request(Deserializer &derez)
+    void Runtime::handle_index_partition_child_request(Deserializer &derez,
+                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_child_request(forest, derez);
+      IndexPartNode::handle_node_child_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_child_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_child_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15692,8 +15752,13 @@ namespace Legion {
     {
       // If this is not a task directly related to shutdown or is a message, 
       // to a remote node then increment the number of outstanding tasks
+#ifdef DEBUG_LEGION
+      if (tid < HLR_MESSAGE_ID)
+        increment_total_outstanding_tasks(tid, true/*meta*/);
+#else
       if (tid < HLR_MESSAGE_ID)
         increment_total_outstanding_tasks();
+#endif
 #ifdef DEBUG_SHUTDOWN_HANG
       __sync_fetch_and_add(&outstanding_counts[tid],1);
 #endif
@@ -16195,7 +16260,22 @@ namespace Legion {
 
       // Record if we have any outstanding tasks
       if (has_outstanding_tasks())
+      {
+#ifdef DEBUG_LEGION
+        for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it = 
+              outstanding_task_counts.begin(); it != 
+              outstanding_task_counts.end(); it++)
+        {
+          if (it->second == 0)
+            continue;
+          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
+                          address_space, it->second, it->first.second ? 
+                           "meta" : "application", it->first.first);
+
+        }
+#endif
         local_manager->record_outstanding_tasks();
+      }
 
       // Record if we have any outstanding profiling requests
       if (profiler != NULL && profiler->has_outstanding_requests())
@@ -16291,20 +16371,33 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void Runtime::increment_total_outstanding_tasks(void)
+    void Runtime::increment_total_outstanding_tasks(unsigned tid, bool meta)
     //--------------------------------------------------------------------------
     {
       AutoLock out_lock(outstanding_task_lock); 
       total_outstanding_tasks++;
+      std::pair<unsigned,bool> key(tid,meta);
+      std::map<std::pair<unsigned,bool>,unsigned>::iterator finder = 
+        outstanding_task_counts.find(key);
+      if (finder == outstanding_task_counts.end())
+        outstanding_task_counts[key] = 1;
+      else
+        finder->second++;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::decrement_total_outstanding_tasks(void)
+    void Runtime::decrement_total_outstanding_tasks(unsigned tid, bool meta)
     //--------------------------------------------------------------------------
     {
       AutoLock out_lock(outstanding_task_lock);
       assert(total_outstanding_tasks > 0);
       total_outstanding_tasks--;
+      std::pair<unsigned,bool> key(tid,meta);
+      std::map<std::pair<unsigned,bool>,unsigned>::iterator finder = 
+        outstanding_task_counts.find(key);
+      assert(finder != outstanding_task_counts.end());
+      assert(finder->second > 0);
+      finder->second--;
     }
 #endif
 
@@ -20012,8 +20105,14 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
+#ifdef DEBUG_LEGION
+      if (tid < HLR_MESSAGE_ID)
+        Runtime::get_runtime(p)->decrement_total_outstanding_tasks(tid, 
+                                                                  true/*meta*/);
+#else
       if (tid < HLR_MESSAGE_ID)
         Runtime::get_runtime(p)->decrement_total_outstanding_tasks();
+#endif
 #ifdef DEBUG_SHUTDOWN_HANG
       Runtime *runtime = Runtime::get_runtime(p);
       __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);

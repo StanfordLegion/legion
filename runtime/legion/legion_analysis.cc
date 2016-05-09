@@ -3467,7 +3467,7 @@ namespace Legion {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_base_gc_ref(PHYSICAL_STATE_REF)) 
+          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF)) 
             legion_delete(it->first);
         }
       }
@@ -3478,7 +3478,7 @@ namespace Legion {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               info.states.begin(); it != info.states.end(); it++)
         {
-          if (it->first->remove_base_gc_ref(PHYSICAL_STATE_REF))
+          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF))
             legion_delete(it->first);
         }
       }
@@ -3533,7 +3533,7 @@ namespace Legion {
         info.states.find(state);
       if (finder == info.states.end())
       {
-        state->add_base_gc_ref(PHYSICAL_STATE_REF);
+        state->add_base_valid_ref(PHYSICAL_STATE_REF);
         info.states[state] = state_mask;
       }
       else
@@ -3551,7 +3551,7 @@ namespace Legion {
         info.states.find(state);
       if (finder == info.states.end())
       {
-        state->add_base_gc_ref(PHYSICAL_STATE_REF);
+        state->add_base_valid_ref(PHYSICAL_STATE_REF);
         info.states[state] = state_mask;
       }
       else
@@ -4197,9 +4197,8 @@ namespace Legion {
         add_base_resource_ref(REMOTE_DID_REF);
       }
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Version State %ld", 
-            LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Version State %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 
@@ -4231,8 +4230,8 @@ namespace Legion {
         map_over_remote_instances(functor);
       }
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Deletion %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 
@@ -4283,6 +4282,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(currently_valid);
 #endif
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -4627,6 +4627,9 @@ namespace Legion {
         if (finder == valid_views.end())
         {
           it->first->add_nested_gc_ref(did);
+#ifdef DEBUG_LEGION
+          assert(currently_valid);
+#endif
           it->first->add_nested_valid_ref(did);
           valid_views[it->first] = overlap;
         }
@@ -4647,6 +4650,9 @@ namespace Legion {
           if (finder == reduction_views.end())
           {
             it->first->add_nested_gc_ref(did);
+#ifdef DEBUG_LEGION
+            assert(currently_valid);
+#endif
             it->first->add_nested_valid_ref(did);
             reduction_views[it->first] = overlap;
           }

@@ -940,14 +940,12 @@ namespace Legion {
       if (info == NULL)
       {
         Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(HANDLE_MESSAGE_CALL,
+                          NULL, first_invocation, continuation_precondition);
         // Special case for handle message, always defer it if we are also
         // the sender in order to avoid deadlocks
-        if (first_invocation && (message->sender == processor))
-          continuation_precondition = mapper_lock.acquire(0, true/*exclusive*/);
-        else
-          info = begin_mapper_call(HANDLE_MESSAGE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-        if (continuation_precondition.exists())
+        if (continuation_precondition.exists() || 
+            (first_invocation && message->sender == processor))
         {
           MapperContinuation1<Mapper::MapperMessage,
                               &MapperManager::invoke_handle_message>
@@ -1011,7 +1009,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
-                                        message_size, radix, 1/*index*/);
+                                        message_size, radix, 0/*index*/);
       resume_mapper_call(ctx);
     }
 
