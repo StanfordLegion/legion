@@ -12823,6 +12823,9 @@ namespace Legion {
     MapperManager* Runtime::find_mapper(Processor target, MapperID map_id)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(target.exists());
+#endif
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
         proc_managers.find(target);
 #ifdef DEBUG_LEGION
