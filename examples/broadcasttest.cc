@@ -1,6 +1,4 @@
-/* Copyright 2016 Stanford University
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
+censed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
@@ -13,17 +11,15 @@
  * limitations under the License.
  */
 
-#include <cstdlib>
+
 #include <cstdio>
 
 #include "legion.h"
 
-#include "default_mapper.h"
-
 // All of the important user-level objects live 
 // in the Legion namespace.
 using namespace Legion;
-using namespace Legion::Mapping;
+
 // We use an enum to declare the IDs for user-level tasks
 enum TaskID {
   HELLO_WORLD_ID,
@@ -39,8 +35,7 @@ public:
                                              TaskOptions&     output);
    virtual void handle_message(const MapperContext           ctx,
                                   const MapperMessage&          message);
- std::set<Processor> all_procs;
-};
+}
 
 void mapper_registration(Machine machine, Runtime *rt,
                           const std::set<Processor> &local_procs)
@@ -55,6 +50,7 @@ void mapper_registration(Machine machine, Runtime *rt,
 
 BroadcastTest::BroadcastTest(Machine m, Runtime *rt, Processor p):DefaultMapper(rt->get_mapper_runtime(), m, p)
 {
+	std::set<Processor> all_procs;
   machine.get_all_processors(all_procs);
 }
 
@@ -62,18 +58,15 @@ void BroadcastTest::select_task_options(const MapperContext ctx,
                                             const Task& task,
                                                   TaskOptions& output)
 {
-int m=123;
+int m=1;
 void *message = &m;
-if (all_procs.begin()->id + 1 == local_proc.id) mapper_runtime->broadcast(ctx, message, sizeof(int));
-
-//std::set<Processor>::iterator it = all_procs.begin(); std::advance(it, 7);
-//if (all_procs.begin()->id+1 == local_proc.id) mapper_runtime->send_message(ctx,*it, message, sizeof(int));
+ if (all_procs.begin()->id + 1 == local_proc.id) mapper_runtime->broadcast(ctx, message, sizeof(get_input_message),2);
 DefaultMapper::select_task_options(ctx, task, output);
 }
 
 void BroadcastTest::handle_message(const MapperContext           ctx,
                 const MapperMessage&          message){
-					std::cout<<"handle message\t Node: "<<node_id<<"\tProcessor: "<<local_proc.id<<"\tSender: "<<message.sender.id<<"\tMessage "<<*(int *)message.message<<"\n";
+					std::cout<<"handle message\t Node: "<<node_id<<"Processor: "<<local_proc.id;
 }
 
 

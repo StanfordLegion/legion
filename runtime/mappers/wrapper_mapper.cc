@@ -54,7 +54,7 @@ namespace Legion {
 			//	std::cout<<"	local"<<local.id<<"\n";
 		}
 		WrapperMapper::~WrapperMapper(){
-			//if (node_id==1) std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
+			if (node_id==1) std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 			//std::cout<<"Des Node id"<< node_id<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 		}
 
@@ -613,8 +613,8 @@ namespace Legion {
 				
 				WrapperMapper::broadcastcount=0;
 				void *message_point = &message;
-				WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
-                                        mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message));
+				//WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
+                                        mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message),2);
                                         //mapper_runtime->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
                                 WrapperMapper::databroadcasted=1;
 
@@ -832,10 +832,10 @@ namespace Legion {
 		void WrapperMapper::handle_message(const MapperContext           ctx,
 		const MapperMessage&          message){
 			const select_task_options_message *rec_message = (select_task_options_message*)message.message;
-			std::cout<<node_id<<rec_message->tag<<"handle message\n";	
+			std::cout<<node_id<<rec_message->tag<<local_proc.id<<"handle message\n";	
 		
-		if (rec_message->tag == 11){
 					if (node_id==0 && WrapperMapper::ownerprocessor.id==local_proc.id){
+						if (rec_message->tag==11){
 					std::string task_name = rec_message->task_name;
 					TaskOptions output = rec_message->output;
 
@@ -857,33 +857,46 @@ namespace Legion {
 					void *message_point = &mess;
 					mapper_runtime->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
 				}
+				}
+			else if (rec_message->tag ==11){
+				wait_task_options = rec_message->output;				
+				mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
+			}
+			else {
+				std::cout<<"input_message\n";
+const get_input_message *rec1_message =( get_input_message*)(message.message);                         
+
+					WrapperMapper::ownerprocessor =  rec1_message->processor;
+                                        WrapperMapper::procs_map =rec1_message->procs_map;
+                                        WrapperMapper::tasks_map =rec1_message->tasks_map;
+                                        WrapperMapper::mems_map =rec1_message->mems_map;		
+	                              //  get_input_message mess = {12, rec1_message->processor, rec1_message->procs_map, rec1_message->tasks_map, rec1_message->mems_map};
+		
+			}
+
 		}	
 				
-
+/*
 						
-const get_input_message *rec1_message =( get_input_message*)(message.message);			
-	if (rec1_message->tag == 12){
+//const get_input_message *rec1_message =( get_input_message*)(message.message);			
+	if (rec_message->tag == 12 && WrapperMapper::ownerprocessor.id!=local_proc.id){
+std::cout<<"input_message\n";
 		if (node_id == 0 && WrapperMapper::ownerprocessor.id==local_proc.id){
 //WrapperMapper::broadcastcount++;
 //std::cout<<WrapperMapper::broadcastcount;
 //if(WrapperMapper::broadcastcount==(signed)all_procs.size()-1) mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
 
 }
-		else {
- WrapperMapper::ownerprocessor =  rec1_message->processor;
-                                        WrapperMapper::procs_map =rec1_message->procs_map;
-                                        WrapperMapper::tasks_map =rec1_message->tasks_map;
-                                        WrapperMapper::mems_map =rec1_message->mems_map;
-					                                get_input_message mess = {12, rec1_message->processor, rec1_message->procs_map, rec1_message->tasks_map, rec1_message->mems_map};
-					
-                                        void *message_point = &mess;
+//		else {
+ 				
+//                                        void *message_point = &mess;
 
 //mapper_runtime->send_message(ctx,message.sender,message_point,sizeof(int));
 
 }
-
-}
-}
+*/
+//}
+//}
 
 		void WrapperMapper::handle_task_result(const MapperContext           ctx,
 		const MapperTaskResult&       result){
