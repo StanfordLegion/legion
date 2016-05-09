@@ -3429,7 +3429,7 @@ namespace Legion {
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
             log_region.error("Field %d is not a valid field of field "
-                                   "space %d for index %d of %s requirements"
+                                   "space %d for index %d of %s requirements "
                                    "of copy operation (ID %lld)",
                                    bad_field, sp.id, idx, 
                                    (src ? "source" : "destination"),
@@ -7498,13 +7498,28 @@ namespace Legion {
       result_map = FutureMap(legion_new<FutureMapImpl>(ctx, 
                                              get_completion_event(), runtime));
 #ifdef DEBUG_LEGION
+      size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
         result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
+        total_points++;
       }
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
         result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
+        total_points += index_tasks[idx]->index_domain.get_volume();
+      }
+      // Assume for now that all msut epoch launches have to be
+      // mapped to CPUs
+      Machine::ProcessorQuery all_cpus(runtime->machine);
+      all_cpus.only_kind(Processor::LOC_PROC); 
+      if (total_points > all_cpus.count())
+      {
+        log_run.error("Illegal must epoch launch in task %s (UID %lld). "
+            "Must epoch launch requested %ld tasks, but only %ld CPUs "
+            "exist in this machine.", parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id(), total_points, all_cpus.count());
+        assert(false);
       }
 #endif
       return result_map;
@@ -7776,7 +7791,7 @@ namespace Legion {
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           } 
           target_procs[proc] = task;
-          task->current_proc = proc;
+          task->target_proc = proc;
         }
       }
       // Then we need to actually perform the mapping
@@ -8529,7 +8544,7 @@ namespace Legion {
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->current_proc))
+        if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
           Event wait = 
@@ -8553,7 +8568,7 @@ namespace Legion {
       for (std::set<SliceTask*>::const_iterator it = 
             slice_tasks.begin(); it != slice_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->current_proc))
+        if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
           Event wait = 

@@ -276,6 +276,7 @@ namespace Legion {
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_SELECT_TUNABLE_TASK_ID,
       HLR_DEFERRED_ENQUEUE_TASK_ID,
+      HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -337,6 +338,7 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Select Tunable",                                         \
         "Deferred Task Enqueue",                                  \
+        "Deferred Mapper Message",                                \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
@@ -433,16 +435,17 @@ namespace Legion {
 
     enum VirtualChannelKind {
       DEFAULT_VIRTUAL_CHANNEL = 0,
-      INDEX_AND_FIELD_VIRTUAL_CHANNEL = 1,
-      LOGICAL_TREE_VIRTUAL_CHANNEL = 2,
-      MAPPER_VIRTUAL_CHANNEL = 3,
-      SEMANTIC_INFO_VIRTUAL_CHANNEL = 4,
-      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 5,
-      CONTEXT_VIRTUAL_CHANNEL = 6,
-      MANAGER_VIRTUAL_CHANNEL = 7,
-      VIEW_VIRTUAL_CHANNEL = 8,
-      VARIANT_VIRTUAL_CHANNEL = 9,
-      MAX_NUM_VIRTUAL_CHANNELS = 10, // this one must be last
+      INDEX_SPACE_VIRTUAL_CHANNEL = 1,
+      FIELD_SPACE_VIRTUAL_CHANNEL = 2,
+      LOGICAL_TREE_VIRTUAL_CHANNEL = 3,
+      MAPPER_VIRTUAL_CHANNEL = 4,
+      SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
+      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 6,
+      CONTEXT_VIRTUAL_CHANNEL = 7,
+      MANAGER_VIRTUAL_CHANNEL = 8,
+      VIEW_VIRTUAL_CHANNEL = 9,
+      VARIANT_VIRTUAL_CHANNEL = 10,
+      MAX_NUM_VIRTUAL_CHANNELS = 11, // this one must be last
     };
 
     enum MessageKind {
@@ -453,10 +456,12 @@ namespace Legion {
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_CHILD_REQUEST,
+      SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
+      SEND_INDEX_PARTITION_CHILD_RESPONSE,
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
@@ -557,10 +562,12 @@ namespace Legion {
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
         "Send Index Space Child Request",                             \
+        "Send Index Space Child Response",                            \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
+        "Send Index Partition Child Response",                        \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \

@@ -64,6 +64,15 @@ namespace Legion {
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
       };
+      struct DeferMessageArgs {
+      public:
+        HLRTaskID hlr_id;
+        MapperManager *manager;
+        Processor sender;
+        void *message;
+        size_t size;
+        bool broadcast;
+      };
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
                     MapperID map_id, Processor p);
@@ -474,6 +483,9 @@ namespace Legion {
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
+      void defer_message(Mapper::MapperMessage *message);
+      static void handle_deferred_message(const void *args);
+    public:
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
       const MapperID mapper_id;
@@ -572,7 +584,7 @@ namespace Legion {
                                       bool first_invocation = true);
     protected:
       // Must be called while holding the lock
-      void release_lock(std::vector<UserEvent> &to_trigger);
+      void release_lock(std::vector<UserEvent> &to_trigger); 
     protected:
       LockState lock_state;
       std::set<MappingCallInfo*> current_holders;

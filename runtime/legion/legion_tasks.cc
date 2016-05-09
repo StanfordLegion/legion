@@ -2825,6 +2825,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::send_back_created_state(AddressSpaceID target, 
+                                             unsigned start,
+                                             RegionTreeContext remote_outermost)
+    //--------------------------------------------------------------------------
+    {
+#if 0
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      {
+        RegionRequirement &req = created_requirements[idx];
+        if (deleted_regions.find(req.region) != deleted_regions.end())
+          continue;
+        FieldSpace fs = req.region.get_field_space();
+        if (deleted_field_spaces.find(fs) != deleted_field_spaces.end())
+          continue;
+        bool all_fields_deleted = true;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it != 
+              req.privilege_fields.end(); it++)
+        {
+          if (deleted_fields.find(std::pair<FieldSpace,FieldID>(fs,*it)) == 
+              deleted_fields.end())
+          {
+            all_fields_deleted = false;
+            break;
+          }
+        }
+        if (all_fields_deleted)
+          continue;
+        unsigned index = regions.size() + idx;
+        runtime->forest->send_back_logical_state(get_parent_context(index),
+            remote_outermost, created_requirements[idx], target);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -4804,7 +4840,14 @@ namespace Legion {
         }
         if (!Runtime::unsafe_mapper)
           validate_target_processors(output.target_procs);
-        target_processors = output.target_procs;
+        // Special case for when we run in hl:separate mode
+        if (Runtime::separate_runtime_instances)
+        {
+          target_processors.resize(1);
+          target_processors[0] = this->target_proc;
+        }
+        else // the common case
+          target_processors = output.target_procs;
       }
       else
       {
@@ -4898,7 +4941,9 @@ namespace Legion {
         int composite_idx = 
           runtime->forest->physical_convert_mapping(regions[idx],
                 output.chosen_instances[idx], result, bad_tree, missing_fields,
-                Runtime::unsafe_mapper ? NULL : get_acquired_instances_ref(),
+                Runtime::unsafe_mapper ? NULL : 
+                  (this->must_epoch == NULL) ? get_acquired_instances_ref() : 
+                             this->must_epoch->get_acquired_instances_ref(),
                 unacquired, !Runtime::unsafe_mapper);
         if (bad_tree > 0)
         {
@@ -8288,12 +8333,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-      {
-        unsigned index = regions.size() + idx;
-        runtime->forest->send_back_logical_state(get_parent_context(index),
-            remote_outermost_context, created_requirements[idx], target);
-      }
+      send_back_created_state(target, regions.size(), remote_outermost_context);
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
@@ -8848,21 +8888,7 @@ namespace Legion {
       mp->assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
       point_termination = UserEvent::create_user_event();
-    } 
-
-    //--------------------------------------------------------------------------
-    void PointTask::send_back_created_state(AddressSpaceID target, 
-                                            unsigned start,
-                                            RegionTreeContext remote_outermost)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-      {
-        unsigned index = regions.size() + idx;
-        runtime->forest->send_back_logical_state(get_parent_context(index),
-            remote_outermost, created_requirements[idx], target);
-      }
-    }
+    }  
 
     /////////////////////////////////////////////////////////////
     // Wrapper Task 
@@ -11955,7 +11981,7 @@ namespace Legion {
       for (std::deque<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
       {
-        (*it)->send_back_created_state(target, version_infos.size(),
+        (*it)->send_back_created_state(target, regions.size(),
                                        remote_outermost_context);
       }
       rez.serialize(index_owner);

@@ -651,7 +651,7 @@ function std.type_eq(a, b, mapping)
 
   if a == b then
     return true
-  elseif mapping[a] == b then
+  elseif mapping[a] == b or mapping[b] == a then
     return true
   elseif std.is_symbol(a) and std.is_symbol(b) then
     if a == wild or b == wild then
@@ -977,7 +977,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
-    elseif not check(param_type, arg_type, mapping) then
+    elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
       log.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
