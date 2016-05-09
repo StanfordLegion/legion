@@ -939,14 +939,16 @@ namespace Legion {
     {
       if (info == NULL)
       {
-        Event continuation_precondition = Event::NO_EVENT;
         // Special case for handle message, always defer it if we are also
         // the sender in order to avoid deadlocks
-        if (first_invocation && (message->sender == processor))
-          continuation_precondition = mapper_lock.acquire(0, true/*exclusive*/);
-        else
-          info = begin_mapper_call(HANDLE_MESSAGE_CALL,
-                            NULL, first_invocation, continuation_precondition);
+        if ((message->sender == processor) && first_invocation)
+        {
+          defer_message(message);
+          return;
+        }
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(HANDLE_MESSAGE_CALL,
+                          NULL, first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
           MapperContinuation1<Mapper::MapperMessage,
@@ -1011,7 +1013,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
-                                        message_size, radix, 1/*index*/);
+                                        message_size, radix, 0/*index*/);
       resume_mapper_call(ctx);
     }
 
@@ -2656,6 +2658,37 @@ namespace Legion {
       assert(kind < LAST_MAPPER_CALL);
 #endif
       return call_names[kind];
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::defer_message(Mapper::MapperMessage *message)
+    //--------------------------------------------------------------------------
+    {
+      DeferMessageArgs args;
+      args.hlr_id = HLR_DEFER_MAPPER_MESSAGE_TASK_ID;
+      args.manager = this;
+      args.sender = message->sender;
+      args.size = message->size;
+      args.message = malloc(args.size);
+      memcpy(args.message, message->message, args.size);
+      args.broadcast = message->broadcast;
+      runtime->issue_runtime_meta_task(&args, sizeof(args), 
+          HLR_DEFER_MAPPER_MESSAGE_TASK_ID, HLR_LATENCY_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MapperManager::handle_deferred_message(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMessageArgs *margs = (const DeferMessageArgs*)args;
+      Mapper::MapperMessage message;
+      message.sender = margs->sender;
+      message.message = margs->message;
+      message.size = margs->size;
+      message.broadcast = margs->broadcast;
+      margs->manager->invoke_handle_message(&message,false/*first invocation*/);
+      // Then free up the allocated memory
+      free(margs->message);
     }
 
     /////////////////////////////////////////////////////////////

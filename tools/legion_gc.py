@@ -25,31 +25,31 @@ VALID_REF_KIND = 1
 RESOURCE_REF_KIND = 2
 REMOTE_REF_KIND = 3
 
-prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_gc\}: '
+prefix = r'\[(?P<realmnode>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_gc\}: '
 # References
-add_base_ref_pat = re.compile(prefix + r'GC Add Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
-add_nested_ref_pat = re.compile(prefix + r'GC Add Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
-remove_base_ref_pat = re.compile(prefix + r'GC Remove Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
-remove_nested_ref_pat = re.compile(prefix + r'GC Remove Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
+add_base_ref_pat = re.compile(prefix + r'GC Add Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
+add_nested_ref_pat = re.compile(prefix + r'GC Add Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
+remove_base_ref_pat = re.compile(prefix + r'GC Remove Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
+remove_nested_ref_pat = re.compile(prefix + r'GC Remove Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 # Instances
-inst_manager_pat = re.compile(prefix + r'GC Instance Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
-list_manager_pat = re.compile(prefix + r'GC List Reduction Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
-fold_manager_pat = re.compile(prefix + r'GC Fold Reduction Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
+inst_manager_pat = re.compile(prefix + r'GC Instance Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
+list_manager_pat = re.compile(prefix + r'GC List Reduction Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
+fold_manager_pat = re.compile(prefix + r'GC Fold Reduction Manager (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
 # Views
-materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<inst>[0-9]+)')
-composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+)')
-fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+)')
-reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<inst>[0-9]+)')
+materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
+composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+) (?P<node>[0-9]+)')
+fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
+reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
 # Version State
-version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+)')
+version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
-future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+)')
+future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Constraints
-constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+)')
+constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_]+)')
 # Deletion Pattern
-deletion_pat = re.compile(prefix + r'GC Deletion (?P<did>[0-9]+)')
+deletion_pat = re.compile(prefix + r'GC Deletion (?P<did>[0-9]+) (?P<node>[0-9]+)')
 
 class TracePrinter(object):
     def __init__(self):
@@ -71,8 +71,9 @@ class TracePrinter(object):
         print line
 
 class Base(object):
-    def __init__(self, did):
+    def __init__(self, did, node):
         self.did = did
+        self.node = node
         self.base_gc_refs = {}
         self.base_gc_adds = {}
         self.base_gc_rems = {}
@@ -280,7 +281,7 @@ class Base(object):
             new_gc_adds = dict()
             new_gc_rems = dict()
             for did,refs in self.nested_gc_refs.iteritems():
-                src = state.get_obj(did)
+                src = state.get_obj(did, self.node)
                 new_gc_refs[src] = refs
                 new_gc_adds[src] = self.nested_gc_adds[did]
                 new_gc_rems[src] = self.nested_gc_rems[did]
@@ -292,7 +293,7 @@ class Base(object):
             new_valid_adds = dict()
             new_valid_rems = dict()
             for did,refs in self.nested_valid_refs.iteritems():
-                src = state.get_obj(did)
+                src = state.get_obj(did, self.node)
                 new_valid_refs[src] = refs
                 new_valid_adds[src] = self.nested_valid_adds[did]
                 new_valid_rems[src] = self.nested_valid_rems[did]
@@ -304,7 +305,7 @@ class Base(object):
             new_remote_adds = dict()
             new_remote_rems = dict()
             for did,refs in self.nested_remote_refs.iteritems():
-                src = state.get_obj(did)
+                src = state.get_obj(did, self.node)
                 new_remote_refs[src] = refs
                 new_remote_adds[src] = self.nested_remote_adds[did]
                 new_remote_rems[src] = self.nested_remote_rems[did]
@@ -316,7 +317,7 @@ class Base(object):
             new_resource_adds = dict()
             new_resource_rems = dict()
             for did,refs in self.nested_resource_refs.iteritems():
-                src = state.get_obj(did)
+                src = state.get_obj(did, self.node)
                 new_resource_refs[src] = refs
                 new_resource_adds[src] = self.nested_resource_adds[did]
                 new_resource_rems[src] = self.nested_resource_rems[did]
@@ -563,22 +564,22 @@ class Base(object):
         self.on_stack = False
 
 class Manager(Base):
-    def __init__(self, did):
-        super(Manager,self).__init__(did)
+    def __init__(self, did, node):
+        super(Manager,self).__init__(did, node)
         self.instance = None
 
     def add_inst(self, inst):
         self.instance = inst
 
     def __repr__(self):
-        result = 'Manager '+str(self.did)
+        result = 'Manager '+str(self.did)+' (Node='+str(self.node)+')'
         if self.instance is not None:
             result += ' '+repr(self.instance)
         return result
 
 class View(Base):
-    def __init__(self, did, kind):
-        super(View,self).__init__(did)
+    def __init__(self, did, node, kind):
+        super(View,self).__init__(did, node)
         self.kind = kind
         self.manager = None
 
@@ -586,29 +587,29 @@ class View(Base):
         self.manager = manager
 
     def __repr__(self):
-        result = self.kind +' View '+str(self.did)
+        result = self.kind +' View '+str(self.did)+' (Node='+str(self.node)+')'
         return result
 
 class Future(Base):
-    def __init__(self, did):
-        super(Future,self).__init__(did)
+    def __init__(self, did, node):
+        super(Future,self).__init__(did, node)
 
     def __repr__(self):
-        return 'Future '+str(self.did)
+        return 'Future '+str(self.did)+' (Node='+str(self.node)+')'
 
 class VersionState(Base):
-    def __init__(self, did):
-        super(VersionState,self).__init__(did)
+    def __init__(self, did, node):
+        super(VersionState,self).__init__(did, node)
 
     def __repr__(self):
-        return 'Version State '+str(self.did)
+        return 'Version State '+str(self.did)+' (Node='+str(self.node)+')'
 
 class Constraints(Base):
-    def __init__(self, did):
-        super(Constraints,self).__init__(did)
+    def __init__(self, did, node):
+        super(Constraints,self).__init__(did, node)
 
     def __repr__(self):
-        return 'Layout Constraints '+str(self.did)
+        return 'Layout Constraints '+str(self.did)+' (Node='+str(self.node)+')'
 
 class Instance(object):
     def __init__(self, iid, mem, kind):
@@ -639,6 +640,7 @@ class State(object):
                 if m is not None:
                     self.log_add_base_ref(int(m.group('kind')),
                                           long(m.group('did')),
+                                          long(m.group('node')),
                                           int(m.group('src')),
                                           int(m.group('cnt')))
                     continue
@@ -646,6 +648,7 @@ class State(object):
                 if m is not None:
                     self.log_add_nested_ref(int(m.group('kind')),
                                             long(m.group('did')),
+                                            long(m.group('node')),
                                             long(m.group('src')),
                                             int(m.group('cnt')))
                     continue
@@ -653,6 +656,7 @@ class State(object):
                 if m is not None:
                     self.log_remove_base_ref(int(m.group('kind')),
                                              long(m.group('did')),
+                                             long(m.group('node')),
                                              int(m.group('src')),
                                              int(m.group('cnt')))
                     continue
@@ -660,56 +664,67 @@ class State(object):
                 if m is not None:
                     self.log_remove_nested_ref(int(m.group('kind')),
                                                long(m.group('did')),
+                                               long(m.group('node')),
                                                long(m.group('src')),
                                                int(m.group('cnt')))
                     continue
                 m = inst_manager_pat.match(line)
                 if m is not None:
                     self.log_inst_manager(long(m.group('did')),
+                                          long(m.group('node')), 
                                           long(m.group('iid'),16),
                                           long(m.group('mem'),16))
                     continue
                 m = list_manager_pat.match(line)
                 if m is not None:
                     self.log_list_manager(long(m.group('did')),
+                                          long(m.gropu('node')),
                                           long(m.group('iid'),16),
                                           long(m.group('mem'),16))
                     continue
                 m = fold_manager_pat.match(line)
                 if m is not None:
                     self.log_fold_manager(long(m.group('did')),
+                                          long(m.group('node')),
                                           long(m.group('iid'),16),
                                           long(m.group('mem'),16))
                     continue
                 m = materialize_pat.match(line)
                 if m is not None:
                     self.log_materialized_view(long(m.group('did')),
+                                               long(m.group('node')),
                                                long(m.group('inst')))
                     continue
                 m = composite_pat.match(line)
                 if m is not None:
-                    self.log_composite_view(long(m.group('did')))
+                    self.log_composite_view(long(m.group('did')),
+                                            long(m.group('node')))
                     continue
                 m = fill_pat.match(line)
                 if m is not None:
-                    self.log_fill_view(long(m.group('did')))
+                    self.log_fill_view(long(m.group('did')),
+                                       long(m.group('node')))
                     continue
                 m = reduction_pat.match(line)
                 if m is not None:
                     self.log_reduction_view(long(m.group('did')),
+                                            long(m.group('node')),
                                             long(m.group('inst')))
                     continue
                 m = version_state_pat.match(line)
                 if m is not None:
-                    self.log_version_state(long(m.group('did')))
+                    self.log_version_state(long(m.group('did')),
+                                           long(m.group('node')))
                     continue
                 m = future_pat.match(line)
                 if m is not None:
-                    self.log_future(long(m.group('did')))
+                    self.log_future(long(m.group('did')),
+                                    long(m.group('node')))
                     continue
                 m = constraints_pat.match(line)
                 if m is not None:
-                    self.log_constraints(long(m.group('did')))
+                    self.log_constraints(long(m.group('did')),
+                                         long(m.group('node')))
                     continue
                 m = source_kind_pat.match(line)
                 if m is not None:
@@ -718,7 +733,8 @@ class State(object):
                     continue
                 m = deletion_pat.match(line)
                 if m is not None:
-                    self.log_deletion(long(m.group('did')))
+                    self.log_deletion(long(m.group('did')),
+                                      long(m.group('node')))
                     continue
                 matches -= 1
                 print 'Skipping unmatched line: '+line
@@ -726,8 +742,12 @@ class State(object):
 
     def post_parse(self):
         # Delete the virtual instance it is special
-        assert 0 in self.unknowns
-        del self.unknowns[0]
+        to_del = list()
+        for key,val in self.unknowns.iteritems():
+            if key[0] == 0:
+                to_del.append(key)
+        for key in to_del:
+            del self.unknowns[key]
         if self.unknowns:
             print "WARNING: Found %d unknown objects!" % len(self.unknowns)
             for did in self.unknowns.iterkeys():
@@ -746,70 +766,70 @@ class State(object):
         # Run the garbage collector
         gc.collect()
 
-    def log_add_base_ref(self, kind, did, src, cnt):
-        obj = self.get_obj(did) 
+    def log_add_base_ref(self, kind, did, node, src, cnt):
+        obj = self.get_obj(did, node) 
         assert src in self.src_names
         obj.add_base_ref(kind, self.src_names[src], cnt)
 
-    def log_add_nested_ref(self, kind, did, src, cnt):
-        obj = self.get_obj(did)
+    def log_add_nested_ref(self, kind, did, node, src, cnt):
+        obj = self.get_obj(did, node)
         obj.add_nested_ref(kind, src, cnt)
 
-    def log_remove_base_ref(self, kind, did, src, cnt):
-        obj = self.get_obj(did)
+    def log_remove_base_ref(self, kind, did, node, src, cnt):
+        obj = self.get_obj(did, node)
         assert src in self.src_names
         obj.remove_base_ref(kind, self.src_names[src], cnt)
 
-    def log_remove_nested_ref(self, kind, did, src, cnt):
-        obj = self.get_obj(did)
+    def log_remove_nested_ref(self, kind, did, node, src, cnt):
+        obj = self.get_obj(did, node)
         obj.remove_nested_ref(kind, src, cnt)
 
-    def log_inst_manager(self, did, iid, mem):
+    def log_inst_manager(self, did, node, iid, mem):
         inst = self.get_instance(iid, mem, 'Physical')
-        manager = self.get_manager(did)
+        manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_list_manager(self, did, iid, mem):
+    def log_list_manager(self, did, node, iid, mem):
         inst = self.get_instance(iid, mem, 'List Reduction')
-        manager = self.get_manager(did)
+        manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_fold_manager(self, did, iid, mem):
+    def log_fold_manager(self, did, node, iid, mem):
         inst = self.get_instance(iid, mem, 'Fold Reduction')
-        manager = self.get_manager(did)
+        manager = self.get_manager(did, node)
         manager.add_inst(inst)
 
-    def log_materialized_view(self, did, inst):
-        manager = self.get_manager(inst)
-        view = self.get_view(did, 'Materialized')
+    def log_materialized_view(self, did, node, inst):
+        manager = self.get_manager(inst, node)
+        view = self.get_view(did, node, 'Materialized')
         view.add_manager(manager)
 
-    def log_composite_view(self, did):
-        self.get_view(did, 'Composite')
+    def log_composite_view(self, did, node):
+        self.get_view(did, node, 'Composite')
 
-    def log_fill_view(self, did):
-        self.get_view(did, 'Fill')
+    def log_fill_view(self, did, node):
+        self.get_view(did, node, 'Fill')
 
-    def log_reduction_view(self, did, inst):
-        manager = self.get_manager(inst)
-        view = self.get_view(did, 'Reduction')
+    def log_reduction_view(self, did, node, inst):
+        manager = self.get_manager(inst, node)
+        view = self.get_view(did, node, 'Reduction')
         view.add_manager(manager)
 
-    def log_version_state(self, did):
-        self.get_version_state(did);
+    def log_version_state(self, did, node):
+        self.get_version_state(did, node);
 
-    def log_future(self, did):
-        self.get_future(did)
+    def log_future(self, did, node):
+        self.get_future(did, node)
 
-    def log_constraints(self, did):
-        self.get_constraints(did)
+    def log_constraints(self, did, node):
+        self.get_constraints(did, node)
 
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
             self.src_names[kind] = name
 
-    def log_deletion(self, did):
-        obj = self.get_obj(did)
+    def log_deletion(self, did, node):
+        obj = self.get_obj(did, node)
         obj.deleted = True
 
     def get_instance(self, iid, mem, kind):
@@ -817,61 +837,67 @@ class State(object):
             self.instances[iid] = Instance(iid, mem, kind)
         return self.instances[iid]
 
-    def get_manager(self, did):
+    def get_manager(self, did, node):
+        key = (did,node)
         if did not in self.managers:
-            self.managers[did] = Manager(did)
-            if did in self.unknowns:
-                self.managers[did].clone(self.unknowns[did])
-                del self.unknowns[did]
-        return self.managers[did]
+            self.managers[key] = Manager(did, node)
+            if key in self.unknowns:
+                self.managers[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.managers[key]
 
-    def get_view(self, did, kind):
-        if did not in self.views:
-            self.views[did] = View(did, kind)
-            if did in self.unknowns:
-                self.views[did].clone(self.unknowns[did])
-                del self.unknowns[did]
-        return self.views[did]
+    def get_view(self, did, node, kind):
+        key = (did,node)
+        if key not in self.views:
+            self.views[key] = View(did, node, kind)
+            if key in self.unknowns:
+                self.views[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.views[key]
 
-    def get_version_state(self, did):
-        if did not in self.version_states:
-            self.version_states[did] = VersionState(did)
-            if did in self.unknowns:
-                self.version_states[did].clone(self.unknowns[did])
-                del self.unknowns[did]
-        return self.version_states[did]
+    def get_version_state(self, did, node):
+        key = (did,node)
+        if key not in self.version_states:
+            self.version_states[key] = VersionState(did, node)
+            if key in self.unknowns:
+                self.version_states[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.version_states[key]
 
-    def get_future(self, did):
-        if did not in self.futures:
-            self.futures[did] = Future(did)
-            if did in self.unknowns:
-                self.futures[did].clone(self.unknowns[did])
-                del self.unknowns[did]
-        return self.futures[did]
+    def get_future(self, did, node):
+        key = (did,node)
+        if key not in self.futures:
+            self.futures[key] = Future(did, node)
+            if key in self.unknowns:
+                self.futures[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.futures[key]
 
-    def get_constraints(self, did):
-        if did not in self.constraints:
-            self.constraints[did] = Constraints(did)
-            if did in self.unknowns:
-                self.constraints[did].clone(self.unknowns[did])
-                del self.unknowns[did]
-        return self.constraints[did]
+    def get_constraints(self, did, node):
+        key = (did,node)
+        if key not in self.constraints:
+            self.constraints[key] = Constraints(did, node)
+            if key in self.unknowns:
+                self.constraints[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.constraints[key]
 
-    def get_obj(self, did):
-        if did in self.views:
-            return self.views[did]
-        if did in self.managers:
-            return self.managers[did]
-        if did in self.futures:
-            return self.futures[did]
-        if did in self.version_states:
-            return self.version_states[did]
-        if did in self.constraints:
-            return self.constraints[did]
-        if did in self.unknowns:
-            return self.unknowns[did]
-        self.unknowns[did] = Base(did)
-        return self.unknowns[did]
+    def get_obj(self, did, node):
+        key = (did,node)
+        if key in self.views:
+            return self.views[key]
+        if key in self.managers:
+            return self.managers[key]
+        if key in self.futures:
+            return self.futures[key]
+        if key in self.version_states:
+            return self.version_states[key]
+        if key in self.constraints:
+            return self.constraints[key]
+        if key in self.unknowns:
+            return self.unknowns[key]
+        self.unknowns[key] = Base(did, node)
+        return self.unknowns[key]
 
     def check_for_cycles(self):
         for did,manager in self.managers.iteritems():

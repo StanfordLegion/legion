@@ -974,9 +974,8 @@ namespace Legion {
       // Add a reference to the layout
       layout->add_reference();
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Instance Manager %ld " IDFMT " " IDFMT " ",
-                    LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
+      log_garbage.info("GC Instance Manager %ld %d " IDFMT " " IDFMT " ",
+       LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
       if (is_owner() && Runtime::legion_spy_enabled)
       {
@@ -1002,8 +1001,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Deletion %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
       if (layout->remove_reference())
         delete layout;
@@ -1480,9 +1479,8 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
-                  LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
+      log_garbage.info("GC List Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+       LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
 
@@ -1505,8 +1503,8 @@ namespace Legion {
       // Free up our pointer space
       ptr_space.get_index_space().destroy();
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Deletion %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 
@@ -1642,9 +1640,8 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
-                  LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
+      log_garbage.info("GC Fold Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+       LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
 
@@ -1665,8 +1662,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      if (is_owner())
-        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      log_garbage.info("GC Deletion %ld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 

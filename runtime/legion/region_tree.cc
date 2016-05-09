@@ -3496,7 +3496,7 @@ namespace Legion {
           return finder->second;
       }
       // Couldn't find it, so send a request to the owner node
-      AddressSpace owner = FieldSpaceNode::get_owner_space(space, runtime); 
+      AddressSpaceID owner = FieldSpaceNode::get_owner_space(space, runtime); 
       if (owner == runtime->address_space)
       {
         log_field.error("Unable to find entry for field space %x.", space.id);
@@ -3673,80 +3673,147 @@ namespace Legion {
     RegionNode* RegionTreeForest::get_tree(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<RegionTreeID,RegionNode*>::const_iterator it = 
-        tree_nodes.find(tid);
-      if (it == tree_nodes.end())
       {
-        log_region.error("Unable to find top-level tree entry for "
-                               "region tree %d.  This is either a runtime "
-                               "bug or requires Legion fences if names are "
-                               "being returned out of the context in which"
-                               "they are being created.", tid);
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
+          tree_nodes.find(tid);
+        if (finder != tree_nodes.end())
+          return finder->second;
+      }
+      // Couldn't find it, so send a request to the owner node
+      AddressSpaceID owner = RegionTreeNode::get_owner_space(tid, runtime);
+      if (owner == runtime->address_space)
+      {
+        log_run.error("Unable to find entry for region tree ID %d", tid);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_INVALID_TREE_ENTRY);
       }
-      return it->second;
+      Event wait_on = Event::NO_EVENT;
+      {
+        // Retake the lock in exclusive mode and check to
+        // make sure that we didn't lose the race
+        AutoLock l_lock(lookup_lock);
+        std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
+          tree_nodes.find(tid);
+        if (finder != tree_nodes.end())
+          return finder->second;
+        // Now see if we've already send a request
+        std::map<RegionTreeID,Event>::const_iterator req_finder =
+          region_tree_requests.find(tid);
+        if (req_finder == region_tree_requests.end())
+        {
+          UserEvent done = UserEvent::create_user_event();
+          region_tree_requests[tid] = done;
+          Serializer rez;
+          rez.serialize(tid);
+          rez.serialize(done);
+          runtime->send_top_level_region_request(owner, rez);
+          wait_on = done;
+        }
+        else
+          wait_on = req_finder->second;
+      }
+      wait_on.wait();
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
+          tree_nodes.find(tid);
+      if (finder == tree_nodes.end())
+      {
+        log_region.error("Unable to find top-level tree entry for "
+                         "region tree %d.  This is either a runtime "
+                         "bug or requires Legion fences if names are "
+                         "being returned out of the context in which"
+                         "they are being created.", tid);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_TREE_ENTRY);
+      }
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexSpace space) const
+    bool RegionTreeForest::has_node(IndexSpace space, bool local_only)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_nodes.find(space) != index_nodes.end());
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (index_nodes.find(space) != index_nodes.end())
+          return true;
+        if (local_only)
+          return false;
+      }
+      return (get_node(space) != NULL);
     }
     
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(IndexPartition part) const
+    bool RegionTreeForest::has_node(IndexPartition part, bool local_only)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (index_parts.find(part) != index_parts.end());
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (index_parts.find(part) != index_parts.end())
+          return true;
+        if (local_only)
+          return false;
+      }
+      return (get_node(part) != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(FieldSpace space) const
+    bool RegionTreeForest::has_node(FieldSpace space, bool local_only)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (field_nodes.find(space) != field_nodes.end());
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (field_nodes.find(space) != field_nodes.end())
+          return true;
+        if (local_only)
+          return false;
+      }
+      return (get_node(space) != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalRegion handle) const
+    bool RegionTreeForest::has_node(LogicalRegion handle, bool local_only)
     //--------------------------------------------------------------------------
     {
       // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_space) && has_node(handle.field_space) &&
-              has_tree(handle.tree_id));
+      return (has_node(handle.index_space, local_only) && 
+              has_node(handle.field_space, local_only) &&
+              has_tree(handle.tree_id, local_only));
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_node(LogicalPartition handle) const
+    bool RegionTreeForest::has_node(LogicalPartition handle, bool local_only)
     //--------------------------------------------------------------------------
     {
       // Reflect that we can build these nodes whenever this is true
-      return (has_node(handle.index_partition) && has_node(handle.field_space)
-              && has_tree(handle.tree_id));
+      return (has_node(handle.index_partition, local_only) && 
+              has_node(handle.field_space, local_only)
+              && has_tree(handle.tree_id, local_only));
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_tree(RegionTreeID tid) const
+    bool RegionTreeForest::has_tree(RegionTreeID tid, bool local_only)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      return (tree_nodes.find(tid) != tree_nodes.end());
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        if (tree_nodes.find(tid) != tree_nodes.end())
+          return true;
+        if (local_only)
+          return false;
+      }
+      return (get_tree(tid) != NULL);
     }
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::has_field(FieldSpace space, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      if (!has_node(space))
-        return false;
       return get_node(space)->has_field(fid);
     }
 
@@ -5587,20 +5654,25 @@ namespace Legion {
       assert(owner_space != local_space);
 #endif
       UserEvent ready_event = UserEvent::create_user_event();
+      IndexPartition child_handle = IndexPartition::NO_PART;
+      IndexPartition *volatile handle_ptr = &child_handle;
       Serializer rez;
-      rez.serialize(handle);
-      rez.serialize(local_space);
-      rez.serialize(c);
-      rez.serialize(ready_event);
+      {
+        RezCheck z(rez);
+        rez.serialize(handle);
+        rez.serialize(c);
+        rez.serialize(handle_ptr);
+        rez.serialize(ready_event);
+      }
       context->runtime->send_index_space_child_request(owner_space, rez);
       ready_event.wait();
-      // Retake the lock and get the result
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      // Stupid volatile-ness
+      IndexPartition handle_copy = *handle_ptr;
 #ifdef DEBUG_LEGION
-      assert((color_map.find(c) != color_map.end()) &&
-              (color_map[c] != NULL));
+      // stupid volatile-ness
+      assert(handle_copy.exists());
 #endif
-      return color_map[c];
+      return context->get_node(handle_copy);
     }
 
     //--------------------------------------------------------------------------
@@ -5946,8 +6018,6 @@ namespace Legion {
     void IndexSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->remove_child(color);
       AutoLock n_lock(node_lock);
       destruction_set.add(source);
       for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
@@ -6574,19 +6644,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_child_request(
-                                  RegionTreeForest *forest, Deserializer &derez)
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      AddressSpaceID source;
-      derez.deserialize(source);
       ColorPoint child_color;
       derez.deserialize(child_color);
+      IndexPartNode *target;
+      derez.deserialize(target);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      IndexSpaceNode *target = forest->get_node(handle);
-      target->send_child_node(source, child_color, to_trigger);
+      IndexSpaceNode *parent = forest->get_node(handle);
+      IndexPartNode *child = parent->get_child(child_color);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(child->handle);
+        rez.serialize(target);
+        rez.serialize(to_trigger);
+      }
+      forest->runtime->send_index_space_child_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_node_child_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      IndexPartition *target;
+      derez.deserialize(target);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      (*target) = handle;
+      to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -7004,21 +7099,24 @@ namespace Legion {
       // Otherwise, request a child node from the owner node
       else
       {
+        IndexSpace child_handle = IndexSpace::NO_SPACE;
+        IndexSpace *volatile handle_ptr = &child_handle;
         UserEvent ready_event = UserEvent::create_user_event();
         Serializer rez;
-        rez.serialize(handle);
-        rez.serialize(local_space);
-        rez.serialize(c);
-        rez.serialize(ready_event);
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(c);
+          rez.serialize(handle_ptr);
+          rez.serialize(ready_event);
+        }
         context->runtime->send_index_partition_child_request(owner_space, rez);
         ready_event.wait();
-        // Retake the lock and get the result
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        IndexSpace copy_handle = *handle_ptr;
 #ifdef DEBUG_LEGION
-        assert((color_map.find(c) != color_map.end()) &&
-                (color_map[c] != NULL));
+        assert(copy_handle.exists());
 #endif
-        return color_map[c];
+        return context->get_node(copy_handle);
       }
     }
 
@@ -7298,8 +7396,6 @@ namespace Legion {
     void IndexPartNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->remove_child(color);
       AutoLock n_lock(node_lock);
       destruction_set.add(source);
       for (std::set<PartitionNode*>::const_iterator it = logical_nodes.begin();
@@ -8005,19 +8101,44 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_child_request(
-                                  RegionTreeForest *forest, Deserializer &derez)
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      AddressSpaceID source;
-      derez.deserialize(source);
       ColorPoint child_color;
       derez.deserialize(child_color);
+      IndexSpace *target;
+      derez.deserialize(target);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      IndexPartNode *target = forest->get_node(handle);
-      target->send_child_node(source, child_color, to_trigger);
+      IndexPartNode *parent = forest->get_node(handle);
+      IndexSpaceNode *child = parent->get_child(child_color);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(child->handle);
+        rez.serialize(target);
+        rez.serialize(to_trigger);
+      }
+      forest->runtime->send_index_partition_child_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_child_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpace *target;
+      derez.deserialize(target);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      (*target) = handle;
+      to_trigger.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -9248,7 +9369,7 @@ namespace Legion {
       for (std::vector<LogicalRegion>::const_iterator it = 
             to_check.begin(); it != to_check.end(); it++)
       {
-        if (context->has_node(*it))
+        if (context->has_node(*it, true/*local only*/))
           context->get_node(*it)->destroy_node(source);
       }
     }
@@ -13557,6 +13678,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Small sanity check to make sure they are in the same tree
       assert(get_tree_id() == manager->region_node->get_tree_id());
+      assert(manager->region_node->context == this->context);
 #endif
       // Check to see if we've already registered it
       InstanceView *result = find_instance_view(manager, context);
@@ -14291,8 +14413,6 @@ namespace Legion {
     void RegionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->remove_child(row_source->color);
       AutoLock n_lock(node_lock);
       destruction_set.add(source);
     }
@@ -16179,8 +16299,6 @@ namespace Legion {
     void PartitionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->remove_child(row_source->color);
       AutoLock n_lock(node_lock);
       destruction_set.add(source);
     }

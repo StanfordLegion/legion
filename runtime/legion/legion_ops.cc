@@ -3429,7 +3429,7 @@ namespace Legion {
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
             log_region.error("Field %d is not a valid field of field "
-                                   "space %d for index %d of %s requirements"
+                                   "space %d for index %d of %s requirements "
                                    "of copy operation (ID %lld)",
                                    bad_field, sp.id, idx, 
                                    (src ? "source" : "destination"),
@@ -7791,7 +7791,7 @@ namespace Legion {
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           } 
           target_procs[proc] = task;
-          task->current_proc = proc;
+          task->target_proc = proc;
         }
       }
       // Then we need to actually perform the mapping
@@ -8544,7 +8544,7 @@ namespace Legion {
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->current_proc))
+        if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
           Event wait = 
@@ -8568,7 +8568,7 @@ namespace Legion {
       for (std::set<SliceTask*>::const_iterator it = 
             slice_tasks.begin(); it != slice_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->current_proc))
+        if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
           Event wait = 

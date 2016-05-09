@@ -522,6 +522,8 @@ namespace Legion {
                               std::set<Event> &ready_events);
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez);
+      void send_back_created_state(AddressSpaceID target, unsigned start,
+                                   RegionTreeContext remote_outermost_context);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
@@ -945,8 +947,6 @@ namespace Legion {
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
-      void send_back_created_state(AddressSpaceID target, unsigned start,
-                                   RegionTreeContext remote_outermost_context);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
