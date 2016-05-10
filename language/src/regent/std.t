@@ -1536,6 +1536,41 @@ function symbol:__tostring()
 end
 
 -- #####################################
+-- ## Quotes
+-- #################
+
+local rquote = {}
+function rquote:__index(field)
+  local value = rquote[field]
+  if value ~= nil then return value end
+  error("rquote has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function rquote:__newindex(field, value)
+  error("rquote has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function std.newrquote(ast)
+  assert(ast ~= nil)
+
+  return setmetatable({
+    ast = ast,
+  }, rquote)
+end
+
+function std.is_rquote(x)
+  return getmetatable(x) == rquote
+end
+
+function rquote:getast()
+  return self.ast
+end
+
+function rquote:__tostring()
+  return self.ast:tostring(true)
+end
+
+-- #####################################
 -- ## Types
 -- #################
 

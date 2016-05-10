@@ -44,15 +44,14 @@ function passes.optimize(node)
   return node
 end
 
-function passes.compile(lex)
-  local node = parser:parse(lex)
+function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = specialize.entry(env, node)
     node = type_check.entry(node)
     node = passes.optimize(node)
-    if std.config["pretty"] then print(pretty.entry(node)) end
-    if std.config["task-inlines"] and node:is(ast.typed.stat.Task) and
+    if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
+    if std.config["task-inlines"] and node:is(ast.typed.top.Task) and
       node.options.inline:is(ast.options.Demand)
     then
       return node.prototype
@@ -60,6 +59,18 @@ function passes.compile(lex)
       return codegen.entry(node)
     end
   end
+  return ctor
+end
+
+function passes.entry_expr(lex)
+  local node = parser:entry_expr(lex)
+  local ctor = passes.compile(node, false)
+  return ctor
+end
+
+function passes.entry_stat(lex)
+  local node = parser:entry_stat(lex)
+  local ctor = passes.compile(node, true)
   return ctor, {node.name}
 end
 

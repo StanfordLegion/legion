@@ -95,12 +95,16 @@ local function ast_node_tostring(node, indent, hide)
   end
 end
 
+function ast_node:tostring(hide)
+  return ast_node_tostring(self, 0, hide)
+end
+
 function ast_node:__tostring()
-  return ast_node_tostring(self, 0, false)
+  return self:tostring(false)
 end
 
 function ast_node:printpretty(hide)
-  print(ast_node_tostring(self, 0, hide))
+  print(self:tostring(hide))
 end
 
 function ast_node:is(node_type)
@@ -518,17 +522,21 @@ ast.unspecialized.stat:leaf("Break")
 ast.unspecialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
-
-ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
-                                     "privileges", "coherence_modes", "flags",
-                                     "conditions", "constraints", "body"})
-ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
-ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
-                                       "constraints"})
-ast.unspecialized.stat:leaf("FspaceParam", {"param_name", "type_expr"})
-ast.unspecialized.stat:leaf("FspaceField", {"field_name", "type_expr"})
-
+ast.unspecialized.stat:leaf("Escape", {"expr"})
 ast.unspecialized.stat:leaf("RawDelete", {"value"})
+
+ast.unspecialized:inner("top", {"options"})
+ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
+                                    "privileges", "coherence_modes", "flags",
+                                    "conditions", "constraints", "body"})
+ast.unspecialized.top:leaf("TaskParam", {"param_name", "type_expr"})
+ast.unspecialized.top:leaf("Fspace", {"name", "params", "fields",
+                                      "constraints"})
+ast.unspecialized.top:leaf("FspaceParam", {"param_name", "type_expr"})
+ast.unspecialized.top:leaf("FspaceField", {"field_name", "type_expr"})
+ast.unspecialized.top:leaf("QuoteExpr", {"expr"})
+ast.unspecialized.top:leaf("QuoteStat", {"block"})
+
 
 -- Node Types (Specialized)
 
@@ -643,15 +651,18 @@ ast.specialized.stat:leaf("Break")
 ast.specialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
-
-ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
-                                   "privileges", "coherence_modes", "flags",
-                                   "conditions", "constraints", "body",
-                                   "prototype"})
-ast.specialized.stat:leaf("TaskParam", {"symbol"})
-ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
-
 ast.specialized.stat:leaf("RawDelete", {"value"})
+
+ast.specialized:inner("top", {"options"})
+ast.specialized.top:leaf("Task", {"name", "params", "return_type",
+                                  "privileges", "coherence_modes", "flags",
+                                  "conditions", "constraints", "body",
+                                  "prototype"})
+ast.specialized.top:leaf("TaskParam", {"symbol"})
+ast.specialized.top:leaf("Fspace", {"name", "fspace", "constraints"})
+ast.specialized.top:leaf("QuoteExpr", {"expr"})
+ast.specialized.top:leaf("QuoteStat", {"block"})
+
 
 -- Node Types (Typed)
 
@@ -741,6 +752,7 @@ ast.typed.stat:leaf("Break")
 ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
+ast.typed.stat:leaf("RawDelete", {"value"})
 ast.typed.stat:leaf("BeginTrace", {"trace_id"})
 ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
@@ -748,13 +760,14 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
-ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
+ast.typed:inner("top", {"options"})
+ast.typed.top:leaf("Fspace", {"name", "fspace"})
+ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
                              "region_divergence", "prototype"})
-ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
-ast.typed.stat:leaf("Fspace", {"name", "fspace"})
-
-ast.typed.stat:leaf("RawDelete", {"value"})
+ast.typed.top:leaf("TaskParam", {"symbol", "param_type"})
+ast.typed.top:leaf("QuoteExpr", {"expr"})
+ast.typed.top:leaf("QuoteStat", {"block"})
 
 return ast

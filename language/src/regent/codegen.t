@@ -4945,10 +4945,10 @@ local lift_unary_op_to_futures = terralib.memoize(
       "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op))
     local rhs_symbol = std.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
-    local node = ast.typed.stat.Task {
+    local node = ast.typed.top.Task {
       name = name,
       params = terralib.newlist({
-          ast.typed.stat.TaskParam {
+          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
             options = ast.default_options(),
@@ -5026,16 +5026,16 @@ local lift_binary_op_to_futures = terralib.memoize(
     local lhs_symbol = std.newsymbol(lhs_type, "lhs")
     local rhs_symbol = std.newsymbol(rhs_type, "rhs")
     local task = std.newtask(name)
-    local node = ast.typed.stat.Task {
+    local node = ast.typed.top.Task {
       name = name,
       params = terralib.newlist({
-         ast.typed.stat.TaskParam {
+         ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
             options = ast.default_options(),
             span = ast.trivial_span(),
          },
-         ast.typed.stat.TaskParam {
+         ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
             options = ast.default_options(),
@@ -6698,7 +6698,7 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
-function codegen.stat_task(cx, node)
+function codegen.top_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
   if node.options.cuda:is(ast.options.Demand) then
@@ -7145,12 +7145,20 @@ function codegen.stat_task(cx, node)
   return task
 end
 
-function codegen.stat_fspace(cx, node)
+function codegen.top_fspace(cx, node)
   return node.fspace
 end
 
-function codegen.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
+function codegen.top_quote_expr(cx, node)
+  return std.newrquote(node)
+end
+
+function codegen.top_quote_stat(cx, node)
+  return std.newrquote(node)
+end
+
+function codegen.top(cx, node)
+  if node:is(ast.typed.top.Task) then
     if not (node.options.cuda:is(ast.options.Demand) and
             cudahelper.check_cuda_available())
     then
@@ -7160,11 +7168,11 @@ function codegen.stat_top(cx, node)
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
       end
-      local cpu_task = codegen.stat_task(cx, node)
+      local cpu_task = codegen.top_task(cx, node)
       std.register_task(cpu_task)
       return cpu_task
     else
-      local cpu_task = codegen.stat_task(
+      local cpu_task = codegen.top_task(
         cx,
         node {
           options = node.options {
@@ -7174,14 +7182,20 @@ function codegen.stat_top(cx, node)
       local new_node = node {
         prototype = cuda_task,
       }
-      cuda_task = codegen.stat_task(cx, new_node)
+      cuda_task = codegen.top_task(cx, new_node)
       std.register_task(cpu_task)
       std.register_task(cuda_task)
       return cpu_task
     end
 
-  elseif node:is(ast.typed.stat.Fspace) then
-    return codegen.stat_fspace(cx, node)
+  elseif node:is(ast.typed.top.Fspace) then
+    return codegen.top_fspace(cx, node)
+
+  elseif node:is(ast.typed.top.QuoteExpr) then
+    return codegen.top_quote_expr(cx, node)
+
+  elseif node:is(ast.typed.top.QuoteStat) then
+    return codegen.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -7190,7 +7204,7 @@ end
 
 function codegen.entry(node)
   local cx = context.new_global_scope()
-  return codegen.stat_top(cx, node)
+  return codegen.top(cx, node)
 end
 
 return codegen

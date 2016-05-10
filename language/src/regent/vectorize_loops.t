@@ -1035,22 +1035,22 @@ function vectorize_loops.stat(node)
   end
 end
 
-function vectorize_loops.stat_task(node)
+function vectorize_loops.top_task(node)
   local body = vectorize_loops.block(node.body)
 
   return node { body = body }
 end
 
-function vectorize_loops.stat_top(node)
-  if node:is(ast.typed.stat.Task) then
-    return vectorize_loops.stat_task(node)
+function vectorize_loops.top(node)
+  if node:is(ast.typed.top.Task) then
+    return vectorize_loops.top_task(node)
   else
     return node
   end
 end
 
 function vectorize_loops.entry(node)
-  return vectorize_loops.stat_top(node)
+  return vectorize_loops.top(node)
 end
 
 return vectorize_loops

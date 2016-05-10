@@ -504,7 +504,7 @@ function task_initial_usage(cx, privileges)
   return usage
 end
 
-function optimize_inlines.stat_task(cx, node)
+function optimize_inlines.top_task(cx, node)
   local cx = cx:new_task_scope(
     node.prototype:get_constraints(),
     node.prototype:get_region_universe())
@@ -515,11 +515,11 @@ function optimize_inlines.stat_task(cx, node)
   return node { body = body }
 end
 
-function optimize_inlines.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) and
+function optimize_inlines.top(cx, node)
+  if node:is(ast.typed.top.Task) and
      not node.config_options.inner
   then
-    return optimize_inlines.stat_task(cx, node)
+    return optimize_inlines.top_task(cx, node)
 
   else
     return node
@@ -528,7 +528,7 @@ end
 
 function optimize_inlines.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_inlines.stat_top(cx, node)
+  return optimize_inlines.top(cx, node)
 end
 
 return optimize_inlines

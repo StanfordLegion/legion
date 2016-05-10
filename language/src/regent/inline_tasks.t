@@ -381,22 +381,28 @@ function inline_tasks.stat(cx, node)
   return stats, node
 end
 
-function inline_tasks.stat_task(cx, node)
+function inline_tasks.top_task(cx, node)
   return node {
     body = inline_tasks.block(cx, node.body)
   }
 end
 
-function inline_tasks.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
+function inline_tasks.top(cx, node)
+  if node:is(ast.typed.top.Task) then
     if node.options.inline:is(ast.options.Demand) then
       check_valid_inline_task(node)
     end
-    local new_node = inline_tasks.stat_task(cx, node)
+    local new_node = inline_tasks.top_task(cx, node)
     new_node.prototype:setast(new_node)
     return new_node
 
-  elseif node:is(ast.typed.stat.Fspace) then
+  elseif node:is(ast.typed.top.Fspace) then
+    return node
+
+  elseif node:is(ast.typed.top.QuoteExpr) then
+    return node
+
+  elseif node:is(ast.typed.top.QuoteStat) then
     return node
 
   else
@@ -407,7 +413,7 @@ end
 
 function inline_tasks.entry(node)
   local cx = context:new_global_scope({})
-  return inline_tasks.stat_top(cx, node)
+  return inline_tasks.top(cx, node)
 end
 
 return inline_tasks
