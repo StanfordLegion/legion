@@ -37,7 +37,7 @@ function parser.option_values(p)
   if p:nextif("(") then
     p:expect("__unroll")
     p:expect("(")
-    local value = p:next(p.number)
+    local value = p:expect(p.number)
     p:expect(")")
     if value.value ~= math.floor(value.value) then
       p:error("unroll factor should be an integer")
@@ -443,7 +443,7 @@ function parser.expr_prefix(p)
     }
 
   elseif p:matches(p.name) then
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     p:ref(name)
     return ast.unspecialized.expr.ID {
       name = name,
@@ -996,7 +996,7 @@ end
 function parser.field(p)
   local start = ast.save(p)
   if p:matches(p.name) and p:lookahead("=") then
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     p:expect("=")
     local value = p:expr()
     return ast.unspecialized.expr.CtorRecField {
@@ -1093,14 +1093,14 @@ function parser.expr_primary_continuation(p, expr)
       if p:nextif("{") then
         repeat
           if p:matches("}") then break end
-          local field_name = p:next(p.name).value
+          local field_name = p:expect(p.name).value
           field_names:insert(field_name)
         until not p:sep()
         p:expect("}")
       elseif p:nextif("ispace") then
         field_names:insert("ispace")
       else
-        field_names:insert(p:next(p.name).value)
+        field_names:insert(p:expect(p.name).value)
       end
       expr = ast.unspecialized.expr.FieldAccess {
         value = expr,
@@ -1120,7 +1120,7 @@ function parser.expr_primary_continuation(p, expr)
       }
 
     elseif p:nextif(":") then
-      local method_name = p:next(p.name).value
+      local method_name = p:expect(p.name).value
       local args, conditions = p:fnargs()
       if #conditions > 0 then
         p:error("method call cannot have conditions")
@@ -1164,7 +1164,7 @@ function parser.expr_simple(p)
 
   local start = ast.save(p)
   if p:matches(p.number) then
-    local token = p:next(p.number)
+    local token = p:expect(p.number)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = token.valuetype,
@@ -1173,7 +1173,7 @@ function parser.expr_simple(p)
     }
 
   elseif p:matches(p.string) then
-    local token = p:next(p.string)
+    local token = p:expect(p.string)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = rawstring,
@@ -1450,10 +1450,10 @@ function parser.stat_var_unpack(p, start, options)
   local names = terralib.newlist()
   local fields = terralib.newlist()
   repeat
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     names:insert(name)
     if p:nextif("=") then
-      fields:insert(p:next(p.name).value)
+      fields:insert(p:expect(p.name).value)
     else
       fields:insert(name)
     end
@@ -1485,7 +1485,7 @@ function parser.stat_var(p, options)
       type_exprs:insert(nil)
       p:expect("]")
     else
-      names:insert(p:next(p.name).value)
+      names:insert(p:expect(p.name).value)
       if p:nextif(":") then
         type_exprs:insert(p:luaexpr())
       else
