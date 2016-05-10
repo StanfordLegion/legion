@@ -46,12 +46,13 @@ namespace Legion {
 			static bool inputtaken;
 			static bool databroadcasted;
 			static Processor ownerprocessor;
+			static Processor localowner;
 			static MapperEvent mapevent;
 			static int broadcastcount;
 			WrapperMapper(Mapper* dmapper, MapperRuntime *rt, Machine machine, Processor local);
 			~WrapperMapper(void);
 			void get_input();
-			//void get_input(const MapperContext ctx);
+			void get_input(const MapperContext ctx);
 			void get_select_task_options_input(const MapperContext ctx, std::string task_name, TaskOptions& output);
 			void get_map_task_input(Task *task);
 			bool InputNumberCheck(std::string strUserInput);
