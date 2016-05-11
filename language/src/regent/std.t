@@ -2775,6 +2775,7 @@ function task:set_params_struct(t)
 end
 
 function task:get_params_struct()
+  self:complete()
   assert(self.params_struct)
   return self.params_struct
 end
@@ -2786,10 +2787,12 @@ function task:set_params_map_type(t)
 end
 
 function task:has_params_map_type()
+  self:complete()
   return self.params_map_type
 end
 
 function task:get_params_map_type()
+  self:complete()
   assert(self.params_map_type)
   return self.params_map_type
 end
@@ -2801,10 +2804,12 @@ function task:set_params_map_label(label)
 end
 
 function task:has_params_map_label()
+  self:complete()
   return self.params_map_label
 end
 
 function task:get_params_map_label()
+  self:complete()
   assert(self.params_map_label)
   return self.params_map_label
 end
@@ -2816,10 +2821,12 @@ function task:set_params_map_symbol(symbol)
 end
 
 function task:has_params_map_symbol()
+  self:complete()
   return self.params_map_symbol
 end
 
 function task:get_params_map_symbol()
+  self:complete()
   assert(self.params_map_symbol)
   return self.params_map_symbol
 end
@@ -2830,6 +2837,7 @@ function task:set_field_id_param_labels(t)
 end
 
 function task:get_field_id_param_labels()
+  self:complete()
   assert(self.field_id_param_labels)
   return self.field_id_param_labels
 end
@@ -2840,6 +2848,7 @@ function task:set_field_id_param_symbols(t)
 end
 
 function task:get_field_id_param_symbols()
+  self:complete()
   assert(self.field_id_param_symbols)
   return self.field_id_param_symbols
 end
@@ -2980,6 +2989,7 @@ function task:getname()
 end
 
 function task:getdefinition()
+  self:complete()
   assert(self.definition)
   return self.definition
 end
@@ -3035,6 +3045,19 @@ function task:make_variant()
   return variant_task
 end
 
+function task:set_complete_thunk(complete_thunk)
+  assert(not self.complete_thunk)
+  self.complete_thunk = complete_thunk
+end
+
+function task:complete()
+  assert(self.complete_thunk)
+  if not self.is_complete then
+    self.is_complete = true
+    return self.complete_thunk()
+  end
+end
+
 function task:printpretty()
   return self:getdefinition():printpretty()
 end
@@ -3045,10 +3068,6 @@ end
 
 function task:disas()
   return self:getdefinition():disas()
-end
-
-function task:__call(...)
-  return self:getdefinition()(...)
 end
 
 function task:__tostring()
@@ -3086,6 +3105,8 @@ do
       region_universe = false,
       config_options = false,
       source_variant = false,
+      complete_thunk = false,
+      is_complete = false,
     }, task)
   end
 end

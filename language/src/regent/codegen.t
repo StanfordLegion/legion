@@ -7168,23 +7168,38 @@ function codegen.top(cx, node)
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
       end
-      local cpu_task = codegen.top_task(cx, node)
+      local cpu_task = node.prototype
+      cpu_task:set_complete_thunk(
+        function()
+          local cx = context.new_global_scope()
+          return codegen.top_task(cx, node)
+      end)
       std.register_task(cpu_task)
       return cpu_task
     else
-      local cpu_task = codegen.top_task(
-        cx,
-        node {
-          options = node.options {
-            cuda = ast.options.Forbid { value = false } } })
+      local cpu_node = node {
+        options = node.options {
+          cuda = ast.options.Forbid { value = false }
+        }
+      }
+      local cpu_task = node.prototype
+      cpu_task:set_complete_thunk(
+        function()
+          local cx = context.new_global_scope()
+          return codegen.top_task(cx, cpu_node)
+      end)
+      std.register_task(cpu_task)
+
       local cuda_task = cpu_task:make_variant()
       cuda_task:setcuda(true)
-      local new_node = node {
-        prototype = cuda_task,
-      }
-      cuda_task = codegen.top_task(cx, new_node)
-      std.register_task(cpu_task)
+      local cuda_node = node { prototype = cuda_task }
+      cuda_task:set_complete_thunk(
+        function()
+          local cx = context.new_global_scope()
+          return codegen.top_task(cx, cuda_node)
+      end)
       std.register_task(cuda_task)
+
       return cpu_task
     end
 

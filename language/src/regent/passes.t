@@ -51,13 +51,7 @@ function passes.compile(node, allow_pretty)
     node = type_check.entry(node)
     node = passes.optimize(node)
     if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
-    if std.config["task-inlines"] and node:is(ast.typed.top.Task) and
-      node.options.inline:is(ast.options.Demand)
-    then
-      return node.prototype
-    else
-      return codegen.entry(node)
-    end
+    return codegen.entry(node)
   end
   return ctor
 end
