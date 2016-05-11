@@ -55,7 +55,7 @@ script:
   - ./language/travis.py
   - |
     make -s -C examples/00_hello_world LG_RT_DIR=../../runtime clean
-    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime
+    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime -j2
     examples/00_hello_world/hello_world
     make -s -C examples/01_tasks_and_futures LG_RT_DIR=../../runtime
     examples/01_tasks_and_futures/tasks_and_futures

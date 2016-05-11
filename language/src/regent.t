@@ -39,9 +39,11 @@ add_builtin("regentlib", std)
 local language = {
   name = "legion",
   entrypoints = {
-    "task",
-    "fspace",
     "__demand",
+    "fspace",
+    "rexpr",
+    "rquote",
+    "task",
   },
   keywords = {
     "__context",
@@ -114,17 +116,16 @@ local language = {
   },
 }
 
--- function language:expression(lex)
---   return function(environment_function)
---   end
--- end
+function language:expression(lex)
+  return passes.entry_expr(lex)
+end
 
 function language:statement(lex)
-  return passes.compile(lex)
+  return passes.entry_stat(lex)
 end
 
 function language:localstatement(lex)
-  return passes.compile(lex)
+  return passes.entry_stat(lex)
 end
 
 return language

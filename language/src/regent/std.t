@@ -651,7 +651,7 @@ function std.type_eq(a, b, mapping)
 
   if a == b then
     return true
-  elseif mapping[a] == b then
+  elseif mapping[a] == b or mapping[b] == a then
     return true
   elseif std.is_symbol(a) and std.is_symbol(b) then
     if a == wild or b == wild then
@@ -977,7 +977,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
-    elseif not check(param_type, arg_type, mapping) then
+    elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
       log.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
@@ -1533,6 +1533,41 @@ function symbol:__tostring()
   else
     return "$" .. tostring(self.symbol_id)
   end
+end
+
+-- #####################################
+-- ## Quotes
+-- #################
+
+local rquote = {}
+function rquote:__index(field)
+  local value = rquote[field]
+  if value ~= nil then return value end
+  error("rquote has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function rquote:__newindex(field, value)
+  error("rquote has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function std.newrquote(ast)
+  assert(ast ~= nil)
+
+  return setmetatable({
+    ast = ast,
+  }, rquote)
+end
+
+function std.is_rquote(x)
+  return getmetatable(x) == rquote
+end
+
+function rquote:getast()
+  return self.ast
+end
+
+function rquote:__tostring()
+  return self.ast:tostring(true)
 end
 
 -- #####################################
@@ -2740,6 +2775,7 @@ function task:set_params_struct(t)
 end
 
 function task:get_params_struct()
+  self:complete()
   assert(self.params_struct)
   return self.params_struct
 end
@@ -2751,10 +2787,12 @@ function task:set_params_map_type(t)
 end
 
 function task:has_params_map_type()
+  self:complete()
   return self.params_map_type
 end
 
 function task:get_params_map_type()
+  self:complete()
   assert(self.params_map_type)
   return self.params_map_type
 end
@@ -2766,10 +2804,12 @@ function task:set_params_map_label(label)
 end
 
 function task:has_params_map_label()
+  self:complete()
   return self.params_map_label
 end
 
 function task:get_params_map_label()
+  self:complete()
   assert(self.params_map_label)
   return self.params_map_label
 end
@@ -2781,10 +2821,12 @@ function task:set_params_map_symbol(symbol)
 end
 
 function task:has_params_map_symbol()
+  self:complete()
   return self.params_map_symbol
 end
 
 function task:get_params_map_symbol()
+  self:complete()
   assert(self.params_map_symbol)
   return self.params_map_symbol
 end
@@ -2795,6 +2837,7 @@ function task:set_field_id_param_labels(t)
 end
 
 function task:get_field_id_param_labels()
+  self:complete()
   assert(self.field_id_param_labels)
   return self.field_id_param_labels
 end
@@ -2805,6 +2848,7 @@ function task:set_field_id_param_symbols(t)
 end
 
 function task:get_field_id_param_symbols()
+  self:complete()
   assert(self.field_id_param_symbols)
   return self.field_id_param_symbols
 end
@@ -2945,6 +2989,7 @@ function task:getname()
 end
 
 function task:getdefinition()
+  self:complete()
   assert(self.definition)
   return self.definition
 end
@@ -3000,6 +3045,19 @@ function task:make_variant()
   return variant_task
 end
 
+function task:set_complete_thunk(complete_thunk)
+  assert(not self.complete_thunk)
+  self.complete_thunk = complete_thunk
+end
+
+function task:complete()
+  assert(self.complete_thunk)
+  if not self.is_complete then
+    self.is_complete = true
+    return self.complete_thunk()
+  end
+end
+
 function task:printpretty()
   return self:getdefinition():printpretty()
 end
@@ -3010,10 +3068,6 @@ end
 
 function task:disas()
   return self:getdefinition():disas()
-end
-
-function task:__call(...)
-  return self:getdefinition()(...)
 end
 
 function task:__tostring()
@@ -3051,6 +3105,8 @@ do
       region_universe = false,
       config_options = false,
       source_variant = false,
+      complete_thunk = false,
+      is_complete = false,
     }, task)
   end
 end

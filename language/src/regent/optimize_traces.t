@@ -83,19 +83,18 @@ local function apply_tracing(cx, node)
   return ast.map_node_postorder(apply_tracing_node(cx), node)
 end
 
-
 local optimize_traces = {}
 
-function optimize_traces.stat_task(cx, node)
+function optimize_traces.top_task(cx, node)
   local cx = cx:new_task_scope()
   local body = apply_tracing(cx, node.body)
 
   return node { body = body }
 end
 
-function optimize_traces.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_traces.stat_task(cx, node)
+function optimize_traces.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_traces.top_task(cx, node)
 
   else
     return node
@@ -104,7 +103,7 @@ end
 
 function optimize_traces.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_traces.stat_top(cx, node)
+  return optimize_traces.top(cx, node)
 end
 
 return optimize_traces

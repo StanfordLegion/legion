@@ -430,16 +430,16 @@ function optimize_loops.block(cx, node)
   return ast.map_node_postorder(optimize_loops_node(cx), node)
 end
 
-function optimize_loops.stat_task(cx, node)
+function optimize_loops.top_task(cx, node)
   local cx = cx:new_task_scope(node.prototype:get_constraints())
   local body = optimize_loops.block(cx, node.body)
 
   return node { body = body }
 end
 
-function optimize_loops.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_loops.stat_task(cx, node)
+function optimize_loops.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_loops.top_task(cx, node)
 
   else
     return node
@@ -448,7 +448,7 @@ end
 
 function optimize_loops.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_loops.stat_top(cx, node)
+  return optimize_loops.top(cx, node)
 end
 
 return optimize_loops

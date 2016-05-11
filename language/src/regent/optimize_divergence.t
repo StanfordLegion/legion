@@ -80,7 +80,7 @@ end
 
 local optimize_divergence = {}
 
-function optimize_divergence.stat_task(cx, node)
+function optimize_divergence.top_task(cx, node)
   local cx = cx:new_task_scope()
   analyze_region_divergence(cx, node.body)
   local divergence = invert_forest(cx.region_div)
@@ -88,9 +88,9 @@ function optimize_divergence.stat_task(cx, node)
   return node { region_divergence = divergence }
 end
 
-function optimize_divergence.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_divergence.stat_task(cx, node)
+function optimize_divergence.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_divergence.top_task(cx, node)
 
   else
     return node
@@ -99,7 +99,7 @@ end
 
 function optimize_divergence.entry(node)
   local cx = context.new_global_scope()
-  return optimize_divergence.stat_top(cx, node)
+  return optimize_divergence.top(cx, node)
 end
 
 return optimize_divergence

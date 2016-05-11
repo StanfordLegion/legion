@@ -5649,8 +5649,8 @@ namespace Legion {
       }
       // if we make it here, send a request
       AddressSpaceID owner_space = get_owner_space();
-      AddressSpaceID local_space = context->runtime->address_space;
 #ifdef DEBUG_LEGION
+      AddressSpaceID local_space = context->runtime->address_space;
       assert(owner_space != local_space);
 #endif
       UserEvent ready_event = UserEvent::create_user_event();
