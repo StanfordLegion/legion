@@ -2664,6 +2664,8 @@ namespace Legion {
     void MapperManager::defer_message(Mapper::MapperMessage *message)
     //--------------------------------------------------------------------------
     {
+      // Acquire the lock as the precondition
+      Event precondition = mapper_lock.acquire(0, true/*exclusive*/);
       DeferMessageArgs args;
       args.hlr_id = HLR_DEFER_MAPPER_MESSAGE_TASK_ID;
       args.manager = this;
@@ -2673,7 +2675,8 @@ namespace Legion {
       memcpy(args.message, message->message, args.size);
       args.broadcast = message->broadcast;
       runtime->issue_runtime_meta_task(&args, sizeof(args), 
-          HLR_DEFER_MAPPER_MESSAGE_TASK_ID, HLR_LATENCY_PRIORITY);
+          HLR_DEFER_MAPPER_MESSAGE_TASK_ID, HLR_RESOURCE_PRIORITY,
+          NULL, precondition);
     }
 
     //--------------------------------------------------------------------------
