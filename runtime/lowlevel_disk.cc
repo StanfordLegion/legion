@@ -31,7 +31,10 @@ namespace Realm {
       fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00777);
       assert(fd != -1);
       // resize the file to what we want
-      int ret = ftruncate(fd, _size);
+#ifndef NDEBUG
+      int ret =
+#endif
+	ftruncate(fd, _size);
       assert(ret == 0);
       free_blocks[0] = _size;
     }

@@ -32,6 +32,9 @@ using namespace LegionRuntime::HighLevel;
 class LuaMapperWrapper : public DefaultMapper
 {
   public:
+    LuaMapperWrapper(Machine machine, Processor locak, const char *name);
+#if 0
+  public:
     LuaMapperWrapper(const char*, Machine, HighLevelRuntime*, Processor);
     ~LuaMapperWrapper();
 
@@ -46,6 +49,7 @@ class LuaMapperWrapper : public DefaultMapper
     const std::string qualified_mapper_name;
     std::string mapper_name;
     lua_State* L;
+#endif
 };
 
 #endif // __LUA_MAPPER_WRAPPER_H__

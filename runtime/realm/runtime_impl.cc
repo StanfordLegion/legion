@@ -200,8 +200,9 @@ namespace Realm {
       DeferredShutdown(RuntimeImpl *_runtime);
       virtual ~DeferredShutdown(void);
 
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -214,16 +215,26 @@ namespace Realm {
     DeferredShutdown::~DeferredShutdown(void)
     {}
 
-    bool DeferredShutdown::event_triggered(void)
+    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
+      // no real good way to deal with a poisoned shutdown precondition
+      if(poisoned) {
+	log_poison.fatal() << "HELP!  poisoned precondition for runtime shutdown";
+	assert(false);
+      }
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true);
       return true; // go ahead and delete us
     }
 
-    void DeferredShutdown::print_info(FILE *f)
+    void DeferredShutdown::print(std::ostream& os) const
     {
-      fprintf(f, "deferred shutdown");
+      os << "deferred shutdown";
+    }
+
+    Event DeferredShutdown::get_finish_event(void) const
+    {
+      return Event::NO_EVENT;
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
@@ -335,7 +346,9 @@ namespace Realm {
   {
     Module::create_code_translators(runtime);
 
-    // no code translators
+#ifdef REALM_USE_DLFCN
+    runtime->add_code_translator(new DSOCodeTranslator);
+#endif
   }
 
   // clean up any common resources created by the module - this will be called
@@ -368,6 +381,7 @@ namespace Realm {
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0), run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
     {
@@ -418,6 +432,11 @@ namespace Realm {
       dma_channels.push_back(c);
     }
 
+    void RuntimeImpl::add_code_translator(CodeTranslator *t)
+    {
+      code_translators.push_back(t);
+    }
+
     void RuntimeImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
     {
       machine->add_proc_mem_affinity(pma);
@@ -436,6 +455,11 @@ namespace Realm {
     const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
     {
       return dma_channels;
+    }
+
+    const std::vector<CodeTranslator *>& RuntimeImpl::get_code_translators(void) const
+    {
+      return code_translators;
     }
 
     static void add_proc_mem_affinities(MachineImpl *machine,
@@ -507,8 +531,11 @@ namespace Realm {
 	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      if(!getenv("GASNET_IB_SPAWNER"))
+      // (This is called GASNET_IB_SPAWNER for versions <= 1.24 and GASNET_SPAWNER for versions >= 1.26)
+      if(!getenv("GASNET_IB_SPAWNER") && !getenv("GASNET_SPAWNER")) {
 	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
+	setenv("GASNET_SPAWNER", "mpi", 0 /*no overwrite*/);
+      }
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -579,6 +606,8 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      sampling_profiler.configure_from_cmdline(cmdline, core_reservations);
+
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -633,6 +662,8 @@ namespace Realm {
       cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
 
+      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;
       cp.add_option_int("-ll:numlmbs", dummy)
@@ -679,7 +710,7 @@ namespace Realm {
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
                        "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
+                       "in legion_config.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
@@ -702,6 +733,7 @@ namespace Realm {
       hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
       hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
       hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
       hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
       hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
       hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
@@ -727,6 +759,7 @@ namespace Realm {
       hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
       hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
       hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
+      hcount += BarrierMigrationMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Migration AM");
       hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
@@ -888,6 +921,11 @@ namespace Realm {
 	  it++)
 	(*it)->create_dma_channels(this);
 
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_code_translators(this);
+
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
@@ -946,14 +984,14 @@ namespace Realm {
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::SYSTEM_MEM],
 				  100, // "large" bandwidth
-				  1   // "small" latency
+				  5   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::REGDMA_MEM],
 				  80,  // "large" bandwidth
-				  5   // "small" latency
+				  10   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
@@ -1515,6 +1553,8 @@ namespace Realm {
       LegionRuntime::LowLevel::stop_dma_worker_threads();
       stop_activemsg_threads();
 
+      sampling_profiler.shutdown();
+
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
@@ -1579,6 +1619,9 @@ namespace Realm {
 	// delete all the DMA channels that we were given
 	delete_container_contents(dma_channels);
 
+	// same for code translators
+	delete_container_contents(code_translators);
+
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
 	    it++) {
@@ -1605,6 +1648,7 @@ namespace Realm {
 	return get_barrier_impl(e);
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1616,12 +1660,6 @@ namespace Realm {
       Node *n = &nodes[id.node()];
       GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
       assert(impl->me == id);
-
-      // check to see if this is for a generation more than one ahead of what we
-      //  know of - this should only happen for remote events, but if it does it means
-      //  there are some generations we don't know about yet, so we can catch up (and
-      //  notify any local waiters right away)
-      impl->check_for_catchup(e.gen - 1);
 
       return impl;
     }
@@ -1659,6 +1697,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1681,6 +1720,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 

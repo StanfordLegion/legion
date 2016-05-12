@@ -21,8 +21,8 @@
 #include "runtime.h"
 #include "legion_ops.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class LegionTrace
@@ -133,7 +133,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
     public:
-      TraceCaptureOp(Internal *rt);
+      TraceCaptureOp(Runtime *rt);
       TraceCaptureOp(const TraceCaptureOp &rhs);
       virtual ~TraceCaptureOp(void);
     public:
@@ -160,7 +160,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TRACE_COMPLETE_OP_ALLOC;
     public:
-      TraceCompleteOp(Internal *rt);
+      TraceCompleteOp(Runtime *rt);
       TraceCompleteOp(const TraceCompleteOp &rhs);
       virtual ~TraceCompleteOp(void);
     public:
@@ -175,7 +175,7 @@ namespace LegionRuntime {
       virtual void trigger_dependence_analysis(void);
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_TRACE__

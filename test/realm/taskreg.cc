@@ -1,4 +1,7 @@
 #include "realm/realm.h"
+#ifdef REALM_USE_LLVM
+#include "realm/llvmjit/llvmjit.h"
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,7 +21,22 @@ Logger log_app("app");
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   CHILD_TASK_ID_START,
+#ifdef REALM_USE_LLVM
+  LLVM_TASK_ID = 100,
+#endif
 };
+
+#ifdef REALM_USE_LLVM
+const char llvmir[] = 
+"@.str = private unnamed_addr constant [30 x i8] c\"hello from LLVM JIT! %d %lld\\0A\\00\", align 1\n"
+"declare i32 @printf(i8*, ...)\n"
+"define void @foo(i32* %a, i64 %b, i32* %c, i64 %d, i64 %e) {\n"
+"  %1 = load i32* %a, align 4\n"
+"  %2 = add i32 %1, 57\n"
+"  %3 = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([30 x i8]* @.str, i32 0, i32 0), i32 %2, i64 %b)\n"
+"  ret void\n"
+"}\n";
+#endif
 
 void child_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
@@ -99,6 +117,44 @@ void top_level_task(const void *args, size_t arglen,
 
     merged.wait();
   }
+
+#ifdef REALM_USE_LLVM
+  // third test - LLVM (if available)
+  {
+    CodeDescriptor llvm_task_desc(TypeConv::from_cpp_type<Processor::TaskFuncPtr>());
+    llvm_task_desc.add_implementation(new LLVMIRImplementation(llvmir, sizeof(llvmir),
+							       "foo"));
+
+    Event e = Processor::register_task_by_kind(Processor::LOC_PROC, true /*global*/,
+					       LLVM_TASK_ID,
+					       llvm_task_desc,
+					       ProfilingRequestSet());
+
+    int count = 0;
+    std::set<Event> finish_events;
+    std::set<Processor> all_processors;
+    machine.get_all_processors(all_processors);
+    for(std::set<Processor>::const_iterator it = all_processors.begin();
+	it != all_processors.end();
+	it++) {
+      Processor pp = (*it);
+
+      // only LOC_PROCs
+      if(pp.kind() != Processor::LOC_PROC)
+	continue;
+
+      Event e2 = pp.spawn(LLVM_TASK_ID, &count, sizeof(count), e);
+
+      count++;
+
+      finish_events.insert(e2);
+    }
+
+    Event merged = Event::merge_events(finish_events);
+
+    merged.wait();
+  }
+#endif
 
   log_app.print() << "all done!";
 }

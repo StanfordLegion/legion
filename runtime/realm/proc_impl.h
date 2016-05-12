@@ -24,6 +24,7 @@
 #include "activemsg.h"
 #include "operation.h"
 #include "profiling.h"
+#include "sampling.h"
 
 #include "event_impl.h"
 #include "rsrv_impl.h"
@@ -99,6 +100,7 @@ namespace Realm {
 
       ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
+      ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
 
       struct TaskTableEntry {
 	Processor::TaskFuncPtr fnptr;
@@ -196,7 +198,8 @@ namespace Realm {
 
       void request_group_members(void);
 
-      PriorityQueue<Task *, GASNetHSL> task_queue;      
+      PriorityQueue<Task *, GASNetHSL> task_queue;
+      ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
     };
     
     // this is generally useful to all processor implementations, so put it here
@@ -210,8 +213,9 @@ namespace Realm {
         // we do _NOT_ own the task - do not free it
       }
 
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       ProcessorImpl *proc;
@@ -226,6 +230,13 @@ namespace Realm {
 		       const ByteArrayRef& _userdata,
 		       Event _finish_event, const ProfilingRequestSet &_requests);
 
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~TaskRegistration(void);
+
+    public:
+      virtual void print(std::ostream& os) const;
+
       CodeDescriptor codedesc;
       ByteArray userdata;
     };
@@ -235,6 +246,8 @@ namespace Realm {
       RemoteTaskRegistration(TaskRegistration *reg_op, int _target_node);
 
       virtual void request_cancellation(void);
+
+      virtual void print(std::ostream& os) const;
 
     protected:
       int target_node;
@@ -296,6 +309,7 @@ namespace Realm {
       struct RequestArgs {
 	gasnet_node_t sender;
 	RemoteTaskRegistration *reg_op;
+	bool successful;
       };
 
       static void handle_request(RequestArgs args);
@@ -305,7 +319,8 @@ namespace Realm {
 					handle_request> Message;
 
       static void send_request(gasnet_node_t target,
-			       RemoteTaskRegistration *reg_op);
+			       RemoteTaskRegistration *reg_op,
+			       bool successful);
     };
 
 }; // namespace Realm

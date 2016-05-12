@@ -38,13 +38,15 @@ enum { MSGID_LONG_EXTENSION = 253,
 static int payload_count = 0;
 #endif
 
+LegionRuntime::Logger::Category log_amsg("activemsg");
+
 #ifdef ACTIVE_MESSAGE_TRACE
-LegionRuntime::Logger::Category log_active_message("amtrace");
+LegionRuntime::Logger::Category log_amsg_trace("amtrace");
 
 void record_am_handler(int handler_id, const char *description, bool reply)
 {
-  log_active_message.info("AM Handler: %d %s %s\n", handler_id, description,
-                          (reply ? "Reply" : "Request"));
+  log_amsg_trace.info("AM Handler: %d %s %s\n", handler_id, description,
+		      (reply ? "Reply" : "Request"));
 }
 #endif
 
@@ -457,6 +459,77 @@ void SrcDataPool::release_srcptr(void *srcptr)
     }
 }
 
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+size_t current_total_spill_bytes, peak_total_spill_bytes;
+size_t current_spill_threshold;
+size_t current_spill_step;
+size_t current_spill_bytes[256], peak_spill_bytes[256], total_spill_bytes[256];
+
+void init_spill_tracking(void)
+{
+  if(getenv("ACTIVEMSG_SPILL_THRESHOLD")) {
+    // value is in megabytes
+    current_spill_threshold = atoi(getenv("ACTIVEMSG_SPILL_THRESHOLD")) << 20;
+  } else
+    current_spill_threshold = 1 << 30; // 1GB
+
+  if(getenv("ACTIVEMSG_SPILL_STEP")) {
+    // value is in megabytes
+    current_spill_step = atoi(getenv("ACTIVEMSG_SPILL_STEP")) << 20;
+  } else
+    current_spill_step = 1 << 30; // 1GB
+
+  current_total_spill_bytes = 0;
+  for(int i = 0; i < 256; i++) {
+    current_spill_bytes[i] = 0;
+    peak_spill_bytes[i] = 0;
+    total_spill_bytes[i] = 0;
+  }
+}
+
+void print_spill_data(void)
+{
+  printf("spill node %d: current spill usage = %zd bytes, peak = %zd\n",
+	 gasnet_mynode(), current_total_spill_bytes, peak_total_spill_bytes);
+  for(int i = 0; i < 256; i++)
+    if(total_spill_bytes[i] > 0) {
+      printf("spill node %d:  MSG %d: cur=%zd peak=%zd total=%zd\n",
+	     gasnet_mynode(), i,
+	     current_spill_bytes[i],
+	     peak_spill_bytes[i],
+	     total_spill_bytes[i]);
+    }
+}
+
+void record_spill_alloc(int msgid, size_t bytes)
+{
+  size_t newcur = __sync_add_and_fetch(&current_spill_bytes[msgid], bytes);
+  while(true) {
+    size_t oldpeak = peak_spill_bytes[msgid];
+    if(oldpeak >= newcur) break;
+    if(__sync_bool_compare_and_swap(&peak_spill_bytes[msgid], oldpeak, newcur))
+      break;
+  }
+  __sync_fetch_and_add(&total_spill_bytes[msgid], bytes);
+  size_t newtotal = __sync_add_and_fetch(&current_total_spill_bytes, bytes);
+  while(true) {
+    size_t oldpeak = peak_total_spill_bytes;
+    if(oldpeak >= newtotal) break;
+    if(__sync_bool_compare_and_swap(&peak_total_spill_bytes, oldpeak, newtotal)) break;
+  }
+  if(newtotal > current_spill_threshold) {
+    current_spill_threshold += current_spill_step;
+    print_spill_data();
+  }
+}
+
+void record_spill_free(int msgid, size_t bytes)
+{
+  __sync_fetch_and_sub(&current_total_spill_bytes, bytes);
+  __sync_fetch_and_sub(&current_spill_bytes[msgid], bytes);
+}
+#endif
+
 OutgoingMessage::OutgoingMessage(unsigned _msgid, unsigned _num_args,
 				 const void *_args)
   : msgid(_msgid), num_args(_num_args),
@@ -477,6 +550,9 @@ OutgoingMessage::~OutgoingMessage(void)
       //memset(payload, 0xdc+gasnet_mynode(), payload_size);
       printf("%d: freeing payload %x = [%p, %p)\n",
 	     gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size);
+#endif
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+      record_spill_free(msgid, payload_size);
 #endif
       deferred_free(payload);
     }
@@ -1037,8 +1113,8 @@ public:
 		 lmb_w_bases[flip_buffer]+lmb_size, flip_count);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-          log_active_message.info("Active Message Request: %d %d 2 0",
-                                  MSGID_FLIP_REQ, peer);
+          log_amsg_trace.info("Active Message Request: %d %d 2 0",
+			      MSGID_FLIP_REQ, peer);
 #endif
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime start_time;
@@ -1257,10 +1333,10 @@ protected:
     __sync_fetch_and_add(&sent_messages, 1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-    log_active_message.info("Active Message Request: %d %d %d %ld",
-                            hdr->msgid, peer, hdr->num_args, 
-                            (hdr->payload_mode == PAYLOAD_NONE) ? 
-                              0 : hdr->payload_size);
+    log_amsg_trace.info("Active Message Request: %d %d %d %ld",
+			hdr->msgid, peer, hdr->num_args, 
+			(hdr->payload_mode == PAYLOAD_NONE) ? 
+			  0 : hdr->payload_size);
 #endif
     switch(hdr->num_args) {
     case 1:
@@ -1476,8 +1552,8 @@ protected:
       __sync_fetch_and_add(&sent_messages, 1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-      log_active_message.info("Active Message Request: %d %d %d %ld",
-                              hdr->msgid, peer, hdr->num_args, size); 
+      log_amsg_trace.info("Active Message Request: %d %d %d %ld",
+			  hdr->msgid, peer, hdr->num_args, size); 
 #endif
       switch(hdr->num_args) {
       case 1:
@@ -1715,6 +1791,13 @@ void OutgoingMessage::reserve_srcdata(void)
       } else {
 	// if the allocation fails, we have to queue ourselves up
 
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+	if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
+ 	  // some dynamic memory is being tied up for this, so count it
+	  record_spill_alloc(msgid, payload_size);
+        }
+#endif
+
 	// if we've been instructed to copy the data, that has to happen now
 	if(payload_mode == PAYLOAD_COPY) {
 	  void *copy_ptr = malloc(payload_size);
@@ -1737,6 +1820,13 @@ void OutgoingMessage::reserve_srcdata(void)
       payload_src = 0;
     }
   } else {
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+    if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
+      // some dynamic memory is being tied up for this, so count it
+      record_spill_alloc(msgid, payload_size);
+    }
+#endif
+
     // no srcdatapool needed, but might still have to copy
     if(payload_src->get_contig_pointer() &&
        (payload_mode != PAYLOAD_COPY)) {
@@ -2027,10 +2117,10 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			total_lmb_size);
 
   if(gasnet_mynode() == 0) {
-    printf("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
-	   gasnet_mem_size_in_mb, registered_mem_size_in_mb,
-	   total_lmb_size >> 20, srcdatapool_size >> 20,
-	   attach_size >> 20);
+    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
+		  gasnet_mem_size_in_mb, registered_mem_size_in_mb,
+		  total_lmb_size >> 20, srcdatapool_size >> 20,
+		  attach_size >> 20);
 #ifdef DEBUG_REALM_STARTUP
     LegionRuntime::TimeStamp ts("entering gasnet_attach", false);
     fflush(stdout);
@@ -2095,12 +2185,17 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 
 
 #ifndef NO_SRCDATAPOOL
-  srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
+  if(srcdatapool_size > 0)
+    srcdatapool = new SrcDataPool(srcdatapool_base, srcdatapool_size);
 #endif
 
   endpoint_manager = new EndpointManager(gasnet_nodes(), crs);
 
   init_deferred_frees();
+
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+  init_spill_tracking();
+#endif
 }
 
 // do a little bit of polling to try to move messages along, but return
@@ -2218,6 +2313,10 @@ void stop_activemsg_threads(void)
 #ifdef DETAILED_MESSAGE_TIMING
   // dump timing data from all the endpoints to a file
   detailed_message_timing.dump_detailed_timing_data();
+#endif
+
+#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
+  print_spill_data();
 #endif
 }
 	

@@ -19,7 +19,7 @@ task f(): int
   return x
 end
 
-local y = terralib.constant(17)
+local y = terralib.constant(int, 17)
 
 task g(): int
   var x = [ y ]

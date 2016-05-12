@@ -17,6 +17,9 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
+// for UINT_MAX, INT_MAX, INT_MIN
+#include <limits.h>
+
 /**
  * \file legion_config.h
  */
@@ -35,6 +38,14 @@
 //==========================================================================
 
 #define AUTO_GENERATE_ID   UINT_MAX
+
+#define GC_MIN_PRIORITY    INT_MIN
+#define GC_MAX_PRIORITY    INT_MAX
+
+#define GC_FIRST_PRIORITY  GC_MAX_PRIORITY
+#define GC_DEFAULT_PRIORITY 0
+#define GC_LAST_PRIORITY   (GC_MIN_PRIORITY+1)
+#define GC_NEVER_PRIORITY  GC_MIN_PRIORITY
 
 #ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
@@ -162,8 +173,13 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
+#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFUL
+#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFUL)
+#define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
+#define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
+
 // The following enums are all re-exported by
-// LegionRuntime::HighLevel. These versions are here to facilitate the
+// namespace Legion. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
 typedef enum legion_error_t {
@@ -311,11 +327,14 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION = 141,
   ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT = 142,
   ERROR_RESERVED_CONSTRAINT_ID = 143,
-  ERROR_DUPLICATE_CONSTRAINT_ID = 144,
-  ERROR_INVALID_CONSTRAINT_ID = 145,
+  ERROR_INVALID_CONSTRAINT_ID = 144,
+  ERROR_DUPLICATE_CONSTRAINT_ID = 145,
   ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN = 146,
-  ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED = 147,
-  ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 148,
+  ERROR_DEPRECATED_METHOD_USE = 147,
+  ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED = 148,
+  ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
+  ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME = 150,
+  ERROR_INVALID_MAPPER_SYNCHRONIZATION = 151,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -351,6 +370,8 @@ typedef enum legion_region_flags_t {
   NO_FLAG         = 0x00000000,
   VERIFIED_FLAG   = 0x00000001,
   NO_ACCESS_FLAG  = 0x00000002,
+  RESTRICTED_FLAG = 0x00000004,
+  MUST_PREMAP_FLAG= 0x00000008,
 } legion_region_flags_T;
 
 typedef enum legion_index_space_kind_t {
@@ -374,7 +395,7 @@ typedef enum legion_partition_kind_t {
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,
   TRUE_DEPENDENCE = 1,
-  ANTI_DEPENDENCE = 2, // Write-After-Read or Write-After-Write with Write-Only privilege
+  ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
   ATOMIC_DEPENDENCE = 3,
   SIMULTANEOUS_DEPENDENCE = 4,
   PROMOTED_DEPENDENCE = 5,
@@ -397,6 +418,7 @@ typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
 typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
+typedef int legion_garbage_collection_priority_t;
 typedef unsigned int legion_color_t;
 typedef unsigned int legion_field_id_t;
 typedef unsigned int legion_trace_id_t;
@@ -413,6 +435,7 @@ typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
+typedef unsigned int legion_generator_id_t;
 typedef unsigned long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
@@ -422,5 +445,5 @@ typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 
-
 #endif // __LEGION_CONFIG_H__
+

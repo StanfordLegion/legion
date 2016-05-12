@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -419,7 +419,9 @@ static void generate_mesh(config &conf,
   // Do calculations common to all mesh types:
   std::vector<int64_t> zxbounds;
   std::vector<int64_t> zybounds;
-  calc_mesh_num_pieces(conf);
+  if (conf.numpcx <= 0 || conf.numpcy <= 0) {
+    calc_mesh_num_pieces(conf);
+  }
   zxbounds.push_back(-1);
   for (int pcx = 1; pcx < conf.numpcx; ++pcx)
     zxbounds.push_back(pcx * conf.nzx / conf.numpcx);
@@ -966,7 +968,7 @@ void generate_mesh_raw(
 
 static LegionRuntime::Logger::Category log_pennant("pennant");
 
-class PennantMapper : public DefaultMapper
+class PennantMapper : public ShimMapper 
 {
 public:
   PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local);
@@ -1003,7 +1005,7 @@ private:
 };
 
 PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
 {
   local_sysmem =
     machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);
@@ -1061,7 +1063,7 @@ void PennantMapper::select_task_variant(Task *task)
 {
   // Use the SOA variant for all tasks.
   // task->selected_variant = VARIANT_SOA;
-  DefaultMapper::select_task_variant(task);
+  ShimMapper::select_task_variant(task);
 
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
@@ -1121,8 +1123,14 @@ bool PennantMapper::map_task(Task *task)
         num_fields = 17;
       } else if (name == "rs_all") {
         num_fields = 34;
-      } else if (name == "rm_all") {
-        num_fields = 20;
+      } else if (name == "rz_spans") {
+        num_fields = 2;
+      } else if (name == "rs_spans") {
+        num_fields = 2;
+      } else if (name == "rp_spans_private") {
+        num_fields = 2;
+      } else if (name == "rp_spans_shared") {
+        num_fields = 2;
       } else {
         assert(false);
       }
@@ -1213,7 +1221,7 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
 //                                      bool &create_one,
 //                                      size_t &blocking_factor)
 //{
-//  // DefaultMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
+//  // ShimMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
 //  //                                  complete, max_blocking_factor, to_reuse,
 //  //                                  to_create, create_one, blocking_factor);
 //  // if (create_one) {

@@ -24,7 +24,6 @@
 #include "legion_types.h"
 #include "legion.h"
 #include "legion_profiling.h"
-#include "legion_allocation.h"
 
 // Apple can go screw itself
 #ifndef __MACH__
@@ -47,8 +46,7 @@
 #define MASK_FMT "%16.16lx"
 #endif
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
 // Useful macros
 #define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
@@ -100,7 +98,7 @@ namespace LegionRuntime {
       // Check for WAR or WAW with write-only
       if (IS_READ_ONLY(u1))
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // We know at least req1 or req2 is a writers, so if req1 is not...
         assert(HAS_WRITE(u2)); 
 #endif
@@ -154,7 +152,7 @@ namespace LegionRuntime {
       else
       {
         // Everything in here has at least one right
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(HAS_WRITE(u1) || HAS_WRITE(u2));
 #endif
         // If anything exclusive 
@@ -214,34 +212,32 @@ namespace LegionRuntime {
     public:
       AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
                Event wait_on = Event::NO_EVENT)
-        : is_low(true), low_lock(r)
+        : low_lock(r)
       {
+#define AUTOLOCK_USE_TRY_ACQUIRE
+#ifdef AUTOLOCK_USE_TRY_ACQUIRE
+	Event retry_event = r.try_acquire(false /*!retry*/,
+	                                  mode, exclusive, wait_on);
+	while(retry_event.exists()) {
+ 	  retry_event.wait();
+	  retry_event = r.try_acquire(true /*retry*/,
+				      mode, exclusive, wait_on);
+	}
+#else
         Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
           lock_event.wait();
-      }
-      AutoLock(ImmovableLock l)
-        : is_low(false), immov_lock(l)
-      {
-        l.lock();
+#endif
       }
     public:
       AutoLock(const AutoLock &rhs)
-        : is_low(false)
       {
         // should never be called
         assert(false);
       }
       ~AutoLock(void)
       {
-        if (is_low)
-        {
-          low_lock.release();
-        }
-        else
-        {
-          immov_lock.unlock();
-        }
+        low_lock.release();
       }
     public:
       AutoLock& operator=(const AutoLock &rhs)
@@ -251,9 +247,7 @@ namespace LegionRuntime {
         return *this;
       }
     private:
-      const bool is_low;
       Reservation low_lock;
-      ImmovableLock immov_lock;
     };
 
     /////////////////////////////////////////////////////////////
@@ -299,7 +293,7 @@ namespace LegionRuntime {
       inline bool is_valid(void) const { return valid; }
       inline int get_index(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         // This will help with the conversion for now
@@ -310,14 +304,14 @@ namespace LegionRuntime {
       }
       inline int get_dim(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point.get_dim();
       }
       inline bool is_null(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point.is_null();
@@ -349,7 +343,7 @@ namespace LegionRuntime {
     public:
       inline int operator[](unsigned index) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
         assert(index < unsigned(point.get_dim()));
 #endif
@@ -358,7 +352,7 @@ namespace LegionRuntime {
     public:
       inline const DomainPoint& get_point(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(valid);
 #endif
         return point;
@@ -380,7 +374,7 @@ namespace LegionRuntime {
       Serializer(size_t base_bytes = 4096)
         : total_bytes(base_bytes), buffer((char*)malloc(base_bytes)), 
           index(0) 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           , context_bytes(0)
 #endif
       { }
@@ -435,7 +429,7 @@ namespace LegionRuntime {
       size_t total_bytes;
       char *buffer;
       size_t index;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       size_t context_bytes;
 #endif
     };
@@ -447,7 +441,7 @@ namespace LegionRuntime {
     public:
       Deserializer(const void *buf, size_t buffer_size)
         : total_bytes(buffer_size), buffer((const char*)buf), index(0)
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           , context_bytes(0)
 #endif
       { }
@@ -460,7 +454,7 @@ namespace LegionRuntime {
     public:
       ~Deserializer(void)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // should have used the whole buffer
         assert(index == total_bytes); 
 #endif
@@ -502,7 +496,7 @@ namespace LegionRuntime {
       const size_t total_bytes;
       const char *buffer;
       size_t index;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       size_t context_bytes;
 #endif
     };
@@ -588,6 +582,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const BitMask &rhs) const;
@@ -666,6 +661,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const TLBitMask &rhs) const;
@@ -737,6 +733,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -807,6 +804,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -881,6 +879,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
@@ -954,6 +953,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
@@ -1028,6 +1028,7 @@ namespace LegionRuntime {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const CompoundBitMask &rhs) const;
@@ -1148,8 +1149,6 @@ namespace LegionRuntime {
       static const size_t STL_SET_NODE_SIZE = 32;
     public:
       struct DenseSet {
-      public:
-        static const AllocationType alloc_type = DENSE_INDEX_ALLOC;
       public:
         DT set;
       };
@@ -1283,7 +1282,7 @@ namespace LegionRuntime {
         {
           if (elems[i] != 0)
           {
-            legion_delete(elems[i]);
+            delete elems[i];
           }
         }
       }
@@ -1363,7 +1362,7 @@ namespace LegionRuntime {
         resize();
       *((T*)(buffer+index)) = element;
       index += sizeof(T);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
     }
@@ -1377,7 +1376,7 @@ namespace LegionRuntime {
         resize();
       *((bool*)buffer+index) = element;
       index += 4;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += 4;
 #endif
     }
@@ -1457,7 +1456,7 @@ namespace LegionRuntime {
         resize();
       memcpy(buffer+index,src,bytes);
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
     }
@@ -1466,7 +1465,7 @@ namespace LegionRuntime {
     inline void Serializer::begin_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       while ((index + sizeof(size_t)) > total_bytes)
         resize();
       *((size_t*)(buffer+index)) = context_bytes;
@@ -1479,7 +1478,7 @@ namespace LegionRuntime {
     inline void Serializer::end_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Save the size into the buffer
       while ((index + sizeof(size_t)) > total_bytes)
         resize();
@@ -1497,7 +1496,7 @@ namespace LegionRuntime {
         resize();
       void *result = buffer+index;
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
       return result;
@@ -1509,11 +1508,11 @@ namespace LegionRuntime {
     {
       // Double the buffer size
       total_bytes *= 2;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(total_bytes != 0); // this would cause deallocation
 #endif
       char *next = (char*)realloc(buffer,total_bytes);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(next != NULL);
 #endif
       buffer = next;
@@ -1533,13 +1532,13 @@ namespace LegionRuntime {
     inline void Deserializer::deserialize(T &element)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+sizeof(T)) <= total_bytes);
 #endif
       element = *((const T*)(buffer+index));
       index += sizeof(T);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += sizeof(T);
 #endif
     }
@@ -1549,13 +1548,13 @@ namespace LegionRuntime {
     inline void Deserializer::deserialize<bool>(bool &element)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Check to make sure we don't read past the end
       assert((index+4) <= total_bytes);
 #endif
       element = *((const bool *)(buffer+index));
       index += 4;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += 4;
 #endif
     }
@@ -1631,12 +1630,12 @@ namespace LegionRuntime {
     inline void Deserializer::deserialize(void *dst, size_t bytes)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((index + bytes) <= total_bytes);
 #endif
       memcpy(dst,buffer+index,bytes);
       index += bytes;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       context_bytes += bytes;
 #endif
     }
@@ -1645,7 +1644,7 @@ namespace LegionRuntime {
     inline void Deserializer::begin_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Save our enclosing context on the stack
 #ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
@@ -1661,7 +1660,7 @@ namespace LegionRuntime {
     inline void Deserializer::end_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Read the send context size out of the buffer      
 #ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
@@ -1677,7 +1676,7 @@ namespace LegionRuntime {
     inline size_t Deserializer::get_remaining_bytes(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index <= total_bytes);
 #endif
       return total_bytes - index;
@@ -1687,7 +1686,7 @@ namespace LegionRuntime {
     inline const void* Deserializer::get_current_pointer(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index <= total_bytes);
 #endif
       return (const void*)(buffer+index);
@@ -1697,7 +1696,7 @@ namespace LegionRuntime {
     inline void Deserializer::advance_pointer(size_t bytes)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((index+bytes) <= total_bytes);
       context_bytes += bytes;
 #endif
@@ -1751,7 +1750,7 @@ namespace LegionRuntime {
       : numerator(num), denominator(denom)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denom > 0);
 #endif
     }
@@ -1761,7 +1760,7 @@ namespace LegionRuntime {
     Fraction<T>::Fraction(const Fraction<T> &f)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(f.denominator > 0);
 #endif
       numerator = f.numerator;
@@ -1773,12 +1772,12 @@ namespace LegionRuntime {
     void Fraction<T>::divide(T factor)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(factor != 0);
       assert(denominator > 0);
 #endif
       T new_denom = denominator * factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(new_denom > 0); // check for integer overflow
 #endif
       denominator = new_denom;
@@ -1789,7 +1788,7 @@ namespace LegionRuntime {
     void Fraction<T>::add(const Fraction<T> &rhs)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denominator > 0);
 #endif
       if (denominator == rhs.denominator)
@@ -1812,7 +1811,7 @@ namespace LegionRuntime {
           T factor = rhs.denominator/denominator;
           numerator = (numerator*factor) + rhs.numerator;
           denominator *= factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1824,12 +1823,12 @@ namespace LegionRuntime {
           T rhs_num = rhs.numerator * denominator;
           numerator = lhs_num + rhs_num;
           denominator *= rhs.denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Should always be less than or equal to 1
       assert(numerator <= denominator); 
 #endif
@@ -1840,12 +1839,12 @@ namespace LegionRuntime {
     void Fraction<T>::subtract(const Fraction<T> &rhs)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(denominator > 0);
 #endif
       if (denominator == rhs.denominator)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(numerator >= rhs.numerator); 
 #endif
         numerator -= rhs.numerator;
@@ -1856,7 +1855,7 @@ namespace LegionRuntime {
         {
           // Our denominator is bigger
           T factor = denominator/rhs.denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(numerator >= (rhs.numerator*factor));
 #endif
           numerator -= (rhs.numerator*factor);
@@ -1865,12 +1864,12 @@ namespace LegionRuntime {
         {
           // Rhs denominator is bigger
           T factor = rhs.denominator/denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert((numerator*factor) >= rhs.numerator);
 #endif
           numerator = (numerator*factor) - rhs.numerator;
           denominator *= factor;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1880,12 +1879,12 @@ namespace LegionRuntime {
           // compute a common denominator
           T lhs_num = numerator * rhs.denominator;
           T rhs_num = rhs.numerator * denominator;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(lhs_num >= rhs_num);
 #endif
           numerator = lhs_num - rhs_num;
           denominator *= rhs.denominator; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(denominator > 0); // check for integer overflow
 #endif
         }
@@ -1896,7 +1895,7 @@ namespace LegionRuntime {
       {
         numerator *= MIN_FRACTION_SPLIT;
         denominator *= MIN_FRACTION_SPLIT;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(denominator > 0); // check for integer overflow
 #endif
       }
@@ -1907,7 +1906,7 @@ namespace LegionRuntime {
     Fraction<T> Fraction<T>::get_part(T ways)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ways > 0);
       assert(denominator > 0);
       assert(numerator > 0);
@@ -1925,12 +1924,12 @@ namespace LegionRuntime {
         }
         numerator *= ways;
         T new_denom = denominator * ways;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(new_denom > 0); // check for integer overflow
 #endif
         denominator = new_denom;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(numerator >= ways);
 #endif
       return Fraction(1,denominator);
@@ -2000,7 +1999,7 @@ namespace LegionRuntime {
     inline void BitMask<T,MAX,SHIFT,MASK>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2012,7 +2011,7 @@ namespace LegionRuntime {
     inline void BitMask<T,MAX,SHIFT,MASK>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2035,7 +2034,7 @@ namespace LegionRuntime {
     inline bool BitMask<T,MAX,SHIFT,MASK>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2085,6 +2084,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bit_vector[idx] > 0) // if it has any valid entries, find the next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -2636,7 +2670,7 @@ namespace LegionRuntime {
     inline void TLBitMask<T,MAX,SHIFT,MASK>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2650,7 +2684,7 @@ namespace LegionRuntime {
     inline void TLBitMask<T,MAX,SHIFT,MASK>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2679,7 +2713,7 @@ namespace LegionRuntime {
     inline bool TLBitMask<T,MAX,SHIFT,MASK>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> SHIFT;
@@ -2729,6 +2763,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bit_vector[idx] > 0) // if it has any valid entries, find the next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -3321,7 +3390,7 @@ namespace LegionRuntime {
     inline void SSEBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3333,7 +3402,7 @@ namespace LegionRuntime {
     inline void SSEBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3356,7 +3425,7 @@ namespace LegionRuntime {
     inline bool SSEBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3406,6 +3475,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -3918,7 +4022,7 @@ namespace LegionRuntime {
     inline void SSETLBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3932,7 +4036,7 @@ namespace LegionRuntime {
     inline void SSETLBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -3961,7 +4065,7 @@ namespace LegionRuntime {
     inline bool SSETLBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4011,6 +4115,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -4598,7 +4737,7 @@ namespace LegionRuntime {
     inline void AVXBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4610,7 +4749,7 @@ namespace LegionRuntime {
     inline void AVXBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4633,7 +4772,7 @@ namespace LegionRuntime {
     inline bool AVXBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -4683,6 +4822,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -5284,7 +5458,7 @@ namespace LegionRuntime {
     inline void AVXTLBitMask<MAX>::set_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5298,7 +5472,7 @@ namespace LegionRuntime {
     inline void AVXTLBitMask<MAX>::unset_bit(unsigned bit)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5327,7 +5501,7 @@ namespace LegionRuntime {
     inline bool AVXTLBitMask<MAX>::is_set(unsigned bit) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(bit < MAX);
 #endif
       unsigned idx = bit >> 6;
@@ -5377,6 +5551,41 @@ namespace LegionRuntime {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < int(ELEMENT_SIZE); j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < int(BIT_ELMTS); idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -6042,7 +6251,7 @@ namespace LegionRuntime {
       }
       else
       {
-        mask.dense = legion_new<BITMASK>(init);
+        mask.dense = new BITMASK(init);
         tag = COMPOUND_DENSE;
       }
     }
@@ -6068,7 +6277,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+            mask.dense = new BITMASK(rhs.mask.dense);
             break;
           }
         default:
@@ -6090,7 +6299,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             break;
           }
       }
@@ -6125,7 +6334,7 @@ namespace LegionRuntime {
           {
             if ((mask.sparse->size()+1) > MAX_SPARSE_SIZE) 
             {
-              BITMASK *next = legion_new<BITMASK>();
+              BITMASK *next = new BITMASK();
               for (std::set<unsigned>::const_iterator it = 
                     mask.sparse->begin(); it != mask.sparse->end(); it++)
               {
@@ -6175,7 +6384,7 @@ namespace LegionRuntime {
             mask.dense->unset_bit(bit);
             if (!(*mask.dense))
             {
-              legion_delete(mask.dense);
+              delete mask.dense;
               tag = COMPOUND_NONE;
             }
             break;
@@ -6237,14 +6446,14 @@ namespace LegionRuntime {
       {
         case COMPOUND_SINGLE:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(index == 0);
 #endif
             return mask.index;
           }
         case COMPOUND_SPARSE:
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(index < mask.sparse->size());
 #endif
             std::set<unsigned>::const_iterator it = 
@@ -6255,6 +6464,36 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           return mask.dense->find_index_set(index);
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline int CompoundBitMask<BITMASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+        {
+          if (start <= mask.index)
+            return mask.index;
+          break;
+        }
+        case COMPOUND_SPARSE:
+        {
+          for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
+                it != mask.sparse->end(); it++)
+          {
+            if ((*it) < start)
+              continue;
+            return (*it);
+          }
+          break;
+        }
+        case COMPOUND_DENSE:
+          return mask.dense->find_next_set(start);
       }
       return -1;
     }
@@ -6273,7 +6512,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             break;
           }
       }
@@ -6407,7 +6646,7 @@ namespace LegionRuntime {
             }
           case COMPOUND_DENSE:
             {
-              mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+              mask.dense = new BITMASK(rhs.mask.dense);
               break;
             }
         }
@@ -6449,23 +6688,20 @@ namespace LegionRuntime {
         case COMPOUND_NONE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = 
-              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             break;
           }
         case COMPOUND_SINGLE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = 
-              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             result.mask.dense->unset_bit(mask.index);
             break;
           }
         case COMPOUND_SPARSE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = 
-              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             for (std::set<unsigned>::const_iterator it = 
                   mask.sparse->begin(); it != mask.sparse->end(); it++)
             {
@@ -6476,7 +6712,7 @@ namespace LegionRuntime {
         case COMPOUND_DENSE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(~(*mask.dense));
+            result.mask.dense = new BITMASK(~(*mask.dense));
             break;
           }
       }
@@ -6495,7 +6731,7 @@ namespace LegionRuntime {
         if (tag == COMPOUND_DENSE)
         {
           result.tag = COMPOUND_DENSE;
-          result.mask.dense = legion_new<BITMASK>(*mask.dense);
+          result.mask.dense = new BITMASK(*mask.dense);
           if (rhs.tag == COMPOUND_SPARSE)
           {
             for (std::set<unsigned>::const_iterator it = 
@@ -6510,7 +6746,7 @@ namespace LegionRuntime {
         else if (rhs.tag == COMPOUND_DENSE)
         {
           result.tag = COMPOUND_DENSE;
-          result.mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          result.mask.dense = new BITMASK(*rhs.mask.dense);
           if (tag == COMPOUND_SPARSE)
           {
             for (std::set<unsigned>::const_iterator it = 
@@ -6576,7 +6812,7 @@ namespace LegionRuntime {
                     rhs.mask.sparse->size()) > MAX_SPARSE_SIZE)
               {
                 result.tag = COMPOUND_DENSE;
-                result.mask.dense = legion_new<BITMASK>();
+                result.mask.dense = new BITMASK();
                 for (std::set<unsigned>::const_iterator it = 
                       mask.sparse->begin(); it != mask.sparse->end(); it++)
                 {
@@ -6604,7 +6840,7 @@ namespace LegionRuntime {
             {
               result.tag = COMPOUND_DENSE;
               result.mask.dense = 
-                legion_new<BITMASK>(*mask.dense | *rhs.mask.dense);
+                new BITMASK(*mask.dense | *rhs.mask.dense);
               break;
             }
         }
@@ -6754,7 +6990,7 @@ namespace LegionRuntime {
         {
           result.tag = COMPOUND_DENSE;
           result.mask.dense = 
-            legion_new<BITMASK>(*mask.dense & *rhs.mask.dense);
+            new BITMASK(*mask.dense & *rhs.mask.dense);
         }
       }
       return result;
@@ -6815,7 +7051,7 @@ namespace LegionRuntime {
       {
         result.tag = COMPOUND_DENSE;
         result.mask.dense = 
-          legion_new<BITMASK>((*mask.dense) ^ (*rhs.mask.dense));
+          new BITMASK((*mask.dense) ^ (*rhs.mask.dense));
       }
       return result;
     }
@@ -6851,14 +7087,14 @@ namespace LegionRuntime {
         {
           unsigned index_copy = mask.index;
           tag = COMPOUND_DENSE;
-          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          mask.dense = new BITMASK(*rhs.mask.dense);
           mask.dense->set_bit(index_copy);
         }
         else if (tag == COMPOUND_SPARSE)
         {
           std::set<unsigned> *copy_sparse = mask.sparse;
           tag = COMPOUND_DENSE;
-          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          mask.dense = new BITMASK(*rhs.mask.dense);
           for (std::set<unsigned>::const_iterator it = 
                 copy_sparse->begin(); it != copy_sparse->end(); it++)
           {
@@ -6915,7 +7151,7 @@ namespace LegionRuntime {
         if (tag == COMPOUND_SPARSE)
           delete mask.sparse;
         else if (tag == COMPOUND_DENSE)
-          legion_delete(mask.dense);
+          delete mask.dense;
         tag = COMPOUND_NONE;
       }
       else if (tag == COMPOUND_SINGLE)
@@ -6942,13 +7178,13 @@ namespace LegionRuntime {
           // tag is compound dense
           if (mask.dense->is_set(rhs.mask.index))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = rhs.mask.index;
             tag = COMPOUND_SINGLE;
           }
           else
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
         }
@@ -6991,13 +7227,13 @@ namespace LegionRuntime {
             mask.dense->unset_bit(*it);
           if (!(*mask.dense))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*mask.dense) == 1)
           {
             unsigned index = mask.dense->find_first_set();
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = index;
             tag = COMPOUND_SINGLE;
           }
@@ -7040,13 +7276,13 @@ namespace LegionRuntime {
           (*mask.dense) &= (*rhs.mask.dense);
           if (!(*mask.dense))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*mask.dense) == 1)
           {
             unsigned index = mask.dense->find_first_set();
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = index;
             tag = COMPOUND_SINGLE;
           }
@@ -7108,7 +7344,7 @@ namespace LegionRuntime {
         else
         {
           // rhs tag is compound dense
-          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          BITMASK *next = new BITMASK(rhs.mask.dense);
           if (!next->is_set(mask.index))
           {
             mask.dense = next;
@@ -7120,7 +7356,7 @@ namespace LegionRuntime {
             if (BITMASK::pop_count(*next) == 1)
             {
               mask.index = next->find_first_set();
-              legion_delete(next);
+              delete next;
               tag = COMPOUND_SINGLE;
             }
             else
@@ -7190,7 +7426,7 @@ namespace LegionRuntime {
         else
         {
           // rhs is dense
-          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          BITMASK *next = new BITMASK(rhs.mask.dense);
           for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
                 it != mask.sparse->end(); it++)
           {
@@ -7202,13 +7438,13 @@ namespace LegionRuntime {
           delete mask.sparse;
           if (!(*next))
           {
-            legion_delete(next);
+            delete next;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*next) == 1)
           {
             mask.index = next->find_first_set();
-            legion_delete(next);
+            delete next;
             tag = COMPOUND_SINGLE;
           }
           else
@@ -7231,13 +7467,13 @@ namespace LegionRuntime {
         }
         if (!(*mask.dense))
         {
-          legion_delete(mask.dense);    
+          delete mask.dense;    
           tag = COMPOUND_NONE;
         }
         else if (BITMASK::pop_count(*mask.dense) == 1)
         {
           unsigned index = mask.dense->find_first_set();
-          legion_delete(mask.dense);
+          delete mask.dense;
           mask.index = index;
           tag = COMPOUND_SINGLE;
         }
@@ -7335,7 +7571,7 @@ namespace LegionRuntime {
       }
       else if (tag == COMPOUND_DENSE)
       {
-        result.mask.dense = legion_new<BITMASK>((*mask.dense) << shift);
+        result.mask.dense = new BITMASK((*mask.dense) << shift);
         result.tag = COMPOUND_DENSE; 
       }
       return result;
@@ -7381,7 +7617,7 @@ namespace LegionRuntime {
       }
       else if (tag == COMPOUND_DENSE)
       {
-        result.mask.dense = legion_new<BITMASK>((*mask.dense) >> shift);
+        result.mask.dense = new BITMASK((*mask.dense) >> shift);
         result.tag = COMPOUND_DENSE;
       }
       return result;
@@ -7564,7 +7800,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            mask.dense = legion_new<BITMASK>();
+            mask.dense = new BITMASK();
             mask.dense->deserialize(derez);
             break;
           }
@@ -7741,8 +7977,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       BITMASK mk, mp, mv, t;
-      BITMASK one;
-      one.set_bit(0);
 
       x = x & m;
       mk = ~m >> 1;
@@ -7768,8 +8002,6 @@ namespace LegionRuntime {
     //-------------------------------------------------------------------------
     {
       BITMASK mk, mp, mv, t;
-      BITMASK one;
-      one.set_bit(0);
 
       x = x & m;
       mk = ~m << 1;
@@ -7895,7 +8127,7 @@ namespace LegionRuntime {
       }
       else
       {
-        set_ptr.dense = legion_new<DenseSet>();
+        set_ptr.dense = new DenseSet();
         set_ptr.dense->set = rhs.set_ptr.dense->set;
       }
     }
@@ -7905,13 +8137,13 @@ namespace LegionRuntime {
     IntegerSet<IT,DT,BIDIR>::~IntegerSet(void)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(set_ptr.sparse != NULL);
 #endif
       if (sparse)
         delete set_ptr.sparse;
       else
-        legion_delete(set_ptr.dense);
+        delete set_ptr.dense;
     }
     
     //-------------------------------------------------------------------------
@@ -7924,7 +8156,7 @@ namespace LegionRuntime {
       {
         if (!sparse)
         {
-          legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new std::set<IT>();
         }
         else
@@ -7936,7 +8168,7 @@ namespace LegionRuntime {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();
@@ -7969,7 +8201,7 @@ namespace LegionRuntime {
         if (sizeof(DT) < (set_ptr.sparse->size() * 
                           (sizeof(IT) + STL_SET_NODE_SIZE)))
         {
-          DenseSet *dense_set = legion_new<DenseSet>();
+          DenseSet *dense_set = new DenseSet();
           for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
@@ -8013,7 +8245,7 @@ namespace LegionRuntime {
               }
             }
             // Delete the dense set
-            legion_delete(set_ptr.dense);
+            delete set_ptr.dense;
             set_ptr.sparse = sparse_set;
             sparse = true;
           }
@@ -8030,14 +8262,14 @@ namespace LegionRuntime {
     {
       if (sparse)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!set_ptr.sparse->empty());
 #endif
         return *(set_ptr.sparse->begin());
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!!(set_ptr.dense->set));
 #endif
         return set_ptr.dense->set.find_first_set();
@@ -8049,7 +8281,7 @@ namespace LegionRuntime {
     inline IT IntegerSet<IT,DT,BIDIR>::find_index_set(int index) const
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index >= 0);
       assert(index < int(size()));
 #endif
@@ -8130,7 +8362,7 @@ namespace LegionRuntime {
         // If it doesn't match then replace the old one
         if (!sparse)
         {
-          legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new std::set<IT>();
         }
         else
@@ -8150,7 +8382,7 @@ namespace LegionRuntime {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();
@@ -8306,7 +8538,7 @@ namespace LegionRuntime {
       // always switch back to set on a clear
       if (!sparse)
       {
-	legion_delete(set_ptr.dense);
+	delete set_ptr.dense;
 	set_ptr.sparse = new std::set<IT>();
 	sparse = true;
       } else
@@ -8414,7 +8646,7 @@ namespace LegionRuntime {
       if (!n || (n->level < level_needed))
         return false;
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // when we get here, root is high enough
       assert((level_needed <= n->level) &&
 	     (index >= n->first_index) &&
@@ -8428,13 +8660,13 @@ namespace LegionRuntime {
           static_cast<typename ALLOCATOR::INNER_TYPE*>(n);
         IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
             ALLOCATOR::INNER_BITS)) & ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
         NodeBase *child = inner->elems[i];
         if (child == 0)
           return false;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((child != 0) && 
                (child->level == (n->level -1)) &&
                (index >= child->first_index) &&
@@ -8462,10 +8694,10 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>();
+          leaf->elems[offset] = new ET();
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8488,10 +8720,10 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>(arg);
+          leaf->elems[offset] = new ET(arg);
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8515,10 +8747,10 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>(arg1, arg2);
+          leaf->elems[offset] = new ET(arg1, arg2);
         result = leaf->elems[offset];
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != 0);
 #endif
       return result;
@@ -8567,7 +8799,7 @@ namespace LegionRuntime {
         n = root;
       }
       // root should be high-enough now
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((level_needed <= n->level) &&
              (index >= n->first_index) &&
              (index <= n->last_index));
@@ -8581,7 +8813,7 @@ namespace LegionRuntime {
         IT i = ((index >> (ALLOCATOR::LEAF_BITS + (n->level - 1) *
                 ALLOCATOR::INNER_BITS)) & 
                 ((((IT)1) << ALLOCATOR::INNER_BITS) - 1));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((i >= 0) && (((size_t)i) < ALLOCATOR::INNER_TYPE::SIZE));
 #endif
         NodeBase *child = inner->elems[i];
@@ -8602,7 +8834,7 @@ namespace LegionRuntime {
           }
           child = inner->elems[i];
         }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((child != 0) &&
                (child->level == (n->level - 1)) &&
                (index >= child->first_index) &&
@@ -8610,13 +8842,12 @@ namespace LegionRuntime {
 #endif
         n = child;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(n->level == 0);
 #endif
       return n;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+}; // namespace Legion 
 
 #endif // __LEGION_UTILITIES_H__

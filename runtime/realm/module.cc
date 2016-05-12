@@ -33,8 +33,12 @@
 // TODO: replace this with Makefile (or maybe cmake) magic that adapts automatically
 //  to the build-system-controlled list of statically-linked Realm modules
 #include "realm/runtime_impl.h"
+#include "realm/numa/numa_module.h"
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
+#endif
+#ifdef REALM_USE_LLVM
+#include "realm/llvmjit/llvmjit_module.h"
 #endif
 
 namespace Realm {
@@ -166,7 +170,10 @@ namespace Realm {
 	    modules.push_back(m);
 	} else {
 	  log_module.error() << "symbol 'create_realm_module' not found in " << filename;
-	  int ret = dlclose(handle);
+#ifndef NDEBUG
+	  int ret =
+#endif
+	    dlclose(handle);
 	  assert(ret == 0);
 	}
       } else {
@@ -236,7 +243,10 @@ namespace Realm {
       void *handle = sofile_handles.back();
       sofile_handles.pop_back();
 
-      int ret = dlclose(handle);
+#ifndef NDEBUG
+      int ret =
+#endif
+	dlclose(handle);
       assert(ret == 0);
     }
 #endif

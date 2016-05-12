@@ -59,11 +59,25 @@ namespace Realm {
       // used by non-legion threads to wait on an event - always blocking
       void external_wait(void) const;
 
+      // fault-aware versions of the above (the above versions will cause the
+      //  caller to fault as well if a poisoned event is queried)
+      bool has_triggered_faultaware(bool& poisoned) const;
+      void wait_faultaware(bool& poisoned) const;
+      void external_wait_faultaware(bool& poisoned) const;
+
+      // attempts to cancel the operation associated with this event
+      // "reason_data" will be provided to any profilers of the operation
+      void cancel_operation(const void *reason_data, size_t reason_size) const;
+ 
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
+
+      // normal merged events propagate poison - this version ignores poison on
+      //  inputs - use carefully!
+      static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
 
       // the following calls are used to give Realm bounds on when the UserEvent
       //  will be triggered - in addition to being useful for diagnostic purposes
@@ -86,6 +100,9 @@ namespace Realm {
       static UserEvent create_user_event(void);
       void trigger(Event wait_on = Event::NO_EVENT) const;
 
+      // cancels (poisons) the event
+      void cancel(void) const;
+
       static const UserEvent NO_USER_EVENT;
     };
 
@@ -97,6 +114,8 @@ namespace Realm {
       typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
 
       timestamp_t timestamp;
+
+      static const Barrier NO_BARRIER;
 
       static Barrier create_barrier(unsigned expected_arrivals, ReductionOpID redop_id = 0,
 				    const void *initial_value = 0, size_t initial_value_size = 0);

@@ -95,12 +95,16 @@ local function ast_node_tostring(node, indent, hide)
   end
 end
 
+function ast_node:tostring(hide)
+  return ast_node_tostring(self, 0, hide)
+end
+
 function ast_node:__tostring()
-  return ast_node_tostring(self, 0, false)
+  return self:tostring(false)
 end
 
 function ast_node:printpretty(hide)
-  print(ast_node_tostring(self, 0, hide))
+  print(self:tostring(hide))
 end
 
 function ast_node:is(node_type)
@@ -385,17 +389,21 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"},
+ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+                         "vectorize", "block"},
                  false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
+  local forbid = ast.options.Forbid { value = false }
   return ast.options.Set {
     cuda = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
+    trace = allow,
     vectorize = allow,
+    block = forbid,
   }
 end
 
@@ -446,7 +454,7 @@ ast.unspecialized.expr:leaf("Escape", {"expr"})
 ast.unspecialized.expr:leaf("FieldAccess", {"value", "field_names"})
 ast.unspecialized.expr:leaf("IndexAccess", {"value", "index"})
 ast.unspecialized.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.unspecialized.expr:leaf("Call", {"fn", "args"})
+ast.unspecialized.expr:leaf("Call", {"fn", "args", "conditions"})
 ast.unspecialized.expr:leaf("Ctor", {"fields"})
 ast.unspecialized.expr:leaf("CtorListField", {"value"})
 ast.unspecialized.expr:leaf("CtorRecField", {"name_expr", "value"})
@@ -461,21 +469,30 @@ ast.unspecialized.expr:leaf("New", {"pointer_type_expr", "extent"})
 ast.unspecialized.expr:leaf("Null", {"pointer_type_expr"})
 ast.unspecialized.expr:leaf("DynamicCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("StaticCast", {"type_expr", "value"})
+ast.unspecialized.expr:leaf("UnsafeCast", {"type_expr", "value"})
 ast.unspecialized.expr:leaf("Ispace", {"index_type_expr", "extent", "start"})
 ast.unspecialized.expr:leaf("Region", {"ispace", "fspace_type_expr"})
-ast.unspecialized.expr:leaf("Partition", {"disjointness", "region", "coloring"})
+ast.unspecialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+                                          "colors"})
 ast.unspecialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.unspecialized.expr:leaf("PartitionByField", {"region", "colors"})
 ast.unspecialized.expr:leaf("Image", {"parent", "partition", "region"})
 ast.unspecialized.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.unspecialized.expr:leaf("CrossProduct", {"args"})
+ast.unspecialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
+ast.unspecialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.unspecialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
-ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.unspecialized.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.unspecialized.expr:leaf("ListPhaseBarriers", {"product"})
 ast.unspecialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.unspecialized.expr:leaf("ListRange", {"start", "stop"})
 ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
+ast.unspecialized.expr:leaf("DynamicCollective", {"value_type_expr", "op", "arrivals"})
+ast.unspecialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
+ast.unspecialized.expr:leaf("Arrive", {"barrier", "value"})
+ast.unspecialized.expr:leaf("Await", {"barrier"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.unspecialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.unspecialized.expr:leaf("AllocateScratchFields", {"region"})
@@ -505,15 +522,21 @@ ast.unspecialized.stat:leaf("Break")
 ast.unspecialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
+ast.unspecialized.stat:leaf("Escape", {"expr"})
+ast.unspecialized.stat:leaf("RawDelete", {"value"})
 
-ast.unspecialized.stat:leaf("Task", {"name", "params", "return_type_expr",
-                                     "privileges", "coherence_modes", "flags",
-                                     "conditions", "constraints", "body"})
-ast.unspecialized.stat:leaf("TaskParam", {"param_name", "type_expr"})
-ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
-                                       "constraints"})
-ast.unspecialized.stat:leaf("FspaceParam", {"param_name", "type_expr"})
-ast.unspecialized.stat:leaf("FspaceField", {"field_name", "type_expr"})
+ast.unspecialized:inner("top", {"options"})
+ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
+                                    "privileges", "coherence_modes", "flags",
+                                    "conditions", "constraints", "body"})
+ast.unspecialized.top:leaf("TaskParam", {"param_name", "type_expr"})
+ast.unspecialized.top:leaf("Fspace", {"name", "params", "fields",
+                                      "constraints"})
+ast.unspecialized.top:leaf("FspaceParam", {"param_name", "type_expr"})
+ast.unspecialized.top:leaf("FspaceField", {"field_name", "type_expr"})
+ast.unspecialized.top:leaf("QuoteExpr", {"expr"})
+ast.unspecialized.top:leaf("QuoteStat", {"block"})
+
 
 -- Node Types (Specialized)
 
@@ -557,7 +580,7 @@ ast.specialized.expr:leaf("ID", {"value"})
 ast.specialized.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.specialized.expr:leaf("IndexAccess", {"value", "index"})
 ast.specialized.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.specialized.expr:leaf("Call", {"fn", "args"})
+ast.specialized.expr:leaf("Call", {"fn", "args", "conditions"})
 ast.specialized.expr:leaf("Cast", {"fn", "args"})
 ast.specialized.expr:leaf("Ctor", {"fields", "named"})
 ast.specialized.expr:leaf("CtorListField", {"value"})
@@ -573,21 +596,30 @@ ast.specialized.expr:leaf("New", {"pointer_type", "region", "extent"})
 ast.specialized.expr:leaf("Null", {"pointer_type"})
 ast.specialized.expr:leaf("DynamicCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("StaticCast", {"value", "expr_type"})
+ast.specialized.expr:leaf("UnsafeCast", {"value", "expr_type"})
 ast.specialized.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.specialized.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring"})
+ast.specialized.expr:leaf("Partition", {"disjointness", "region", "coloring",
+                                        "colors"})
 ast.specialized.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.specialized.expr:leaf("PartitionByField", {"region", "colors"})
 ast.specialized.expr:leaf("Image", {"parent", "partition", "region"})
 ast.specialized.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.specialized.expr:leaf("CrossProduct", {"args"})
+ast.specialized.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
+ast.specialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.specialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
-ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.specialized.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.specialized.expr:leaf("ListPhaseBarriers", {"product"})
 ast.specialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.specialized.expr:leaf("ListRange", {"start", "stop"})
 ast.specialized.expr:leaf("PhaseBarrier", {"value"})
+ast.specialized.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
+ast.specialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
+ast.specialized.expr:leaf("Arrive", {"barrier", "value"})
+ast.specialized.expr:leaf("Await", {"barrier"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.specialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.specialized.expr:leaf("AllocateScratchFields", {"region"})
@@ -619,13 +651,18 @@ ast.specialized.stat:leaf("Break")
 ast.specialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
+ast.specialized.stat:leaf("RawDelete", {"value"})
 
-ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
-                                   "privileges", "coherence_modes", "flags",
-                                   "conditions", "constraints", "body",
-                                   "prototype"})
-ast.specialized.stat:leaf("TaskParam", {"symbol"})
-ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
+ast.specialized:inner("top", {"options"})
+ast.specialized.top:leaf("Task", {"name", "params", "return_type",
+                                  "privileges", "coherence_modes", "flags",
+                                  "conditions", "constraints", "body",
+                                  "prototype"})
+ast.specialized.top:leaf("TaskParam", {"symbol"})
+ast.specialized.top:leaf("Fspace", {"name", "fspace", "constraints"})
+ast.specialized.top:leaf("QuoteExpr", {"expr"})
+ast.specialized.top:leaf("QuoteStat", {"block"})
+
 
 -- Node Types (Typed)
 
@@ -653,21 +690,31 @@ ast.typed.expr:leaf("New", {"pointer_type", "region", "extent"})
 ast.typed.expr:leaf("Null", {"pointer_type"})
 ast.typed.expr:leaf("DynamicCast", {"value"})
 ast.typed.expr:leaf("StaticCast", {"value", "parent_region_map"})
+ast.typed.expr:leaf("UnsafeCast", {"value"})
 ast.typed.expr:leaf("Ispace", {"index_type", "extent", "start"})
 ast.typed.expr:leaf("Region", {"ispace", "fspace_type"})
-ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring"})
+ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
+                                  "colors"})
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.typed.expr:leaf("PartitionByField", {"region", "colors"})
 ast.typed.expr:leaf("Image", {"parent", "partition", "region"})
 ast.typed.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
+ast.typed.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})
+ast.typed.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.typed.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
-ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.typed.expr:leaf("ListSliceCrossProduct", {"product", "indices"})
+ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.typed.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.typed.expr:leaf("ListPhaseBarriers", {"product"})
 ast.typed.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.typed.expr:leaf("ListRange", {"start", "stop"})
 ast.typed.expr:leaf("PhaseBarrier", {"value"})
+ast.typed.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
+ast.typed.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
+ast.typed.expr:leaf("Arrive", {"barrier", "value"})
+ast.typed.expr:leaf("Await", {"barrier"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.typed.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.typed.expr:leaf("AllocateScratchFields", {"region"})
@@ -705,16 +752,22 @@ ast.typed.stat:leaf("Break")
 ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
+ast.typed.stat:leaf("RawDelete", {"value"})
+ast.typed.stat:leaf("BeginTrace", {"trace_id"})
+ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
-ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
+ast.typed:inner("top", {"options"})
+ast.typed.top:leaf("Fspace", {"name", "fspace"})
+ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
                              "region_divergence", "prototype"})
-ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
-ast.typed.stat:leaf("Fspace", {"name", "fspace"})
+ast.typed.top:leaf("TaskParam", {"symbol", "param_type"})
+ast.typed.top:leaf("QuoteExpr", {"expr"})
+ast.typed.top:leaf("QuoteStat", {"block"})
 
 return ast

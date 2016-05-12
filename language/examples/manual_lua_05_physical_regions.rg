@@ -1,1 +1,0 @@
-../../bindings/terra/examples/lua/05_physical_regions_and_accessors/physical_regions.t

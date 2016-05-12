@@ -27,13 +27,16 @@ terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
   return vec2 { x = a.x - b.x, y = a.y - b.y }
 end
 
-terra vec2.metamethods.__mul(a : double, b : vec2) : vec2
-  return vec2 { x = a * b.x, y = a * b.y }
-end
-
-terra vec2.metamethods.__mul(a : vec2, b : double) : vec2
-  return vec2 { x = a.x * b, y = a.y * b }
-end
+vec2.metamethods.__mul = terralib.overloadedfunction(
+  "__mul",
+  {
+    terra(a : double, b : vec2) : vec2
+      return vec2 { x = a * b.x, y = a * b.y }
+    end,
+    terra(a : vec2, b : double) : vec2
+      return vec2 { x = a.x * b, y = a.y * b }
+    end
+  })
 
 task f(a : vec2, b : vec2) : vec2
   var c = a + b
@@ -42,8 +45,10 @@ task f(a : vec2, b : vec2) : vec2
   var f = e * 3.4
   return (c + d) - (e + f)
 end
-f:compile()
 
 task main()
+  var x = vec2 { x = 1, y = 2 }
+  var y = vec2 { x = 30, y = 40 }
+  f(x, y)
 end
 regentlib.start(main)

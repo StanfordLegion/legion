@@ -400,13 +400,42 @@ namespace Realm {
 		       gasnet_mynode(), (unsigned long)pthread_self(),
 		       level, name.c_str());
     int amt = msg.length();
+    // Unusual case, but handle it
     if((len + amt) >= MAXLEN)
+    {
+      // If this is an error or a warning, print out the 
+      // whole message no matter what
+      if ((level == LEVEL_FATAL) || 
+          (level == LEVEL_ERROR) || (level == LEVEL_WARNING))
+      {
+        const size_t full_len = len + amt + 2;
+        char *full_buffer = (char*)malloc(full_len);
+        memcpy(full_buffer, buffer, len); 
+        memcpy(full_buffer + len, msg.data(), amt);
+        full_buffer[len+amt] = '\n';
+        full_buffer[len+amt+1] = 0;
+        // go through all the streams
+        for(std::vector<LogStream>::iterator it = streams.begin();
+            it != streams.end();
+            it++) {
+          if(level < it->min_level)
+            continue;
+
+          it->s->write(full_buffer, full_len);
+
+          if(it->flush_each_write)
+            it->s->flush();
+        }
+        free(full_buffer);
+        return;
+      }
       amt = MAXLEN - 2 - len;
+    }
     memcpy(buffer + len, msg.data(), amt);
     len += amt;
     buffer[len++] = '\n';
     buffer[len] = 0;
-    
+
     // go through all the streams
     for(std::vector<LogStream>::iterator it = streams.begin();
 	it != streams.end();
@@ -443,9 +472,20 @@ namespace Realm {
   LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
   {
     if(active) {
-      char msg[256];
-      vsnprintf(msg, 256, fmt, args);
-      oss << msg;
+      static const int MAXLEN = 4096;
+      char msg[MAXLEN];
+      int full = vsnprintf(msg, MAXLEN, fmt, args);
+      // If this is an error or a warning, print out the full string
+      // no matter what
+      if((full >= MAXLEN) && ((level == Logger::LEVEL_FATAL) || 
+          (level == Logger::LEVEL_ERROR) || (level == Logger::LEVEL_WARNING))) {
+        char *full_msg = (char*)malloc(full+1);
+        vsnprintf(full_msg, full+1, fmt, args);
+        (*oss) << full_msg;
+        free(full_msg);
+      } else {
+        (*oss) << msg;
+      }
     }
     return *this;
   }

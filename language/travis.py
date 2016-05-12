@@ -48,11 +48,11 @@ def install_dependencies():
 
 def test(root_dir, debug, env):
     subprocess.check_call(
-        ['./install.py', '-j', '2'] + (['--debug'] if debug else []),
+        ['time', './install.py', '-j', '2'] + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
     subprocess.check_call(
-        ['./test.py', '-j', '2'] + (['--debug'] if debug else []),
+        ['time', './test.py', '-q', '-j', '2'] + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
 
@@ -66,6 +66,9 @@ if __name__ == '__main__':
         'LG_RT_DIR': runtime_dir,
         'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
+    # reduce output spewage by default
+    if 'MAKEFLAGS' not in env:
+        env['MAKEFLAGS'] = 's'
 
     test(root_dir, True, env)
     test(root_dir, False, env)

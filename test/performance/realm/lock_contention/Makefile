@@ -37,4 +37,5 @@ TESTARGS.default =
 RUNMODE ?= default
 
 run : $(OUTFILE)
-	$(dir $(OUTFILE))$(notdir $(OUTFILE)) $(TESTARGS.$(RUNMODE))
+	@echo $(dir $(OUTFILE))$(notdir $(OUTFILE)) $(TESTARGS.$(RUNMODE))
+	@$(dir $(OUTFILE))$(notdir $(OUTFILE)) $(TESTARGS.$(RUNMODE))

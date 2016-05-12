@@ -53,38 +53,38 @@ namespace LegionRuntime {
 
     class ByteOffset {
     public:
-      ByteOffset(void) : offset(0) {}
-      explicit ByteOffset(off_t _offset) : offset(_offset) { assert(offset == _offset); }
-      explicit ByteOffset(int _offset) : offset(_offset) {}
+      CUDAPREFIX ByteOffset(void) : offset(0) {}
+      CUDAPREFIX explicit ByteOffset(off_t _offset) : offset(_offset) { assert(offset == _offset); }
+      CUDAPREFIX explicit ByteOffset(int _offset) : offset(_offset) {}
 
       template <typename T1, typename T2>
-      ByteOffset(T1 *p1, T2 *p2) : offset(((char *)p1) - ((char *)p2)) {}
+      CUDAPREFIX ByteOffset(T1 *p1, T2 *p2) : offset(((char *)p1) - ((char *)p2)) {}
 
       template <typename T>
-      T *add_to_pointer(T *ptr) const
+      CUDAPREFIX T *add_to_pointer(T *ptr) const
       {
 	return (T*)(((char *)ptr) + offset);
       }
 
-      bool operator==(const ByteOffset rhs) const { return offset == rhs.offset; }
-      bool operator!=(const ByteOffset rhs) const { return offset != rhs.offset; }
+      CUDAPREFIX bool operator==(const ByteOffset rhs) const { return offset == rhs.offset; }
+      CUDAPREFIX bool operator!=(const ByteOffset rhs) const { return offset != rhs.offset; }
 
-      ByteOffset& operator+=(ByteOffset rhs) { offset += rhs.offset; return *this; }
-      ByteOffset& operator*=(int scale) { offset *= scale; return *this; }
+      CUDAPREFIX ByteOffset& operator+=(ByteOffset rhs) { offset += rhs.offset; return *this; }
+      CUDAPREFIX ByteOffset& operator*=(int scale) { offset *= scale; return *this; }
       
-      ByteOffset operator+(const ByteOffset rhs) const { return ByteOffset(offset + rhs.offset); }
-      ByteOffset operator*(int scale) const { return ByteOffset(offset * scale); }
+      CUDAPREFIX ByteOffset operator+(const ByteOffset rhs) const { return ByteOffset(offset + rhs.offset); }
+      CUDAPREFIX ByteOffset operator*(int scale) const { return ByteOffset(offset * scale); }
       
       int offset;
     };
 
-    inline ByteOffset operator*(int scale, const ByteOffset rhs) { return ByteOffset(scale * rhs.offset); }
+    CUDAPREFIX inline ByteOffset operator*(int scale, const ByteOffset rhs) { return ByteOffset(scale * rhs.offset); }
 
     template <typename T>
-    inline T* operator+(T *ptr, const ByteOffset offset) { return offset.add_to_pointer(ptr); }
+    CUDAPREFIX inline T* operator+(T *ptr, const ByteOffset offset) { return offset.add_to_pointer(ptr); }
 
     template <typename T>
-    inline T*& operator+=(T *&ptr, const ByteOffset offset) { ptr = offset.add_to_pointer(ptr); return ptr; }
+    CUDAPREFIX inline T*& operator+=(T *&ptr, const ByteOffset offset) { ptr = offset.add_to_pointer(ptr); return ptr; }
 
     namespace TemplateFu {
       // bool IsAStruct<T>::value == true if T is a class/struct, else false
@@ -108,11 +108,17 @@ namespace LegionRuntime {
 	: AT::Untyped(to_copy) {}
     };
 
-    // Helper function for extracting an accessor from a region
+    // Helper functions for extracting an accessor from a region
     template<typename AT, typename ET, typename RT>
     inline RegionAccessor<AT,ET> extract_accessor(const RT &region) 
     {
       return region.get_accessor().template typeify<ET>().template convert<AT>();
+    }
+
+    template<typename AT, typename ET, typename RT>
+    inline RegionAccessor<AT,ET> extract_accessor(const RT &region, unsigned fid) 
+    {
+      return region.get_field_accessor(fid).template typeify<ET>().template convert<AT>();
     }
 
     namespace AccessorType {
@@ -139,6 +145,7 @@ namespace LegionRuntime {
       template <size_t STRIDE> struct AOS;
       template <size_t STRIDE> struct SOA;
       template <size_t STRIDE, size_t BLOCK_SIZE, size_t BLOCK_STRIDE> struct HybridSOA;
+      template <unsigned DIM> struct Affine;
 
       template <typename REDOP> struct ReductionFold;
       template <typename REDOP> struct ReductionList;
@@ -211,26 +218,33 @@ namespace LegionRuntime {
 	  void read_untyped(const Realm::DomainPoint& dp, void *dst, size_t bytes, off_t offset = 0) const;
 	  void write_untyped(const Realm::DomainPoint& dp, const void *src, size_t bytes, off_t offset = 0) const;
 
+	  void report_fault(ptr_t ptr, size_t bytes, off_t offset = 0) const;
+	  void report_fault(const Realm::DomainPoint& dp, size_t bytes, off_t offset = 0) const;
+
 	  RegionAccessor<Generic, void, void> get_untyped_field_accessor(off_t _field_offset, size_t _field_size)
 	  {
 	    return RegionAccessor<Generic, void, void>(Untyped(internal, field_offset + _field_offset));
 	  }
 
-	  void *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride);
+	  void *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride) const;
+
+	  // for whole instance - fails if not completely affine
+	  template <int DIM>
+	  void *raw_rect_ptr(ByteOffset *offsets) const;
 
 	  template <int DIM>
-	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets);
+	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets) const;
 
 	  template <int DIM>
 	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
-			     const std::vector<off_t> &field_offsets, ByteOffset &field_stride);
+			     const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const;
 
 	  template <int DIM>
-	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride);
+	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride) const;
 
 	  template <int DIM>
 	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride,
-			      const std::vector<off_t> &field_offsets, ByteOffset &field_stride);
+			      const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const;
 
 	  void *internal;
 	  off_t field_offset;
@@ -298,20 +312,35 @@ namespace LegionRuntime {
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
 
-	  T *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& offset)
+	  void report_fault(ptr_t ptr) const
+	  {
+	    Untyped::report_fault(ptr, sizeof(T));
+	  }
+
+	  void report_fault(const Realm::DomainPoint& dp) const
+	  {
+	    Untyped::report_fault(dp, sizeof(T));
+	  }
+
+	  T *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& offset) const
 	  { return (T*)(Untyped::raw_span_ptr(ptr, req_count, act_count, offset)); }
 
+	  // for whole instance - fails if not completely affine
 	  template <int DIM>
-	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets)
+	  T *raw_rect_ptr(ByteOffset *offsets) const
+	  { return (T*)(Untyped::raw_rect_ptr<DIM>(offsets)); }
+
+	  template <int DIM>
+	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets) const
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets)); }
 
 	  template <int DIM>
 	    T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
-			    const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+			    const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets, field_offsets, field_stride)); }
 
 	  template <int DIM>
-	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride)
+	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride) const
 	  { return (T*)(Untyped::raw_dense_ptr<DIM>(r, subrect, elem_stride)); }
 
 	  template<typename REDOP, typename PTRTYPE>
@@ -435,6 +464,24 @@ namespace LegionRuntime {
             result.set_privileges(priv);
 #endif
             return result;
+	  }
+
+	  template <typename AT, unsigned DIM>
+	  bool can_convert_helper(Affine<DIM> *dummy) const {
+	    ByteOffset offsets[DIM];
+	    T *ptr = raw_rect_ptr<DIM>(offsets);
+	    bool ok = (ptr != 0);
+	    return ok;
+	  }
+
+	  template <typename AT, unsigned DIM>
+	  RegionAccessor<Affine<DIM>, T> convert_helper(Affine<DIM> *dummy) const {
+	    RegionAccessor<Affine<DIM>, T> result;
+	    T *ptr = raw_rect_ptr<DIM>(result.strides);
+	    bool ok = (ptr != 0);
+	    assert(ok);
+	    result.base = ptr;
+	    return result;
 	  }
 
 	  template <typename AT, typename REDOP>
@@ -853,6 +900,62 @@ namespace LegionRuntime {
 	    check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
+	  }
+	};
+      };
+
+      template <unsigned DIM>
+      struct Affine {
+	struct Untyped {
+          CUDAPREFIX
+	  Untyped(void) : base(0) {}
+
+          CUDAPREFIX
+	  inline void *elem_ptr(const Point<DIM>& p)
+	  {
+	    void *ptr = base;
+	    for(unsigned i = 0; i < DIM; i++)
+	      ptr += strides[i] * p.x[i];
+#if 0
+	    printf("AFF[%p, (%d", this, p.x[0]);
+	    for(unsigned i = 1; i < DIM; i++)
+	      printf(", %d", p.x[i]);
+	    printf(") -> %p\n", ptr);
+#endif
+	    return ptr;
+	  }
+
+	  void *base;
+	  ByteOffset strides[DIM];
+	};
+
+	template <typename T, typename PT>
+	struct Typed : public Untyped {
+          CUDAPREFIX
+	  Typed(void) : Untyped() {}
+
+          CUDAPREFIX
+	  inline T& ref(const Point<DIM>& p)
+	  {
+	    return *(T *)(Untyped::elem_ptr(p));
+	  }
+
+          CUDAPREFIX
+	  inline T& operator[](const Point<DIM>& p)
+	  {
+	    return ref(p);
+	  }
+
+          CUDAPREFIX
+	  inline T read(const Point<DIM>& p)
+	  {
+	    return ref(p);
+	  }
+
+          CUDAPREFIX
+	  inline void write(const Point<DIM>& p, T newval)
+	  {
+	    ref(p) = newval;
 	  }
 	};
       };

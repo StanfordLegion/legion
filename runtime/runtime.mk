@@ -134,6 +134,24 @@ LEGION_LD_FLAGS += -ldl -Wl,-export_dynamic
 endif
 endif
 
+USE_LLVM ?= 0
+ifeq ($(strip $(USE_LLVM)),1)
+  # prefer 3.5 (actually, require it right now)
+  LLVM_CONFIG ?= $(shell which llvm-config-3.5 llvm-config | head -1)
+  ifeq ($(LLVM_CONFIG),)
+    $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
+  endif
+  CC_FLAGS += -DREALM_USE_LLVM
+  # NOTE: do not use these for all source files - just the ones that include llvm include files
+  LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
+  LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+  # llvm-config --system-libs gives you all the libraries you might need for anything,
+  #  which includes things we don't need, and might not be installed
+  # by default, filter out libedit
+  LLVM_SYSTEM_LIBS ?= $(filter-out -ledit,$(shell $(LLVM_CONFIG) --system-libs))
+  LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
+endif
+
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
@@ -153,7 +171,7 @@ CC_FLAGS        += -DUSE_CUDA
 NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
-NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g
+NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
 #NVCC_FLAGS	+= -G
 else
 NVCC_FLAGS	+= -O2
@@ -261,7 +279,7 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
@@ -272,7 +290,7 @@ CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Wno-strict-overflow
-ifeq ($(strip $(WARNINGS_ARE_ERRORS)),1)
+ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
 
@@ -290,6 +308,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
+	           $(LG_RT_DIR)/realm/faults.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
@@ -300,11 +319,18 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/inst_impl.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
+		   $(LG_RT_DIR)/realm/sampling_impl.cc \
                    $(LG_RT_DIR)/lowlevel.cc \
                    $(LG_RT_DIR)/lowlevel_disk.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
+		   $(LG_RT_DIR)/realm/numa/numasysif.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
 		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
+endif
+ifeq ($(strip $(USE_LLVM)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
+                   $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
 endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
@@ -320,12 +346,13 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
-# If you want to go back to using the shared mapper, comment out the next line
-# and uncomment the one after that
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
+		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
-		   $(LG_RT_DIR)/mappers/mapping_utilities.cc
-#MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
+		   $(LG_RT_DIR)/mappers/test_mapper.cc \
+		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
+		   $(LG_RT_DIR)/mappers/debug_mapper.cc
+
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
@@ -341,9 +368,11 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \
 		    $(LG_RT_DIR)/legion/legion_constraint.cc \
+		    $(LG_RT_DIR)/legion/legion_mapping.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
-		    $(LG_RT_DIR)/legion/garbage_collection.cc
+		    $(LG_RT_DIR)/legion/garbage_collection.cc \
+		    $(LG_RT_DIR)/legion/mapper_manager.cc
 
 # General shell commands
 SHELL	:= /bin/sh
@@ -426,3 +455,7 @@ clean::
 
 endif
 
+ifeq ($(strip $(USE_LLVM)),1)
+llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+%/llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+endif

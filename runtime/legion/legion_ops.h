@@ -19,15 +19,17 @@
 
 #include "legion.h"
 #include "region_tree.h"
+#include "legion_mapping.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "legion_analysis.h"
+#include "mapper_manager.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     // Special typedef for predicates
-    typedef Predicate::Impl PredicateOp; 
+    typedef PredicateImpl PredicateOp; 
 
     /**
      * \class Operation
@@ -114,11 +116,17 @@ namespace LegionRuntime {
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
-      struct DeferredCommitArgs {
+      struct DeferredCommitTriggerArgs {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
         GenerationID gen;
+      };
+      struct DeferredCommitArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+        bool deactivate;
       };
       struct StateAnalysisArgs {
       public:
@@ -133,7 +141,7 @@ namespace LegionRuntime {
           { mapping_dependences.insert(dependence); }
         inline void add_resolution_dependence(Event dependence)
           { resolution_dependences.insert(dependence); }
-        void issue_stage_triggers(Operation *op, Internal *runtime, 
+        void issue_stage_triggers(Operation *op, Runtime *runtime, 
                                   MustEpochOp *must_epoch);
       private:
         std::set<Event> mapping_dependences;
@@ -143,12 +151,12 @@ namespace LegionRuntime {
       public:
         inline void add_commit_dependence(Event dependence)
           { commit_dependences.insert(dependence); }
-        bool issue_commit_trigger(Operation *op, Internal *runtime);
+        bool issue_commit_trigger(Operation *op, Runtime *runtime);
       private:
         std::set<Event> commit_dependences;
       };
     public:
-      Operation(Internal *rt);
+      Operation(Runtime *rt);
       virtual ~Operation(void);
     public:
       static const char* get_string_rep(OpKind kind);
@@ -193,12 +201,14 @@ namespace LegionRuntime {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_trace(LegionTrace *trace, bool is_tracing);
-      void set_must_epoch(MustEpochOp *epoch, unsigned index);
+      void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
       // coherence mode is exclusive
       static void localize_region_requirement(RegionRequirement &req);
+      static void release_acquired_instances(std::map<PhysicalManager*,
+                        std::pair<unsigned,bool> > &acquired_instances);
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
@@ -241,7 +251,7 @@ namespace LegionRuntime {
       // part of the default pipeline)
       virtual void deferred_execute(void);
       // Helper function for deferring commit operations
-      virtual void deferred_commit(GenerationID commit_gen);
+      virtual void deferred_commit_trigger(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -263,6 +273,16 @@ namespace LegionRuntime {
       virtual bool is_close_op(void) const { return false; }
       // Determine if this operation is a partition operation
       virtual bool is_partition_op(void) const { return false; }
+    public: // virtual methods for mapping
+      // Pick the sources for a copy operations
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      // Get a reference to our data structure for tracking acquired instances
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
+      // Update the set of atomic locks for this operation
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -278,7 +298,7 @@ namespace LegionRuntime {
       // which will also verify any regions for our producers
       void complete_operation(void);
       // Indicate that we are committing this operation
-      void commit_operation(void);
+      void commit_operation(bool do_deactivate,Event wait_on = Event::NO_EVENT);
       // Indicate that this operation is hardened against failure
       void harden_operation(void);
       // Quash this task and do what is necessary to the
@@ -351,8 +371,20 @@ namespace LegionRuntime {
       // been verified (flows up edges)
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
+    public: // Support for mapping operations
+      static void prepare_for_mapping(const InstanceRef &ref,
+                                      MappingInstance &instance);
+      static void prepare_for_mapping(const InstanceSet &valid,
+                           std::vector<MappingInstance> &input_valid);
+      static void prepare_for_mapping(const InstanceSet &valid,
+                           const std::set<Memory> &filter_memories,
+                           std::vector<MappingInstance> &input_valid);
+      static void compute_ranking(
+          const std::deque<MappingInstance>         &output,
+          const InstanceSet                         &sources,
+          std::vector<unsigned>                     &ranking);
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
     protected:
       Reservation op_lock;
       GenerationID gen;
@@ -372,7 +404,7 @@ namespace LegionRuntime {
       // Set of events from operations we depend that describe when
       // all of their children have mapped
       //std::set<Event> dependent_children_mapped;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -419,8 +451,6 @@ namespace LegionRuntime {
       bool tracing;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
-      // The index in the must epoch
-      unsigned must_epoch_index;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
       // A dependence tracker for this operation
@@ -443,15 +473,15 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Predicate::Impl 
+     * \class Predicate 
      * A predicate operation is an abstract class that
      * contains a method that allows other operations to
      * sample their values and see if they are resolved
      * or whether they are speculated values.
      */
-    class Predicate::Impl : public Operation {
+    class PredicateImpl : public Operation {
     public:
-      Impl(Internal *rt);
+      PredicateImpl(Runtime *rt);
     public:
       void activate_predicate(void);
       void deactivate_predicate(void);
@@ -491,13 +521,13 @@ namespace LegionRuntime {
         RESOLVE_FALSE_STATE,
       };
     public:
-      SpeculativeOp(Internal *rt);
+      SpeculativeOp(Runtime *rt);
     public:
       void activate_speculative(void);
       void deactivate_speculative(void);
     public:
-      void initialize_speculation(SingleTask *ctx, bool track, 
-                                  unsigned regions, const Predicate &p);
+      void initialize_speculation(SingleTask *ctx, bool track, unsigned regions,
+                                  const Predicate &p);
       void register_predicate_dependence(void);
       bool is_predicated(void) const;
       // Wait until the predicate is valid and then return
@@ -542,11 +572,11 @@ namespace LegionRuntime {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public Inline, public Operation {
+    class MapOp : public InlineMapping, public Operation {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
-      MapOp(Internal *rt);
+      MapOp(Runtime *rt);
       MapOp(const MapOp &rhs);
       virtual ~MapOp(void);
     public:
@@ -576,17 +606,21 @@ namespace LegionRuntime {
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(const InstanceSet &valid_instances,
+                               InstanceSet &mapped_instances);
+      void report_profiling_results(void);
     protected:
       bool remap_region;
       UserEvent termination_event;
@@ -594,7 +628,13 @@ namespace LegionRuntime {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::map<Reservation,bool> atomic_locks;
+    protected:
+      MapperManager *mapper;
+    protected:
+      Mapper::InlineProfilingInfo profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -608,7 +648,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
-      CopyOp(Internal *rt);
+      CopyOp(Runtime *rt);
       CopyOp(const CopyOp &rhs);
       virtual ~CopyOp(void);
     public:
@@ -635,18 +675,26 @@ namespace LegionRuntime {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
       void compute_parent_indexes(void);
+      template<bool IS_SRC>
+      int perform_conversion(unsigned idx, const RegionRequirement &req,
+                             std::vector<MappingInstance> &output,
+                             InstanceSet &targets, bool is_reduce = false);
+      inline void set_mapping_state(unsigned idx, bool is_src) 
+        { current_index = idx; current_src = is_src; }
+      void report_profiling_results(void);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
@@ -654,8 +702,16 @@ namespace LegionRuntime {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-      std::vector<RestrictInfo>   src_restrictions;
-      std::vector<RestrictInfo>   dst_restrictions;
+    protected: // for support with mapping
+      MapperManager*              mapper;
+      unsigned                    current_index;
+      bool                        current_src;
+    protected:
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::vector<std::map<Reservation,bool> > atomic_locks;
+    protected:
+      Mapper::CopyProfilingInfo   profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -678,7 +734,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
-      FenceOp(Internal *rt);
+      FenceOp(Runtime *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
     public:
@@ -710,7 +766,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
-      FrameOp(Internal *rt);
+      FrameOp(Runtime *rt);
       FrameOp(const FrameOp &rhs);
       virtual ~FrameOp(void);
     public:
@@ -751,7 +807,7 @@ namespace LegionRuntime {
         LOGICAL_PARTITION_DELETION,
       };
     public:
-      DeletionOp(Internal *rt);
+      DeletionOp(Runtime *rt);
       DeletionOp(const DeletionOp &rhs);
       virtual ~DeletionOp(void);
     public:
@@ -796,21 +852,25 @@ namespace LegionRuntime {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Operation {
+    class CloseOp : public Close, public Operation {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
-      CloseOp(Internal *rt);
+      CloseOp(Runtime *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
     public:
       CloseOp& operator=(const CloseOp &rhs);
     public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
+    public:
       void activate_close(void);
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void perform_logging(bool is_intermediate_close_op);
+      void initialize_close(SingleTask *ctx, unsigned idx, bool track);
+      void perform_logging(bool is_intermediate_close_op, bool read_only);
     public:
       // For recording trace dependences
     public:
@@ -824,10 +884,9 @@ namespace LegionRuntime {
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void trigger_commit(void);
     protected:
-      RegionRequirement requirement;
       RegionTreePath privilege_path;
-      VersionInfo  version_info;
-      RestrictInfo restrict_info;
+      VersionInfo    version_info;
+      RestrictInfo   restrict_info;
     };
 
     /**
@@ -837,7 +896,7 @@ namespace LegionRuntime {
      */
     class TraceCloseOp : public CloseOp {
     public:
-      TraceCloseOp(Internal *runtime);
+      TraceCloseOp(Runtime *runtime);
       virtual ~TraceCloseOp(void);
     public:
       virtual void activate(void) = 0;
@@ -890,7 +949,7 @@ namespace LegionRuntime {
      */
     class InterCloseOp : public TraceCloseOp {
     public:
-      InterCloseOp(Internal *runtime);
+      InterCloseOp(Runtime *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
     public:
@@ -910,9 +969,25 @@ namespace LegionRuntime {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
+    protected:
+      int invoke_mapper(const InstanceSet &valid_instances,
+                              InstanceSet &chosen_instances);
+      void report_profiling_results(void);
     protected:
       unsigned parent_req_index;
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      MapperManager *mapper;
+    protected:
+      Mapper::CloseProfilingInfo  profiling_results;
+      UserEvent                   profiling_reported;
     };
     
     /**
@@ -928,7 +1003,7 @@ namespace LegionRuntime {
      */
     class ReadCloseOp : public TraceCloseOp {
     public:
-      ReadCloseOp(Internal *runtime);
+      ReadCloseOp(Runtime *runtime);
       ReadCloseOp(const ReadCloseOp &rhs);
       virtual ~ReadCloseOp(void);
     public:
@@ -958,14 +1033,13 @@ namespace LegionRuntime {
      */
     class PostCloseOp : public CloseOp {
     public:
-      PostCloseOp(Internal *runtime);
+      PostCloseOp(Runtime *runtime);
       PostCloseOp(const PostCloseOp &rhs);
       virtual ~PostCloseOp(void);
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index, 
-                      const InstanceRef &reference);
+      void initialize(SingleTask *ctx, unsigned index); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -974,10 +1048,23 @@ namespace LegionRuntime {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
     protected:
-      InstanceRef reference;
+      void report_profiling_results(void);
+    protected:
       unsigned parent_idx;
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      MapperManager *mapper;
+    protected:
+      Mapper::CloseProfilingInfo  profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -989,7 +1076,7 @@ namespace LegionRuntime {
      */
     class VirtualCloseOp : public CloseOp {
     public:
-      VirtualCloseOp(Internal *runtime);
+      VirtualCloseOp(Runtime *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
       virtual ~VirtualCloseOp(void);
     public:
@@ -1019,7 +1106,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
-      AcquireOp(Internal *rt);
+      AcquireOp(Runtime *rt);
       AcquireOp(const AcquireOp &rhs);
       virtual ~AcquireOp(void);
     public:
@@ -1043,25 +1130,29 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-    public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
+    public: 
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(void);
+      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      MapperManager*    mapper;
+    protected:
+      Mapper::AcquireProfilingInfo  profiling_results;
+      UserEvent                     profiling_reported;
     };
 
     /**
@@ -1074,7 +1165,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
-      ReleaseOp(Internal *rt);
+      ReleaseOp(Runtime *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
     public:
@@ -1098,25 +1189,32 @@ namespace LegionRuntime {
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                   get_acquired_instances_ref(void);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(void);
+      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      MapperManager*    mapper;
+    protected:
+      Mapper::ReleaseProfilingInfo  profiling_results;
+      UserEvent                     profiling_reported;
     };
 
     /**
@@ -1130,7 +1228,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
-      DynamicCollectiveOp(Internal *rt);
+      DynamicCollectiveOp(Runtime *rt);
       DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
       virtual ~DynamicCollectiveOp(void);
     public:
@@ -1155,7 +1253,7 @@ namespace LegionRuntime {
      * \class FuturePredOp
      * A class for making predicates out of futures.
      */
-    class FuturePredOp : public Predicate::Impl {
+    class FuturePredOp : public PredicateOp {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
@@ -1164,7 +1262,7 @@ namespace LegionRuntime {
         FuturePredOp *future_pred_op;
       };
     public:
-      FuturePredOp(Internal *rt);
+      FuturePredOp(Runtime *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
@@ -1188,11 +1286,11 @@ namespace LegionRuntime {
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public Predicate::Impl, PredicateWaiter {
+    class NotPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
-      NotPredOp(Internal *rt);
+      NotPredOp(Runtime *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
     public:
@@ -1216,11 +1314,11 @@ namespace LegionRuntime {
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public Predicate::Impl, PredicateWaiter {
+    class AndPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
-      AndPredOp(Internal *rt);
+      AndPredOp(Runtime *rt);
       AndPredOp(const AndPredOp &rhs);
       virtual ~AndPredOp(void);
     public:
@@ -1251,11 +1349,11 @@ namespace LegionRuntime {
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public Predicate::Impl, PredicateWaiter {
+    class OrPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
-      OrPredOp(Internal *rt);
+      OrPredOp(Runtime *rt);
       OrPredOp(const OrPredOp &rhs);
       virtual ~OrPredOp(void);
     public:
@@ -1311,17 +1409,17 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      MustEpochOp(Internal *rt);
+      MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
       FutureMap initialize(SingleTask *ctx,
-                           const MustEpochLauncher &launcher,
-                           bool check_privileges);
-      void set_task_options(ProcessorManager *manager);
-      void find_conflicted_regions(std::vector<PhysicalRegion> &unmapped); 
+                                   const MustEpochLauncher &launcher,
+                                   bool check_privileges);
+      void find_conflicted_regions(
+          std::vector<PhysicalRegion> &unmapped); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1341,6 +1439,12 @@ namespace LegionRuntime {
                              Operation *target_op, GenerationID target_gen,
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
+      void must_epoch_map_task_callback(SingleTask *task, 
+                                        Mapper::MapTaskInput &input,
+                                        Mapper::MapTaskOutput &output);
+      // Get a reference to our data structure for tracking acquired instances
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
     public:
       void add_mapping_dependence(Event precondition);
       void register_single_task(SingleTask *single, unsigned index);
@@ -1368,6 +1472,8 @@ namespace LegionRuntime {
       // Use a deque to keep everything in order
       std::deque<SingleTask*>      single_tasks;
     protected:
+      Mapper::MapMustEpochInput    input;
+      Mapper::MapMustEpochOutput   output;
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;
     protected:
@@ -1382,6 +1488,8 @@ namespace LegionRuntime {
       std::vector<Mapper::MappingConstraint> constraints;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
+      // Track the physical instances that we've acquired
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
       std::deque<DependenceRecord> dependences;
       std::vector<unsigned> dependence_count;
@@ -1478,7 +1586,7 @@ namespace LegionRuntime {
     public:
       MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
     public:
-      void distribute_tasks(Internal *runtime,
+      void distribute_tasks(Runtime *runtime,
                             const std::vector<IndividualTask*> &indiv_tasks,
                             const std::set<SliceTask*> &slice_tasks);
     public:
@@ -1635,7 +1743,7 @@ namespace LegionRuntime {
         std::vector<IndexSpace> handles;
       };
     public:
-      PendingPartitionOp(Internal *rt);
+      PendingPartitionOp(Runtime *rt);
       PendingPartitionOp(const PendingPartitionOp &rhs);
       virtual ~PendingPartitionOp(void);
     public:
@@ -1706,7 +1814,7 @@ namespace LegionRuntime {
         BY_PREIMAGE,
       };
     public:
-      DependentPartitionOp(Internal *rt);
+      DependentPartitionOp(Runtime *rt);
       DependentPartitionOp(const DependentPartitionOp &rhs);
       virtual ~DependentPartitionOp(void);
     public:
@@ -1764,7 +1872,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
-      FillOp(Internal *rt);
+      FillOp(Runtime *rt);
       FillOp(const FillOp &rhs);
       virtual ~FillOp(void);
     public:
@@ -1775,7 +1883,7 @@ namespace LegionRuntime {
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid, const Future &f,
+                      LogicalRegion parent, FieldID fid,const Future &f,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
@@ -1786,6 +1894,8 @@ namespace LegionRuntime {
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, const FillLauncher &launcher,
+                      bool check_privileges);
       void perform_logging(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
@@ -1808,6 +1918,7 @@ namespace LegionRuntime {
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
+      Event compute_sync_precondition(void) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
@@ -1817,6 +1928,11 @@ namespace LegionRuntime {
       void *value;
       size_t value_size;
       Future future;
+      std::set<Event> map_applied_conditions;
+    protected:
+      std::vector<Grant>        grants;
+      std::vector<PhaseBarrier> wait_barriers;
+      std::vector<PhaseBarrier> arrive_barriers;
     };
 
     /**
@@ -1832,17 +1948,19 @@ namespace LegionRuntime {
         IN_MEMORY_DATA
       };
     public:
-      AttachOp(Internal *rt);
+      AttachOp(Runtime *rt);
       AttachOp(const AttachOp &rhs);
       virtual ~AttachOp(void);
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize_hdf5(SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_hdf5(
+                                 SingleTask *ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
-      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_file(
+                                     SingleTask *ctx, const char *file_name,
                                      LogicalRegion handle, LogicalRegion parent,
                                      const std::vector<FieldID> &field_vec,
                                      LegionFileMode mode, bool check_privileges);
@@ -1862,7 +1980,7 @@ namespace LegionRuntime {
       virtual void trigger_commit(void);
     public:
       PhysicalInstance create_instance(const Domain &dom,
-                                       const std::vector<size_t> &field_sizes);
+        const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -1887,7 +2005,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
-      DetachOp(Internal *rt);
+      DetachOp(Runtime *rt);
       DetachOp(const DetachOp &rhs);
       virtual ~DetachOp(void);
     public:
@@ -1929,7 +2047,7 @@ namespace LegionRuntime {
         NANOSECOND_MEASUREMENT,
       };
     public:
-      TimingOp(Internal *rt);
+      TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
       virtual ~TimingOp(void);
     public:
@@ -1954,7 +2072,7 @@ namespace LegionRuntime {
       Future result;
     };
 
-  }; //namespace HighLevel
-}; // namespace LegionRuntime
+  }; //namespace Internal 
+}; // namespace Legion 
 
 #endif // __LEGION_OPERATIONS_H__

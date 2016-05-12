@@ -39,9 +39,11 @@ add_builtin("regentlib", std)
 local language = {
   name = "legion",
   entrypoints = {
-    "task",
-    "fspace",
     "__demand",
+    "fspace",
+    "rexpr",
+    "rquote",
+    "task",
   },
   keywords = {
     "__context",
@@ -52,21 +54,29 @@ local language = {
     "__inline",
     "__parallel",
     "__physical",
+    "__delete",
     "__raw",
     "__runtime",
     "__spmd",
+    "__trace",
     "__unroll",
     "__vectorize",
+    "__block",
     "aliased",
     "allocate_scratch_fields",
     "advance",
+    "arrive",
+    "await",
     "arrives",
     "awaits",
     "atomic",
     "copy",
     "cross_product",
+    "cross_product_array",
     "disjoint",
     "dynamic_cast",
+    "dynamic_collective",
+    "dynamic_collective_get_result",
     "exclusive",
     "equal",
     "fill",
@@ -75,6 +85,8 @@ local language = {
     "isnull",
     "ispace",
     "list_cross_product",
+    "list_cross_product_complete",
+    "list_slice_partition",
     "list_duplicate_partition",
     "list_invert",
     "list_phase_barriers",
@@ -96,6 +108,7 @@ local language = {
     "region",
     "simultaneous",
     "static_cast",
+    "unsafe_cast",
     "wild", -- reserved for future use
     "with_scratch_fields",
     "where",
@@ -103,17 +116,16 @@ local language = {
   },
 }
 
--- function language:expression(lex)
---   return function(environment_function)
---   end
--- end
+function language:expression(lex)
+  return passes.entry_expr(lex)
+end
 
 function language:statement(lex)
-  return passes.compile(lex)
+  return passes.entry_stat(lex)
 end
 
 function language:localstatement(lex)
-  return passes.compile(lex)
+  return passes.entry_stat(lex)
 end
 
 return language

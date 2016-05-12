@@ -51,11 +51,18 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.AllocateScratchFields) or
@@ -80,6 +87,8 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.Deref)
     then
       return not std.is_bounded_type(std.as_read(node.value.expr_type))
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_region(std.as_read(node.value.expr_type))
     elseif node:is(ast.typed.expr.RawPhysical) or
       node:is(ast.typed.stat.MapRegions)
     then
@@ -98,7 +107,7 @@ end
 
 local optimize_config_options = {}
 
-function optimize_config_options.stat_task(cx, node)
+function optimize_config_options.top_task(cx, node)
   local leaf = analyze_leaf(cx, node.body)
   local inner = not leaf and analyze_inner(cx, node.body)
 
@@ -111,9 +120,9 @@ function optimize_config_options.stat_task(cx, node)
   }
 end
 
-function optimize_config_options.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_config_options.stat_task(cx, node)
+function optimize_config_options.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_config_options.top_task(cx, node)
 
   else
     return node
@@ -122,7 +131,7 @@ end
 
 function optimize_config_options.entry(node)
   local cx = context.new_global_scope()
-  return optimize_config_options.stat_top(cx, node)
+  return optimize_config_options.top(cx, node)
 end
 
 return optimize_config_options

@@ -31,7 +31,7 @@ namespace Realm {
   //
 
     MetadataBase::MetadataBase(void)
-      : state(STATE_INVALID), valid_event_impl(0)
+      : state(STATE_INVALID), valid_event(Event::NO_EVENT)
     {}
 
     MetadataBase::~MetadataBase(void)
@@ -58,15 +58,15 @@ namespace Realm {
     {
       // update the state, and
       // if there was an event, we'll trigger it
-      GenEventImpl *to_trigger = 0;
+      Event to_trigger = Event::NO_EVENT;
       {
 	AutoHSLLock a(mutex);
 
 	switch(state) {
 	case STATE_REQUESTED:
 	  {
-	    to_trigger = valid_event_impl;
-	    valid_event_impl = 0;
+	    to_trigger = valid_event;
+	    valid_event = Event::NO_EVENT;
 	    state = STATE_VALID;
 	    break;
 	  }
@@ -76,8 +76,8 @@ namespace Realm {
 	}
       }
 
-      if(to_trigger)
-	to_trigger->trigger_current();
+      if(to_trigger.exists())
+	GenEventImpl::trigger(to_trigger, false /*!poisoned*/);
     }
 
     Event MetadataBase::request_data(int owner, ID::IDType id)
@@ -106,8 +106,8 @@ namespace Realm {
 	  {
 	    // if the current state is invalid, we'll need to issue a request
 	    state = STATE_REQUESTED;
-	    valid_event_impl = GenEventImpl::create_genevent();
-            e = valid_event_impl->current_event();
+	    valid_event = GenEventImpl::create_genevent()->current_event();
+            e = valid_event;
 	    issue_request = true;
 	    break;
 	  }
@@ -115,8 +115,8 @@ namespace Realm {
 	case STATE_REQUESTED:
 	  {
 	    // request has already been issued, but return the event again
-	    assert(valid_event_impl);
-            e = valid_event_impl->current_event();
+	    assert(valid_event.exists());
+            e = valid_event;
 	    break;
 	  }
 
@@ -146,8 +146,7 @@ namespace Realm {
 	AutoHSLLock a(mutex);
 
 	assert(state != STATE_INVALID);
-	if(valid_event_impl)
-          e = valid_event_impl->current_event();
+	e = valid_event;
       }
 
       if(!e.has_triggered())

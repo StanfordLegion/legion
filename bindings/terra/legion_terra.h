@@ -16,11 +16,11 @@
 #ifndef __LEGION_TERRA_H__
 #define __LEGION_TERRA_H__
 
+#include "legion_c.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "legion_c.h"
 
 void register_reduction_plus_float(legion_reduction_op_id_t redop);
 void register_reduction_plus_double(legion_reduction_op_id_t redop);
@@ -201,51 +201,6 @@ void safe_reduce_min_int32(legion_accessor_generic_t accessor,
                            legion_ptr_t ptr, int value);
 void safe_reduce_min_int32_domain_point(legion_accessor_generic_t accessor,
                                         legion_domain_point_t, int value);
-
-void set_lua_registration_callback_name(char*);
-
-legion_mapper_t create_mapper(const char*,
-                              legion_machine_t,
-                              legion_runtime_t,
-                              legion_processor_t);
-
-void lua_registration_callback_wrapper(legion_machine_t,
-                                       legion_runtime_t,
-                                       const legion_processor_t*,
-                                       unsigned);
-
-void lua_task_wrapper_void(legion_task_t,
-                           const legion_physical_region_t*,
-                           unsigned,
-                           legion_context_t,
-                           legion_runtime_t);
-
-legion_task_result_t lua_task_wrapper(legion_task_t,
-                                      const legion_physical_region_t*,
-                                      unsigned,
-                                      legion_context_t,
-                                      legion_runtime_t);
-
-
-typedef
-  struct vector_legion_domain_split_t { void *impl; }
-vector_legion_domain_split_t;
-
-void
-vector_legion_domain_split_push_back(vector_legion_domain_split_t,
-                                     legion_domain_split_t);
-
-unsigned
-vector_legion_domain_split_size(vector_legion_domain_split_t);
-
-legion_domain_split_t
-vector_legion_domain_split_get(vector_legion_domain_split_t,
-                               unsigned);
-
-void decompose_index_space(legion_domain_t,
-                           legion_processor_t*,
-                           unsigned, unsigned,
-                           vector_legion_domain_split_t);
 
 #ifdef __cplusplus
 }

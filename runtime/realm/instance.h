@@ -65,6 +65,9 @@ namespace Realm {
       id_t local_id(void) const;
 
       LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
+
+      void report_instance_fault(int reason,
+				 const void *reason_data, size_t reason_size) const;
     };
 
     inline std::ostream& operator<<(std::ostream& os, RegionInstance r) { return os << std::hex << r.id << std::dec; }

@@ -21,28 +21,32 @@
 #include "region_tree.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
-
+namespace Legion {
+  namespace Internal {
 
     /////////////////////////////////////////////////////////////
     // DistributedCollectable 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DistributedCollectable::DistributedCollectable(Internal *rt,
+    DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space,
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
-        local_space(loc_space), current_state(INACTIVE_STATE),
-        gc_lock(Reservation::create_reservation()), gc_references(0), 
-        valid_references(0), resource_references(0), 
+        local_space(loc_space), gc_lock(Reservation::create_reservation()),
+        current_state(INACTIVE_STATE), has_gc_references(false),
+        has_valid_references(false), has_resource_references(false), 
+        gc_references(0), valid_references(0), resource_references(0), 
         destruction_event(UserEvent::create_user_event()),
         registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (did > 0)
+        assert(runtime->determine_owner(did) == owner_space);
+#endif
       if (do_registration)
       {
         runtime->register_distributed_collectable(did, this);
@@ -57,13 +61,12 @@ namespace LegionRuntime {
     DistributedCollectable::~DistributedCollectable(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(gc_references == 0);
       assert(valid_references == 0);
       assert(resource_references == 0);
-      assert(current_state == DELETED_STATE);
 #endif
-      destruction_event.trigger(Event::merge_events(recycle_events));
+      destruction_event.trigger(Runtime::merge_events<true>(recycle_events));
       if (registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);
@@ -82,10 +85,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_gc_reference(unsigned cnt /*=1*/)
+    void DistributedCollectable::add_gc_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
       bool need_activate = false;
@@ -108,7 +111,10 @@ namespace LegionRuntime {
         AutoLock gc(gc_lock);
         if (first)
         {
-          gc_references += cnt;
+#ifdef DEBUG_LEGION
+          assert(!has_gc_references);
+#endif
+          has_gc_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -124,10 +130,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_gc_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::remove_gc_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
 #endif
       bool need_activate = false;
@@ -150,10 +156,10 @@ namespace LegionRuntime {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(gc_references >= cnt);
+#ifdef DEBUG_LEGION
+          assert(has_gc_references);
 #endif
-          gc_references -= cnt;
+          has_gc_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -163,11 +169,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_valid_reference(unsigned cnt /*=1*/)
+    void DistributedCollectable::add_valid_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
 #endif
       bool need_activate = false;
       bool need_validate = false;
@@ -189,7 +199,10 @@ namespace LegionRuntime {
         AutoLock gc(gc_lock);
         if (first)
         {
-          valid_references += cnt;
+#ifdef DEBUG_LEGION
+          assert(!has_valid_references);
+#endif
+          has_valid_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -204,11 +217,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_valid_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::remove_valid_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
 #endif
       bool need_activate = false;
       bool need_validate = false;
@@ -230,10 +247,10 @@ namespace LegionRuntime {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(valid_references >= cnt);
+#ifdef DEBUG_LEGION
+          assert(has_valid_references);
 #endif
-          valid_references -= cnt;
+          has_valid_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -243,28 +260,113 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_resource_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::try_add_valid_reference(bool must_be_valid,
+                                                         int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(current_state != DELETED_STATE);
-#endif
-      AutoLock gc(gc_lock);
-      resource_references += cnt;
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        // Check our state and see if this is going to work
+        if (must_be_valid && (current_state != VALID_STATE))
+          return false;
+        // If we are in any of the deleted states, it is no good
+        if ((current_state == DELETED_STATE) || 
+            (current_state == ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_INVALID_DELETED_STATE) ||
+            (current_state == PENDING_INACTIVE_DELETED_STATE))
+          return false;
+        if (first)
+        {
+          // Still have to use an atomic here
+          unsigned previous = __sync_fetch_and_add(&valid_references, cnt);
+          if (previous == 0)
+            has_valid_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_resource_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::try_active_deletion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(current_state != DELETED_STATE);
-#endif
       AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(resource_references >= cnt);
+      // We can only do this from five states
+      // Note this also prevents duplicate deletions
+      if (current_state == INACTIVE_STATE)
+      {
+        current_state = DELETED_STATE;
+        return true;
+      }
+      if (current_state == ACTIVE_INVALID_STATE)
+      {
+        current_state = ACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_INACTIVE_STATE)
+      {
+        current_state = PENDING_INACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_ACTIVE_STATE)
+      {
+        current_state = PENDING_ACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_INVALID_STATE)
+      {
+        current_state = PENDING_INVALID_DELETED_STATE;
+        return true;
+      }
+      return false; 
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_resource_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(!has_resource_references);
 #endif
-      resource_references -= cnt;
+      has_resource_references = true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_resource_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(has_resource_references);
+#endif
+      has_resource_references = false;
       return can_delete();
     }
 
@@ -274,7 +376,7 @@ namespace LegionRuntime {
                                       AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(source != owner_space);
       assert(current_state != DELETED_STATE);
@@ -340,10 +442,9 @@ namespace LegionRuntime {
                                       AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner());
       assert(source != owner_space);
-      assert(current_state != DELETED_STATE);
       assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
       bool need_activate = false;
@@ -427,7 +528,7 @@ namespace LegionRuntime {
                                                           Event destroyed)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(is_owner()); // This should only happen on the owner node
 #endif
       AutoLock gc(gc_lock);
@@ -439,7 +540,7 @@ namespace LegionRuntime {
     void DistributedCollectable::register_with_runtime(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
@@ -452,7 +553,7 @@ namespace LegionRuntime {
     void DistributedCollectable::send_remote_registration(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(registered_with_runtime);
 #endif
@@ -470,7 +571,7 @@ namespace LegionRuntime {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -490,7 +591,7 @@ namespace LegionRuntime {
                                                        unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -510,7 +611,7 @@ namespace LegionRuntime {
                                 AddressSpaceID target, unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -539,7 +640,7 @@ namespace LegionRuntime {
       State copy = current_state;
       // We better be holding a gc reference or a valid reference when
       // we are doing this operation
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((copy == ACTIVE_INVALID_STATE) || (copy == VALID_STATE) ||
              (copy == PENDING_VALID_STATE) || (copy == PENDING_INVALID_STATE));
 #endif
@@ -593,7 +694,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_registration(
-                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
+                  Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -608,7 +709,7 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_valid_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -626,7 +727,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_gc_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -644,7 +745,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -663,7 +764,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_add_create(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef USE_REMOTE_REFERENCES
@@ -687,7 +788,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remove_create(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef USE_REMOTE_REFERENCES
@@ -711,7 +812,7 @@ namespace LegionRuntime {
           runtime->find_distributed_collectable(did);
         if (source == owner)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
           if (kind == VALID_REF_KIND)
@@ -765,18 +866,23 @@ namespace LegionRuntime {
           {
             // See if we have any reason to be active
 #ifdef USE_REMOTE_REFERENCES
-            if ((gc_references > 0) || (valid_references > 0) ||
-                || !create_gc_refs.empty() || !create_valid_refs.empty())
+            if (has_valid_references || (!create_valid_refs.empty()))
 #else
-            if ((gc_references > 0) || (valid_references > 0))
+            if (has_valid_references)
 #endif
             {
-              // Move to the pending active state
+              current_state = PENDING_ACTIVE_VALID_STATE;
+              need_activate = true;
+            }
+#ifdef USE_REMOTE_REFERENCES
+            else if (has_gc_references || !create_gc_refs.empty())
+#else
+            else if (has_gc_references)
+#endif
+            {
               current_state = PENDING_ACTIVE_STATE;
               need_activate = true;
             }
-            else
-              need_activate = false;
             need_validate = false;
             need_invalidate = false;
             need_deactivate = false;
@@ -786,9 +892,9 @@ namespace LegionRuntime {
           {
             // See if we have a reason to be valid
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references > 0) || !create_valid_refs.empty())
+            if (has_valid_references || !create_valid_refs.empty())
 #else
-            if (valid_references > 0)
+            if (has_valid_references)
 #endif
             {
               // Move to a pending valid state
@@ -798,9 +904,9 @@ namespace LegionRuntime {
             }
             // See if we have a reason to be inactive
 #ifdef USE_REMOTE_REFERENCES
-            else if ((gc_references == 0) && create_gc_refs.empty())
+            else if (!has_gc_references  && create_gc_refs.empty())
 #else
-            else if (gc_references == 0)
+            else if (!has_gc_references)
 #endif
             {
               current_state = PENDING_INACTIVE_STATE;
@@ -816,13 +922,39 @@ namespace LegionRuntime {
             need_invalidate = false;
             break;
           }
+        case ACTIVE_DELETED_STATE:
+          {
+            // We should never move to a valid state from here
+#ifdef USE_REMOTE_REFERENCES
+            if (has_valid_references || !create_valid_refs.empty())
+#else
+            if (has_valid_references)
+#endif           
+              assert(false);
+            // See if we have a reason to move towards deletion
+#ifdef USE_REMOTE_REFERENCES
+            else if (!has_gc_references && create_gc_refs.empty())
+#else
+            else if (!has_gc_references)
+#endif
+            {
+              current_state = PENDING_INACTIVE_DELETED_STATE;
+              need_deactivate = true;
+            }
+            else
+              need_deactivate = false;
+            need_validate = false;
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
         case VALID_STATE:
           {
             // See if we have a reason to be invalid
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references == 0) && create_valid_refs.empty())
+            if (!has_valid_references && create_valid_refs.empty())
 #else
-            if (valid_references == 0)
+            if (!has_valid_references)
 #endif
             {
               current_state = PENDING_INVALID_STATE;
@@ -835,6 +967,12 @@ namespace LegionRuntime {
             need_deactivate = false;
             break;
           }
+        case DELETED_STATE:
+          {
+            // Hitting this is universally bad
+            assert(false);
+            break;
+          }
         case PENDING_ACTIVE_STATE:
           {
             // See if we were the ones doing the activating
@@ -842,9 +980,9 @@ namespace LegionRuntime {
             {
               // See if we are still active
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Now we need a validate
@@ -853,9 +991,9 @@ namespace LegionRuntime {
                 need_deactivate = false;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references > 0) || !create_gc_refs.empty())
+              else if (has_gc_references || !create_gc_refs.empty())
 #else
-              else if (gc_references > 0)
+              else if (has_gc_references)
 #endif
               {
                 // Nothing more to do
@@ -889,10 +1027,18 @@ namespace LegionRuntime {
             {
               // See if we are still inactive
 #ifdef USE_REMOTE_REFERENCES
-              if ((gc_references == 0) && (valid_references == 0) &&
-                  create_gc_refs.empty() && create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if ((gc_references == 0) && (valid_references == 0))
+              if (has_valid_references)
+#endif
+              {
+                current_state = PENDING_ACTIVE_VALID_STATE;
+                need_activate = true;
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if (!has_gc_references && create_gc_refs.empty())
+#else
+              else if (!has_gc_references)
 #endif
               {
                 current_state = INACTIVE_STATE;
@@ -922,9 +1068,9 @@ namespace LegionRuntime {
             {
               // Check to see if we are still valid
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 current_state = VALID_STATE;
@@ -954,9 +1100,9 @@ namespace LegionRuntime {
             {
               // Check to see if we are still valid
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Now we are valid again
@@ -965,9 +1111,9 @@ namespace LegionRuntime {
                 need_deactivate = false;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 // No longer active either
@@ -993,6 +1139,178 @@ namespace LegionRuntime {
             need_invalidate = false;
             break;
           }
+        case PENDING_ACTIVE_VALID_STATE:
+          {
+            // See if we were the ones doing the action
+            if (need_activate)
+            {
+#ifdef USE_REMOTE_REFERENCES
+              if (has_valid_references || !create_valid_refs.empty())
+#else
+              if (has_valid_references)
+#endif
+              {
+                // Still going to valid
+                current_state = PENDING_VALID_STATE;
+                need_validate = true;
+                need_deactivate = false;
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if (!has_gc_references && create_gc_refs.empty())
+#else
+              else if (!has_gc_references)
+#endif
+              {
+                // all our references disappeared
+                current_state = PENDING_INACTIVE_STATE;
+                need_validate = false;
+                need_deactivate = true;
+              }
+              else
+              {
+                // our valid references disappeared, but we at least
+                // have some gc references now
+                current_state = ACTIVE_INVALID_STATE;
+                need_validate = false;
+                need_deactivate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the activate so we are of no help
+              need_validate = false;
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_ACTIVE_DELETED_STATE:
+          {
+            // See if were the ones doing the work
+            if (need_activate)
+            {
+// See if we are still active
+#ifdef USE_REMOTE_REFERENCES
+              if (has_valid_references || !create_valid_refs.empty())
+#else
+              if (has_valid_references)
+#endif
+              {
+                // This is really bad if it happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if (has_gc_references || !create_gc_refs.empty())
+#else
+              else if (has_gc_references)
+#endif
+              {
+                // Nothing more to do
+                current_state = ACTIVE_DELETED_STATE;
+                need_deactivate = false;
+              }
+              else
+              {
+                // Not still active, go to pending inactive 
+                current_state = PENDING_INACTIVE_DELETED_STATE;
+                need_deactivate = true;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the activate so 
+              // we can't help, just keep going
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_validate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_INVALID_DELETED_STATE:
+          {
+            // See if we were doing the invalidate
+            if (need_invalidate)
+            {
+              // Check to see if we are still valid
+#ifdef USE_REMOTE_REFERENCES
+              if (has_valid_references || !create_valid_refs.empty())
+#else
+              if (has_valid_references)
+#endif
+              {
+                // Really bad if this happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if (!has_gc_references  && create_gc_refs.empty())
+#else
+              else if (!has_gc_references)
+#endif
+              {
+                // No longer active either
+                current_state = PENDING_INACTIVE_DELETED_STATE;
+                need_deactivate = true;
+              }
+              else
+              {
+                current_state = ACTIVE_DELETED_STATE;
+                need_deactivate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the invalidate
+              // so we can't help
+              need_deactivate = false;
+            }
+            need_validate = false;
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_INACTIVE_DELETED_STATE:
+          {
+            // See if we were doing the deactivate
+            if (need_deactivate)
+            {
+              // See if we are still inactive
+#ifdef USE_REMOTE_REFERENCES
+              if (has_valid_references || !create_valid_refs.empty())
+#else
+              if (has_valid_references)
+#endif
+              {
+                // This is really bad if it happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if (!has_gc_references && create_gc_refs.empty())
+#else
+              else if (!has_gc_references)
+#endif
+              {
+                current_state = DELETED_STATE;
+                need_activate = false;
+              }
+              else
+              {
+                current_state = PENDING_ACTIVE_DELETED_STATE;
+                need_activate = true;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the deactivate
+              // so we can't help, just keep going
+              need_activate = false;
+            }
+            need_validate = false;
+            need_invalidate = false;
+            need_deactivate = false;
+            break;
+          }
         default:
           assert(false); // should never get here
       }
@@ -1011,20 +1329,22 @@ namespace LegionRuntime {
     {
       // Better be called while holding the lock
 #ifdef USE_REMOTE_REFERENCES
-      bool result = ((resource_references == 0) && (gc_references == 0) &&
-              (valid_references == 0) && create_gc_refs.empty() && 
-              create_valid_refs.empty() && (current_state == INACTIVE_STATE));
+      bool result = (!has_resource_references && !has_gc_references &&
+              !has_valid_references && create_gc_refs.empty() && 
+              create_valid_refs.empty() && 
+              ((current_state == INACTIVE_STATE) || 
+               (current_state == DELETED_STATE)));
 #else
-      bool result = ((resource_references == 0) && (gc_references == 0) &&
-              (valid_references == 0) && (current_state == INACTIVE_STATE));
+      bool result = (!has_resource_references && !has_gc_references &&
+              !has_valid_references && 
+              ((current_state == INACTIVE_STATE) || 
+               (current_state == DELETED_STATE)));
 #endif
-      if (result)
-        current_state = DELETED_STATE;
       return result;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 // EOF
 

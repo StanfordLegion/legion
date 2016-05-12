@@ -16,13 +16,18 @@
 #include "realm_saxpy.h"
 
 __global__
-void gpu_saxpy(const float alpha, const int num_elements,
-               const float *x, const float *y, float *z)
+void gpu_saxpy(const float alpha,
+	       //const int num_elements,
+	       Rect<1> bounds,
+	       RegionAccessor<AccessorType::Affine<1>, float> ra_x,
+	       RegionAccessor<AccessorType::Affine<1>, float> ra_y,
+	       RegionAccessor<AccessorType::Affine<1>, float> ra_z)
+	       
+	       //               const float *x, const float *y, float *z)
 {
-  int tid = blockIdx.x*blockDim.x+threadIdx.x;
-  if (tid >= num_elements)
-    return;
-  z[tid] = alpha * x[tid] + y[tid];
+  Point<1> p = bounds.lo + make_point(blockIdx.x*blockDim.x+threadIdx.x);
+  if(bounds.contains(p))
+    ra_z[p] = alpha * ra_x[p] + ra_y[p];
 }
 
 __host__
@@ -32,23 +37,23 @@ void gpu_saxpy_task(const void *args, size_t arglen,
   assert(arglen == sizeof(SaxpyArgs));
   const SaxpyArgs *saxpy_args = (const SaxpyArgs*)args;
   printf("Running GPU Saxpy Task\n\n");
-  Rect<1> actual_bounds;
-  ByteOffset offsets;
-  // These are all device pointers
-  const float *x_ptr = (const float*)saxpy_args->x_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  const float *y_ptr = (const float*)saxpy_args->y_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  float *z_ptr = (float*)saxpy_args->z_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  size_t num_elements = actual_bounds.volume();
+
+  // get the generic accessors for each of our three instances
+  RegionAccessor<AccessorType::Generic> ra_xg = saxpy_args->x_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_yg = saxpy_args->y_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_zg = saxpy_args->z_inst.get_accessor();
+
+  // now convert them to typed, "affine" accessors that we can use like arrays
+  RegionAccessor<AccessorType::Affine<1>, float> ra_x = ra_xg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_y = ra_yg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_z = ra_zg.typeify<float>().convert<AccessorType::Affine<1> >();
+
+  size_t num_elements = saxpy_args->bounds.volume();
 
   size_t cta_threads = 256;
   size_t total_ctas = (num_elements + (cta_threads-1))/cta_threads; 
-  gpu_saxpy<<<total_ctas, cta_threads>>>(saxpy_args->alpha, num_elements,
-                                         x_ptr, y_ptr, z_ptr);
+  gpu_saxpy<<<total_ctas, cta_threads>>>(saxpy_args->alpha, saxpy_args->bounds,
+					 ra_x, ra_y, ra_z);
   // LOOK: NO WAIT! :)
 }
 
