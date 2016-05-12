@@ -14,6 +14,8 @@ set(realm_HEADERS
   dynamic_table.inl
   event.h
   event_impl.h
+  faults.h
+  faults.inl
   id.h
   id.inl
   idx_impl.h
@@ -46,6 +48,9 @@ set(realm_HEADERS
   rsrv_impl.inl
   runtime.h
   runtime_impl.h
+  sampling.h
+  sampling.inl
+  sampling_impl.h
   serialize.h
   serialize.inl
   tasks.h
@@ -56,12 +61,15 @@ set(realm_HEADERS
   custom_serdez.h
   custom_serdez.inl
   utils.h
+  numa/numa_module.h
+  numa/numasysif.h
 )
 
 set(realm_SOURCES
   cmdline.cc
   codedesc.cc
   event_impl.cc
+  faults.cc
   idx_impl.cc
   inst_impl.cc
   logging.cc
@@ -77,11 +85,25 @@ set(realm_SOURCES
   profiling.cc
   rsrv_impl.cc
   runtime_impl.cc
+  sampling_impl.cc
   tasks.cc
   threads.cc
   timers.cc
+  numa/numa_module.cc
+  numa/numasysif.cc
 )
-
+ 
+if (USE_LLVM)
+set(realm_llvm_HEADERS
+  llvmjit/llvmjit.h
+  llvmjit/llvmjit.inl
+  llvmjit/llvmjit_internal.h
+  llvmjit/llvmjit_module.h)
+set(realm_llvm_SOURCES
+  llvmjit/llvmjit_internal.cc
+  llvmjit/llvmjit_module.cc
+ )
+endif (USE_LLVM)
 
 if (ENABLE_CUDA)
  set(realm_cuda_HEADERS

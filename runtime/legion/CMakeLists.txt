@@ -12,19 +12,22 @@ set(legion_HEADERS
   legion_c.h
   legion_c_util.h
   legion_config.h
+  legion_constraint.h
+  legion_mapping.h
   legion_instances.h
   legion_ops.h
   legion_profiling.h
+  legion_realm.h
   legion_spy.h
   legion_tasks.h
   legion_trace.h
   legion_types.h
   legion_utilities.h
   legion_views.h
+  mapper_manager.h
   rectangle_set.h
   region_tree.h
   runtime.h
-  legion_constraint.h
 )
 
 set(legion_SOURCES
@@ -32,14 +35,16 @@ set(legion_SOURCES
   legion.cc
   legion_analysis.cc
   legion_c.cc
+  legion_constraint.cc
   legion_instances.cc
+  legion_mapping.cc
   legion_ops.cc
   legion_profiling.cc
   legion_spy.cc
   legion_tasks.cc
   legion_trace.cc
   legion_views.cc
-  legion_constraint.cc
+  mapper_manager.cc
   region_tree.cc
   runtime.cc
 )

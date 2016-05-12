@@ -2,15 +2,21 @@
 #------------------------------------------------------------------------------#
 
 set(mappers_HEADERS
+  debug_mapper.h
   default_mapper.h
   mapping_utilities.h
+  replay_mapper.h
   shim_mapper.h
+  test_mapper.h
 )
 
 set(mappers_SOURCES
+  debug_mapper.cc
   default_mapper.cc
   mapping_utilities.cc
+  replay_mapper.cc
   shim_mapper.cc
+  test_mapper.cc
 )
 
 add_library(legion_mappers ${mappers_SOURCES})

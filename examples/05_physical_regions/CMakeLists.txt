@@ -14,9 +14,10 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-add_executable(05_physical_regions_and_accessors physical_regions.cc)
-target_link_libraries(05_physical_regions_and_accessors legion realm legion_mappers ${EXTRA_LIBS})
-target_include_directories(05_physical_regions_and_accessors
+add_executable(05_physical_regions physical_regions.cc)
+target_link_libraries(05_physical_regions legion realm legion_mappers ${EXTRA_LIBS})
+target_include_directories(05_physical_regions
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"
+   "${CMAKE_SOURCE_DIR}/runtime/mappers"
     "${CMAKE_SOURCE_DIR}/runtime/realm")

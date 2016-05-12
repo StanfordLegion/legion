@@ -14,9 +14,9 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-add_executable(09_custom_mappers custom_mapper.cc)
-target_link_libraries(09_custom_mappers legion realm legion_mappers ${EXTRA_LIBS})
-target_include_directories(09_custom_mappers
+add_executable(09_custom_mapper custom_mapper.cc)
+target_link_libraries(09_custom_mapper legion realm legion_mappers ${EXTRA_LIBS})
+target_include_directories(09_custom_mapper
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"
     "${CMAKE_SOURCE_DIR}/runtime/mappers"

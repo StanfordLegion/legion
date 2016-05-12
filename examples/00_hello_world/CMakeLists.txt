@@ -20,5 +20,6 @@ target_link_libraries(00_hello_world
 target_include_directories(00_hello_world
 	PUBLIC
 		${CMAKE_SOURCE_DIR}/runtime
+                ${CMAKE_SOURCE_DIR}/runtime/mappers
 		${CMAKE_SOURCE_DIR}/runtime/legion
                 ${CMAKE_SOURCE_DIR}/runtime/realm)
