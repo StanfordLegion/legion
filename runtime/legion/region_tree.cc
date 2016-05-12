@@ -7070,7 +7070,10 @@ namespace Legion {
                       handle.get_tree_id());
 
         if (Runtime::legion_spy_enabled)
+        {
           LegionSpy::log_index_subspace(handle.id, is.id, c.get_point());
+          LegionSpy::log_empty_index_space(is.id);
+        }
 
         if (parent->kind == UNSTRUCTURED_KIND)
         {
