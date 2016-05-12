@@ -2057,7 +2057,8 @@ class IndexSpace(object):
     def update_index_sets(self, index_sets):
         if self.shape is None or self.shape.empty():
             return
-        print '    Reducing index sub-space '+str(self)
+        if self.state.verbose:
+            print '    Reducing index sub-space '+str(self)
         local_points = self.shape.copy()
         new_sets = dict()
         del_sets = list()
@@ -2120,7 +2121,8 @@ class IndexSpace(object):
     def compute_reduced_shapes(self):
         if self.shape is None:
             return
-        print 'Reducing '+str(self)+'...'
+        if self.state.verbose:
+            print 'Reducing '+str(self)+'...'
         # Iterate over all the points and find which 
         # index spaces they belong to
         index_sets = dict()
@@ -3730,11 +3732,11 @@ class Requirement(object):
 
     def print_requirement(self):
         if self.is_reg:
-            print "        Logical Region Requirement ("+hex(self.ispace)+","+\
-                  str(self.fspace)+","+str(self.tid)+")"
+            print "        Logical Region Requirement ("+hex(self.index_node)+","+\
+                  str(self.field_space)+","+str(self.tid)+")"
         else:
-            print "        Logical Partition Requirement ("+str(self.ispace)+","+\
-                  str(self.fspace)+","+str(self.tid)+")"
+            print "        Logical Partition Requirement ("+str(self.index_node)+","+\
+                  str(self.field_space)+","+str(self.tid)+")"
         field_str = "          Fields: "
         first = True
         for f in self.fields:
@@ -4813,7 +4815,10 @@ class Operation(object):
             print prefix+'-------------------------------------------------'
             print prefix+' Mapping Decisions for '+str(self)
             for index,mappings in self.mappings.iteritems():
-                print prefix+'  Region Requirement '+str(index)
+                assert index in self.reqs
+                req = self.reqs[index]
+                print prefix+'  Region Requirement '+str(index)+' Region=('+\
+                    str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')'
                 for fid,inst in mappings.iteritems():
                     field = inst.region.field_space.get_field(fid)
                     print prefix+'    '+str(field)+': '+str(inst)
@@ -7455,7 +7460,7 @@ class State(object):
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
-        print 'INFO: Reducing top-level index space shapes...'
+        print 'Reducing top-level index space shapes...'
         for space in self.index_spaces.itervalues():
             if space.parent is None:
                 space.compute_reduced_shapes()            
