@@ -575,6 +575,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const FieldMask& VersionInfo::get_advance_mask(RegionTreeNode *node,
+                                                   bool &is_split) const
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
+        node_infos.find(node);
+#ifdef DEBUG_LEGION
+      assert(finder != node_infos.end());
+#endif
+      is_split = finder->second.split_node();
+      return finder->second.advance_mask;
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::pack_version_info(Serializer &rez, 
                                         AddressSpaceID local, ContextID ctx)
     //--------------------------------------------------------------------------

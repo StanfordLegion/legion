@@ -158,6 +158,8 @@ namespace Legion {
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node, bool capture); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
+      const FieldMask& get_advance_mask(RegionTreeNode *node, 
+                                        bool &is_split) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);

@@ -3175,16 +3175,21 @@ namespace Legion {
         runtime->forest->perform_fence_analysis(ctx, op, 
                                         regions[idx].region, true/*dominate*/);
       // Now see if we have any created regions
-      std::deque<RegionRequirement> created_clones;
+      std::vector<LogicalRegion> created_regions;
       {
         AutoLock o_lock(op_lock,1,false/*exclusive*/);
         if (created_requirements.empty())
           return;
-        created_clones = created_requirements;
+        created_regions.resize(created_requirements.size());
+        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+          created_regions[idx] = created_requirements[idx].region;
       }
-      for (unsigned idx = 0; idx < created_clones.size(); idx++)
-        runtime->forest->perform_fence_analysis(ctx, op,
-                                created_clones[idx].region, true/*dominate*/);
+      // These get analyzed in the outermost context since they are
+      // created regions
+      RegionTreeContext outermost = find_outermost_context()->get_context();
+      for (unsigned idx = 0; idx < created_regions.size(); idx++)
+        runtime->forest->perform_fence_analysis(outermost, op, 
+                                    created_regions[idx], true/*dominate*/);
     }
 
     //--------------------------------------------------------------------------

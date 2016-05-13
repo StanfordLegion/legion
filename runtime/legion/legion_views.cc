@@ -670,8 +670,8 @@ namespace Legion {
         FieldMask observed, non_dominated, write_skip_mask;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Find any version updates as well our write skip mask
-        find_version_updates(copy_mask, version_info, write_skip_mask,
-                             filter_mask, advance_versions, add_versions);
+        find_version_updates(copy_mask, version_info, write_skip_mask, 
+            filter_mask, advance_versions, add_versions, redop > 0);
         if (!!write_skip_mask)
         {
           // If we have a write skip mask we know we won't interfere with
@@ -1331,7 +1331,8 @@ namespace Legion {
                                                 FieldMask &write_skip_mask,
                                                 FieldMask &filter_mask,
                               LegionMap<VersionID,FieldMask>::aligned &advance,
-                              LegionMap<VersionID,FieldMask>::aligned &add_only)
+                              LegionMap<VersionID,FieldMask>::aligned &add_only,
+                                                bool is_reduction)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1343,6 +1344,9 @@ namespace Legion {
 #endif
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
         versions->get_field_versions();
+      bool is_split = false;
+      const FieldMask &advance_mask = 
+        version_info.get_advance_mask(logical_node, is_split);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             field_versions.begin(); it != field_versions.end(); it++)
       {
@@ -1388,8 +1392,16 @@ namespace Legion {
           if (!!intersect)
           {
             // This is a write skip field since we're already
-            // at the version number at this view
-            write_skip_mask |= intersect;
+            // at the version number at this view, but we're only
+            // really at the version number if we are not a split
+            // version number and we're not reducing
+            if (!is_reduction)
+            {
+              if (is_split)
+                write_skip_mask |= (intersect - advance_mask);
+              else
+                write_skip_mask |= intersect;
+            }
             overlap -= intersect;
             if (!overlap)
               continue;

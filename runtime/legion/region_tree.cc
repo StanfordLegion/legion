@@ -2625,13 +2625,17 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+      // Can be a part projection if we are closing to a partition node
+      assert((req.handle_type == SINGULAR) || 
+              (req.handle_type == PART_PROJECTION));
 #endif
-      RegionNode *reg_node = get_node(req.region);      
+      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
+        static_cast<RegionTreeNode*>(get_node(req.region)) : 
+        static_cast<RegionTreeNode*>(get_node(req.partition));      
       // Get the field mask for the fields we need
       FieldMask needed_fields = 
-                reg_node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID local_tree = reg_node->handle.get_tree_id();
+                tree_node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID local_tree = tree_node->get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2685,7 +2689,7 @@ namespace Legion {
           // going to be reporting an error so performance no
           // longer matters
           std::set<FieldID> missing;
-          reg_node->column_source->get_field_set(needed_fields, missing);
+          tree_node->column_source->get_field_set(needed_fields, missing);
           missing_fields.insert(missing_fields.end(), 
                                 missing.begin(), missing.end());
         }
@@ -2766,9 +2770,12 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(Runtime::legion_spy_enabled); 
-      assert(req.handle_type == SINGULAR);
+      assert((req.handle_type == SINGULAR) || 
+          (req.handle_type == PART_PROJECTION));
 #endif
-      FieldSpaceNode *node = get_node(req.region.get_field_space());
+      FieldSpaceNode *node = (req.handle_type == SINGULAR) ? 
+        get_node(req.region.get_field_space()) : 
+        get_node(req.partition.get_field_space());
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &inst = targets[idx];

@@ -4837,7 +4837,20 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
-      mapper->invoke_map_close(this, &input, &output);
+      if (requirement.handle_type == PART_PROJECTION)
+      {
+        // Always tell the mapper that we are closing to the parent region
+        // if we are actually closing to a partition
+        LogicalPartition partition = requirement.partition;
+        requirement.handle_type = SINGULAR;
+        requirement.region = 
+          runtime->forest->get_parent_logical_region(partition); 
+        mapper->invoke_map_close(this, &input, &output);
+        requirement.handle_type = PART_PROJECTION;
+        requirement.partition = partition;
+      }
+      else // This is the common case
+        mapper->invoke_map_close(this, &input, &output);
       // Now we have to validate the output
       // Make sure we have at least one instance for every field
       RegionTreeID bad_tree = 0;

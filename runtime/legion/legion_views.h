@@ -424,7 +424,8 @@ namespace Legion {
                                 FieldMask &write_skip_mask,
                                 FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
-                            LegionMap<VersionID,FieldMask>::aligned &add_only);
+                            LegionMap<VersionID,FieldMask>::aligned &add_only,
+                                bool is_reducing);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
