@@ -372,6 +372,9 @@ class Shape(object):
                 new_rect = rect.intersection(orect)
                 if not new_rect.empty():
                     new_rects.add(new_rect)
+            for point in other.points:
+                if rect.contains_point(point):
+                    self.points.add(point)
         self.rects = new_rects
         return self
 
@@ -2085,6 +2088,9 @@ class IndexSpace(object):
                 if local_points.empty():
                     # We were dominated so we're done now
                     break
+        # Should always be empty since we know the list was
+        # initialized with all points
+        assert local_points.empty()
         # Remove the deleted entries
         for key in del_sets:
             del index_sets[key]
@@ -2162,8 +2168,6 @@ class IndexSpace(object):
 
     def intersection(self, other):
         if other in self.intersections:
-            if self.intersections is None:
-                return Shape() # empty shape
             return self.intersections[other]
         intersection = self.get_point_set() & other.get_point_set()
         if intersection.empty():
@@ -2322,13 +2326,11 @@ class IndexPartition(object):
                 if self.point_set is None:
                     self.point_set = child.get_point_set().copy()
                 else:
-                    self.point_set | child.get_point_set()
+                    self.point_set |= child.get_point_set()
         return self.point_set
 
     def intersection(self, other):
         if other in self.intersections:
-            if self.intersections[other] is None:
-                return Shape() # empty shape
             return self.intersections[other]
         intersection = self.get_point_set() & other.get_point_set()
         if intersection.empty():
@@ -2567,10 +2569,10 @@ class LogicalRegion(object):
                 return False
         return True
 
-    def close_logical_tree(self, field, closed_users):
+    def close_logical_tree(self, field, closed_users, permit_leave_open):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users)
+        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
 
     def get_physical_state(self, depth, field):
         if depth not in self.physical_state:
@@ -2796,10 +2798,10 @@ class LogicalPartition(object):
                 return False
         return True
 
-    def close_logical_tree(self, field, closed_users):
+    def close_logical_tree(self, field, closed_users, permit_leave_open):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users)
+        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
 
     def get_physical_state(self, depth, field):
         if depth not in self.physical_state:
@@ -2917,17 +2919,22 @@ class LogicalState(object):
             if req.is_write() and self.open_children:
                 closed_users = list()
                 for child in self.open_children:
-                    child.close_logical_tree(self.field, closed_users)
+                    child.close_logical_tree(self.field, closed_users, False)
                 if perform_checks:
                     for prev_op,prev_req in closed_users:
-                        if not op.has_mapping_dependence(req, prev_op, prev_req,
-                                                        TRUE_DEPENDENCE, self.field):
-                            return False
+                        if prev_req.is_read_only():
+                            if not op.has_mapping_dependence(req, prev_op, prev_req,
+                                                             ANTI_DEPENDENCE, self.field):
+                                return False
+                        else:
+                            if not op.has_mapping_dependence(req, prev_op, prev_req,
+                                                            TRUE_DEPENDENCE, self.field):
+                                return False
                 else:
                     # Not performing checks so record the mapping dependences 
                     for prev_op,prev_req in closed_users:
-                        dep = MappingDependence(prev_op, prev_req.index,
-                                                op, req.index, TRUE_DEPENDENCE)
+                        dep = MappingDependence(prev_op, prev_req.index, op, req.index, 
+                            ANTI_DEPENDENCE if prev_req.is_read_only() else TRUE_DEPENDENCE)
                         prev_op.add_outgoing(dep)
                         op.add_incoming(dep)
                 # We closed all the children
@@ -2942,7 +2949,7 @@ class LogicalState(object):
     def perform_logical_fence(self, op, perform_checks):
         if perform_checks: 
             for prev_op,prev_req in self.current_epoch_users:
-                if prev_op not in op.logical_incoming:
+                if not op.logical_incoming or prev_op not in op.logical_incoming:
                     print "ERROR: missing logical fence dependence between "+\
                           str(prev_op)+" and "+str(op)
                     if self.node.state.assert_on_fail:
@@ -3007,7 +3014,7 @@ class LogicalState(object):
             error_str = " in state READ_WRITE"
             if not self.perform_close_operations(next_child,
                                                  True, # allow next
-                                                 False, # permit leave open
+                                                 req.is_read_only(), # permit leave open
                                                  False, # read only close
                                                  False, # flush reductions
                                                  op, req, previous_deps,
@@ -3084,12 +3091,12 @@ class LogicalState(object):
         close = op.get_close_operation(req, self.node, self.field)
         if close is None:
             if perform_checks:
-                print "ERROR: "+str(op)+" failed to generate a close "+\
-                    "operation for field "+str(self.field)+" of region "+\
+                print "ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+\
+                    "a close operation for field "+str(self.field)+" of region "+\
                     "requirement "+str(req.index)+" at "+str(self.node)+error_str
             else:
-                print "ERROR: "+str(op)+" failed to generate a close "+\
-                    "operation that we normally would have expected. This "+\
+                print "ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+\
+                    "a close operation that we normally would have expected. This "+\
                     "is likely a runtime bug. Re-run with logical checks "+\
                     "to confirm."
             if self.node.state.assert_on_fail:
@@ -3107,8 +3114,9 @@ class LogicalState(object):
             if prev_op is op:
                 op.need_logical_replay = True
                 return False
-            if not close.has_mapping_dependence(close_req, prev_op,
-                            prev_req, TRUE_DEPENDENCE, self.field):
+            if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
+                                  ANTI_DEPENDENCE if prev_req.is_read_only() 
+                                  else TRUE_DEPENDENCE, self.field):
                 print "ERROR: close operation "+str(close)+" generated by "+\
                       "field "+str(self.field)+" of region requirement "+\
                       str(req.index)+" of "+str(op)+" failed to find a "+\
@@ -3122,8 +3130,9 @@ class LogicalState(object):
             if prev_op is op:
                 op.need_logical_replay = True
                 return False
-            if not close.has_mapping_dependence(close_req, prev_op,
-                            prev_req, TRUE_DEPENDENCE, self.field):
+            if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
+                                  ANTI_DEPENDENCE if prev_req.is_read_only()
+                                  else TRUE_DEPENDENCE, self.field):
                 print "ERROR: close operation "+str(close)+" generated by "+\
                       "field "+str(self.field)+" of region requirement "+\
                       str(req.index)+" of "+str(op)+" failed to find a "+\
@@ -3172,7 +3181,7 @@ class LogicalState(object):
                 return False
             closed_users = list()
             for child in self.open_children:
-                child.close_logical_tree(self.field, closed_users)
+                child.close_logical_tree(self.field, closed_users, permit_leave_open)
             # clear the open children
             self.open_children = set() 
             if perform_checks:
@@ -3206,7 +3215,7 @@ class LogicalState(object):
                         assert False
                     return False
                 closed_users = list()
-                next_child.close_logical_tree(self.field, closed_users)
+                next_child.close_logical_tree(self.field, closed_users, permit_leave_open)
                 if perform_checks:
                     if not self.perform_close_checks(close, closed_users, op, req,
                                                      previous_deps, error_str):
@@ -3243,7 +3252,7 @@ class LogicalState(object):
                             assert False
                         return False
                     closed_users = list()
-                child.close_logical_tree(self.field, closed_users)
+                child.close_logical_tree(self.field, closed_users, permit_leave_open)
                 if not permit_leave_open:
                     to_remove.append(child)
             if close is not None:
@@ -3266,19 +3275,27 @@ class LogicalState(object):
         if not self.open_children:
             self.open_mode = OPEN_NONE
             self.open_redop = 0
+        elif permit_leave_open:
+            assert req.is_read_only()
+            self.open_mode = OPEN_READ_ONLY
         return True
 
-    def close_logical_tree(self, closed_users):
+    def close_logical_tree(self, closed_users, permit_leave_open):
         # Save the closed users and then close the subtrees
         closed_users += self.current_epoch_users
         self.current_epoch_users = list()
         self.previous_epoch_users = list()
         for child in self.open_children:
-            child.close_logical_tree(self.field, closed_users)
-        self.open_children = set()
-        self.open_mode = OPEN_NONE
-        self.open_redop = 0
-        self.current_redop = 0
+            child.close_logical_tree(self.field, closed_users, permit_leave_open)
+        if permit_leave_open and len(self.open_children) > 1:
+            self.open_mode = OPEN_READ_ONLY
+            self.open_redop = 0
+            self.current_redop = 0
+        else:
+            self.open_children = set()
+            self.open_mode = OPEN_NONE
+            self.open_redop = 0
+            self.current_redop = 0
         
     def perform_epoch_analysis(self, op, req, perform_checks, 
                                can_dominate, recording_set,
@@ -3400,8 +3417,6 @@ class PhysicalState(object):
             self.valid_instances.add(inst)
             self.dirty = True
         else:
-            assert self.redop == 0
-            assert not self.reduction_instances
             # Find the valid set of instances
             valid = self.find_valid_instances()
             # See if we are valid yet or not 
@@ -3417,11 +3432,22 @@ class PhysicalState(object):
                 if not self.node.close_physical_tree(self.depth, self.field, 
                                                      inst, op, req, perform_checks):
                     return False
+                # Issue any reduction updates too
+                if self.redop <> 0:
+                    assert self.reduction_instances
+                    error_str = "region requirement "+str(req.index)+" of "+str(op)
+                    if not self.issue_update_reductions(inst, 
+                        self.reduction_instances, op, req, perform_checks, error_str):
+                        return False
+                    self.reduction_instances = set()
+                    self.redop = 0
                 # We are now the only valid copy
                 self.valid_instances = set()
                 self.valid_instances.add(inst)
                 self.dirty = True
             else:
+                assert self.redop == 0
+                assert not self.reduction_instances
                 self.valid_instances.add(inst)
         if register and not self.perform_physical_registration(op, req, inst, 
                                                                perform_checks):
@@ -3511,7 +3537,8 @@ class PhysicalState(object):
 
     def close_physical_tree(self, target, op, req, perform_checks):
         # Issue any updates from our instances
-        if target is not None and not target.is_virtual() and self.dirty:
+        if target is not None and not target.is_virtual() and \
+                  self.dirty and target not in self.valid_instances:
             if not self.issue_update_copies(target, self.valid_instances, 
                                             op, req.index, perform_checks, str(op)):
                 return False
@@ -3527,8 +3554,9 @@ class PhysicalState(object):
                 target.capture(self, already_captured)
             elif self.redop <> 0:
                 assert self.reduction_instances
+                error_str = "region requirement "+str(req.index)+" of "+str(op)
                 if not self.issue_update_reductions(target, self.reduction_instances,
-                                                    op, req.index, perform_checks):
+                                            op, req.index, perform_checks, error_str):
                     return False
         # Now we can reset everything since we are closed
         self.dirty = False
@@ -3967,8 +3995,8 @@ class Operation(object):
 
     def add_close_operation(self, close):
         if self.inter_close_ops is None:
-            self.inter_close_ops = set()
-        self.inter_close_ops.add(close)
+            self.inter_close_ops = list()
+        self.inter_close_ops.append(close)
 
     def get_depth(self):
         assert self.context is not None
@@ -4290,7 +4318,7 @@ class Operation(object):
                     point_req = point.op.reqs[index]
                     point_path = list()
                     point_req.logical_node.compute_path(point_path, req.logical_node)
-                    point_deps = previous_deps
+                    point_deps = copy.copy(previous_deps)
                     if not req.logical_node.perform_logical_analysis(0, point_path,
                           self, point_req, field, False, point_deps, perform_checks):
                         return False
@@ -4300,10 +4328,6 @@ class Operation(object):
         return True
 
     def analyze_logical_fence(self, perform_checks):
-        if perform_checks:
-            # TODO: Figure out how to turn this back on 
-            print "WARNING: Logical fence analysis is currently disabled"
-            return True
         for index,req in self.context.op.reqs.iteritems():
             for field in req.fields:
                 if not req.logical_node.perform_logical_fence(self, field, perform_checks):
@@ -5101,6 +5125,9 @@ class Task(object):
         assert self.virtual_indexes is None
         if self.op.reqs: 
             for idx,req in self.op.reqs.iteritems():
+                # Skip any no access requirements
+                if req.is_no_access():
+                    continue
                 assert idx in self.op.mappings
                 mappings = self.op.mappings[idx]
                 for field in req.fields:
@@ -5642,16 +5669,19 @@ class CompositeNode(object):
         if self.node not in already_captured:
             copy = target.get_node(self.node)
             copy.dirty = self.dirty
-            for inst in self.valid_instances:
-                if copy.valid_instances is None:
-                    copy.valid_instances = set()
-                if inst.is_composite():
-                    inline_composite = inst.create_inline_composite(already_captured) 
-                    copy.valid_instances.add(inline_composite)
-                    if inline_composite is not inst:
-                        changed = True
-                else:
-                    copy.valid_instances.add(inst)
+            if self.dirty:
+                for inst in self.valid_instances:
+                    if copy.valid_instances is None:
+                        copy.valid_instances = set()
+                    if inst.is_composite():
+                        inline_composite = inst.create_inline_composite(already_captured) 
+                        copy.valid_instances.add(inline_composite)
+                        if inline_composite is not inst:
+                            changed = True
+                    else:
+                        copy.valid_instances.add(inst)
+            else:
+                assert not self.valid_instances
             # Add ourselves to the already captured
             already_captured.add(self.node)
         else:
