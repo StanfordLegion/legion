@@ -13956,12 +13956,7 @@ namespace Legion {
       // if we don't observe any users of those fields.  Therefore
       // also keep track of the fields that we observe.  We'll use this
       // at the end when computing the final dominator mask.
-      FieldMask observed_mask;
-      // For domination, we only need to observe fields that
-      // are open below, therefore, any fields which are not open
-      // below can already be recorded as observed.
-      if (TRACK_DOM)
-        observed_mask = check_mask - open_below;
+      FieldMask observed_mask; 
       FieldMask user_check_mask = user.field_mask & check_mask;
       const bool tracing = user.op->is_tracing();
       for (typename LegionList<LogicalUser, ALLOC>::track_aligned::iterator 
@@ -14082,7 +14077,24 @@ namespace Legion {
       // we actually observed users for so intersect the dominator 
       // mask with the observed mask
       if (TRACK_DOM)
+      {
+        // For writes, there is a special case here we actually
+        // want to record that we are dominating fields which 
+        // are not actually open below even if we didn't see
+        // any users on the way down
+        if (IS_WRITE(user.usage))
+        {
+          FieldMask unobserved = check_mask - observed_mask;
+          if (!!unobserved)
+          {
+            if (!open_below)
+              observed_mask |= unobserved;
+            else
+              observed_mask |= (unobserved - open_below);
+          }
+        }
         return (dominator_mask & observed_mask);
+      }
       else
         return dominator_mask;
     }
