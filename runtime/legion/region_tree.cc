@@ -11710,7 +11710,7 @@ namespace Legion {
           continue;
         }
         // Update the field mask with the non-dominated fields
-        it->field_mask -= field_mask;
+        it->field_mask -= local_dom;
         if (!it->field_mask)
         {
           // Remove the mapping reference
