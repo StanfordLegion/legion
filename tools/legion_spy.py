@@ -2949,7 +2949,20 @@ class LogicalState(object):
     def perform_logical_fence(self, op, perform_checks):
         if perform_checks: 
             for prev_op,prev_req in self.current_epoch_users:
-                if not op.logical_incoming or prev_op not in op.logical_incoming:
+                found = False
+                for dep in op.incoming:
+                    if dep.op1 is not prev_op:
+                        # If the prev op is a close op see if we have a dependence on its creator
+                        if prev_op.is_close() and prev_op.creator is dep.op1 and \
+                            prev_op.close_idx == dep.idx1:
+                            found = True
+                            break
+                        continue
+                    if dep.idx1 is not prev_req.index:
+                        continue
+                    found = True
+                    break
+                if not found:
                     print "ERROR: missing logical fence dependence between "+\
                           str(prev_op)+" and "+str(op)
                     if self.node.state.assert_on_fail:
@@ -3871,8 +3884,8 @@ class MappingDependence(object):
 
     def __str__(self):
         return "index %d of %s and index %d of %s (type: %s)" % \
-                (self.idx1, self.op1.get_name(),
-                 self.idx2, self.op2.get_name(),
+                (self.idx1, str(self.op1),
+                 self.idx2, str(self.op2),
                  DEPENDENCE_TYPES[self.dtype])
 
     __repr__ = __str__
