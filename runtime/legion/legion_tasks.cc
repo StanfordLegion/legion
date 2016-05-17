@@ -4161,8 +4161,9 @@ namespace Legion {
           return false;
         // Check to see if there is a path between
         // the index spaces
-        if (runtime->forest->are_disjoint(our_space,
-                                          req.region.get_index_space()))
+        std::vector<ColorPoint> path;
+        if (!runtime->forest->compute_index_path(our_space,
+                         req.region.get_index_space(),path))
           return false;
       }
       else
@@ -4170,8 +4171,9 @@ namespace Legion {
         // Check if the trees are different
         if (our_tid != req.partition.get_tree_id())
           return false;
-        if (runtime->forest->are_disjoint(our_space,
-                  req.partition.get_index_partition()))
+        std::vector<ColorPoint> path;
+        if (!runtime->forest->compute_partition_path(our_space,
+                     req.partition.get_index_partition(), path))
           return false;
       }
       // Check to see if any privilege fields overlap

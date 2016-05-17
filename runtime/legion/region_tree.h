@@ -501,8 +501,8 @@ namespace Legion {
       bool is_disjoint(IndexPartition handle);
       bool is_disjoint(LogicalPartition handle);
     public:
-      bool are_disjoint(IndexSpace parent, IndexSpace child);
-      bool are_disjoint(IndexSpace parent, IndexPartition child);
+      bool are_disjoint(IndexSpace one, IndexSpace two);
+      bool are_disjoint(IndexSpace one, IndexPartition two);
       bool are_disjoint(IndexPartition one, IndexPartition two); 
     public:
       bool are_compatible(IndexSpace left, IndexSpace right);

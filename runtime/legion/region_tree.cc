@@ -3854,121 +3854,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexSpace child)
+    bool RegionTreeForest::are_disjoint(IndexSpace one, IndexSpace two)
     //--------------------------------------------------------------------------
     {
-      if (parent == child)
+      if (one == two)
         return false;
-      std::vector<ColorPoint> path;
-      if (compute_index_path(parent, child, path))
-        return false;
-      // Now check for a common ancestor and see if the
-      // children are disjoint
-      IndexSpaceNode *sp_one = get_node(parent);
-      IndexSpaceNode *sp_two = get_node(child);
-      if (sp_two->depth < sp_one->depth)
-      {
-        path.clear();
-        if (compute_index_path(child, parent, path))
-          return false;
-      }
-      // Bring them up to the same minimum depth
-      unsigned depth = sp_one->depth;
-      if (sp_two->depth < depth)
-        depth = sp_two->depth;
-      while (sp_one->depth > depth)
-        sp_one = sp_one->parent->parent;
-      while (sp_two->depth > depth)
-        sp_two = sp_two->parent->parent;
-      // Now we're at the same depth, we know they can't
-      // equal or else there would have been a path
-#ifdef DEBUG_LEGION
-      assert(sp_one != sp_two);
-      assert(sp_one->depth == sp_two->depth);
-#endif
-      while (sp_one->depth > 0)
-      {
-        // Check for a common partition
-        if (sp_one->parent == sp_two->parent)
-          return sp_one->parent->are_disjoint(sp_one->color, sp_two->color);
-        // Check for a common new space
-        if (sp_one->parent->parent == sp_two->parent->parent)
-          return sp_one->parent->parent->are_disjoint(sp_one->parent->color,
-                                                      sp_two->parent->color);
-        // Otherwise advance everything
-        sp_one = sp_one->parent->parent;
-        sp_two = sp_two->parent->parent;
-      }
-      // Otherwise they're not even in the same tree
-      // which guarantees disjointness
-      return true;
+      if (one.get_tree_id() != two.get_tree_id())
+        return true;
+      // See if they intersect with each other
+      IndexSpaceNode *sp_one = get_node(one);
+      IndexSpaceNode *sp_two = get_node(two);
+      return !sp_one->intersects_with(sp_two);
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexPartition child)
+    bool RegionTreeForest::are_disjoint(IndexSpace one, IndexPartition two)
     //--------------------------------------------------------------------------
     {
-      std::vector<ColorPoint> path;
-      if (compute_partition_path(parent, child, path))
-        return false;
-      IndexPartNode *part_node = get_node(child);
-      // Do a little check for a path between the partitions
-      // parent and the parent node
-      if (compute_index_path(parent, part_node->parent->handle, path))
-      {
-        path.pop_back(); // pop off the parent node's color
-        return part_node->parent->are_disjoint(part_node->color,path.back());
-      }
-      if (compute_index_path(part_node->parent->handle, parent, path))
-      {
-        path.pop_back(); // pop off the parent node's color
-        return part_node->parent->are_disjoint(part_node->color,path.back());
-      }
-      // Now check for a common ancestor and see if the
-      // children are disjoint
-      IndexSpaceNode *sp_one = get_node(parent);
-      if (part_node->depth < sp_one->depth)
-      {
-        path.clear();
-        if (compute_index_path(part_node->parent->handle, parent, path))
-        {
-#ifdef DEBUG_LEGION
-          assert(path.size() > 2);
-#endif
-          path.pop_back();
-          if (path.back() == part_node->color)
-            return false;
-        }
-      }
-      IndexSpaceNode *sp_two = part_node->parent;
-      // Bring them up to the same minimum depth
-      unsigned depth = sp_one->depth;
-      if (sp_two->depth < depth)
-        depth = sp_two->depth;
-      while (sp_one->depth > depth)
-        sp_one = sp_one->parent->parent;
-      while (sp_two->depth > depth)
-        sp_two = sp_two->parent->parent;
-#ifdef DEBUG_LEGION
-      assert(sp_one != sp_two);
-      assert(sp_one->depth == sp_two->depth);
-#endif
-      while (sp_one->depth > 0)
-      {
-        // Check for a common partition
-        if (sp_one->parent == sp_two->parent)
-          return sp_one->parent->are_disjoint(sp_one->color, sp_two->color);
-        // Check for a common new space
-        if (sp_one->parent->parent == sp_two->parent->parent)
-          return sp_one->parent->parent->are_disjoint(sp_one->parent->color,
-                                                      sp_two->parent->color);
-        // Otherwise advance everything
-        sp_one = sp_one->parent->parent;
-        sp_two = sp_two->parent->parent;
-      }
-      // Otherwise they are not in the same tree
-      // and therefore by definition disjoint
-      return true;
+      if (one.get_tree_id() != two.get_tree_id())
+        return true;
+      IndexSpaceNode *space_node = get_node(one);
+      IndexPartNode *part_node = get_node(two);
+      return !space_node->intersects_with(part_node);
     }
 
     //--------------------------------------------------------------------------
@@ -3977,51 +3884,11 @@ namespace Legion {
     {
       if (one == two)
         return false;
+      if (one.get_tree_id() != two.get_tree_id())
+        return true;
       IndexPartNode *part_one = get_node(one);
       IndexPartNode *part_two = get_node(two);
-      if (part_one->depth < part_two->depth)
-      {
-        // See if there is a path
-        std::vector<ColorPoint> path;
-        if (compute_partition_path(part_one->parent->handle, two, path))
-          return false;
-        // Otherwise bring it up to the same level
-        while (part_one->depth < part_two->depth)
-          part_two = part_two->parent->parent;
-      }
-      else if (part_one->depth > part_two->depth)
-      {
-        // See if there is a path
-        std::vector<ColorPoint> path;
-        if (compute_partition_path(part_two->parent->handle, one, path))
-          return false;
-        // Otherwise bring it up to the same level
-        while (part_one->depth > part_two->depth)
-          part_one = part_one->parent->parent;
-      }
-      // Once we get here they are at the same level
-#ifdef DEBUG_LEGION
-      assert(part_one != part_two);
-      assert(part_one->depth == part_two->depth);
-#endif
-      IndexSpaceNode *sp_one = part_one->parent;
-      IndexSpaceNode *sp_two = part_two->parent;
-      if (sp_one == sp_two)
-        return false;
-      while (sp_one->depth != 0)
-      {
-        // Check for a common partition
-        if (sp_one->parent == sp_two->parent)
-          return sp_one->parent->are_disjoint(sp_one->color, sp_two->color);
-        // Check for a common new space
-        if (sp_one->parent->parent == sp_two->parent->parent)
-          return sp_one->parent->parent->are_disjoint(sp_one->parent->color,
-                                                      sp_two->parent->color);
-        // Otherwise advance everything
-        sp_one = sp_one->parent->parent;
-        sp_two = sp_two->parent->parent;
-      }
-      return true;
+      return !part_one->intersects_with(part_two);
     }
 
     //--------------------------------------------------------------------------
