@@ -6888,7 +6888,7 @@ mapping_dep_pat         = re.compile(
 instance_pat            = re.compile(
     prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
 instance_region_pat     = re.compile(
-    prefix+"Physical Instance Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9a-f]+) "
+    prefix+"Physical Instance Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9]+) "
            "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
 instance_field_pat      = re.compile(
     prefix+"Physical Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
@@ -7075,7 +7075,7 @@ def parse_legion_spy_line(line, state):
     m = instance_region_pat.match(line)
     if m is not None:
         inst = state.get_instance(int(m.group('iid'),16))
-        region = state.get_region(int(m.group('ispace'),16), 
+        region = state.get_region(int(m.group('ispace')), 
             int(m.group('fspace')), int(m.group('tid')))
         inst.set_region(region)
         return True

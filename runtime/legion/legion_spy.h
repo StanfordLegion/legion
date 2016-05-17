@@ -379,7 +379,7 @@ namespace Legion {
       static inline void log_physical_instance_region(IDType inst_id, 
                                                       LogicalRegion handle)
       {
-        log_spy.info("Physical Instance Region " IDFMT " " IDFMT " %d %d",
+        log_spy.info("Physical Instance Region " IDFMT " %d %d %d",
                       inst_id, handle.get_index_space().get_id(), 
                       handle.get_field_space().get_id(), handle.get_tree_id());
       }
