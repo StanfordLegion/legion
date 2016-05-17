@@ -4186,9 +4186,9 @@ class Operation(object):
                 continue
             if intersect is not None or copy.intersect is not None:
                 if copy.intersect is not None:
-                    copy_shape = copy.region.get_point_set()
-                else:
                     copy_shape = copy.region.intersection(copy.intersect)
+                else:
+                    copy_shape = copy.region.get_point_set()
                 base_shape = region.get_point_set()
                 if intersect is not None:
                     base_shape =  region.intersection(intersect)
@@ -5533,7 +5533,7 @@ class FillInstance(object):
     def find_use_dependences(self, depth, field, op, req, precise):
         assert False
 
-    def find_copy_dependences(self, depth, field, op, region, reading, redop, precise):
+    def find_copy_dependences(self, depth, field, op, index, region, reading, redop, precise):
         assert False
 
     def add_user(self, depth, field, op, req):
@@ -5926,7 +5926,7 @@ class CompositeInstance(object):
     def find_use_dependences(self, depth, field, op, req, precise):
         assert False
 
-    def find_copy_dependences(self, depth, field, op, region, reading, redop, precise):
+    def find_copy_dependences(self, depth, field, op, index, region, reading, redop, precise):
         assert False
 
     def add_user(self, depth, field, op, req):
@@ -5985,12 +5985,12 @@ class CompositeInstance(object):
                             return False
                         if reduction_inst.region is not region:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                depth=self.depth, field=self.field, op=op, 
+                                depth=self.depth, field=self.field, op=op, index=index, 
                                 region=region, reading=True, redop=0, 
                                 precise=True, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                depth=self.depth, field=self.field, op=op, 
+                                depth=self.depth, field=self.field, op=op, index=index,
                                 region=region, reading=True, redop=0, 
                                 precise=True)
                         if reduction.reachable_cache is None:
@@ -6014,12 +6014,12 @@ class CompositeInstance(object):
                             return False
                         if reduction_inst.region is not region:
                             dst_preconditions = dst.find_copy_dependences(
-                                depth=dst_depth, field=dst_field, op=op, 
+                                depth=dst_depth, field=dst_field, op=op, index=index, 
                                 region=region, reading=False, redop=reduction_inst.redop,
                                 precise=True, intersect=reduction_inst.region)
                         else:
                             dst_preconditions = dst.find_copy_dependences(
-                                depth=dst_depth, field=dst_field, op=op, 
+                                depth=dst_depth, field=dst_field, op=op, index=index,
                                 region=region, reading=False, redop=reduction_inst.redop, 
                                 precise=True)
                         bad = check_preconditions(dst_preconditions, reduction)
@@ -6063,20 +6063,20 @@ class CompositeInstance(object):
                         if reduction_inst.region is not region:
                             reduction.set_intersection(reduction_inst.region)
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                depth=self.depth, field=self.field, op=op, 
+                                depth=self.depth, field=self.field, op=op, index=index,
                                 region=region, reading=True, redop=0,
                                 precise=True, intersect=reduction_inst.region)
                             dst_preconditions = dst.find_copy_dependences(
-                                depth=dst_depth, field=dst_field, op=op,
+                                depth=dst_depth, field=dst_field, op=op, index=index,
                                 region=region, reading=False, redop=reduction_inst.redop,
                                 precise=True, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                depth=self.depth, field=self.field, op=op, 
+                                depth=self.depth, field=self.field, op=op, index=index,
                                 region=region, reading=True, redop=0, 
                                 precise=True)
                             dst_preconditions = dst.find_copy_dependences(
-                                depth=dst_depth, field=dst_field, op=op, 
+                                depth=dst_depth, field=dst_field, op=op, index=index,
                                 region=region, reading=False, redop=reduction_inst.redop, 
                                 precise=True)
                         for src_op in src_preconditions:
