@@ -301,6 +301,13 @@ class Shape(object):
         self.points = set()
         self.rects = set()
 
+    def get_dim(self):
+        if self.points:
+            return next(iter(self.points)).dim
+        else:
+            assert self.rects
+            return next(iter(self.rects)).dim
+
     def __str__(self):
         result = ''
         first = True
@@ -2088,15 +2095,17 @@ class IndexSpace(object):
                 if local_points.empty():
                     # We were dominated so we're done now
                     break
-        # Should always be empty since we know the list was
-        # initialized with all points
-        assert local_points.empty()
         # Remove the deleted entries
         for key in del_sets:
             del index_sets[key]
         # Add the new entries
         for shape,index_set in new_sets.iteritems():
             index_sets[shape] = index_set
+        # If we had left over points, add them as a new set
+        if not local_points.empty():
+            index_set = set()
+            index_set.add(self)
+            index_sets[local_points] = index_set   
         # Traverse the children
         for child in self.children.itervalues():
             child.update_index_sets(index_sets)                
@@ -2124,27 +2133,14 @@ class IndexSpace(object):
         for child in self.children.itervalues():
             child.check_partition_properties()
 
-    def compute_reduced_shapes(self):
-        if self.shape is None:
+    def compute_reduced_shapes(self, dim_sets):
+        if self.shape is None or self.shape.empty():
             return
         if self.state.verbose:
             print 'Reducing '+str(self)+'...'
-        # Iterate over all the points and find which 
-        # index spaces they belong to
-        index_sets = dict()
-        initial_set = set()
-        initial_set.add(self)
-        index_sets[self.shape.copy()] = initial_set
-        for child in self.children.itervalues():
-            child.update_index_sets(index_sets)
-        # Each index set is now a point in the each of the index spaces
-        point_value = 0
-        for index_set in index_sets.itervalues():
-            point = Point(1)
-            point.vals[0] = point_value
-            point_value += 1
-            for index in index_set:
-                index.add_refined_point(point)
+        if self.shape.get_dim() not in dim_sets:
+            dim_sets[self.shape.get_dim()] = dict()
+        self.update_index_sets(dim_sets[self.shape.get_dim()])
 
     def are_all_children_disjoint(self):
         return False
@@ -4189,9 +4185,8 @@ class Operation(object):
                     copy_shape = copy.region.intersection(copy.intersect)
                 else:
                     copy_shape = copy.region.get_point_set()
-                base_shape = region.get_point_set()
                 if intersect is not None:
-                    base_shape =  region.intersection(intersect)
+                    base_shape = region.intersection(intersect)
                 else:
                     base_shape = region.get_point_set()
                 one = copy_shape - base_shape
@@ -5722,7 +5717,7 @@ class CompositeNode(object):
                     next(iter(local_valid)).is_virtual():
                     virtual_inst = next(iter(local_valid))
                     if not virtual_inst.issue_copies_across(dst, dst_depth, dst_field, 
-                              region, op, perform_checks, error_str, actually_across):
+                        region, op, index, perform_checks, error_str, actually_across):
                         return False
                 else:
                     if self.node is not region:
@@ -6045,7 +6040,7 @@ class CompositeInstance(object):
                                 region=region, op=reduction, index=index, reading=False, 
                                 redop=reduction_inst.redop, intersect=reduction_inst.region)
                         else:
-                            reduction_isnt.add_copy_user(depth=self.depth, field=self.field,
+                            reduction_inst.add_copy_user(depth=self.depth, field=self.field,
                                 region=region, op=reduction, index=index, 
                                 reading=True, redop=0)
                             dst.add_copy_user(depth=dst_depth, field=dst_field, 
@@ -7489,9 +7484,20 @@ class State(object):
 
     def post_parse(self, simplify_graphs, need_physical):
         print 'Reducing top-level index space shapes...'
+        # Have to do the same sets across all index spaces
+        # with the same dimensions in case of copy across
+        dim_sets = dict()
         for space in self.index_spaces.itervalues():
             if space.parent is None:
-                space.compute_reduced_shapes()            
+                space.compute_reduced_shapes(dim_sets)            
+        for index_sets in dim_sets.itervalues():
+            point_value = 0
+            for index_set in index_sets.itervalues():
+                point = Point(1)
+                point.vals[0] = point_value
+                point_value += 1
+                for index in index_set:
+                    index.add_refined_point(point)
         print 'Done'
         # Find the top-level index spaces
         num_index_trees = 0
