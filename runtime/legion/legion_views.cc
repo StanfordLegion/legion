@@ -3953,7 +3953,7 @@ namespace Legion {
         }
       }
       // Always capture any reductions that we need
-      if (!state->reduction_views.empty() && !!reduction_mask)
+      if (!state->reduction_views.empty() && !!capture_reduc)
       {
         reduction_mask = state->reduction_mask & capture_reduc;
         if (!!reduction_mask)
