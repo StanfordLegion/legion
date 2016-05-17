@@ -2722,7 +2722,6 @@ namespace Legion {
       // should never be both, but can be neither
       assert(!(leave_open && read_only));
 #endif
-      closed_mask |= mask;
       // IMPORTANT: Always do this even if we don't have any closed users
       // They could have been pruned out because they finished executing, but
       // we still need to do the close operation.
@@ -2741,6 +2740,8 @@ namespace Legion {
       }
       else
       {
+        // Only actual closes get to count to the closed mask
+        closed_mask |= mask;
         LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
                                               closed_children.find(child);
         if (finder != closed_children.end())
@@ -2977,6 +2978,9 @@ namespace Legion {
     void LogicalCloser::update_state(CurrentState &state)
     //--------------------------------------------------------------------------
     {
+      // If we only have read-only closes then we are done
+      if (!closed_mask)
+        return;
       RegionTreeNode *node = state.owner;
       // Our partial mask is initially an over approximation of
       // the partially closed fields, so intersect it with the

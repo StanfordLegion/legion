@@ -10099,7 +10099,7 @@ namespace Legion {
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
         // See if we need to register a close operation
-        if (closer.has_closed_fields())
+        if (closer.has_close_operations())
         {
           // Generate the close operations         
           // We need to record the version numbers for this node as well

@@ -525,6 +525,9 @@ namespace Legion {
     public:
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
+      inline bool has_close_operations(void) const 
+        { return (!closed_children.empty() || 
+                  !read_only_children.empty() || !!flush_only_fields); }
       inline bool has_closed_fields(void) const { return !!closed_mask; }
       inline const FieldMask& get_closed_fields(void) const 
         { return closed_mask; }
