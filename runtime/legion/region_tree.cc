@@ -2692,22 +2692,17 @@ namespace Legion {
       if (!user_mask)
         return;
       RegionNode *root = manager->region_node;
-      // Compute the proper subview if necessary, we are guaranteed
-      // that it will exist
+      // Compute the proper subview if necessary
       if (region_node != root)
       {
         std::vector<ColorPoint> path;
-#ifdef DEBUG_LEGION
-        bool valid =
-#endif
-          compute_index_path(region_node->handle.get_index_space(), 
-                             root->handle.get_index_space(), path);
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
-        // Skip the first entry as it is the color for the root node
-        for (int i = int(path.size())-2; i >= 0; i--)
-          dst_view = dst_view->get_instance_subview(path[i]);
+        if (compute_index_path(root->handle.get_index_space(),
+                               region_node->handle.get_index_space(), path))
+        {
+          // Skip the first entry as it is the color for the root node
+          for (int i = int(path.size())-2; i >= 0; i--)
+            dst_view = dst_view->get_instance_subview(path[i]);
+        }
       }
       RegionUsage usage(req);
       // Privileges should always be exclusive here
