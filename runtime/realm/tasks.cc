@@ -35,10 +35,10 @@ namespace Realm {
 	     Event _before_event,
 	     Event _finish_event, int _priority)
     : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
-      args(_args, _arglen), priority(_priority),
+      args(_args, _arglen), before_event(_before_event), priority(_priority),
       executing_thread(0)
   {
-    log_task.info() << "task " << this << " created: func=" << func_id
+    log_task.info() << "task " << (void *)this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
 		    << " before=" << _before_event << " after=" << _finish_event;
   }
@@ -54,7 +54,7 @@ namespace Realm {
 
   bool Task::mark_ready(void)
   {
-    log_task.info() << "task " << this << " ready: func=" << func_id
+    log_task.info() << "task " << (void *)this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_ready();
@@ -62,7 +62,7 @@ namespace Realm {
 
   bool Task::mark_started(void)
   {
-    log_task.info() << "task " << this << " started: func=" << func_id
+    log_task.info() << "task " << (void *)this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_started();
@@ -70,7 +70,7 @@ namespace Realm {
 
   void Task::mark_completed(void)
   {
-    log_task.info() << "task " << this << " completed: func=" << func_id
+    log_task.info() << "task " << (void *)this << " completed: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     Operation::mark_completed();
@@ -389,14 +389,13 @@ namespace Realm {
 
     log_sched.debug() << "scheduler worker blocking: sched=" << this << " worker=" << thread;
 
-    while(thread->get_state() != Thread::STATE_READY) {
+    while(true) {//thread->get_state() != Thread::STATE_READY) {
       bool alerted = try_update_thread_state(thread,
 					     Thread::STATE_ALERTED,
 					     Thread::STATE_BLOCKED);
       if(alerted) {
 	log_sched.debug() << "thread alerted while blocked: sched=" << this << " worker=" << thread;
 	thread->process_signals();
-	continue;
       }
 
       // let's try to find something better to do than spin our wheels
@@ -411,13 +410,15 @@ namespace Realm {
 	// first check - is this US?  if so, we're done
 	if(yield_to == thread) {
 	  printf("resuming ourselves! (%d)\n", thread->get_state());
-	  continue;
+	  if(thread->get_state() != Thread::STATE_READY) continue;
+	  break;
 	}
 	// this preserves active and unassigned counts
 	update_worker_count(0, 0);
 	worker_sleep(yield_to);
 	// go back around in case this was just an alert
-	continue;
+	if(thread->get_state() != Thread::STATE_READY) continue;
+	break;
       }
 
       // next choice - if we're above the min active count AND there's at least one
@@ -428,7 +429,8 @@ namespace Realm {
 	update_worker_count(-1, 0);
 	worker_sleep(0);
 	// go back around in case this was just an alert
-	continue;
+	if(thread->get_state() != Thread::STATE_READY) continue;
+	break;
       }
 
       // next choice - is there an idle worker we can yield to?
@@ -439,7 +441,8 @@ namespace Realm {
 	update_worker_count(0, +1);
 	worker_sleep(yield_to);
 	// go back around in case this was just an alert
-	continue;
+	if(thread->get_state() != Thread::STATE_READY) continue;
+	break;
       }
 	
       // last choice - create a new worker to mind the store
@@ -450,7 +453,8 @@ namespace Realm {
 	update_worker_count(0, +1);
 	worker_sleep(yield_to);
 	// go back around in case this was just an alert
-	continue;
+	if(thread->get_state() != Thread::STATE_READY) continue;
+	break;
       }
 
       // wait at least until some new work shows up (even if we don't end up getting it,
@@ -517,6 +521,7 @@ namespace Realm {
 	// first rule - always yield to a resumable worker
 	while(!resumable_workers.empty()) {
 	  Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
+	  assert(yield_to != Thread::self());
 
 	  // this should only happen if we're at the max active worker count (otherwise
 	  //  somebody should have just woken this guy up earlier), and reduces the 
@@ -614,6 +619,7 @@ namespace Realm {
 	    //  worker counts constant
 	    if(!idle_workers.empty()) {
 	      Thread *to_wake = idle_workers.back();
+	      assert(to_wake != Thread::self());
 	      idle_workers.pop_back();
 	      // no net change in worker counts
 	      worker_terminate(to_wake);
@@ -993,7 +999,7 @@ namespace Realm {
   inline void UserThreadTaskScheduler::do_user_thread_cleanup(void)
   {
     if(ThreadLocal::terminated_user_thread != 0) {
-      delete ThreadLocal::terminated_user_thread;
+      //delete ThreadLocal::terminated_user_thread;
       ThreadLocal::terminated_user_thread = 0;
     }
   }
@@ -1115,7 +1121,12 @@ namespace Realm {
     assert(count == 1);
 
     // whoever we switch to should delete us
+    Thread *t = Thread::self();
     request_user_thread_cleanup(Thread::self());
+    update_thread_state(t, Thread::STATE_DELETED);
+
+    if(switch_to != 0)
+      assert(switch_to->get_state() != Thread::STATE_DELETED);
 
     Thread::user_switch(switch_to);
 

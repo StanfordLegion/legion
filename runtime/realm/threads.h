@@ -109,6 +109,7 @@ namespace Realm {
 		 STATE_ALERTED,
 		 STATE_READY,
 		 STATE_FINISHED,
+		 STATE_DELETED,
                  };
 
     State get_state(void);
@@ -140,6 +141,7 @@ namespace Realm {
     //  for cancellation reasons
     void start_operation(Operation *op);
     void stop_operation(Operation *op);
+    Operation *get_operation(void) const;
 
 #ifdef REALM_USE_USER_THREADS
     // perform a user-level thread switch

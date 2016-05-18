@@ -14,40 +14,6 @@
 
 import "regent"
 
--- Compile and link circuit.cc
-local ccircuit
-do
-  local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime/"
-  local legion_dir = runtime_dir .. "legion/"
-  local mapper_dir = runtime_dir .. "mappers/"
-  local realm_dir = runtime_dir .. "realm/"
-  local circuit_cc = root_dir .. "circuit.cc"
-  local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
-  local cxx = os.getenv('CXX') or 'c++'
-
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
-  if os.execute('test "$(uname)" = Darwin') == 0 then
-    cxx_flags =
-      (cxx_flags ..
-         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
-  else
-    cxx_flags = cxx_flags .. " -shared -fPIC"
-  end
-
-  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
-                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 " -I " .. realm_dir .. " " .. circuit_cc .. " -o " .. circuit_so)
-  if os.execute(cmd) ~= 0 then
-    print("Error: failed to compile " .. circuit_cc)
-    assert(false)
-  end
-  terralib.linklibrary(circuit_so)
-  ccircuit = terralib.includec("circuit.h", {"-I", root_dir, "-I", runtime_dir, 
-                                             "-I", mapper_dir, "-I", legion_dir,
-                                             "-I", realm_dir})
-end
-
 local c = regentlib.c
 local std = terralib.includec("stdlib.h")
 local cstring = terralib.includec("string.h")
@@ -686,5 +652,9 @@ task toplevel()
   end
   c.free(colorings.first_wires)
 end
-ccircuit.register_mappers()
-regentlib.start(toplevel)
+
+if os.getenv('SAVEOBJ') == '1' then
+  regentlib.saveobj(toplevel, "circuit", "executable")
+else
+  regentlib.start(toplevel)
+end

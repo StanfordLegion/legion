@@ -203,6 +203,7 @@ namespace Realm {
 
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -230,6 +231,11 @@ namespace Realm {
     void DeferredShutdown::print(std::ostream& os) const
     {
       os << "deferred shutdown";
+    }
+
+    Event DeferredShutdown::get_finish_event(void) const
+    {
+      return Event::NO_EVENT;
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
@@ -537,6 +543,7 @@ namespace Realm {
 	local_sparsity_map_free_list(0),
 	run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
     {
@@ -686,8 +693,11 @@ namespace Realm {
 	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      if(!getenv("GASNET_IB_SPAWNER"))
+      // (This is called GASNET_IB_SPAWNER for versions <= 1.24 and GASNET_SPAWNER for versions >= 1.26)
+      if(!getenv("GASNET_IB_SPAWNER") && !getenv("GASNET_SPAWNER")) {
 	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
+	setenv("GASNET_SPAWNER", "mpi", 0 /*no overwrite*/);
+      }
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -758,6 +768,8 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      sampling_profiler.configure_from_cmdline(cmdline, core_reservations);
+
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -813,6 +825,8 @@ namespace Realm {
       std::string dummy_prefix;
       cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
+
+      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
 
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;
@@ -909,6 +923,7 @@ namespace Realm {
       hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
       hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
       hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
+      hcount += BarrierMigrationMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Migration AM");
       hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
@@ -1148,14 +1163,14 @@ namespace Realm {
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::SYSTEM_MEM],
 				  100, // "large" bandwidth
-				  1   // "small" latency
+				  5   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::REGDMA_MEM],
 				  80,  // "large" bandwidth
-				  5   // "small" latency
+				  10   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
@@ -1717,6 +1732,8 @@ namespace Realm {
       PartitioningOpQueue::stop_worker_threads();
       LegionRuntime::LowLevel::stop_dma_worker_threads();
       stop_activemsg_threads();
+
+      sampling_profiler.shutdown();
 
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;

@@ -21,8 +21,8 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \struct GenericUser
@@ -102,26 +102,27 @@ namespace LegionRuntime {
       public:
         // Don't forget to update clone_from methods
         // when changing these bit values
-        static const unsigned BASE_FIELDS_MASK = 0x7;
-        inline void set_path_only(void) { bit_mask |= 1; }
-        inline void set_needs_final(void) { bit_mask |= 2; }
-        inline void set_close_top(void) { bit_mask |= 4; }
-        inline void set_needs_capture(void) { bit_mask |= 8; }
+        static const unsigned BASE_FIELDS_MASK = 0x3F;
+        inline void set_path_only(void) { bit_mask |= 0x1; }
+        inline void set_needs_final(void) { bit_mask |= 0x2; }
+        inline void set_close_top(void) { bit_mask |= 0x4; }
+        inline void set_close_node(void) { bit_mask |= 0x8; }
+        inline void set_leave_open(void) { bit_mask |= 0x10; }
+        inline void set_split_node(void) { bit_mask |= 0x20; }
+        inline void set_needs_capture(void) { bit_mask |= 0x40; }
         inline void unset_needs_capture(void)
-        { if (needs_capture()) bit_mask -= 8; }
+        { if (needs_capture()) bit_mask &= BASE_FIELDS_MASK; }
       public:
-        inline bool path_only(void) const { return (1 & bit_mask); }
-        inline bool needs_final(void) const { return (2 & bit_mask); }
-        inline bool close_top(void) const { return (4 & bit_mask); }
-        inline bool needs_capture(void) const { return (8 & bit_mask); }
+        inline bool path_only(void) const { return (0x1 & bit_mask); }
+        inline bool needs_final(void) const { return (0x2 & bit_mask); }
+        inline bool close_top(void) const { return (0x4 & bit_mask); }
+        inline bool close_node(void) const { return (0x8 & bit_mask); }
+        inline bool leave_open(void) const { return (0x10 & bit_mask); }
+        inline bool split_node(void) const { return (0x20 & bit_mask); }
+        inline bool needs_capture(void) const { return (0x40 & bit_mask); }
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
-        // For nodes in close operations that are not the top node
-        // this mask doubles as the set of fields which need to be 
-        // applied because the close is leave open. Unfortunately
-        // we can't put this in a union to make this more clear
-        // because C unions are dumb.
         FieldMask        advance_mask;
       public:
         unsigned bit_mask;
@@ -144,7 +145,8 @@ namespace LegionRuntime {
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
-                         std::set<Event> &applied_conditions);
+                         std::set<Event> &applied_conditions,
+			 bool copy_previous = false);
       void apply_close(ContextID ctx, AddressSpaceID target,
              const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                        std::set<Event> &applied_conditions); 
@@ -156,6 +158,8 @@ namespace LegionRuntime {
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node, bool capture); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
+      const FieldMask& get_advance_mask(RegionTreeNode *node, 
+                                        bool &is_split) const;
     public:
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);
@@ -272,15 +276,13 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-      PhysicalUser(const RegionUsage &u, const ColorPoint &child,
-                   FieldVersions *versions = NULL);
+      PhysicalUser(void);
+      PhysicalUser(const RegionUsage &u, const ColorPoint &child, 
+                   UniqueID op_id, unsigned index);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
-    public:
-      bool same_versions(const FieldMask &test_mask, 
-                         const FieldVersions *other) const;
     public:
       void pack_user(Serializer &rez);
       static PhysicalUser* unpack_user(Deserializer &derez, 
@@ -290,25 +292,28 @@ namespace LegionRuntime {
     public:
       RegionUsage usage;
       ColorPoint child;
-      FieldVersions *const versions;
+      UniqueID op_id;
+      unsigned index; // region requirement index
     }; 
 
     /**
-     * \struct MappableInfo
+     * \struct TraversalInfo
      */
-    struct MappableInfo {
+    struct TraversalInfo {
     public:
-      MappableInfo(ContextID ctx, Operation *op,
-                   Processor local_proc, RegionRequirement &req,
-                   VersionInfo &version_info,
-                   const FieldMask &traversal_mask);
+      TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
+                    const RegionRequirement &req, VersionInfo &version_info, 
+                    const FieldMask &traversal_mask, 
+                    std::set<Event> &map_applied_events);
     public:
       const ContextID ctx;
       Operation *const op;
-      const Processor local_proc;
-      RegionRequirement &req;
+      const unsigned index;
+      const RegionRequirement &req;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
+      const UniqueID context_uid;
+      std::set<Event> &map_applied_events;
     };
 
     /**
@@ -401,16 +406,21 @@ namespace LegionRuntime {
       void reset(void);
       void sanity_check(void);
     public:
-      void initialize_state(LogicalView *view, Event term_event,
+      void initialize_state(Event term_event,
                             const RegionUsage &usage,
-                            const FieldMask &user_mask);
+                            const FieldMask &user_mask,
+                            const InstanceSet &targets,
+                            UniqueID init_op_id, unsigned init_index,
+                            const std::vector<LogicalView*> &corresponding);
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
                                   bool capture_previous, bool path_only,
                                   bool need_final, bool close_top, 
                                   bool report_unversioned,
-                                  bool capture_leave_open = false);
+                                  bool close_node = false,
+                                  bool capture_leave_open = false,
+                                  bool split_node = false);
       void advance_version_numbers(const FieldMask &mask);
     public:
       VersionState* create_new_version_state(VersionID vid); 
@@ -418,13 +428,6 @@ namespace LegionRuntime {
                               DistributedID did, AddressSpaceID owner_space);
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
                                               AddressSpaceID owner_space);
-    public:
-      inline bool has_persistent_views(void) const { return has_persistent; }
-      void add_persistent_view(MaterializedView *view);
-      void remove_persistent_view(MaterializedView *view);
-      void capture_persistent_views(
-                            LegionMap<LogicalView*,FieldMask>::aligned &views,
-                                    const FieldMask &capture_mask);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -453,9 +456,6 @@ namespace LegionRuntime {
       FieldMask restricted_fields;
     protected:
       Reservation state_lock; 
-    protected:
-      bool has_persistent;
-      std::set<MaterializedView*> persistent_views;
     };
 
     typedef DynamicTableAllocator<CurrentState, 10, 8> CurrentStateAllocator;
@@ -525,7 +525,12 @@ namespace LegionRuntime {
     public:
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
+      inline bool has_close_operations(void) const 
+        { return (!closed_children.empty() || 
+                  !read_only_children.empty() || !!flush_only_fields); }
       inline bool has_closed_fields(void) const { return !!closed_mask; }
+      inline const FieldMask& get_closed_fields(void) const 
+        { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
                                bool leave_open, bool read_only_close);
       void record_partial_fields(const FieldMask &skipped_fields);
@@ -587,99 +592,6 @@ namespace LegionRuntime {
       FieldMask flush_only_fields;
     }; 
 
-    struct CopyTracker {
-    public:
-      CopyTracker(void);
-    public:
-      inline void add_copy_event(Event e) { copy_events.insert(e); } 
-      Event get_termination_event(void) const;
-    protected:
-      std::set<Event> copy_events;
-    };
-
-    /**
-     * \struct PhysicalCloser
-     * Class for helping with the closing of physical region trees
-     */
-    class PhysicalCloser : public CopyTracker {
-    public:
-      PhysicalCloser(const MappableInfo &info,
-                     LogicalRegion closing_handle);
-      PhysicalCloser(const PhysicalCloser &rhs);
-      ~PhysicalCloser(void);
-    public:
-      PhysicalCloser& operator=(const PhysicalCloser &rhs);
-    public:
-      bool needs_targets(void) const;
-      void add_target(MaterializedView *target);
-      void close_tree_node(RegionTreeNode *node, 
-                           const FieldMask &closing_mask);
-      const std::vector<MaterializedView*>& get_upper_targets(void) const;
-      const std::vector<MaterializedView*>& get_lower_targets(void) const;
-    public:
-      void update_dirty_mask(const FieldMask &mask);
-      const FieldMask& get_dirty_mask(void) const;
-      void update_node_views(RegionTreeNode *node, PhysicalState *state);
-    public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-      inline const FieldMask& get_leave_open_mask(void) const 
-        { return leave_open_mask; }
-    public:
-      const MappableInfo &info;
-      const LogicalRegion handle;
-    protected:
-      FieldMask leave_open_mask;
-    protected:
-      bool targets_selected;
-      FieldMask dirty_mask;
-      std::vector<MaterializedView*> upper_targets;
-      std::vector<MaterializedView*> lower_targets;
-      std::set<Event> close_events;
-    }; 
-
-    /**
-     * \struct CompositeCloser
-     * Class for helping with closing of physical trees to composite instances
-     */
-    class CompositeCloser {
-    public:
-      CompositeCloser(ContextID ctx, VersionInfo &version_info);
-      CompositeCloser(const CompositeCloser &rhs);
-      ~CompositeCloser(void);
-    public:
-      CompositeCloser& operator=(const CompositeCloser &rhs);
-    public:
-      CompositeNode* get_composite_node(RegionTreeNode *tree_node,
-                                        CompositeNode *parent);
-      CompositeRef create_valid_view(PhysicalState *state,
-                                     CompositeNode *root,
-                                     const FieldMask &closed_mask,
-                                     bool register_view);
-      void capture_physical_state(CompositeNode *target,
-                                  RegionTreeNode *node,
-                                  PhysicalState *state,
-                                  const FieldMask &capture_mask,
-                                  FieldMask &dirty_mask);
-      void update_capture_mask(RegionTreeNode *node,
-                               const FieldMask &capture_mask);
-      bool filter_capture_mask(RegionTreeNode *node,
-                               FieldMask &capture_mask);
-    public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-    public:
-      const ContextID ctx;
-      VersionInfo &version_info;
-    public:
-      FieldMask leave_open_mask;
-    public:
-      CompositeVersionInfo *composite_version_info;
-      std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
-      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
-    }; 
-
     /**
      * \struct EventSet 
      * A helper class for building sets of fields with 
@@ -708,7 +620,7 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
       PhysicalState(CurrentState *manager);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       PhysicalState(CurrentState *manager, RegionTreeNode *node);
 #endif
       PhysicalState(const PhysicalState &rhs);
@@ -722,17 +634,16 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool path_only, bool close_top);
+      void capture_state(bool path_only, bool split_node);
       void apply_path_only_state(const FieldMask &advance_mask,
             AddressSpaceID target, std::set<Event> &applied_conditions) const;
       void apply_state(const FieldMask &advance_mask, 
             AddressSpaceID target, std::set<Event> &applied_conditions);
-      void filter_and_apply(bool top, AddressSpaceID target,
-            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+      void filter_and_apply(const FieldMask &advance_mask,AddressSpaceID target,
+            bool filter_masks, bool filter_views, bool filter_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
                             std::set<Event> &applied_conditions);
-      void release_created_instances(void);
       void reset(void);
-      void record_created_instance(InstanceView *view, bool remote);
       void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
@@ -759,14 +670,10 @@ namespace LegionRuntime {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-      // Any instance views which we created and are therefore holding
-      // additional valid references that will need to be removed
-      // after our updates have been applied
-      std::deque<std::pair<InstanceView*,bool/*remote*/> > created_instances;
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       RegionTreeNode *const node;
 #endif
@@ -805,7 +712,7 @@ namespace LegionRuntime {
         UserEvent to_trigger;
       };
     public:
-      VersionState(VersionID vid, Internal *rt, DistributedID did,
+      VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
                    CurrentState *manager); 
       VersionState(const VersionState &rhs);
@@ -817,17 +724,19 @@ namespace LegionRuntime {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void initialize(LogicalView *view, Event term_event,
-                      const RegionUsage &usage,
-                      const FieldMask &user_mask);
-      void update_close_top_state(PhysicalState *state,
-                                  const FieldMask &update_mask) const;
-      void update_open_children_state(PhysicalState *state,
+      void initialize(Event term_event, const RegionUsage &usage,
+                      const FieldMask &user_mask, const InstanceSet &targets,
+                      UniqueID init_op_id, unsigned init_index,
+                      const std::vector<LogicalView*> &corresponding);
+      void update_split_previous_state(PhysicalState *state,
+                                       const FieldMask &update_mask) const;
+      void update_split_advance_state(PhysicalState *state,
                                       const FieldMask &update_mask) const;
       void update_path_only_state(PhysicalState *state,
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
+    public: // methods for applying state information
       void merge_path_only_state(const PhysicalState *state,
                                  const FieldMask &merge_mask,
                                  AddressSpaceID target,
@@ -838,9 +747,10 @@ namespace LegionRuntime {
                                 std::set<Event> &applied_conditions,
                                 bool need_lock = true);
       void filter_and_merge_physical_state(const PhysicalState *state,
-                                const FieldMask &merge_mask, bool top,
-                                AddressSpaceID target,
-            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+                                const FieldMask &merge_mask,
+                                AddressSpaceID target, bool filter_masks,
+                                bool filter_views, bool filter_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
                                 std::set<Event> &applied_conditions);
     public:
       virtual void notify_active(void);
@@ -864,7 +774,7 @@ namespace LegionRuntime {
       void send_version_state(AddressSpaceID target, VersionRequestKind kind,
                            const FieldMask &request_mask, UserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                            UserEvent to_trigger, const FieldMask &request_mask, 
+                            UserEvent to_trigger, const FieldMask &request_mask,
                             VersionRequestKind request_kind);
       void launch_send_version_state(AddressSpaceID target,
                                      UserEvent to_trigger, 
@@ -883,13 +793,13 @@ namespace LegionRuntime {
       void handle_version_state_response(AddressSpaceID source,
             UserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
-      static void process_version_state_path_only(Internal *rt,
+      static void process_version_state_path_only(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_initialization(Internal *rt,
+      static void process_version_state_initialization(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_request(Internal *rt, 
+      static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
-      static void process_version_state_response(Internal *rt,
+      static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
     public:
       const VersionID version_number;
@@ -908,7 +818,7 @@ namespace LegionRuntime {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       // Track our current state 
       bool currently_active;
       bool currently_valid;
@@ -945,8 +855,6 @@ namespace LegionRuntime {
       bool has_child(unsigned depth) const;
       const ColorPoint& get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
-    public:
-      InstanceRef translate_ref(const InstanceRef &ref) const;
     protected:
       std::vector<ColorPoint> path;
       unsigned min_depth;
@@ -1137,8 +1045,9 @@ namespace LegionRuntime {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
-                      VersionInfo &version_info,
-                      Processor local_proc, Operation *op);
+                      VersionInfo &version_info, 
+                      Operation *op, unsigned index,
+                      std::set<Event> &map_applied_events);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1149,36 +1058,11 @@ namespace LegionRuntime {
       ReductionView *const target;
       const FieldMask close_mask;
       VersionInfo &version_info;
-      const Processor local_proc;
       Operation *const op;
+      const unsigned index;
+      std::set<Event> &map_applied_events;
     protected:
       std::set<ReductionView*> issued_reductions;
-    };
-
-    /**
-     * \class MappingRef
-     * This class keeps a valid reference to a physical instance that has
-     * been allocated and is ready to have dependence analysis performed.
-     * Once all the allocations have been performed, then an operation
-     * can pass all of the mapping references to the RegionTreeForest
-     * to actually perform the operations necessary to make the 
-     * region valid and return an InstanceRef.
-     */
-    class MappingRef {
-    public:
-      MappingRef(void);
-      MappingRef(LogicalView *view, const FieldMask &needed_mask);
-      MappingRef(const MappingRef &rhs);
-      ~MappingRef(void);
-    public:
-      MappingRef& operator=(const MappingRef &rhs);
-    public:
-      inline bool has_ref(void) const { return (view != NULL); }
-      inline LogicalView* get_view(void) const { return view; } 
-      inline const FieldMask& get_mask(void) const { return needed_fields; }
-    private:
-      LogicalView *view;
-      FieldMask needed_fields;
     };
 
     /**
@@ -1187,126 +1071,252 @@ namespace LegionRuntime {
      */
     class InstanceRef {
     public:
-      InstanceRef(void);
-      InstanceRef(Event ready, InstanceView *view);
-      InstanceRef(Event ready, InstanceView *view,
-                  const std::vector<Reservation> &locks);
+      InstanceRef(bool composite = false);
+      InstanceRef(const InstanceRef &rhs);
+      InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
+                  Event ready_event = Event::NO_EVENT);
+      ~InstanceRef(void);
+    public:
+      InstanceRef& operator=(const InstanceRef &rhs);
     public:
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
-      inline bool has_ref(void) const { return (manager != NULL); }
-      inline bool has_required_locks(void) const 
-                                      { return !needed_locks.empty(); }
+      inline bool has_ref(void) const 
+      {
+#ifdef DEBUG_LEGION
+        assert(!composite);
+#endif
+        return (ptr.manager != NULL);
+      }
       inline Event get_ready_event(void) const { return ready_event; }
-      inline void add_reservation(Reservation handle) 
-                                  { needed_locks.push_back(handle); }
-      inline PhysicalManager* get_manager(void) const { return manager; }
-      inline InstanceView* get_instance_view(void) const { return view; }
+      inline void set_ready_event(Event ready) { ready_event = ready; }
+      inline PhysicalManager* get_manager(void) const 
+      { 
+#ifdef DEBUG_LEGION
+        assert(!composite);
+#endif
+        return ptr.manager; 
+      }
+      inline const FieldMask& get_valid_fields(void) const 
+        { return valid_fields; }
+    public:
+      inline bool is_composite_ref(void) const { return composite; }
+      inline bool is_local(void) const { return local; }
+      void set_composite_view(CompositeView *view);
+      CompositeView* get_composite_view(void) const;
+      MappingInstance get_mapping_instance(void) const;
     public:
       // These methods are used by PhysicalRegion::Impl to hold
       // valid references to avoid premature collection
-      void add_valid_reference(ReferenceSource source);
-      void remove_valid_reference(ReferenceSource source);
+      void add_valid_reference(ReferenceSource source) const;
+      void remove_valid_reference(ReferenceSource source) const;
     public:
-      MaterializedView* get_materialized_view(void) const;
-      ReductionView* get_reduction_view(void) const;
-    public:
-      void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
-                               bool exclusive);
       Memory get_memory(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+    public:
+      bool is_field_set(FieldID fid) const;
+      LegionRuntime::Accessor::RegionAccessor<
+          LegionRuntime::Accessor::AccessorType::Generic>
+            get_accessor(void) const;
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Internal *rt, Deserializer &derez);
+      void unpack_reference(Runtime *rt, Deserializer &derez, Event &ready);
     private:
+      FieldMask valid_fields; 
       Event ready_event;
-      InstanceView *view; // only valid on creation node
-      PhysicalManager *manager;
-      std::vector<Reservation> needed_locks;
-    };
-
-    class CompositeRef {
-    public:
-      CompositeRef(void);
-      CompositeRef(CompositeView *view);
-      CompositeRef(const CompositeRef &rhs);
-      ~CompositeRef(void);
-    public:
-      CompositeRef& operator=(const CompositeRef &rhs);
-    public:
-      inline bool has_ref(void) const { return (view != NULL); }
-      inline bool is_local(void) const { return local; }
-      CompositeView* get_view(void) const { return view; }
-    public:
-      void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Internal *rt, Deserializer &derez);
-    private:
-      CompositeView *view;
+      union {
+        PhysicalManager *manager;
+        CompositeView *view;
+      } ptr;
+      bool composite;
       bool local;
     };
 
     /**
-     * \class PremapTraverser
-     * A traverser of the physical region tree for
-     * performing the premap operation.
-     * Keep track of the last node we visited
+     * \class InstanceSet
+     * This class is an abstraction for representing one or more
+     * instance references. It is designed to be light-weight and
+     * easy to copy by value. It maintains an internal copy-on-write
+     * data structure to avoid unnecessary premature copies.
      */
-    class PremapTraverser : public PathTraverser {
+    class InstanceSet {
     public:
-      PremapTraverser(RegionTreePath &path, const MappableInfo &info);  
-      PremapTraverser(const PremapTraverser &rhs); 
-      ~PremapTraverser(void);
+      struct CollectableRef : public Collectable, public InstanceRef {
+      public:
+        CollectableRef(void)
+          : Collectable(), InstanceRef() { }
+        CollectableRef(const InstanceRef &ref)
+          : Collectable(), InstanceRef(ref) { }
+      };
+      struct InternalSet : public Collectable {
+      public:
+        InternalSet(size_t size = 0)
+          { if (size > 0) vector.resize(size); }
+        InternalSet(const InternalSet &rhs) : vector(rhs.vector) { }
+        ~InternalSet(void) { }
+      public:
+        InternalSet& operator=(const InternalSet &rhs)
+          { assert(false); return *this; }
+      public:
+        LegionVector<InstanceRef>::aligned vector; 
+      };
     public:
-      PremapTraverser& operator=(const PremapTraverser &rhs);
+      InstanceSet(size_t init_size = 0);
+      InstanceSet(const InstanceSet &rhs);
+      ~InstanceSet(void);
     public:
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
+      InstanceSet& operator=(const InstanceSet &rhs);
+      bool operator==(const InstanceSet &rhs) const;
+      bool operator!=(const InstanceSet &rhs) const;
+    public:
+      InstanceRef& operator[](unsigned idx);
+      const InstanceRef& operator[](unsigned idx) const;
+    public:
+      bool empty(void) const;
+      size_t size(void) const;
+      void resize(size_t new_size);
+      void clear(void);
+      void add_instance(const InstanceRef &ref);
+    public:
+      bool has_composite_ref(void) const;
+      const InstanceRef& get_composite_ref(void) const;
+    public:
+      void pack_references(Serializer &rez, AddressSpaceID target) const;
+      void unpack_references(Runtime *runtime, Deserializer &derez,
+                             std::set<Event> &ready_events);
+    public:
+      void add_valid_references(ReferenceSource source) const;
+      void remove_valid_references(ReferenceSource source) const;
+    public:
+      void update_wait_on_events(std::set<Event> &wait_on_events) const;
+    public:
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
     protected:
-      bool premap_node(RegionTreeNode *node, LogicalRegion closing_handle);
+      void make_copy(void);
     protected:
-      const MappableInfo &info;
+      union {
+        CollectableRef* single;
+        InternalSet*     multi;
+      } refs;
+      bool single;
+      mutable bool shared;
     };
 
     /**
-     * \class MappingTraverser
-     * A traverser of the physical region tree for
-     * performing the mapping operation.
+     * \class PhysicalTraverser
+     * A class for traversing the physical region tree to open up
+     * sub-trees and find valid instances for a given region requirement
      */
-    class MappingTraverser : public PathTraverser {
+    class PhysicalTraverser : public PathTraverser {
     public:
-      MappingTraverser(RegionTreePath &path, const MappableInfo &info,
-                       const RegionUsage &u, const FieldMask &m,
-                       Processor proc, unsigned idx, 
-                       InstanceView *target = NULL/*for restricted*/);
-      MappingTraverser(const MappingTraverser &rhs);
-      ~MappingTraverser(void);
+      PhysicalTraverser(RegionTreePath &path, TraversalInfo *info, 
+                        InstanceSet *targets);
+      PhysicalTraverser(const PhysicalTraverser &rhs);
+      ~PhysicalTraverser(void);
     public:
-      MappingTraverser& operator=(const MappingTraverser &rhs);
+      PhysicalTraverser& operator=(const PhysicalTraverser &rhs);
     public:
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
-    public:
-      const MappingRef& get_instance_ref(void) const;
     protected:
-      void traverse_node(RegionTreeNode *node);
-      bool map_physical_region(RegionNode *node);
-      bool map_reduction_region(RegionNode *node);
-    public:
-      const MappableInfo &info;
-      const RegionUsage usage;
-      const FieldMask user_mask;
-      const Processor target_proc;
-      const unsigned index;
+      bool traverse_node(RegionTreeNode *node);
     protected:
-      MappingRef result;
-      LogicalView *target;
+      TraversalInfo *const info;
+      InstanceSet *const targets;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+    /**
+     * \struct PhysicalCloser
+     * Class for helping with the closing of physical region trees
+     */
+    class PhysicalCloser {
+    public:
+      PhysicalCloser(const TraversalInfo &info,
+                     LogicalRegion closing_handle);
+      PhysicalCloser(const PhysicalCloser &rhs);
+      ~PhysicalCloser(void);
+    public:
+      PhysicalCloser& operator=(const PhysicalCloser &rhs);
+    public:
+      void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
+                              const std::vector<MaterializedView*> &targets,
+                              const FieldMask &closing_mask,
+                              const InstanceSet &close_targets);
+    public:
+      void close_tree_node(RegionTreeNode *node, 
+                           const FieldMask &closing_mask);
+      void issue_dirty_updates(RegionTreeNode *node, 
+                               const FieldMask &dirty_fields,
+              const LegionMap<LogicalView*,FieldMask>::aligned &valid_intances);
+      void issue_reduction_updates(RegionTreeNode *node,
+                                   const FieldMask &reduc_fields,
+          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions);
+    public:
+      void update_dirty_mask(const FieldMask &mask);
+      const FieldMask& get_dirty_mask(void) const;
+      void update_node_views(RegionTreeNode *node, PhysicalState *state);
+    public:
+      inline void set_leave_open_mask(const FieldMask &leave_open)
+        { leave_open_mask = leave_open; }
+      inline const FieldMask& get_leave_open_mask(void) const 
+        { return leave_open_mask; }
+    public:
+      const TraversalInfo &info;
+      const LogicalRegion handle;
+    protected:
+      FieldMask                    leave_open_mask;
+    protected:
+      FieldMask                         dirty_mask;
+      std::vector<MaterializedView*> upper_targets;
+      std::vector<MaterializedView*> lower_targets;
+      InstanceSet                    close_targets;
+    }; 
+
+    /**
+     * \struct CompositeCloser
+     * Class for helping with closing of physical trees to composite instances
+     */
+    class CompositeCloser {
+    public:
+      CompositeCloser(ContextID ctx, 
+                      VersionInfo &version_info, SingleTask *target_ctx);
+      CompositeCloser(const CompositeCloser &rhs);
+      ~CompositeCloser(void);
+    public:
+      CompositeCloser& operator=(const CompositeCloser &rhs);
+    public:
+      CompositeNode* get_composite_node(RegionTreeNode *tree_node,
+                                        bool root = false);
+      CompositeView* create_valid_view(PhysicalState *state,
+                                      CompositeNode *root,
+                                      const FieldMask &valid_mask);
+      void capture_physical_state(CompositeNode *target,
+                                  RegionTreeNode *node,
+                                  PhysicalState *state,
+                                  const FieldMask &close_mask,
+                                  const FieldMask &dirty_mask,
+                                  const FieldMask &reduc_mask);
+    public:
+      void update_capture_mask(RegionTreeNode *node,
+                               const FieldMask &capture_mask);
+      bool filter_capture_mask(RegionTreeNode *node,
+                               FieldMask &capture_mask);
+    public:
+      const ContextID ctx;
+      VersionInfo &version_info;
+      SingleTask *const target_ctx;
+    public:
+      std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
+      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_ANALYSIS_H__

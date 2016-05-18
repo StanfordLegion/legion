@@ -27,7 +27,7 @@
 
 namespace Realm {
 
-    typedef unsigned int AddressSpace;
+    typedef ::legion_lowlevel_address_space_t AddressSpace;
 
     class ProfilingRequestSet;
     class CodeDescriptor;
@@ -116,6 +116,8 @@ namespace Realm {
       // reports a problem with a processor in general (this is primarily for fault injection)
       void report_processor_fault(int reason,
 				  const void *reason_data, size_t reason_size) const;
+
+      static const char* get_kind_name(Kind kind);
     };
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }

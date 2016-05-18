@@ -363,17 +363,17 @@ function codegen.task_rule(state_type, node)
   local predicate_pattern_matches = quote end
   first_element.patterns:map(function(pattern)
     if pattern.field == "index" then
-      local binder = terralib.newsymbol(pattern.binder)
+      local binder = terralib.newsymbol(c.legion_domain_point_t, pattern.binder)
       binders[pattern.binder] = binder
       select_task_options_pattern_matches = quote
         [select_task_options_pattern_matches]
-        var [binder] : c.legion_domain_point_t
+        var [binder]
         [binder].dim = 1
         [binder].point_data[0] = 0
       end
       select_target_for_point_pattern_matches = quote
         [select_target_for_point_pattern_matches]
-        var [binder] : c.legion_domain_point_t
+        var [binder]
         [binder] = [point_var]
       end
     else
@@ -438,7 +438,7 @@ function codegen.task_rule(state_type, node)
   end)
 
   local terra matches(ptr        : &opaque,
-                      [task_var] : c.legion_task_t)
+                      [task_var])
     var [state_var] = [&state_type](ptr)
     [selector_body]
     [predicate_pattern_matches]
@@ -464,7 +464,7 @@ function codegen.task_rule(state_type, node)
   end
 
   local terra select_task_options(ptr        : &opaque,
-                                  [task_var] : c.legion_task_t)
+                                  [task_var])
     var [state_var] = [&state_type](ptr)
     [selector_body]
     [early_out("select_task_options")]
@@ -477,8 +477,8 @@ function codegen.task_rule(state_type, node)
   end
 
   local terra select_target_for_point(ptr         : &opaque,
-                                      [task_var]  : c.legion_task_t,
-                                      [point_var] : c.legion_domain_point_t)
+                                      [task_var],
+                                      [point_var])
     var [state_var] = [&state_type](ptr)
     [select_target_for_point_pattern_matches]
     [select_target_for_point_body]
@@ -527,11 +527,11 @@ function codegen.region_rule(state_type, node)
   local pattern_matches = quote end
   first_task_element.patterns:map(function(pattern)
     if pattern.field == "target" then
-      local binder = terralib.newsymbol(pattern.binder)
+      local binder = terralib.newsymbol(c.legion_processor_t, pattern.binder)
       binders[pattern.binder] = binder
       pattern_matches = quote
         [pattern_matches]
-        var [binder] : c.legion_processor_t
+        var [binder]
         [binder] = c.legion_task_get_target_proc([task_var])
       end
     elseif pattern.field == "isa" then
@@ -539,7 +539,7 @@ function codegen.region_rule(state_type, node)
       binders[pattern.binder] = binder
       pattern_matches = quote
         [pattern_matches]
-        var [binder] : c.legion_processor_kind_t
+        var [binder]
         do
           var proc = c.legion_task_get_target_proc([task_var])
           [binder] = c.bishop_processor_get_isa(proc)
@@ -625,9 +625,9 @@ function codegen.region_rule(state_type, node)
   end
 
   local terra map_task(ptr        : &opaque,
-                       [task_var] : c.legion_task_t,
-                       [req_var]  : c.legion_region_requirement_t,
-                       [req_idx]  : uint)
+                       [task_var],
+                       [req_var],
+                       [req_idx])
     var [state_var] = [&state_type](ptr)
     [selector_body]
     [early_out]
@@ -656,7 +656,7 @@ function codegen.mapper_init(assignments)
     }
   end)
   local mapper_state_var = terralib.newsymbol(&mapper_state_type)
-  local terra mapper_init
+  local mapper_init
 
   if sizeof(mapper_state_type) > 0 then
     terra mapper_init(ptr : &&opaque)

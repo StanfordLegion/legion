@@ -213,6 +213,9 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>())
+	measurements.add_measurement(waits);
+
       measurements.send_responses(requests);
     }
   }
@@ -286,6 +289,11 @@ namespace Realm {
   void OperationTable::TableCleaner::print(std::ostream& os) const
   {
     os << "operation table cleaner (table=" << table << ")";
+  }
+
+  Event OperationTable::TableCleaner::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
   }
 
 

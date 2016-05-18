@@ -24,6 +24,7 @@
 #include "activemsg.h"
 #include "operation.h"
 #include "profiling.h"
+#include "sampling.h"
 
 #include "event_impl.h"
 #include "rsrv_impl.h"
@@ -99,6 +100,7 @@ namespace Realm {
 
       ThreadedTaskScheduler *sched;
       PriorityQueue<Task *, GASNetHSL> task_queue;
+      ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
 
       struct TaskTableEntry {
 	Processor::TaskFuncPtr fnptr;
@@ -196,7 +198,8 @@ namespace Realm {
 
       void request_group_members(void);
 
-      PriorityQueue<Task *, GASNetHSL> task_queue;      
+      PriorityQueue<Task *, GASNetHSL> task_queue;
+      ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
     };
     
     // this is generally useful to all processor implementations, so put it here
@@ -212,6 +215,7 @@ namespace Realm {
 
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       ProcessorImpl *proc;

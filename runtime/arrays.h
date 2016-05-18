@@ -40,11 +40,7 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
-#ifdef POINTS_ARE_64BIT
-    typedef ptrdiff_t coord_t;
-#else
-    typedef int coord_t;
-#endif
+    typedef long long int coord_t;
 
     template <unsigned DIM>
     class Point {
@@ -139,6 +135,34 @@ namespace LegionRuntime {
 	return res;
       }
 
+      CUDAPREFIX Point<DIM>& operator+=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] += other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator-=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] -= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator*=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] *= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator/=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] /= other.x[i];
+        return *this;
+      }
+
       CUDAPREFIX static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
@@ -188,6 +212,9 @@ namespace LegionRuntime {
       enum { DIM = 1 };
       CUDAPREFIX Point(void) {}
       CUDAPREFIX Point(coord_t val) { x[0] = val; }
+      CUDAPREFIX Point(int val) { x[0] = val; }
+      CUDAPREFIX Point(size_t val) { x[0] = val; }
+      CUDAPREFIX Point(unsigned int val) { x[0] = val; }
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
@@ -365,6 +392,36 @@ namespace LegionRuntime {
 	return ((lo != other.lo) || (hi != other.hi));
       }
 
+      CUDAPREFIX Rect<DIM> operator+(const Point<DIM> &translate) const
+      {
+        Rect<DIM> result;
+        result.lo = lo + translate;
+        result.hi = hi + translate;
+        return result;
+      }
+
+      CUDAPREFIX Rect<DIM> operator-(const Point<DIM> &translate) const
+      {
+        Rect<DIM> result;
+        result.lo = lo - translate;
+        result.hi = hi - translate;
+        return result;
+      }
+
+      CUDAPREFIX Rect<DIM>& operator+=(const Point<DIM> &translate)
+      {
+        lo += translate;
+        hi += translate;
+        return *this;
+      }
+
+      CUDAPREFIX Rect<DIM>& operator-=(const Point<DIM> &translate)
+      {
+        lo += translate;
+        hi += translate;
+        return *this;
+      }
+
       CUDAPREFIX bool overlaps(const Rect<DIM>& other) const
       {
 	for(unsigned i = 0; i < DIM; i++)
@@ -413,6 +470,18 @@ namespace LegionRuntime {
       {
         return Rect<DIM>(Point<DIM>::min(lo, other.lo),
                          Point<DIM>::max(hi, other.hi));
+      }
+
+      bool dominates(const Rect<DIM>& other) const
+      {
+        for (unsigned i = 0; i < DIM; i++)
+        {
+          if (other.lo.x[i] < lo.x[i])
+            return false;
+          if (other.hi.x[i] > hi.x[i])
+            return false;
+        }
+        return true;
       }
   
       Point<DIM> lo, hi;

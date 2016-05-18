@@ -63,7 +63,7 @@ using namespace LegionRuntime::Accessor;
 // Default Pthreads stack size
 #define STACK_SIZE      2      // (MB) 
 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 #define PTHREAD_SAFE_CALL(cmd)			\
 	{					\
 		int ret = (cmd);		\
@@ -525,7 +525,7 @@ namespace LegionRuntime {
 	    current.gen = generation+1;
             free_generation = generation+1;
 	    sources = 1;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	    assert(current.exists());
 #endif
           }
@@ -1137,7 +1137,7 @@ namespace LegionRuntime {
     {
       // Update the generation
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(in_use);
       assert(sources >= count);
 #endif
@@ -1154,7 +1154,7 @@ namespace LegionRuntime {
         // Increment the generation so that nobody can register a triggerable
         // with this event, but keep event in_use so no one can use the event
         generation++;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(generation == current.gen);
 #endif
         // Get the set of people to trigger
@@ -1279,7 +1279,7 @@ namespace LegionRuntime {
 		current.id = index;
 		current.gen = generation+1;
                 free_generation = generation+1;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 		assert(current.exists());
 #endif
 	}	
@@ -1305,7 +1305,7 @@ namespace LegionRuntime {
 
     Event EventImpl::get_event() 
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(in_use);
 #endif
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1316,7 +1316,7 @@ namespace LegionRuntime {
 
     UserEvent EventImpl::get_user_event()
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(in_use);
 #endif
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1332,7 +1332,7 @@ namespace LegionRuntime {
     Barrier EventImpl::get_barrier(unsigned expected_arrivals, ReductionOpID _redop_id,
 				   const void *_initial_value, size_t _initial_value_size)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(in_use);
 #endif
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1362,7 +1362,7 @@ namespace LegionRuntime {
 
     void EventImpl::alter_arrival_count(int delta, EventGeneration alter_gen)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(in_use);
 #endif
       PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -1377,7 +1377,7 @@ namespace LegionRuntime {
           pending_alterations[alter_gen] = delta;
       } else {
         // We're working on the current generation
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         if (delta < 0) // If we're deleting, make sure nothing weird happens
           assert(int(sources) > (-delta));
 #endif
@@ -1391,7 +1391,7 @@ namespace LegionRuntime {
     void EventImpl::perform_arrival(int count, Event wait_on,
                                     EventGeneration apply_gen)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(in_use);
 #endif
       if (wait_on.exists()) {
@@ -1548,7 +1548,7 @@ namespace LegionRuntime {
                     {
                         data_size = dsize;
                         data = malloc(data_size);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
                         assert(data != NULL);
 #endif
                     }
@@ -1560,7 +1560,7 @@ namespace LegionRuntime {
                 }
                 else
                 {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
                     assert(dsize == 0);
 #endif
                     data_size = 0;
@@ -1573,7 +1573,7 @@ namespace LegionRuntime {
                 free(mutex);
                 if (data_size != 0)
                 {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
                     assert(data != NULL);
 #endif
                     free(data);
@@ -1858,7 +1858,7 @@ namespace LegionRuntime {
                 {
                     data_size = dsize;
                     data = malloc(data_size);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
                     assert(data != NULL);
 #endif
                 }
@@ -1878,7 +1878,7 @@ namespace LegionRuntime {
 	active = false;	
         if (data_size > 0)
         {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
             assert(data != NULL);
 #endif
             free(data);
@@ -2188,7 +2188,7 @@ namespace LegionRuntime {
         {
           RuntimeImpl::TaskTable::const_iterator it = 
                               task_table.find(task->func_id);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(it != task_table.end());
 #endif
           Processor::TaskFuncPtr func = it->second.func_ptr;
@@ -2277,7 +2277,7 @@ namespace LegionRuntime {
         PTHREAD_SAFE_CALL(pthread_barrier_destroy(init_bar));
         free(init_bar);
       }
-#if DEBUG_LOW_LEVEL
+#if DEBUG_REALM
       else
       {
         PTHREAD_SAFE_CALL(bar_result);
@@ -2643,7 +2643,7 @@ namespace LegionRuntime {
 	{
 		remaining -= size;
 		ptr = malloc(size);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 		assert(ptr != NULL);
 #endif
 	}
@@ -2654,7 +2654,7 @@ namespace LegionRuntime {
     void MemoryImpl::free_space(void *ptr, size_t size)
     {
 	PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(ptr != NULL);
 #endif
 	remaining += size;
@@ -3095,7 +3095,7 @@ namespace Realm {
     ElementMask::OverlapResult ElementMask::overlaps_with(const ElementMask &other,
                                              off_t max_effort) const
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(raw_size() == other.raw_size());
 #endif
       if (raw_data != 0) {
@@ -3651,7 +3651,7 @@ namespace LegionRuntime {
 			// Use the memory to allocate the space, fail if there is none
 			//MemoryImpl *mem = RuntimeImpl::get_runtime()->get_memory_impl(m);
 			base_ptr = base; //(char*)mem->allocate_space(num_elmts*elem_size);	
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 			assert(base_ptr != NULL);
 #endif
 			reservation = RuntimeImpl::get_runtime()->get_free_reservation();
@@ -3850,7 +3850,7 @@ namespace LegionRuntime {
                 parent_impl = parent;
                 list = (parent != NULL);
                 cur_entry = 0;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 		assert(base_ptr != NULL);
 #endif
 		reservation = RuntimeImpl::get_runtime()->get_free_reservation();
@@ -3986,12 +3986,12 @@ namespace LegionRuntime {
         DetailedTimer::ScopedPush sp(TIME_COPY); 
         const void *src_ptr = base_ptr;
         void       *tgt_ptr = target->base_ptr;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert((src_ptr != NULL) && (tgt_ptr != NULL));
 #endif
         if (!reduction)
         {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           if (target->reduction)
           {
              fprintf(stderr,"Cannot copy from non-reduction instance %d to reduction instance %d\n",
@@ -4018,7 +4018,7 @@ namespace LegionRuntime {
             else
             {
               // Reduction-to-reduction copy 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
               // Make sure they are the same kind of reduction
               if (this->redop != target->redop)
               {
@@ -4051,7 +4051,7 @@ namespace LegionRuntime {
             }
             else
             {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
               // Make sure its a reduction fold copy
               if (target->list)
               {
@@ -4077,7 +4077,7 @@ namespace LegionRuntime {
 
     void RegionInstanceImpl::apply_list(RegionInstanceImpl *target)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(this->list);
         assert(!target->list);
         assert(cur_entry <= num_elmts);
@@ -4097,7 +4097,7 @@ namespace LegionRuntime {
 
     void RegionInstanceImpl::append_list(RegionInstanceImpl *target)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(this->list);
         assert(target->list);
 #endif
@@ -4269,7 +4269,7 @@ namespace LegionRuntime {
     template<>
     RegionAccessor<AccessorArray> RegionAccessor<AccessorGeneric>::convert<AccessorArray>(void) const
     { 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(!this->is_reduction_only());
 #endif
       RegionInstanceImpl *impl = (RegionInstanceImpl*)internal_data;
@@ -4284,7 +4284,7 @@ namespace LegionRuntime {
     RegionAccessor<AccessorArrayReductionFold> RegionAccessor<AccessorGeneric>::convert<AccessorArrayReductionFold>(void) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl*)internal_data;
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(impl->is_reduction() && !impl->is_list_reduction());
 #endif
       return RegionAccessor<AccessorArrayReductionFold>(impl->get_base_ptr());
@@ -4294,7 +4294,7 @@ namespace LegionRuntime {
     RegionAccessor<AccessorReductionList> RegionAccessor<AccessorGeneric>::convert<AccessorReductionList>(void) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl*)internal_data; 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(impl->is_reduction() && impl->is_list_reduction());
 #endif
       return RegionAccessor<AccessorReductionList>(impl,impl->get_num_elmts(),impl->get_elmt_size());
@@ -5132,7 +5132,7 @@ namespace LegionRuntime {
             // Make the parent do it and intercept the returning value
             result = parent->allocate_space(count);
         }
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(result >= 0);
 #endif
         // Update the mask to reflect the allocation
@@ -5144,7 +5144,7 @@ namespace LegionRuntime {
     void IndexSpaceImpl::free_space(unsigned ptr, unsigned count)
     {
         PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         // Some sanity checks
         assert(int(ptr) < mask.get_num_elmts());
         assert(int(ptr+count) < mask.get_num_elmts());
@@ -5173,7 +5173,7 @@ namespace LegionRuntime {
 
     ElementMask& IndexSpaceImpl::get_element_mask(void)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(active);
 #endif
       return mask;
@@ -5181,7 +5181,7 @@ namespace LegionRuntime {
 
     const ElementMask& IndexSpaceImpl::get_element_mask(void) const
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(active);
 #endif
       return mask;
@@ -5615,7 +5615,7 @@ namespace LegionRuntime {
         }
         MemoryImpl *mem = RuntimeImpl::get_runtime()->get_memory_impl(m);
  // There must be a reduction operation for a list instance
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(redopid > 0);
 #endif
         const ReductionOpUntyped *op = RuntimeImpl::get_runtime()->get_reduction_op(redopid); 
@@ -5626,7 +5626,7 @@ namespace LegionRuntime {
         }
         // Set everything up
         RegionInstanceImpl *parent_impl = RuntimeImpl::get_runtime()->get_instance_impl(parent_inst);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(parent_impl != NULL);
 #endif
         PTHREAD_SAFE_CALL(pthread_mutex_lock(mutex));
@@ -6931,7 +6931,7 @@ namespace LegionRuntime {
 #else
             unsigned utility_idx = idx % num_utility_cpus;
 #endif
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
             assert(utility_idx < num_utility_cpus);
 #endif
             ProcessorImpl *impl = new ProcessorImpl(init_barrier, task_table, p, 
@@ -7066,7 +7066,7 @@ namespace LegionRuntime {
         }
 	// Now start the threads for each of the processors
 	// except for processor 0 which is this thread
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(processors.size() == (num_cpus+num_utility_cpus+1));
 #endif
 		
@@ -7176,7 +7176,7 @@ namespace LegionRuntime {
     {
         EventImpl::EventIndex i = e.id;
         PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&event_lock));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(i != 0);
 	assert(i < events.size());
 #endif
@@ -7206,7 +7206,7 @@ namespace LegionRuntime {
     ReservationImpl* RuntimeImpl::get_reservation_impl(Reservation r)
     {
         PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&reservation_lock));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(r.id != 0);
 	assert(r.id < reservations.size());
 #endif
@@ -7238,7 +7238,7 @@ namespace LegionRuntime {
       if(p.id >= ProcessorGroup::FIRST_PROC_GROUP_ID) {
 	IDType id = p.id - ProcessorGroup::FIRST_PROC_GROUP_ID;
         PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&proc_group_lock));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(id < proc_groups.size());
 #endif
 	ProcessorGroup *grp = proc_groups[id];
@@ -7246,7 +7246,7 @@ namespace LegionRuntime {
 	return grp;
       }
 
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
         assert(p.exists());
 	assert(p.id < processors.size());
 #endif
@@ -7256,7 +7256,7 @@ namespace LegionRuntime {
     IndexSpaceImpl* RuntimeImpl::get_metadata_impl(IndexSpace m)
     {
         PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&metadata_lock));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(m.id != 0);
 	assert(m.id < metadatas.size());
 #endif
@@ -7275,7 +7275,7 @@ namespace LegionRuntime {
     RegionInstanceImpl* RuntimeImpl::get_instance_impl(RegionInstance i)
     {
         PTHREAD_SAFE_CALL(pthread_rwlock_rdlock(&instance_lock));
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
 	assert(i.id != 0);
 	assert(i.id < instances.size());
 #endif
@@ -7302,7 +7302,7 @@ namespace LegionRuntime {
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_event_lock));
           // Activate this event
           bool activated = result->activate();
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7338,7 +7338,7 @@ namespace LegionRuntime {
           free_reservations.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_reservation_lock));
           bool activated = result->activate(data_size);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7390,7 +7390,7 @@ namespace LegionRuntime {
           free_metas.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
           bool activated = result->activate(num_elmts);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7422,7 +7422,7 @@ namespace LegionRuntime {
           free_metas.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
           bool activated = result->activate(mask);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7455,7 +7455,7 @@ namespace LegionRuntime {
           free_metas.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
           bool activated = result->activate(parent);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7488,7 +7488,7 @@ namespace LegionRuntime {
           free_metas.pop_front();
           PTHREAD_SAFE_CALL(pthread_mutex_unlock(&free_metas_lock));
           bool activated = result->activate(parent,mask);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7530,7 +7530,7 @@ namespace LegionRuntime {
           bool activated = result->activate(m, num_elmts, alloc_size, 
                                             field_sizes, elmt_size, block_size, 
                                             linearization, ptr, redop, parent, reqs);
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
           assert(activated);
 #else
 	  (void)activated; // eliminate compiler warning
@@ -7566,7 +7566,7 @@ namespace LegionRuntime {
 
     const ReductionOpUntyped* RuntimeImpl::get_reduction_op(ReductionOpID redop)
     {
-#ifdef DEBUG_LOW_LEVEL
+#ifdef DEBUG_REALM
       assert(redop_table.find(redop) != redop_table.end());
 #endif
       return redop_table[redop];

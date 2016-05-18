@@ -1,5 +1,6 @@
 language: cpp
 sudo: required
+dist: trusty
 os:
   - linux
   - osx
@@ -7,10 +8,13 @@ compiler:
   - gcc
   - clang
 env:
-  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=
-  - WARNINGS_ARE_ERRORS=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=-DLEGION_SPY
-  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=-std=c++0x
+  global:
+  - WARN_AS_ERROR=1
+  matrix:
+  - CC_FLAGS=
+  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+  - CC_FLAGS=-DLEGION_SPY
+  - CC_FLAGS=-std=c++0x
 matrix:
   exclude:
     - os: osx
@@ -36,8 +40,8 @@ before_install:
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       # sudo sh -c "echo 'deb http://llvm.org/apt/precise/ llvm-toolchain-precise-3.5 main' >> /etc/apt/sources.list"
       # wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key | sudo apt-key add -
-      sudo sh -c "echo 'deb http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/precise/ llvm-toolchain-precise-3.5 main' >> /etc/apt/sources.list"
-      wget -O - http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/llvm-snapshot.gpg.key | sudo apt-key add -
+      # sudo sh -c "echo 'deb http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/precise/ llvm-toolchain-precise-3.5 main' >> /etc/apt/sources.list"
+      # wget -O - http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/llvm-snapshot.gpg.key | sudo apt-key add -
       sudo apt-get update -qq
       sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev
     fi
@@ -49,7 +53,35 @@ before_install:
   - export TERRA_LINK="$CXX"
 script:
   - ./language/travis.py
-  - make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-  - make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
-  - make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-  - make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+  - |
+    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime clean
+    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime -j2
+    examples/00_hello_world/hello_world
+    make -s -C examples/01_tasks_and_futures LG_RT_DIR=../../runtime
+    examples/01_tasks_and_futures/tasks_and_futures
+    make -s -C examples/02_index_tasks LG_RT_DIR=../../runtime
+    examples/02_index_tasks/index_tasks
+    make -s -C examples/03_global_vars LG_RT_DIR=../../runtime
+    examples/03_global_vars/global_vars
+    make -s -C examples/04_logical_regions LG_RT_DIR=../../runtime
+    examples/04_logical_regions/logical_regions
+    make -s -C examples/05_physical_regions LG_RT_DIR=../../runtime
+    examples/05_physical_regions/physical_regions
+    make -s -C examples/06_privileges LG_RT_DIR=../../runtime
+    examples/06_privileges/privileges
+    make -s -C examples/07_partitioning LG_RT_DIR=../../runtime
+    examples/07_partitioning/partitioning
+    make -s -C examples/08_multiple_partitioning LG_RT_DIR=../../runtime
+    examples/08_multiple_partitioning/multiple_partitioning
+    make -s -C examples/09_custom_mapper LG_RT_DIR=../../runtime
+    examples/09_custom_mapper/custom_mapper
+    make -s -C examples/full_circuit LG_RT_DIR=../../runtime
+    examples/full_circuit/ckt_sim
+    make -s -C examples/full_ghost LG_RT_DIR=../../runtime
+    examples/full_ghost/ghost -ll:cpu 4
+  - |
+    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+  - |
+    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
+    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all

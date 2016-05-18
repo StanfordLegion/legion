@@ -196,3 +196,4 @@ DECLARE_REDUCTION(register_reduction_min_int32,
                   safe_reduce_min_int32, safe_reduce_min_int32_domain_point,
                   reduce_min_int32, reduce_min_int32_domain_point,
                   MinOpInt, int, int, min, min, INT_MAX)
+

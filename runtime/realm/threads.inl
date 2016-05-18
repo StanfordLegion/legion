@@ -159,7 +159,7 @@ namespace Realm {
   template <typename CONDTYPE>
   class ThreadWaker : public CONDTYPE::Callback {
   public:
-    ThreadWaker(Thread *_thread);
+    ThreadWaker(const CONDTYPE& cond, Thread *_thread);
     void operator()(bool _poisoned);
 
     Thread *thread;
@@ -167,8 +167,8 @@ namespace Realm {
   };
 
   template <typename CONDTYPE>
-  ThreadWaker<CONDTYPE>::ThreadWaker(Thread *_thread)
-    : thread(_thread)
+  ThreadWaker<CONDTYPE>::ThreadWaker(const CONDTYPE& cond, Thread *_thread)
+    : CONDTYPE::Callback(cond), thread(_thread)
   {
   }
 
@@ -223,7 +223,7 @@ namespace Realm {
     // first, indicate our intent to sleep
     thread->update_state(STATE_BLOCKING);
     // now create the callback so we know when to wake up
-    ThreadWaker<CONDTYPE> cb(thread);
+    ThreadWaker<CONDTYPE> cb(cond, thread);
     cond.add_callback(cb);
 
     // now tell the scheduler we are blocking
@@ -255,6 +255,11 @@ namespace Realm {
   {
     assert(current_op == op);
     current_op = 0;
+  }
+
+  inline Operation *Thread::get_operation(void) const
+  {
+    return current_op;
   }
 
 

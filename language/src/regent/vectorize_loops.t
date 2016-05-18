@@ -25,6 +25,8 @@ local symbol_table = require("regent/symbol_table")
 
 local min = math.min
 
+local bounds_checks = std.config["bounds-checks"]
+
 -- vectorizer
 
 local SIMD_REG_SIZE
@@ -65,6 +67,7 @@ context.__index = context
 function context:new_local_scope()
   local cx = {
     var_type = self.var_type:new_local_scope(),
+    subst = self.subst:new_local_scope(),
     expr_type = self.expr_type,
     demanded = self.demanded,
   }
@@ -74,6 +77,7 @@ end
 function context:new_global_scope()
   local cx = {
     var_type = symbol_table:new_global_scope(),
+    subst = symbol_table:new_global_scope(),
     expr_type = {},
     demanded = false,
   }
@@ -108,6 +112,16 @@ function context:report_error_when_demanded(node, error_msg)
   if self.demanded then log.error(node, error_msg) end
 end
 
+function context:add_substitution(from, to)
+  self.subst:insert(nil, from, to)
+end
+
+function context:find_replacement(from)
+  local to = self.subst:safe_lookup(from)
+  assert(to)
+  return to
+end
+
 local flip_types = {}
 
 function flip_types.block(cx, simd_width, symbol, node)
@@ -124,17 +138,20 @@ function flip_types.stat(cx, simd_width, symbol, node)
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
   elseif node:is(ast.typed.stat.Var) then
+    local symbols = terralib.newlist()
     local types = terralib.newlist()
     local values = terralib.newlist()
 
-    node.types:map(function(ty)
-      types:insert(flip_types.type(simd_width, ty))
-    end)
-    node.values:map(function(exp)
-      values:insert(flip_types.expr(cx, simd_width, symbol, exp))
-    end)
+    for i = 1, #node.symbols do
+      types:insert(flip_types.type(simd_width, node.types[i]))
+      symbols:insert(std.newsymbol(types[i], node.symbols[i]:getname() .. "_vectorized"))
+      cx:add_substitution(node.symbols[i], symbols[i])
+      if i <= #node.values then
+        values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
+      end
+    end
 
-    return node { types = types, values = values }
+    return node { symbols = symbols, types = types, values = values }
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
@@ -249,9 +266,18 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
     end
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if cx:lookup_expr_type(node) == V then
+      new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    end
+
   elseif node:is(ast.typed.expr.Deref) then
 
   elseif node:is(ast.typed.expr.ID) then
+    if cx:lookup_expr_type(node) == V and not (node.value == symbol) then
+      local sym = cx:find_replacement(node.value)
+      new_node.value = sym
+    end
 
   elseif node:is(ast.typed.expr.Constant) then
 
@@ -406,6 +432,9 @@ function min_simd_width.expr(cx, reg_size, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.arg))
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   elseif node:is(ast.typed.expr.Deref) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
@@ -663,6 +692,12 @@ function check_vectorizability.stat(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "an expression as a statement")
 
+    elseif node:is(ast.typed.stat.BeginTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
+    elseif node:is(ast.typed.stat.EndTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -753,6 +788,11 @@ function check_vectorizability.expr(cx, node)
   elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
+    return true
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if not check_vectorizability.expr(cx, node.value) then return false end
+    cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
   elseif node:is(ast.typed.expr.Deref) then
@@ -906,7 +946,7 @@ function vectorize_loops.stat_for_list(node)
   cx.demanded = node.options.vectorize:is(ast.options.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
-  if vectorizable then
+  if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
     return node { block = node.block }
@@ -936,7 +976,7 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_for_num(node)
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol.type) and node.symbol.type.dim <= 1 then
+    if std.is_bounded_type(node.symbol:gettype()) and node.symbol:gettype().dim <= 1 then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }
@@ -975,10 +1015,19 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Expr) then
     return node
 
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return node
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return node
+
   elseif node:is(ast.typed.stat.MapRegions) then
     return node
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
+    return node
+
+  elseif node:is(ast.typed.stat.RawDelete) then
     return node
 
   else
@@ -986,22 +1035,22 @@ function vectorize_loops.stat(node)
   end
 end
 
-function vectorize_loops.stat_task(node)
+function vectorize_loops.top_task(node)
   local body = vectorize_loops.block(node.body)
 
   return node { body = body }
 end
 
-function vectorize_loops.stat_top(node)
-  if node:is(ast.typed.stat.Task) then
-    return vectorize_loops.stat_task(node)
+function vectorize_loops.top(node)
+  if node:is(ast.typed.top.Task) then
+    return vectorize_loops.top_task(node)
   else
     return node
   end
 end
 
 function vectorize_loops.entry(node)
-  return vectorize_loops.stat_top(node)
+  return vectorize_loops.top(node)
 end
 
 return vectorize_loops

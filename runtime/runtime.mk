@@ -171,7 +171,7 @@ CC_FLAGS        += -DUSE_CUDA
 NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
-NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g -O0
+NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
 #NVCC_FLAGS	+= -G
 else
 NVCC_FLAGS	+= -O2
@@ -279,7 +279,7 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
@@ -290,7 +290,7 @@ CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Wno-strict-overflow
-ifeq ($(strip $(WARNINGS_ARE_ERRORS)),1)
+ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
 
@@ -320,8 +320,11 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/inst_impl.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
+		   $(LG_RT_DIR)/realm/sampling_impl.cc \
                    $(LG_RT_DIR)/lowlevel.cc \
                    $(LG_RT_DIR)/lowlevel_disk.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
+		   $(LG_RT_DIR)/realm/numa/numasysif.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
 		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
@@ -344,12 +347,13 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
-# If you want to go back to using the shared mapper, comment out the next line
-# and uncomment the one after that
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
+		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
-		   $(LG_RT_DIR)/mappers/mapping_utilities.cc
-#MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
+		   $(LG_RT_DIR)/mappers/test_mapper.cc \
+		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
+		   $(LG_RT_DIR)/mappers/debug_mapper.cc
+
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
@@ -365,9 +369,11 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \
 		    $(LG_RT_DIR)/legion/legion_constraint.cc \
+		    $(LG_RT_DIR)/legion/legion_mapping.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
-		    $(LG_RT_DIR)/legion/garbage_collection.cc
+		    $(LG_RT_DIR)/legion/garbage_collection.cc \
+		    $(LG_RT_DIR)/legion/mapper_manager.cc
 
 # General shell commands
 SHELL	:= /bin/sh

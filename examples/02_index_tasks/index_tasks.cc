@@ -18,7 +18,7 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 
 /*
  * This example is a redux version of hello world 
@@ -35,11 +35,11 @@ enum TaskIDs {
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   int num_points = 4;
   // See how many points to run
-  const InputArgs &command_args = HighLevelRuntime::get_input_args();
+  const InputArgs &command_args = Runtime::get_input_args();
   if (command_args.argc > 1)
   {
     num_points = atoi(command_args.argv[1]);
@@ -125,12 +125,12 @@ void top_level_task(const Task *task,
 
 int index_space_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
   // The point for this task is available in the task
   // structure under the 'index_point' field.
   assert(task->index_point.get_dim() == 1); 
-  printf("Hello world from task %d!\n", task->index_point.point_data[0]);
+  printf("Hello world from task %lld!\n", task->index_point.point_data[0]);
   // Values passed through an argument map are available 
   // through the local_args and local_arglen fields.
   assert(task->local_arglen == sizeof(int));
@@ -140,11 +140,11 @@ int index_space_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
-  HighLevelRuntime::register_legion_task<int, index_space_task>(HELLO_WORLD_INDEX_ID,
+  Runtime::register_legion_task<int, index_space_task>(HELLO_WORLD_INDEX_ID,
       Processor::LOC_PROC, false/*single*/, true/*index*/);
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }

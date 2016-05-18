@@ -19,6 +19,7 @@
 #include "runtime_impl.h"
 #include "logging.h"
 #include "threads.h"
+#include "profiling.h"
 
 namespace Realm {
 
@@ -43,6 +44,8 @@ namespace Realm {
     virtual bool event_triggered(Event e, bool poisoned);
 
     virtual void print(std::ostream& os) const;
+
+    virtual Event get_finish_event(void) const;
 
   protected:
     Event after_event;
@@ -70,6 +73,11 @@ namespace Realm {
   void DeferredEventTrigger::print(std::ostream& os) const
   {
     os << "deferred trigger: after=" << after_event;
+  }
+
+  Event DeferredEventTrigger::get_finish_event(void) const
+  {
+    return after_event;
   }
 
 
@@ -138,14 +146,20 @@ namespace Realm {
 
   class EventTriggeredCondition {
   public:
-    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen);
+    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
+			    ProfilingMeasurements::OperationEventWaits::WaitInterval *_interval);
 
     class Callback : public EventWaiter {
     public:
+      Callback(const EventTriggeredCondition& _cond);
       virtual ~Callback(void);
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
       virtual void operator()(bool poisoned) = 0;
+
+    protected:
+      const EventTriggeredCondition& cond;
     };
 
     void add_callback(Callback& cb) const;
@@ -153,10 +167,12 @@ namespace Realm {
   protected:
     EventImpl *event;
     Event::gen_t gen;
+    ProfilingMeasurements::OperationEventWaits::WaitInterval *interval;
   };
 
-  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen)
-    : event(_event), gen(_gen)
+  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
+						   ProfilingMeasurements::OperationEventWaits::WaitInterval *_interval)
+    : event(_event), gen(_gen), interval(_interval)
   {}
 
   void EventTriggeredCondition::add_callback(Callback& cb) const
@@ -164,12 +180,19 @@ namespace Realm {
     event->add_waiter(gen, &cb);
   }
 
+  EventTriggeredCondition::Callback::Callback(const EventTriggeredCondition& _cond)
+    : cond(_cond)
+  {
+  }
+  
   EventTriggeredCondition::Callback::~Callback(void)
   {
   }
   
   bool EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
   {
+    if(cond.interval)
+      cond.interval->record_wait_ready();
     (*this)(poisoned);
     // we don't manage the memory any more
     return false;
@@ -179,6 +202,11 @@ namespace Realm {
   {
     os << "EventTriggeredCondition (thread unknown)";
   }  
+
+  Event EventTriggeredCondition::Callback::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;  // ideally would be the finish event of the task being suspended
+  }
 
   void Event::wait(void) const
   {
@@ -213,8 +241,17 @@ namespace Realm {
     Thread *thread = Thread::self();
     if(thread) {
       log_event.info() << "thread blocked: thread=" << thread << " event=" << *this;
+      // see if we are being asked to profile these waits
+      ProfilingMeasurements::OperationEventWaits::WaitInterval *interval = 0;
+      if(thread->get_operation() != 0) {
+	interval = thread->get_operation()->create_wait_interval(*this);
+	if(interval)
+	  interval->record_wait_start();
+      }
       // describe the condition we want the thread to wait on
-      thread->wait_for_condition(EventTriggeredCondition(e, gen), poisoned);
+      thread->wait_for_condition(EventTriggeredCondition(e, gen, interval), poisoned);
+      if(interval)
+	interval->record_wait_end();
       log_event.info() << "thread resumed: thread=" << thread << " event=" << *this << " poisoned=" << poisoned;
       return;
     }
@@ -282,6 +319,12 @@ namespace Realm {
     return u;
   }
 
+  namespace Config {
+    // if non-zero, eagerly checks deferred user event triggers for loops up to the
+    //  specified limit
+    int event_loop_detection_limit = 0;
+  };
+
   void UserEvent::trigger(Event wait_on) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -297,6 +340,15 @@ namespace Realm {
     if(!wait_on.has_triggered()) {
       // deferred trigger
       log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
+      if(Config::event_loop_detection_limit > 0) {
+	// before we add the deferred trigger as a waiter, see if this is causing a cycle in the event graph
+	if(EventImpl::detect_event_chain(*this, wait_on, 
+					 Config::event_loop_detection_limit,
+					 true /*print chain*/)) {
+	  log_event.fatal() << "deferred trigger creates event loop!  event=" << *this << " wait_on=" << wait_on;
+	  assert(0);
+	}
+      }
       EventImpl::add_waiter(wait_on, new DeferredEventTrigger(*this));
       return;
     }
@@ -382,7 +434,9 @@ namespace Realm {
 			 ",%d) %d", id, gen, enclosing.id, enclosing.gen, delta);
 #endif
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
-    impl->adjust_arrival(gen, delta, timestamp, Event::NO_EVENT, 0, 0);
+    impl->adjust_arrival(gen, delta, timestamp, Event::NO_EVENT,
+			 gasnet_mynode(), false /*!forwarded*/,
+			 0, 0);
 
     Barrier with_ts;
     with_ts.id = id;
@@ -412,6 +466,7 @@ namespace Realm {
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(gen, -count, timestamp, wait_on,
+			 gasnet_mynode(), false /*!forwarded*/,
 			 reduce_value, reduce_value_size);
   }
 
@@ -419,6 +474,123 @@ namespace Realm {
   {
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     return impl->get_result(gen, value, value_size);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventImpl
+  //
+
+  /*static*/ bool EventImpl::detect_event_chain(Event search_from, Event target,
+						int max_depth, bool print_chain)
+  {
+    std::vector<Event> events;
+    std::vector<EventWaiter *> waiters;
+    std::set<Event> events_seen;
+    std::vector<EventWaiter *> todo;
+
+    events.reserve(max_depth + 1);
+    waiters.reserve(max_depth + 1);
+
+    events.push_back(search_from);
+    waiters.push_back(0);
+
+    Event e = search_from;
+    while(true) {
+      std::vector<EventWaiter *> waiters_copy;
+
+      switch(ID(e).type()) {
+      case ID::ID_EVENT:
+	{
+	  GenEventImpl *impl = get_runtime()->get_genevent_impl(e);
+
+	  {
+	    AutoHSLLock al(impl->mutex);
+	    if(impl->generation >= e.gen) {
+	      // already triggered!?
+	      assert(0);
+	    } else if((impl->generation + 1) == e.gen) {
+	      // current generation
+	      waiters_copy.assign(impl->current_local_waiters.begin(),
+				  impl->current_local_waiters.end());
+	    } else {
+	      std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = impl->future_local_waiters.find(e.gen);
+	      if(it != impl->future_local_waiters.end())
+		waiters_copy.assign(it->second.begin(), it->second.end());
+	    }
+	  }
+	  break;
+	}
+
+      case ID::ID_BARRIER:
+	{
+	  assert(0);
+	  break;
+	}
+
+      default:
+	assert(0);
+      }
+
+      // record all of these event waiters as seen before traversing, so that we find the
+      //  shortest possible path
+      int count = 0;
+      for(std::vector<EventWaiter *>::const_iterator it = waiters_copy.begin();
+	  it != waiters_copy.end();
+	  it++) {
+	Event e2 = (*it)->get_finish_event();
+	if(!e2.exists()) continue;
+	if(e2 == target) {
+	  if(print_chain) {
+	    LoggerMessage msg(log_event.error());
+	    if(msg.is_active()) {
+	      msg << "event chain found!";
+	      events.push_back(e2);
+	      waiters.push_back(*it);
+	      for(size_t i = 0; i < events.size(); i++) {
+		msg << "\n  " << events[i];
+		if(waiters[i]) {
+		  msg << ": ";
+		  waiters[i]->print(msg.get_stream());
+		}
+	      }
+	    }
+	  }
+	  return true;
+	}
+	// don't search past the requested maximum depth
+	if(events.size() > (size_t)max_depth)
+	  continue;
+	bool inserted = events_seen.insert(e2).second;
+	if(inserted) {
+	  if(count++ == 0)
+	    todo.push_back(0); // marker so we know when to "pop" the stack
+	  todo.push_back(*it);
+	}
+      }
+
+      if(count == 0) {
+	events.pop_back();
+	waiters.pop_back();
+      }
+
+      // get next waiter
+      EventWaiter *w = 0;
+      while(!todo.empty()) {
+	w = todo.back();
+	todo.pop_back();
+	if(w) break;
+	assert(!events.empty());
+	events.pop_back();
+	waiters.pop_back();
+      }
+      if(!w) break;
+      e = w->get_finish_event();
+      events.push_back(e);
+      waiters.push_back(w);
+    }
+    return false;
   }
 
 
@@ -529,6 +701,11 @@ namespace Realm {
       virtual void print(std::ostream& os) const
       {
 	os << "event merger: " << finish_event << " left=" << count_needed;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return finish_event;
       }
 
     protected:
@@ -1195,6 +1372,11 @@ namespace Realm {
 	os << "external waiter";
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
+      }
+
     public:
       GASNetCondVar &cv;
       bool poisoned;
@@ -1399,7 +1581,7 @@ namespace Realm {
       }
 
       // and let the barrier rearm as many times as necessary without being released
-      impl->free_generation = (unsigned)-1;
+      //impl->free_generation = (unsigned)-1;
 
       log_barrier.info("barrier created: " IDFMT "/%d base_count=%d redop=%d",
 		       impl->me.id(), impl->generation, impl->base_arrival_count, redopid);
@@ -1419,7 +1601,7 @@ namespace Realm {
     {
       generation = 0;
       gen_subscribed = 0;
-      first_generation = free_generation = 0;
+      first_generation = /*free_generation =*/ 0;
       next_free = 0;
       remote_subscribe_gens.clear();
       remote_trigger_gens.clear();
@@ -1436,7 +1618,7 @@ namespace Realm {
       owner = _init_owner;
       generation = 0;
       gen_subscribed = 0;
-      first_generation = free_generation = 0;
+      first_generation = /*free_generation =*/ 0;
       next_free = 0;
       remote_subscribe_gens.clear();
       remote_trigger_gens.clear();
@@ -1452,11 +1634,19 @@ namespace Realm {
       log_barrier.info("received barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
 		       args.delta, args.wait_on.id, args.wait_on.gen, args.barrier.id, args.barrier.gen, args.barrier.timestamp);
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
+      gasnet_node_t sender = args.sender;
+      bool forwarded = false;
+      if(args.sender < 0) {
+	forwarded = true;
+	sender = -1 - args.sender;
+      }
       impl->adjust_arrival(args.barrier.gen, args.delta, args.barrier.timestamp, args.wait_on,
+			   sender, forwarded,
 			   datalen ? data : 0, datalen);
     }
 
     /*static*/ void BarrierAdjustMessage::send_request(gasnet_node_t target, Barrier barrier, int delta, Event wait_on,
+						       gasnet_node_t sender, bool forwarded,
 						       const void *data, size_t datalen)
     {
       RequestArgs args;
@@ -1464,15 +1654,18 @@ namespace Realm {
       args.barrier = barrier;
       args.delta = delta;
       args.wait_on = wait_on;
+      args.sender = forwarded ? (-1 - sender) : sender;
       
       Message::request(target, args, data, datalen, PAYLOAD_COPY);
     }
 
-    /*static*/ void BarrierSubscribeMessage::send_request(gasnet_node_t target, ID::IDType barrier_id, Event::gen_t subscribe_gen)
+    /*static*/ void BarrierSubscribeMessage::send_request(gasnet_node_t target, ID::IDType barrier_id, Event::gen_t subscribe_gen,
+							  gasnet_node_t subscriber, bool forwarded)
     {
       RequestArgs args;
 
-      args.node = gasnet_mynode();
+      args.subscriber = subscriber;
+      args.forwarded = forwarded;
       args.barrier_id = barrier_id;
       args.subscribe_gen = subscribe_gen;
       
@@ -1482,6 +1675,7 @@ namespace Realm {
     /*static*/ void BarrierTriggerMessage::send_request(gasnet_node_t target, ID::IDType barrier_id,
 							Event::gen_t trigger_gen, Event::gen_t previous_gen,
 							Event::gen_t first_generation, ReductionOpID redop_id,
+							gasnet_node_t migration_target,	unsigned base_arrival_count,
 							const void *data, size_t datalen)
     {
       RequestArgs args;
@@ -1492,6 +1686,8 @@ namespace Realm {
       args.previous_gen = previous_gen;
       args.first_generation = first_generation;
       args.redop_id = redop_id;
+      args.migration_target = migration_target;
+      args.base_arrival_count = base_arrival_count;
 
       Message::request(target, args, data, datalen, PAYLOAD_COPY);
     }
@@ -1508,8 +1704,12 @@ static void *bytedup(const void *data, size_t datalen)
 
     class DeferredBarrierArrival : public EventWaiter {
     public:
-      DeferredBarrierArrival(Barrier _barrier, int _delta, const void *_data, size_t _datalen)
-	: barrier(_barrier), delta(_delta), data(bytedup(_data, _datalen)), datalen(_datalen)
+      DeferredBarrierArrival(Barrier _barrier, int _delta,
+			     gasnet_node_t _sender, bool _forwarded,
+			     const void *_data, size_t _datalen)
+	: barrier(_barrier), delta(_delta),
+	  sender(_sender), forwarded(_forwarded),
+	  data(bytedup(_data, _datalen)), datalen(_datalen)
       {}
 
       virtual ~DeferredBarrierArrival(void)
@@ -1525,7 +1725,9 @@ static void *bytedup(const void *data, size_t datalen)
 	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d",
 			 barrier.id, barrier.gen, barrier.timestamp, delta);
 	BarrierImpl *impl = get_runtime()->get_barrier_impl(barrier);
-	impl->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT, data, datalen);
+	impl->adjust_arrival(barrier.gen, delta, barrier.timestamp, Event::NO_EVENT,
+			     sender, forwarded,
+			     data, datalen);
         return true;
       }
 
@@ -1535,9 +1737,16 @@ static void *bytedup(const void *data, size_t datalen)
 	   << ", delta=" << delta << " datalen=" << datalen;
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return barrier;
+      }
+
     protected:
       Barrier barrier;
       int delta;
+      gasnet_node_t sender;
+      bool forwarded;
       void *data;
       size_t datalen;
     };
@@ -1603,26 +1812,33 @@ static void *bytedup(const void *data, size_t datalen)
     // if delta < 0, timestamp says which positive adjustment this arrival must wait for
     void BarrierImpl::adjust_arrival(Event::gen_t barrier_gen, int delta, 
 				     Barrier::timestamp_t timestamp, Event wait_on,
+				     gasnet_node_t sender, bool forwarded,
 				     const void *reduce_value, size_t reduce_value_size)
     {
       if(!wait_on.has_triggered()) {
 	// deferred arrival
 	Barrier b = make_barrier(barrier_gen, timestamp);
-#ifndef DEFER_ARRIVALS_LOCALLY
-        if(owner != gasnet_mynode()) {
+
+	// only forward deferred arrivals if the precondition is not one that looks like it'll
+	//  trigger here first
+        if((owner != gasnet_mynode())  &&
+	   (ID(wait_on).node() != gasnet_mynode())) {
 	  // let deferral happen on owner node (saves latency if wait_on event
           //   gets triggered there)
           //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
           //       owner, e.id, e.gen, wait_on.id, wait_on.gen);
 	  log_barrier.info("forwarding deferred barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
 			   delta, wait_on.id, wait_on.gen, b.id, b.gen, b.timestamp);
-	  BarrierAdjustMessage::send_request(owner, b, delta, wait_on, reduce_value, reduce_value_size);
+	  BarrierAdjustMessage::send_request(owner, b, delta, wait_on,
+					     sender, (sender != gasnet_mynode()),
+					     reduce_value, reduce_value_size);
 	  return;
         }
-#endif
+
 	log_barrier.info("deferring barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
 			 delta, wait_on.id, wait_on.gen, me.id(), barrier_gen, timestamp);
 	EventImpl::add_waiter(wait_on, new DeferredBarrierArrival(b, delta, 
+								  sender, forwarded,
 								  reduce_value, reduce_value_size));
 	return;
       }
@@ -1640,13 +1856,6 @@ static void *bytedup(const void *data, size_t datalen)
       }
 #endif
 
-      if(owner != gasnet_mynode()) {
-	// all adjustments handled by owner node
-	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierAdjustMessage::send_request(owner, b, delta, Event::NO_EVENT, reduce_value, reduce_value_size);
-	return;
-      }
-
       // can't actually trigger while holding the lock, so remember which generation(s),
       //  if any, to trigger and do it at the end
       Event::gen_t trigger_gen = 0;
@@ -1654,11 +1863,26 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<RemoteNotification> remote_notifications;
       Event::gen_t oldest_previous = 0;
       void *final_values_copy = 0;
-      {
+      gasnet_node_t migration_target = (gasnet_node_t) -1;
+      gasnet_node_t forward_to_node = (gasnet_node_t) -1;
+      gasnet_node_t inform_migration = (gasnet_node_t) -1;
+
+      do { // so we can use 'break' from the middle
 	AutoHSLLock a(mutex);
 
+	// ownership can change, so check it inside the lock
+	if(owner != gasnet_mynode()) {
+	  forward_to_node = owner;
+	  break;
+	} else {
+	  // if this message had to be forwarded to get here, tell the original sender we are the
+	  //  new owner
+	  if(forwarded && (sender != gasnet_mynode()))
+	    inform_migration = sender;
+	}
+
 	// sanity checks - is this a valid barrier?
-	assert(generation < free_generation);
+	//assert(generation < free_generation);
 	assert(base_arrival_count > 0);
 
 	// update whatever generation we're told to
@@ -1727,6 +1951,16 @@ static void *bytedup(const void *data, size_t datalen)
 	      remote_notifications.push_back(rn);
 	    }
 	  }
+
+#ifndef DISABLE_BARRIER_MIGRATION
+	  // if there were zero local waiters and a single remote waiter, this barrier is an obvious
+	  //  candidate for migration
+	  if(local_notifications.empty() && (remote_notifications.size() == 1)) {
+	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
+	    migration_target = remote_notifications[0].node;
+	    owner = migration_target;
+	  }
+#endif
 	}
 
 	// do we have reduction data to apply?  we can do this even if the actual adjustment is
@@ -1761,6 +1995,19 @@ static void *bytedup(const void *data, size_t datalen)
 	  final_values_copy = bytedup(final_values + ((rel_gen - 1) * redop->sizeof_lhs),
 				      count * redop->sizeof_lhs);
 	}
+      } while(0);
+
+      if(forward_to_node != (gasnet_node_t) -1) {
+	Barrier b = make_barrier(barrier_gen, timestamp);
+	BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
+					   sender, (sender != gasnet_mynode()),
+					   reduce_value, reduce_value_size);
+	return;
+      }
+
+      if(inform_migration != (gasnet_node_t) -1) {
+	Barrier b = make_barrier(barrier_gen, timestamp);
+	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
       }
 
       if(trigger_gen != 0) {
@@ -1790,7 +2037,8 @@ static void *bytedup(const void *data, size_t datalen)
 	    datalen = ((*it).trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
 	  }
 	  BarrierTriggerMessage::send_request((*it).node, me.id(), (*it).trigger_gen, (*it).previous_gen,
-					      first_generation, redop_id, data, datalen);
+					      first_generation, redop_id, migration_target, base_arrival_count,
+					      data, datalen);
 	}
       }
 
@@ -1819,7 +2067,7 @@ static void *bytedup(const void *data, size_t datalen)
 
 	if(previous_subscription < needed_gen) {
 	  log_barrier.info("subscribing to barrier " IDFMT "/%d", me.id(), needed_gen);
-	  BarrierSubscribeMessage::send_request(owner, me.id(), needed_gen);
+	  BarrierSubscribeMessage::send_request(owner, me.id(), needed_gen, gasnet_mynode(), false/*!forwarded*/);
 	}
       }
 
@@ -1883,15 +2131,33 @@ static void *bytedup(const void *data, size_t datalen)
       Event::gen_t previous_gen = 0;
       void *final_values_copy = 0;
       size_t final_values_size = 0;
-      {
+      gasnet_node_t forward_to_node = (gasnet_node_t) -1;
+      gasnet_node_t inform_migration = (gasnet_node_t) -1;
+      
+      do {
 	AutoHSLLock a(impl->mutex);
+
+	// first check - are we even the current owner?
+	if(impl->owner != gasnet_mynode()) {
+	  forward_to_node = impl->owner;
+	  break;
+	} else {
+	  if(args.forwarded) {
+	    // our own request wrapped back around can be ignored - we've already added the local waiter
+	    if(args.subscriber == gasnet_mynode()) {
+	      break;
+	    } else {
+	      inform_migration = args.subscriber;
+	    }
+	  }
+	}
 
 	// make sure the subscription is for this "lifetime" of the barrier
 	assert(args.subscribe_gen > impl->first_generation);
 
 	bool already_subscribed = false;
 	{
-	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_subscribe_gens.find(args.node);
+	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_subscribe_gens.find(args.subscriber);
 	  if(it != impl->remote_subscribe_gens.end()) {
 	    // a valid subscription should always be for a generation that hasn't
 	    //  triggered yet
@@ -1907,20 +2173,20 @@ static void *bytedup(const void *data, size_t datalen)
 	    //  generations that haven't triggered, so if we're subscribing to 
 	    //  an old generation, don't add it
 	    if(args.subscribe_gen > impl->generation)
-	      impl->remote_subscribe_gens[args.node] = args.subscribe_gen;
+	      impl->remote_subscribe_gens[args.subscriber] = args.subscribe_gen;
 	  }
 	}
 
 	// as long as we're not already subscribed to this generation, check to see if
 	//  any trigger notifications are needed
 	if(!already_subscribed && (impl->generation > impl->first_generation)) {
-	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_trigger_gens.find(args.node);
+	  std::map<unsigned, Event::gen_t>::iterator it = impl->remote_trigger_gens.find(args.subscriber);
 	  if((it == impl->remote_trigger_gens.end()) or (it->second < impl->generation)) {
 	    previous_gen = ((it == impl->remote_trigger_gens.end()) ?
 			      impl->first_generation :
 			      it->second);
 	    trigger_gen = impl->generation;
-	    impl->remote_trigger_gens[args.node] = impl->generation;
+	    impl->remote_trigger_gens[args.subscriber] = impl->generation;
 
 	    if(impl->redop) {
 	      int rel_gen = previous_gen + 1 - impl->first_generation;
@@ -1931,14 +2197,24 @@ static void *bytedup(const void *data, size_t datalen)
 	    }
 	  }
 	}
+      } while(0);
+
+      if(forward_to_node != (gasnet_node_t) -1) {
+	BarrierSubscribeMessage::send_request(forward_to_node, args.barrier_id, args.subscribe_gen,
+					      args.subscriber, (args.subscriber != gasnet_mynode()));
+      }
+
+      if(inform_migration != (gasnet_node_t) -1) {
+	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
       }
 
       // send trigger message outside of lock, if needed
       if(trigger_gen > 0) {
 	log_barrier.info("sending immediate barrier trigger: " IDFMT "/%d -> %d",
 			 args.barrier_id, previous_gen, trigger_gen);
-	BarrierTriggerMessage::send_request(args.node, args.barrier_id, trigger_gen, previous_gen,
+	BarrierTriggerMessage::send_request(args.subscriber, args.barrier_id, trigger_gen, previous_gen,
 					    impl->first_generation, impl->redop_id,
+					    (gasnet_node_t) -1 /*no migration*/, 0 /*dummy arrival count*/,
 					    final_values_copy, final_values_size);
       }
 
@@ -1961,6 +2237,13 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<EventWaiter *> local_notifications;
       {
 	AutoHSLLock a(impl->mutex);
+
+	// handle migration of the barrier ownership (possibly to us)
+	if(args.migration_target != (gasnet_node_t) -1) {
+	  //log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
+	  impl->owner = args.migration_target;
+	  impl->base_arrival_count = args.base_arrival_count;
+	}
 
 	// it's theoretically possible for multiple trigger messages to arrive out
 	//  of order, so check if this message triggers the oldest possible range
@@ -2049,6 +2332,26 @@ static void *bytedup(const void *data, size_t datalen)
       assert(value != 0);
       memcpy(value, final_values + ((rel_gen - 1) * redop->sizeof_lhs), redop->sizeof_lhs);
       return true;
+    }
+
+    /*static*/ void BarrierMigrationMessage::handle_request(RequestArgs args)
+    {
+      log_barrier.info() << "received barrier migration: barrier=" << args.barrier << " owner=" << args.current_owner;
+      BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
+      {
+	AutoHSLLock a(impl->mutex);
+	impl->owner = args.current_owner;
+      }
+    }
+
+    /*static*/ void BarrierMigrationMessage::send_request(gasnet_node_t target, Barrier barrier, gasnet_node_t owner)
+    {
+      RequestArgs args;
+
+      args.barrier = barrier;
+      args.current_owner = owner;
+
+      Message::request(target, args);
     }
 
 }; // namespace Realm

@@ -54,6 +54,11 @@ namespace Realm {
         os << "deferred instance destruction";
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
+      }
+
     protected:
       RegionInstanceImpl *impl;
     };
@@ -314,7 +319,7 @@ namespace Realm {
 	// double-check that whole range maps densely
 	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
 	assert(mapping->image_is_dense(preimage));
-	int inst_first_elmt = preimage.lo[0];
+	coord_t inst_first_elmt = preimage.lo[0];
 	//printf("adjusting base by %d * %zd: %p -> %p\n", inst_first_elmt, stride,
 	//       base,
 	//       ((char *)base) - inst_first_elmt * stride);

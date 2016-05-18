@@ -20,6 +20,8 @@
 #include "serialize.h"
 #include "inst_impl.h"
 #include "runtime_impl.h"
+#include "profiling.h"
+#include "utils.h"
 
 namespace Realm {
 
@@ -36,7 +38,9 @@ namespace Realm {
 
     AddressSpace Memory::address_space(void) const
     {
-      return ID(id).node();
+      // limitations in the current newmap implementation require that all memories
+      //  be managed by the HLR instance on the first node
+      return 0; //ID(id).node();
     }
 
     ID::IDType Memory::local_id(void) const
@@ -75,9 +79,9 @@ namespace Realm {
 
     MemoryImpl::MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind)
       : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
-#ifdef REALM_PROFILE_MEMORY_USAGE
-      , usage(0), peak_usage(0), peak_footprint(0)
-#endif
+      , usage(stringbuilder() << "realm/mem " << _me << "/usage")
+      , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
+      , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
     {
     }
 
@@ -123,12 +127,10 @@ namespace Realm {
 	    off_t retval = it->first;
 	    free_blocks.erase(it);
 	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
-#ifdef REALM_PROFILE_MEMORY_USAGE
 	    usage += size;
 	    if(usage > peak_usage) peak_usage = usage;
 	    size_t footprint = this->size - retval;
 	    if(footprint > peak_footprint) peak_footprint = footprint;
-#endif
 	    return retval;
 	  }
 	
@@ -138,12 +140,10 @@ namespace Realm {
 	    off_t retval = it->first + leftover;
 	    it->second = leftover;
 	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, retval);
-#ifdef REALM_PROFILE_MEMORY_USAGE
 	    usage += size;
 	    if(usage > peak_usage) peak_usage = usage;
 	    size_t footprint = this->size - retval;
 	    if(footprint > peak_footprint) peak_footprint = footprint;
-#endif
 	    return retval;
 	  }
 	} while(it != free_blocks.begin());
@@ -174,10 +174,8 @@ namespace Realm {
 	}
       }
 
-#ifdef REALM_PROFILE_MEMORY_USAGE
       usage -= size;
       // only made things smaller, so can't impact the peak usage
-#endif
 
       if(free_blocks.size() > 0) {
 	// find the first existing block that comes _after_ us
@@ -1603,7 +1601,7 @@ namespace Realm {
 	  args.sequence_id = sequence_id;
 
 	  int count = 1;
-	  while(datalen > max_xfer_size) {
+	  while(lines > max_lines_per_xfer) {
 	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
 						 pos, datalen,
 						 stride, max_lines_per_xfer,

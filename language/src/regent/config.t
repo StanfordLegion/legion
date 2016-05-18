@@ -24,10 +24,12 @@ local default_options = {
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["pretty"] = false,
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
   ["leaf"] = true,
+  ["trace"] = true,
   ["vectorize"] = true,
   ["task-inlines"] = true,
 }
@@ -50,6 +52,10 @@ function config.parse_args()
   end
 
   local args = terralib.newlist()
+
+  if not rawargs then
+    return setmetatable(options, option), args
+  end
 
   local i = 0
   local arg_i = 1

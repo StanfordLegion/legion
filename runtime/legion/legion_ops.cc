@@ -23,8 +23,8 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -36,7 +36,7 @@ namespace LegionRuntime {
       Operation::op_names[Operation::LAST_OP_KIND] = OPERATION_NAMES;
 
     //--------------------------------------------------------------------------
-    Operation::Operation(Internal *rt)
+    Operation::Operation(Runtime *rt)
       : runtime(rt), op_lock(Reservation::create_reservation()), 
         gen(0), unique_op_id(0), 
         outstanding_mapping_references(0),
@@ -44,7 +44,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       dependence_tracker.mapping = NULL;
-      if (!Internal::resilient_mode)
+      if (!Runtime::resilient_mode)
         commit_event = UserEvent::NO_USER_EVENT;
     }
 
@@ -70,7 +70,7 @@ namespace LegionRuntime {
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
       outstanding_mapping_references = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       mapped = false;
       executed = false;
       resolved = false;
@@ -86,17 +86,16 @@ namespace LegionRuntime {
       mapped_event = UserEvent::create_user_event();
       resolved_event = UserEvent::create_user_event();
       completion_event = UserEvent::create_user_event();
-      if (Internal::resilient_mode)
+      if (Runtime::resilient_mode)
         commit_event = UserEvent::create_user_event();
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
-      must_epoch_index = 0;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(mapped_event.exists());
       assert(resolved_event.exists());
       assert(completion_event.exists());
-      if (Internal::resilient_mode)
+      if (Runtime::resilient_mode)
         assert(commit_event.exists());
 #endif
       if (runtime->profiler != NULL)
@@ -149,10 +148,10 @@ namespace LegionRuntime {
     unsigned Operation::get_operation_depth(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
-      return (parent_ctx->depth+1);
+      return (parent_ctx->get_depth()+1);
     }
 
     //--------------------------------------------------------------------------
@@ -167,7 +166,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(req.handle_type == PART_PROJECTION);
 #endif
         runtime->forest->initialize_path(req.partition.get_index_partition(),
@@ -181,7 +180,7 @@ namespace LegionRuntime {
                                             LogicalRegion start_node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
@@ -194,7 +193,7 @@ namespace LegionRuntime {
                                             LogicalPartition start_node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
       runtime->forest->initialize_path(req.region.get_index_space(),
@@ -205,7 +204,7 @@ namespace LegionRuntime {
     void Operation::set_trace(LegionTrace *t, bool is_tracing)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(trace == NULL);
       assert(t != NULL);
 #endif
@@ -214,23 +213,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_must_epoch(MustEpochOp *epoch, unsigned index)
+    void Operation::set_must_epoch(MustEpochOp *epoch, bool do_registration)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(must_epoch == NULL);
       assert(epoch != NULL);
 #endif
       must_epoch = epoch;
-      must_epoch_index = index;
-      must_epoch->register_subop(this);
+      if (do_registration)
+        must_epoch->register_subop(this);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::localize_region_requirement(RegionRequirement &r)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(r.handle_type == SINGULAR);
 #endif
       r.parent = r.region;
@@ -238,11 +237,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Operation::release_acquired_instances(
+       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
+            acquired_instances.begin(); it != acquired_instances.end(); it++)
+      {
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                             it->second.first))
+          PhysicalManager::delete_physical_manager(it->first);
+      }
+      acquired_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::initialize_operation(SingleTask *ctx, bool track, 
                                          unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(completion_event.exists());
 #endif
@@ -311,9 +325,7 @@ namespace LegionRuntime {
     void Operation::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      commit_operation();
-      // Once we're done with this, we can deactivate the object
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -325,13 +337,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::deferred_commit(GenerationID our_gen)
+    void Operation::deferred_commit_trigger(GenerationID our_gen)
     //--------------------------------------------------------------------------
     {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !trigger_commit_invoked)
@@ -378,17 +390,45 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::select_sources(const InstanceRef &target,
+                                   const InstanceSet &sources,
+                                   std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                     Operation::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for inherited types
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::complete_mapping(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!mapped);
         mapped = true;
       }
 #endif
-      mapped_event.trigger(wait_on);
+      Runtime::trigger_event<true>(mapped_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -403,6 +443,7 @@ namespace LegionRuntime {
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_EXECUTE_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -411,7 +452,7 @@ namespace LegionRuntime {
       // are executed to avoid race conditions
       if (track_parent)
         parent_ctx->register_child_executed(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!executed);
@@ -422,12 +463,13 @@ namespace LegionRuntime {
       if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
         Event trigger_pre = 
-          Event::merge_events(mapped_event, resolved_event);
+          Runtime::merge_events<true>(mapped_event, resolved_event);
         DeferredCompleteArgs args;
         args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_COMPLETE_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, trigger_pre);
       }
       else // Do the trigger now
@@ -438,14 +480,14 @@ namespace LegionRuntime {
     void Operation::resolve_speculation(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       {
         AutoLock o_lock(op_lock);
         assert(!resolved);
         resolved = true;
       }
 #endif
-      resolved_event.trigger(wait_on);
+      Runtime::trigger_event<true>(resolved_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -460,7 +502,7 @@ namespace LegionRuntime {
         parent_ctx->register_child_complete(this);
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(mapped);
         assert(executed);
         assert(resolved);
@@ -474,7 +516,7 @@ namespace LegionRuntime {
         // have been disable previously
         trigger_commit_invoked = false;
         // Check to see if we need to trigger commit
-        if ((!Internal::resilient_mode) || early_commit_request ||
+        if ((!Runtime::resilient_mode) || early_commit_request ||
             ((hardened && unverified_regions.empty())))
         {
           trigger_commit_invoked = true;
@@ -482,7 +524,7 @@ namespace LegionRuntime {
         }
         else if (outstanding_mapping_references == 0)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dependence_tracker.commit != NULL);
 #endif
           CommitDependenceTracker *tracker = dependence_tracker.commit;
@@ -493,15 +535,13 @@ namespace LegionRuntime {
       }
       if (need_completion_trigger)
         completion_event.trigger(); 
-      if (must_epoch != NULL)
-        must_epoch->notify_subop_complete(this);
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
       for (std::map<Operation*,std::set<unsigned> >::const_iterator it =
             verify_regions.begin(); it != verify_regions.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(incoming.find(it->first) != incoming.end());
 #endif
         GenerationID ver_gen = incoming[it->first];
@@ -514,9 +554,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::commit_operation(void)
+    void Operation::commit_operation(bool do_deactivate,
+                                     Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
+      if (!wait_on.has_triggered())
+      {
+        DeferredCommitArgs args;
+        args.hlr_id = HLR_DEFERRED_COMMIT_ID;
+        args.proxy_this = this;
+        args.deactivate = do_deactivate;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_COMMIT_ID,
+                                         HLR_LATENCY_PRIORITY,
+                                         this, wait_on);
+        return;
+      }
       // Tell our parent context that we are committed
       // Do this before actually committing to avoid race conditions
       if (track_parent)
@@ -524,7 +577,7 @@ namespace LegionRuntime {
       // Mark that we are committed 
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(mapped);
         assert(executed);
         assert(resolved);
@@ -533,11 +586,11 @@ namespace LegionRuntime {
 #endif
         committed = true;
       } 
-      if (must_epoch != NULL)
-        must_epoch->notify_subop_commit(this);
       // Trigger the commit event
-      if (Internal::resilient_mode)
+      if (Runtime::resilient_mode)
         commit_event.trigger();
+      if (do_deactivate)
+        deactivate();
     }
 
     //--------------------------------------------------------------------------
@@ -548,7 +601,7 @@ namespace LegionRuntime {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!hardened);
 #endif
         hardened = true;
@@ -582,7 +635,7 @@ namespace LegionRuntime {
     void Operation::begin_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping == NULL);
 #endif
       // Make a dependence tracker
@@ -599,7 +652,7 @@ namespace LegionRuntime {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       MappingDependenceTracker *tracker = dependence_tracker.mapping;
@@ -624,7 +677,7 @@ namespace LegionRuntime {
         if (tracing)
         {
           // Don't forget to record the dependence
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
@@ -636,7 +689,7 @@ namespace LegionRuntime {
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       bool prune = target->perform_registration(target_gen, this, gen,
@@ -647,7 +700,7 @@ namespace LegionRuntime {
         incoming[target] = target_gen;
       if (tracing)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(trace != NULL);
 #endif
         trace->record_dependence(target, target_gen, this, gen);
@@ -683,7 +736,7 @@ namespace LegionRuntime {
         if (tracing)
         {
           // Don't forget to record the dependence
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
@@ -701,7 +754,7 @@ namespace LegionRuntime {
       bool prune = false;
       if (do_registration)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(dependence_tracker.mapping != NULL);
 #endif
         prune = target->perform_registration(target_gen, this, gen,
@@ -718,7 +771,7 @@ namespace LegionRuntime {
       }
       if (tracing)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(trace != NULL);
 #endif
         trace->record_region_dependence(target, target_gen, 
@@ -740,14 +793,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
       // If the generations match and we haven't committed yet, 
       // register an outgoing dependence
       if ((our_gen == gen) && !committed)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         // should still have some mapping references
         // if other operations are trying to register dependences
         assert(outstanding_mapping_references > 0);
@@ -764,7 +817,7 @@ namespace LegionRuntime {
           tracker->add_resolution_dependence(resolved_event);
           // Record that we have a commit dependence on the
           // registering operation
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dependence_tracker.commit != NULL);
 #endif
           dependence_tracker.commit->add_commit_dependence(other_commit_event);
@@ -798,7 +851,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
       if (our_gen == gen)
@@ -812,12 +865,12 @@ namespace LegionRuntime {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !committed)
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(outstanding_mapping_references > 0);
 #endif
           outstanding_mapping_references--;
@@ -826,7 +879,7 @@ namespace LegionRuntime {
           // we can commit this operation
           if ((outstanding_mapping_references == 0) && !trigger_commit_invoked)
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(dependence_tracker.commit != NULL);
 #endif
             CommitDependenceTracker *tracker = dependence_tracker.commit;
@@ -858,8 +911,8 @@ namespace LegionRuntime {
         args.proxy_op = this;
         args.ready_event = ready_event;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_STATE_ANALYSIS_ID, this,
-                                         Event::NO_EVENT, 1/*priority*/);
+                                         HLR_STATE_ANALYSIS_ID, 
+                                         HLR_LATENCY_PRIORITY, this);
         return ready_event;
       }
       else
@@ -896,7 +949,7 @@ namespace LegionRuntime {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
         if ((our_gen == gen) && !trigger_commit_invoked)
@@ -919,15 +972,91 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceRef &ref,
+                                                   MappingInstance &instance) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!ref.is_composite_ref());
+#endif
+      instance = ref.get_mapping_instance();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
+                                      std::vector<MappingInstance> &input_valid)
+    //--------------------------------------------------------------------------
+    {
+      input_valid.resize(valid.size());
+      for (unsigned idx = 0; idx < valid.size(); idx++)
+      {
+        const InstanceRef &ref = valid[idx];
+#ifdef DEBUG_LEGION
+        assert(!ref.is_composite_ref());
+#endif
+        MappingInstance &inst = input_valid[idx];
+        inst = ref.get_mapping_instance();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
+                                      const std::set<Memory> &visible_filter,
+                                      std::vector<MappingInstance> &input_valid)
+    //--------------------------------------------------------------------------
+    {
+      input_valid.reserve(valid.size());
+      unsigned next_index = 0;
+      for (unsigned idx = 0; idx < valid.size(); idx++)
+      {
+        const InstanceRef &ref = valid[idx];
+#ifdef DEBUG_LEGION
+        assert(!ref.is_composite_ref());
+#endif
+        if (visible_filter.find(ref.get_manager()->get_memory()) == 
+            visible_filter.end())
+          continue;
+        input_valid.resize(next_index+1);
+        MappingInstance &inst = input_valid[next_index++];
+        inst = ref.get_mapping_instance();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::compute_ranking(
+                              const std::deque<MappingInstance> &output,
+                              const InstanceSet &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      ranking.reserve(output.size());
+      for (std::deque<MappingInstance>::const_iterator it = 
+            output.begin(); it != output.end(); it++)
+      {
+        const PhysicalManager *manager = it->impl;
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          if (manager == sources[idx].get_manager())
+          {
+            ranking.push_back(idx);
+            break;
+          }
+        }
+        // Ignore any instances which are not in the original set of sources
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::MappingDependenceTracker::issue_stage_triggers(
-                      Operation *op, Internal *runtime, MustEpochOp *must_epoch)
+                      Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
     {
       bool map_now = true;
       bool resolve_now = true;
       if (!mapping_dependences.empty())
       {
-        Event map_precondition = Event::merge_events(mapping_dependences);
+        Event map_precondition = 
+          Runtime::merge_events<true>(mapping_dependences);
         if (!map_precondition.has_triggered())
         {
           if (must_epoch == NULL)
@@ -937,6 +1066,7 @@ namespace LegionRuntime {
             args.proxy_this = op;
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_DEFERRED_MAPPING_TRIGGER_ID,
+                                             HLR_LATENCY_PRIORITY,
                                              op, map_precondition);
           }
           else
@@ -947,7 +1077,7 @@ namespace LegionRuntime {
       if (!resolution_dependences.empty())
       {
         Event resolve_precondition = 
-          Event::merge_events(resolution_dependences);
+          Runtime::merge_events<true>(resolution_dependences);
         if (!resolve_precondition.has_triggered())
         {
           DeferredResolutionArgs args;
@@ -955,6 +1085,7 @@ namespace LegionRuntime {
           args.proxy_this = op;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
                                            HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
+                                           HLR_LATENCY_PRIORITY,
                                            op, resolve_precondition);
           resolve_now = false;
         }
@@ -967,20 +1098,22 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     bool Operation::CommitDependenceTracker::issue_commit_trigger(Operation *op,
-                                                              Internal *runtime)
+                                                               Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       if (!commit_dependences.empty())
       {
-        Event commit_precondition = Event::merge_events(commit_dependences);
+        Event commit_precondition = 
+          Runtime::merge_events<true>(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
-          DeferredCommitArgs args;
-          args.hlr_id = HLR_DEFERRED_COMMIT_ID;
+          DeferredCommitTriggerArgs args;
+          args.hlr_id = HLR_DEFERRED_COMMIT_TRIGGER_ID;
           args.proxy_this = op;
           args.gen = op->get_generation();
           runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_DEFERRED_COMMIT_ID,
+                                           HLR_DEFERRED_COMMIT_TRIGGER_ID,
+                                           HLR_LATENCY_PRIORITY,
                                            op, commit_precondition);
           return false;
         }
@@ -993,14 +1126,14 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Predicate::Impl::Impl(Internal *rt)
+    PredicateImpl::PredicateImpl(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::activate_predicate(void)
+    void PredicateImpl::activate_predicate(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
@@ -1009,18 +1142,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::deactivate_predicate(void)
+    void PredicateImpl::deactivate_predicate(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(predicate_references == 0);
 #endif
       waiters.clear();
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::add_predicate_reference(void)
+    void PredicateImpl::add_predicate_reference(void)
     //--------------------------------------------------------------------------
     {
       bool add_map_reference;
@@ -1034,7 +1167,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::remove_predicate_reference(void)
+    void PredicateImpl::remove_predicate_reference(void)
     //--------------------------------------------------------------------------
     {
       bool need_trigger;
@@ -1042,7 +1175,7 @@ namespace LegionRuntime {
       GenerationID task_gen = 0;  // initialization to make gcc happy
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(predicate_references > 0);
 #endif
         predicate_references--;
@@ -1063,7 +1196,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Predicate::Impl::register_waiter(PredicateWaiter *waiter,
+    bool PredicateImpl::register_waiter(PredicateWaiter *waiter,
                                           GenerationID waiter_gen, bool &value)
     //--------------------------------------------------------------------------
     {
@@ -1076,7 +1209,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(waiters.find(waiter) == waiters.end());
 #endif
         waiters[waiter] = waiter_gen;
@@ -1086,7 +1219,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Predicate::Impl::set_resolved_value(GenerationID pred_gen, bool value)
+    void PredicateImpl::set_resolved_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
       bool need_trigger;
@@ -1121,7 +1254,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SpeculativeOp::SpeculativeOp(Internal *rt)
+    SpeculativeOp::SpeculativeOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -1200,7 +1333,7 @@ namespace LegionRuntime {
           result = false;
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(predicate != NULL);
 #endif
           predicate_waiter = UserEvent::create_user_event();
@@ -1210,13 +1343,9 @@ namespace LegionRuntime {
       if (wait_event.exists())
       {
         if (!wait_event.has_triggered())
-        {
-          runtime->pre_wait(proc);
           wait_event.wait();
-          runtime->post_wait(proc);
-        }
         // Might be a little bit of a race here with cleanup
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
@@ -1235,7 +1364,7 @@ namespace LegionRuntime {
       // Quick out
       if (predicate == NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
@@ -1245,7 +1374,7 @@ namespace LegionRuntime {
           resolve_false();
         return;
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(predicate != NULL);
 #endif
       // Register ourselves as a waiter on the predicate value
@@ -1341,7 +1470,7 @@ namespace LegionRuntime {
       bool need_trigger;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!received_trigger_resolution);
 #endif
         received_trigger_resolution = true;
@@ -1364,7 +1493,7 @@ namespace LegionRuntime {
       bool need_trigger = false;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(pred_gen == get_generation());
 #endif
         switch (speculation_state)
@@ -1444,15 +1573,15 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MapOp::MapOp(Internal *rt)
-      : Inline(), Operation(rt)
+    MapOp::MapOp(Runtime *rt)
+      : InlineMapping(), Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     MapOp::MapOp(const MapOp &rhs)
-      : Inline(), Operation(NULL)
+      : InlineMapping(), Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1487,23 +1616,23 @@ namespace LegionRuntime {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
-      requirement.copy_without_mapping_info(launcher.requirement);
-      requirement.initialize_mapping_fields(); 
+      requirement = launcher.requirement;
       map_id = launcher.map_id;
       tag = launcher.tag;
+      layout_constraint_id = launcher.layout_constraint_id;
       termination_event = UserEvent::create_user_event();
-      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1512,7 +1641,8 @@ namespace LegionRuntime {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -1534,24 +1664,23 @@ namespace LegionRuntime {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      requirement = req;
       map_id = id;
       tag = t;
       parent_task = ctx;
       termination_event = UserEvent::create_user_event();
-      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1560,7 +1689,8 @@ namespace LegionRuntime {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -1573,8 +1703,7 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
-      requirement.copy_without_mapping_info(reg.impl->get_requirement());
-      requirement.initialize_mapping_fields();
+      requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       parent_task = ctx;
@@ -1583,13 +1712,13 @@ namespace LegionRuntime {
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
       // instance that we can use to make a valid value
-      remap_region = region.impl->get_reference().has_ref();
+      remap_region = region.impl->has_references();
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(), 
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(), 
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1598,7 +1727,8 @@ namespace LegionRuntime {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -1611,6 +1741,9 @@ namespace LegionRuntime {
       activate_operation();
       parent_ctx = NULL;
       remap_region = false;
+      mapper = NULL;
+      layout_constraint_id = 0;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1622,7 +1755,12 @@ namespace LegionRuntime {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
-      restrict_info.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      atomic_locks.clear();
+      profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
       runtime->free_map_op(this);
     } 
@@ -1662,6 +1800,7 @@ namespace LegionRuntime {
       // First compute our parent region requirement
       compute_parent_index();  
       begin_dependence_analysis();
+      RestrictInfo restrict_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
@@ -1682,7 +1821,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -1691,156 +1831,131 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
-      MappingRef map_ref;
-      bool notify = false;
+      InstanceSet mapped_instances;
+      std::set<Event> map_applied_conditions;
       // If we are restricted we know the answer
-      if (restrict_info.has_restrictions())
+      if (requirement.is_restricted())
       {
-        InstanceRef target_inst = privilege_path.translate_ref(
-            parent_ctx->get_local_reference(parent_req_index));
-        map_ref = runtime->forest->map_restricted_region(physical_ctx,
-                                                         requirement,
-                                                         0/*idx*/,
-                                                         version_info,
-                                                         local_proc,
-                                                         target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                         , get_logging_name()
-                                                         , unique_op_id
+        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                               requirement, version_info, 
+                                               this, 0/*idx*/, 
+                                               termination_event, 
+                                               false/*defer add users*/,
+                                               map_applied_conditions,
+                                               mapped_instances
+#ifdef DEBUG_LEGION
+                                               , get_logging_name()
+                                               , unique_op_id
 #endif
-                                                         );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(map_ref.has_ref());
-#endif
+                                               );
       }
       // If we are remapping then we also know the answer
       else if (remap_region)
       {
-        InstanceRef target = region.impl->get_reference();
-        // We're remapping the region so we don't actually
-        // need to ask the mapper about anything when doing the remapping
-        map_ref = runtime->forest->remap_physical_region(physical_ctx,
-                                                         requirement,
-                                                         0/*idx*/,
-                                                         version_info,
-                                                         target
-#ifdef DEBUG_HIGH_LEVEL
-                                                         , get_logging_name()
-                                                         , unique_op_id
+        region.impl->get_references(mapped_instances);
+        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                               requirement, version_info,
+                                               this, 0/*idx*/, 
+                                               termination_event,
+                                               false/*defer add users*/,
+                                               map_applied_conditions,
+                                               mapped_instances
+#ifdef DEBUG_LEGION
+                                               , get_logging_name()
+                                               , unique_op_id
 #endif
-                                                         );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(map_ref.has_ref());
-#endif
-
+                                               );
       }
       else
       {
-        // Now ask the mapper how to map this inline mapping operation 
-        notify = runtime->invoke_mapper_map_inline(local_proc, this);
-        // Do the mapping and see if it succeeded 
-        map_ref = runtime->forest->map_physical_region(physical_ctx,
-                                                       requirement,
-                                                       0/*idx*/,
-                                                       version_info,
-                                                       this,
-                                                       local_proc,
-                                                       local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                       , get_logging_name()
-                                                       , unique_op_id
+        // We're going to need to invoke the mapper, find the set of valid
+        // instances as part of our traversal
+        InstanceSet valid_instances;
+        runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                                requirement, version_info, 
+                                                this, 0/*idx*/,
+                                                true/*find valid*/,
+                                                map_applied_conditions,
+                                                valid_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                                       );
-        if (!map_ref.has_ref())
+                                                );
+        // Now we've got the valid instances so invoke the mapper
+        invoke_mapper(valid_instances, mapped_instances);
+        // Then we can register our mapped instances
+        runtime->forest->physical_register_only(physical_ctx, requirement,
+                                                version_info, this, 0/*idx*/,
+                                                termination_event, 
+                                                false/*defer add users*/,
+                                                map_applied_conditions,
+                                                mapped_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
+      }
+#ifdef DEBUG_LEGION
+      assert(!mapped_instances.empty());
+#endif 
+      // We're done so apply our mapping changes
+      version_info.apply_mapping(physical_ctx.get_id(), 
+                               runtime->address_space, map_applied_conditions);
+      // Update our physical instance with the newly mapped instances
+      // Have to do this before triggering the mapped event
+      region.impl->reset_references(mapped_instances, termination_event);
+      Event map_complete_event = Event::NO_EVENT;
+      if (mapped_instances.size() > 1)
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+          mapped_events.insert(mapped_instances[idx].get_ready_event());
+        map_complete_event = Runtime::merge_events<false>(mapped_events);
+      }
+      else
+        map_complete_event = mapped_instances[0].get_ready_event();
+      if (Runtime::legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
+                                        termination_event);
+#endif
+      }
+      // See if we have any reservations to take as part of this map
+      if (!atomic_locks.empty())
+      {
+        // They've already been sorted in order 
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          requirement.mapping_failed = true;
-          requirement.selected_memory = Memory::NO_MEMORY;
-          // Tell the mapper that we failed to map
-          runtime->invoke_mapper_failed_mapping(local_proc, this);
-          // clear the version info
-          version_info.reset();
-          return false;
+          map_complete_event = 
+            Runtime::acquire_reservation<false>(it->first, it->second,
+                                                map_complete_event);
+          // We can also issue the release condition on our termination
+          Runtime::release_reservation<false>(it->first, termination_event);
         }
       }
-      InstanceRef result = runtime->forest->register_physical_region(
-                                                                physical_ctx,
-                                                                map_ref,
-                                                                requirement,
-                                                                0/*idx*/,
-                                                                version_info,
-                                                                this,
-                                                                local_proc,
-                                                            termination_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
-#endif
-                                                            );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result.has_ref());
-#endif
-      // We're done so apply our mapping changes
-      std::set<Event> applied_conditions;
-      version_info.apply_mapping(physical_ctx.get_id(), 
-                                 runtime->address_space, applied_conditions);
-      // We succeeded in mapping, so set up our physical region with
-      // the reference information.  Note that the physical region
-      // becomes responsible for triggering the termination event
-      // when it unmaps so we can recycle this mapping operation 
-      // immediately.
-      if (notify)
-      {
-        requirement.mapping_failed = false;
-        requirement.selected_memory = result.get_memory();
-        runtime->invoke_mapper_notify_result(local_proc, this);
-      }
-#ifdef LEGION_SPY
-      // Log an implicit dependence on the parent's start event
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-                                         result.get_ready_event());
-      LegionSpy::log_op_events(unique_op_id, result.get_ready_event(),
-                                termination_event);
-      // Log an implicit dependence on the parent's term event
-      LegionSpy::log_implicit_dependence(termination_event, 
-                                         parent_ctx->get_task_completion());
-      LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          result.get_manager()->get_instance().id);
-      {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
-#endif
-      // Have to do this before triggering the mapped event
-      region.impl->reset_reference(result, termination_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       
-      Event map_complete_event = result.get_ready_event(); 
       if (!map_complete_event.has_triggered())
       {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        completion_event.trigger(map_complete_event);
+        Runtime::trigger_event<false>(completion_event, map_complete_event);
         need_completion_trigger = false;
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
@@ -1848,6 +1963,7 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&deferred_execute_args,
                                          sizeof(deferred_execute_args),
                                          HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, map_complete_event);
       }
       else
@@ -1859,7 +1975,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void MapOp::deferred_execute(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -1880,68 +1996,74 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit this operation until we've reported our profiling
+      commit_operation(true/*deactivate*/, profiling_reported); 
     }
 
     //--------------------------------------------------------------------------
     unsigned MapOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
     }
 
     //--------------------------------------------------------------------------
-    Mappable::MappableKind MapOp::get_mappable_kind(void) const
+    void MapOp::select_sources(const InstanceRef &target,
+                               const InstanceSet &sources,
+                               std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
-      return INLINE_MAPPABLE;
+      Mapper::SelectInlineSrcInput input;
+      Mapper::SelectInlineSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_inline_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    } 
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                         MapOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
-    Task* MapOp::as_mappable_task(void) const
+    void MapOp::update_atomic_locks(Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      return NULL;
+      std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
+      if (finder != atomic_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        atomic_locks[lock] = exclusive;
     }
 
     //--------------------------------------------------------------------------
-    Copy* MapOp::as_mappable_copy(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Inline* MapOp::as_mappable_inline(void) const
-    //--------------------------------------------------------------------------
-    {
-      MapOp *proxy_this = const_cast<MapOp*>(this);
-      return proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    Acquire* MapOp::as_mappable_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Release* MapOp::as_mappable_release(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID MapOp::get_unique_mappable_id(void) const
+    UniqueID MapOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
     } 
+
+    //--------------------------------------------------------------------------
+    int MapOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
 
     //--------------------------------------------------------------------------
     void MapOp::check_privilege(void)
@@ -1952,8 +2074,8 @@ namespace LegionRuntime {
       {
         log_region.error("Projection region requirements are not "
                                "permitted for inline mappings (in task %s)",
-                               parent_ctx->variants->name);
-#ifdef DEBUG_HIGH_LEVEL
+                               parent_ctx->get_task_name());
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PROJECTION_USE);
@@ -1976,7 +2098,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -1990,7 +2112,7 @@ namespace LegionRuntime {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for inline mapping (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -2001,7 +2123,7 @@ namespace LegionRuntime {
                                    "privilege fields for inline mapping "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -2011,7 +2133,7 @@ namespace LegionRuntime {
             log_region.error("Instance field %d is a duplicate for "
                                     "inline mapping (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -2022,13 +2144,13 @@ namespace LegionRuntime {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -2046,7 +2168,7 @@ namespace LegionRuntime {
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id,
                              unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -2057,7 +2179,7 @@ namespace LegionRuntime {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -2073,7 +2195,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -2096,13 +2218,13 @@ namespace LegionRuntime {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -2111,12 +2233,284 @@ namespace LegionRuntime {
         parent_req_index = unsigned(parent_index);
     }
 
+    //--------------------------------------------------------------------------
+    void MapOp::invoke_mapper(const InstanceSet &valid_instances,
+                                    InstanceSet &chosen_instances)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapInlineInput input;
+      Mapper::MapInlineOutput output;
+      if (!requirement.is_no_access())
+      {
+        std::set<Memory> visible_memories;
+        runtime->find_visible_memories(parent_ctx->get_executing_processor(),
+                                       visible_memories);
+        prepare_for_mapping(valid_instances, visible_memories, 
+                            input.valid_instances);
+      }
+      else
+        prepare_for_mapping(valid_instances, input.valid_instances);
+      // Invoke the mapper
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_inline(this, &input, &output);
+      // Now we have to validate the output
+      // Go through the instances and make sure we got one for every field
+      // Also check to make sure that none of them are composite instances
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_index = runtime->forest->physical_convert_mapping(
+                                requirement, output.chosen_instances, 
+                                chosen_instances, bad_tree, missing_fields,
+                                &acquired_instances, unacquired, 
+                                !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for an inline "
+                      "mapping in task %s (ID %lld) whose logical region is "
+                      "from region tree %d.", mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id(), 
+                      requirement.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %ld fields of the region requirement to "
+                      "an inline mapping in task %s (ID %lld). The missing "
+                      "fields are listed below.", mapper->get_mapper_name(),
+                      missing_fields.size(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          runtime->retrieve_semantic_information(
+              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+              name, name_size, false, false);
+          log_run.error("Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          {
+            log_run.error("Invalid mapper output from 'map_inline' invocation "
+                        "on mapper %s. Mapper selected physical instance for "
+                        "inline mapping in task %s (ID %lld) which has already "
+                        "been collected. If the mapper had properly acquired "
+                        "this instance as part of the mapper call it would "
+                        "have detected this. Please update the mapper to abide "
+                        "by proper mapping conventions.", 
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s faield to acquire instance "
+                        "for inline mapping operation in task %s (ID %lld) "
+                        "in 'map_inline' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+      }
+      if (composite_index >= 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper requested creation of a composite "
+                      "instance for inline mapping in task %s (ID %lld).",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      } 
+      // If we are doing unsafe mapping, then we can return
+      if (Runtime::unsafe_mapper)
+        return;
+      // If this requirement doesn't have a no access flag then we
+      // need to check to make sure that the instances are visible
+      if (!requirement.is_no_access())
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        std::set<Memory> visible_memories;
+        runtime->find_visible_memories(exec_proc, visible_memories);
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          Memory mem = chosen_instances[idx].get_memory();   
+          if (visible_memories.find(mem) == visible_memories.end())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper selected a "
+                          "physical instance in memory " IDFMT " which is "
+                          "not visible from processor " IDFMT ". The inline "
+                          "mapping operation was issued in task %s (ID %lld).",
+                          mapper->get_mapper_name(), mem.id, exec_proc.id,
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+      // Iterate over the instances and make sure they are all valid
+      // for the given logical region which we are mapping
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
+      for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+      {
+        if (!chosen_instances[idx].get_manager()->meets_regions(
+                                                        regions_to_check))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                        "on mapper %s. Mapper specified an instance that does "
+                        "not meet the logical region requirement. The inline "
+                        "mapping operation was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      // If this is a reduction region requirement, make sure all the
+      // chosen instances are specialized reduction instances
+      if (IS_REDUCE(requirement))
+      {
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          if (!chosen_instances[idx].get_manager()->is_reduction_manager())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper failed to select "
+                          "specialized reduction instances for region "
+                          "requirement with reduction-only privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
+            finder = acquired_instances.find(
+                chosen_instances[idx].get_manager());
+#ifdef DEBUG_LEGION
+          assert(finder != acquired_instances.end());
+#endif
+          if (!finder->second.second)
+          {
+            log_run.error("Invalid mapper output from invocatino of "
+                          "'map_inline' on mapper %s. Mapper made an illegal "
+                          "decision to re-use a reduction instance for an "
+                          "inline mapping in task %s (ID %lld). Reduction "
+                          "instances are not currently permitted to be "
+                          "recycled.", mapper->get_mapper_name(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          if (!chosen_instances[idx].get_manager()->is_instance_manager())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper selected an "
+                          "illegal specialized reduction instance for region "
+                          "requirement without reduction privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+      if (layout_constraint_id > 0)
+      {
+        // Check the layout constraints are valid
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(layout_constraint_id);
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          PhysicalManager *manager = chosen_instances[idx].get_manager();
+          if (manager->conflicts(constraints))
+          {
+            log_run.error("Invalid mapper output. Mapper %s selected "
+                          "instance for inline mapping (ID %lld) in task %s "
+                          "(ID %lld) which failed to satisfy the corresponding "
+                          "layout constraints.", 
+                          mapper->get_mapper_name(), get_unique_op_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_inline_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      // Trigger the event indicating we are done reporting profiling
+      profiling_reported.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // Copy Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CopyOp::CopyOp(Internal *rt)
+    CopyOp::CopyOp(Runtime *rt)
       : Copy(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -2160,22 +2554,18 @@ namespace LegionRuntime {
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
       dst_versions.resize(launcher.dst_requirements.size());
-      src_restrictions.resize(launcher.src_requirements.size());
-      dst_restrictions.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: SOURCE REGION REQUIREMENT %d OF "
-                                 "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, get_unique_op_id(),
-                                 parent_ctx->variants->name, 
-                                 parent_ctx->get_unique_task_id());
+                           "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
         }
-        src_requirements[idx].copy_without_mapping_info(
-            launcher.src_requirements[idx]);
-        src_requirements[idx].initialize_mapping_fields();
+        src_requirements[idx] = launcher.src_requirements[idx];
         src_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2183,16 +2573,18 @@ namespace LegionRuntime {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: DESTINATION REGION REQUIREMENT %d OF"
-                                 " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, get_unique_op_id(),
-                                 parent_ctx->variants->name, 
-                                 parent_ctx->get_unique_task_id());
+                           " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
         }
-        dst_requirements[idx].copy_without_mapping_info(
-            launcher.dst_requirements[idx]);
-        dst_requirements[idx].initialize_mapping_fields();
+        dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        // If our privilege is not reduce, then shift it to write discard
+        // since we are going to write all over the region
+        if (dst_requirements[idx].privilege != REDUCE)
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -2218,13 +2610,13 @@ namespace LegionRuntime {
         if (src_requirements.size() != dst_requirements.size())
         {
           log_run.error("Number of source requirements (%ld) does not "
-                              "match number of destination requirements (%ld) "
-                              "for copy operation (ID %lld) with parent "
-                              "task %s (ID %lld)",
-                              src_requirements.size(), dst_requirements.size(),
-                              get_unique_copy_id(), parent_ctx->variants->name,
-                              parent_ctx->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
+                        "match number of destination requirements (%ld) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
@@ -2235,16 +2627,16 @@ namespace LegionRuntime {
               src_requirements[idx].instance_fields.size())
           {
             log_run.error("Copy source requirement %d for copy operation "
-                                "(ID %lld) in parent task %s (ID %lld) has %ld "
-                                "privilege fields and %ld instance fields.  "
-                                "Copy requirements must have exactly the same "
-                                "number of privilege and instance fields.",
-                                idx, get_unique_copy_id(), 
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
-                                src_requirements[idx].privilege_fields.size(),
-                                src_requirements[idx].instance_fields.size());
-#ifdef DEBUG_HIGH_LEVEL
+                          "(ID %lld) in parent task %s (ID %lld) has %ld "
+                          "privilege fields and %ld instance fields.  "
+                          "Copy requirements must have exactly the same "
+                          "number of privilege and instance fields.",
+                          idx, get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_requirements[idx].privilege_fields.size(),
+                          src_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_FIELDS_SIZE);
@@ -2252,12 +2644,12 @@ namespace LegionRuntime {
           if (!IS_READ_ONLY(src_requirements[idx]))
           {
             log_run.error("Copy source requirement %d for copy operation "
-                                "(ID %lld) in parent task %s (ID %lld) must "
-                                "be requested with a read-only privilege.",
-                                idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
+                          "(ID %lld) in parent task %s (ID %lld) must "
+                          "be requested with a read-only privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_PRIVILEGE);
@@ -2270,17 +2662,17 @@ namespace LegionRuntime {
               dst_requirements[idx].instance_fields.size())
           {
             log_run.error("Copy destination requirement %d for copy "
-                                "operation (ID %lld) in parent task %s "
-                                "(ID %lld) has %ld privilege fields and %ld "
-                                "instance fields.  Copy requirements must "
-                                "have exactly the same number of privilege "
-                                "and instance fields.", idx, 
-                                get_unique_copy_id(), 
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
-                                dst_requirements[idx].privilege_fields.size(),
-                                dst_requirements[idx].instance_fields.size());
-#ifdef DEBUG_HIGH_LEVEL
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %ld privilege fields and %ld "
+                          "instance fields.  Copy requirements must "
+                          "have exactly the same number of privilege "
+                          "and instance fields.", idx, 
+                          get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          dst_requirements[idx].privilege_fields.size(),
+                          dst_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_FIELDS_SIZE);
@@ -2288,13 +2680,13 @@ namespace LegionRuntime {
           if (!HAS_WRITE(dst_requirements[idx]))
           {
             log_run.error("Copy destination requirement %d for copy "
-                                "operation (ID %lld) in parent task %s "
-                                "(ID %lld) must be requested with a "
-                                "read-write or write-discard privilege.",
-                                idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-write or write-discard privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_COPY_PRIVILEGE);
@@ -2308,17 +2700,17 @@ namespace LegionRuntime {
           if (!runtime->forest->are_compatible(src_space, dst_space))
           {
             log_run.error("Copy launcher index space mismatch at index "
-                                "%d of cross-region copy (ID %lld) in task %s "
-                                "(ID %lld). Source requirement with index "
-                                "space %x and destination requirement "
-                                "with index space %x do not have the "
-                                "same number of dimensions or the same number "
-                                "of elements in their element masks.",
-                                idx, get_unique_copy_id(),
-                                parent_ctx->variants->name, 
-                                parent_ctx->get_unique_task_id(),
-                                src_space.id, dst_space.id);
-#ifdef DEBUG_HIGH_LEVEL
+                          "%d of cross-region copy (ID %lld) in task %s "
+                          "(ID %lld). Source requirement with index "
+                          "space %x and destination requirement "
+                          "with index space %x do not have the "
+                          "same number of dimensions or the same number "
+                          "of elements in their element masks.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id(),
+                          src_space.id, dst_space.id);
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_COPY_SPACE_MISMATCH);
@@ -2326,14 +2718,14 @@ namespace LegionRuntime {
           else if (!runtime->forest->is_dominated(src_space, dst_space))
           {
             log_run.error("Destination index space %x for "
-                                "requirement %d of cross-region copy "
-                                "(ID %lld) in task %s (ID %lld) is not "
-                                "a sub-region of the source index space %x.", 
-                                dst_space.id, idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
-                                src_space.id);
-#ifdef DEBUG_HIGH_LEVEL
+                          "requirement %d of cross-region copy "
+                          "(ID %lld) in task %s (ID %lld) is not "
+                          "a sub-region of the source index space %x.", 
+                          dst_space.id, idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_space.id);
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_COPY_SPACE_MISMATCH);
@@ -2354,9 +2746,9 @@ namespace LegionRuntime {
         initialize_privilege_path(dst_privilege_paths[idx],
                                   dst_requirements[idx]);
       }
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_copy_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -2366,7 +2758,8 @@ namespace LegionRuntime {
                                              req.region.field_space.id,
                                              req.region.tree_id,
                                              req.privilege,
-                                             req.prop, req.redop);
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, idx, 
                                             req.instance_fields);
         }
@@ -2380,7 +2773,8 @@ namespace LegionRuntime {
                                              req.region.field_space.id,
                                              req.region.tree_id,
                                              req.privilege,
-                                             req.prop, req.redop);
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, 
                                             src_requirements.size()+idx, 
                                             req.instance_fields);
@@ -2393,6 +2787,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2412,8 +2808,12 @@ namespace LegionRuntime {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
-      src_restrictions.clear();
-      dst_restrictions.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      atomic_locks.clear();
+      profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
     }
@@ -2457,20 +2857,30 @@ namespace LegionRuntime {
       register_predicate_dependence();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
+        RestrictInfo restrict_info;
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_versions[idx],
-                                                     src_restrictions[idx],
+                                                     restrict_info,
                                                      src_privilege_paths[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
+        RestrictInfo restrict_info;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
-                                                     dst_restrictions[idx],
+                                                     restrict_info,
                                                      dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
       }
       end_dependence_analysis();
     }
@@ -2497,7 +2907,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -2517,6 +2928,7 @@ namespace LegionRuntime {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -2524,385 +2936,323 @@ namespace LegionRuntime {
     bool CopyOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_copy_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
     bool CopyOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      bool map_success = true;
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
       std::vector<RegionTreeContext> dst_contexts(dst_requirements.size());
-      // Premap all the regions if we haven't already done so
-      bool premapped = true;
-      Processor local_proc = parent_ctx->get_executing_processor();
+      std::vector<InstanceSet> valid_src_instances(src_requirements.size());
+      std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
+      Mapper::MapCopyInput input;
+      Mapper::MapCopyOutput output;
+      input.src_instances.resize(src_requirements.size());
+      input.dst_instances.resize(dst_requirements.size());
+      output.src_instances.resize(src_requirements.size());
+      output.dst_instances.resize(dst_requirements.size());
+      std::set<Event> map_applied_conditions;
+      // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         src_contexts[idx] = parent_ctx->find_enclosing_context(
-                                                  src_parent_indexes[idx]);
-        if (!src_requirements[idx].premapped)
-        {
-          src_requirements[idx].premapped = 
-            runtime->forest->premap_physical_region(
-                  src_contexts[idx],src_privilege_paths[idx],
-                  src_requirements[idx], src_versions[idx],
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , idx, get_logging_name(), unique_op_id
+                                                    src_parent_indexes[idx]);
+        // No need to find the valid instances if this is restricted
+        if (src_requirements[idx].is_restricted())
+          continue;
+        InstanceSet &valid_instances = valid_src_instances[idx];
+        runtime->forest->physical_traverse_path(src_contexts[idx],
+                                                src_privilege_paths[idx],
+                                                src_requirements[idx],
+                                                src_versions[idx],
+                                                this, idx, true/*find valid*/,
+                                                map_applied_conditions,
+                                                valid_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(src_requirements[idx].premapped);
-#endif
-        }
+                                                );
+        // Convert these to the valid set of mapping instances
+        // No need to filter for copies
+        prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_contexts[idx] = parent_ctx->find_enclosing_context(
-                                                  dst_parent_indexes[idx]);
-        if (!dst_requirements[idx].premapped)
-        {
-          dst_requirements[idx].premapped = 
-            runtime->forest->premap_physical_region(
-                  dst_contexts[idx],dst_privilege_paths[idx],
-                  dst_requirements[idx], dst_versions[idx],
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , src_requirements.size()+idx
-                  , get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(dst_requirements[idx].premapped);
-#endif
-        }
-      }
-      // If we couldn't premap, then we need to try again later
-      if (!premapped)
-        return false;
-      // Now ask the mapper how to map this copy operation
-      bool notify = runtime->invoke_mapper_map_copy(local_proc, this);
-      // Map all the destination instances
-      LegionVector<MappingRef>::aligned 
-                            src_mapping_refs(src_requirements.size());
-      for (unsigned idx = 0; (idx < src_requirements.size()) && 
-            map_success; idx++)
-      {
-        // If there is no ranking for this instance then we can skip
-        // it as we will just issue copies from the existing valid instances
-        if (src_requirements[idx].target_ranking.empty())
+                                                    dst_parent_indexes[idx]);
+        // No need to find the valid instances if this is restricted
+        if (dst_requirements[idx].is_restricted())
           continue;
-        // If this is a restricted instance then we need to
-        // map wherever the existing physical instance was
-        if (src_restrictions[idx].has_restrictions())
-        {
-          InstanceRef target_inst = src_privilege_paths[idx].translate_ref(
-            parent_ctx->get_local_reference(src_parent_indexes[idx]));
-          src_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                        src_contexts[idx],
-                                                        src_requirements[idx],
-                                                        idx, 
-                                                        src_versions[idx],
-                                                        local_proc, target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                        , get_logging_name()
-                                                        , unique_op_id
+        InstanceSet &valid_instances = valid_dst_instances[idx];
+        runtime->forest->physical_traverse_path(dst_contexts[idx],
+                                                dst_privilege_paths[idx],
+                                                dst_requirements[idx],
+                                                dst_versions[idx],
+                                                this, idx, true/*find valid*/,
+                                                map_applied_conditions,
+                                                valid_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                                        );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(src_mapping_refs[idx].has_ref());
-#endif
-          continue;
-        }
-        src_mapping_refs[idx] = runtime->forest->map_physical_region(
-                                                        src_contexts[idx],
-                                                        src_requirements[idx],
-                                                        idx,
-                                                        src_versions[idx],
-                                                        this,
-                                                        local_proc,
-                                                        local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                        , get_logging_name()
-                                                        , unique_op_id
-#endif
-                                                        );
-        if (!src_mapping_refs[idx].has_ref())
-        {
-          map_success = false;
-          src_requirements[idx].mapping_failed = true;
-          src_requirements[idx].selected_memory = Memory::NO_MEMORY;
-          break;
-        }
+                                                );
+        // No need to filter for copies
+        prepare_for_mapping(valid_instances, input.dst_instances[idx]);
       }
-      LegionVector<MappingRef>::aligned 
-                          dst_mapping_refs(dst_requirements.size());
-      for (unsigned idx = 0; (idx < dst_requirements.size()) && 
-            map_success; idx++)
+      // Now we can ask the mapper what to do
+      if (mapper == NULL)
       {
-        // If this is a restricted instance, then we need to map
-        // wherever the existing physical instance was
-        if (dst_restrictions[idx].has_restrictions())
-        {
-          // Little bit of a hack here: if this is a restricted reduction,
-          // we actually want to map to a normal instance, so make it look
-          // like the privileges are read-write while selecting the instance
-          // and then switch back after we are done
-          InstanceRef target_inst = dst_privilege_paths[idx].translate_ref(
-            parent_ctx->get_local_reference(dst_parent_indexes[idx]));
-          if (IS_REDUCE(dst_requirements[idx]))
-          {
-            dst_requirements[idx].privilege = READ_WRITE;
-            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                    dst_contexts[idx],
-                                                    dst_requirements[idx],
-                                                    src_requirements.size()+idx,
-                                                    dst_versions[idx],
-                                                    local_proc, target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-            // Switch the privileges back
-            dst_requirements[idx].privilege = REDUCE;
-          }
-          else // The normal thing
-            dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                    dst_contexts[idx],
-                                                    dst_requirements[idx],
-                                                    src_requirements.size()+idx,
-                                                    dst_versions[idx],
-                                                    local_proc, target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(dst_mapping_refs[idx].has_ref());
-#endif
-          continue;
-        }
-        dst_mapping_refs[idx] = runtime->forest->map_physical_region(
-                                                    dst_contexts[idx],
-                                                    dst_requirements[idx],
-                                                    src_requirements.size()+idx,
-                                                    dst_versions[idx],
-                                                    this,
-                                                    local_proc,
-                                                    local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-        if (!dst_mapping_refs[idx].has_ref())
-        {
-          map_success = false;
-          dst_requirements[idx].mapping_failed = true;
-          dst_requirements[idx].selected_memory = Memory::NO_MEMORY;
-          // Break out since we failed
-          break;
-        }
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
       }
-
-      // If we successfully mapped, then we can issue the copies
-      // These should be guaranteed to succeed since no new 
-      // regions will need to be created because we already
-      // made all the destination regions.
-      if (map_success)
+      mapper->invoke_map_copy(this, &input, &output);
+      // Now we can carry out the mapping requested by the mapper
+      // and issue the across copies, first set up the sync precondition
+      Event sync_precondition = Event::NO_EVENT;
+      if (!wait_barriers.empty() || !grants.empty())
       {
-        // First get the set of barriers and grants we need to wait 
-        // on before we can start running this copy.
-        Event sync_precondition = Event::NO_EVENT;
-        if (!wait_barriers.empty() || !grants.empty())
+        std::set<Event> preconditions;
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
         {
-          std::set<Event> preconditions;
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            Event e = it->phase_barrier.get_previous_phase(); 
-            preconditions.insert(e);
-          }
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            Event e = it->impl->acquire_grant();
-            preconditions.insert(e);
-          }
-          sync_precondition = Event::merge_events(preconditions);
-#ifdef LEGION_SPY
-          if (!sync_precondition.exists())
-          {
-            UserEvent new_pre = UserEvent::create_user_event();
-            new_pre.trigger();
-            sync_precondition = new_pre;
-          }
-          LegionSpy::log_event_dependences(preconditions,
-              sync_precondition);
-#endif
+          Event e = it->phase_barrier.get_previous_phase(); 
+          preconditions.insert(e);
         }
-        std::set<Event> applied_conditions;
-        std::set<Event> copy_complete_events;
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
         {
-          InstanceRef dst_ref = runtime->forest->register_physical_region(
-                                                        dst_contexts[idx],
-                                                        dst_mapping_refs[idx],
-                                                        dst_requirements[idx],
-                                                        idx,
-                                                        dst_versions[idx],
-                                                        this,
-                                                        local_proc,
-                                                        completion_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                        , get_logging_name()
-                                                        , unique_op_id
-#endif
-                                                        );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(dst_ref.has_ref());
-#endif
-          if (notify)
-          {
-            dst_requirements[idx].mapping_failed = false;
-            dst_requirements[idx].selected_memory = dst_ref.get_memory();
-          }
-          if (!src_mapping_refs[idx].has_ref())
-          {
-            // In this case, there is no source instance so we need
-            // to issue copies from the valid set
-            if (!IS_REDUCE(dst_requirements[idx]))
-              copy_complete_events.insert(runtime->forest->copy_across(this, 
-                                          parent_ctx->get_executing_processor(),
-                                                   src_contexts[idx],
-                                                   dst_contexts[idx],
-                                                   src_requirements[idx],
-                                                   src_versions[idx],
-                                                   dst_requirements[idx],
-                                                   dst_ref, sync_precondition));
-            else
-              copy_complete_events.insert(runtime->forest->reduce_across(this,
-                                          parent_ctx->get_executing_processor(),
-                                                   src_contexts[idx],
-                                                   dst_contexts[idx],
-                                                   src_requirements[idx],
-                                                   src_versions[idx],
-                                                   dst_requirements[idx],
-                                                   dst_ref, sync_precondition));
-            // Only need to apply our changes to the destination state
-            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
-                                runtime->address_space, applied_conditions);
-          }
-          else
-          {
-            InstanceRef src_ref = runtime->forest->register_physical_region(
-                                                        src_contexts[idx],
-                                                        src_mapping_refs[idx],
-                                                        src_requirements[idx],
-                                                        idx,
-                                                        src_versions[idx],
-                                                        this,
-                                                        local_proc,
-                                                        completion_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                        , get_logging_name()
-                                                        , unique_op_id
-#endif
-                                                        );
-            
-#ifdef DEBUG_HIGH_LEVEL
-            assert(src_ref.has_ref());
-#endif
-            // Apply our changes to the state
-            src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
-                                runtime->address_space, applied_conditions);
-            dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
-                                runtime->address_space, applied_conditions);
-            if (notify)
-            {
-              src_requirements[idx].mapping_failed = false;
-              src_requirements[idx].selected_memory = src_ref.get_memory();
-            }
-            // Now issue the copies from source to destination
-            if (!IS_REDUCE(dst_requirements[idx]))
-              copy_complete_events.insert(
-                  runtime->forest->copy_across(this, src_contexts[idx],
-                                          dst_contexts[idx],
-                                          src_requirements[idx],
-                                          dst_requirements[idx],
-                                          src_ref, dst_ref, sync_precondition));
-            else
-              copy_complete_events.insert(
-                  runtime->forest->reduce_across(this, dst_contexts[idx],
-                                          dst_contexts[idx],
-                                          src_requirements[idx],
-                                          dst_requirements[idx],
-                                          src_ref, dst_ref, sync_precondition));
-          }
+          Event e = it->impl->acquire_grant();
+          preconditions.insert(e);
         }
-        // Launch the complete task if necessary 
-        Event copy_complete_event = 
-          Event::merge_events(copy_complete_events);
-#ifdef LEGION_SPY
-        if (!copy_complete_event.exists())
+        sync_precondition = Runtime::merge_events<false>(preconditions);
+      }
+      // Register the source and destination regions
+      std::set<Event> copy_complete_events;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        InstanceSet src_targets, dst_targets;
+        // The common case 
+        int src_composite = -1;
+        // Make a user event for when this copy across is done
+        // and add it to the set of copy complete events
+        UserEvent local_completion = UserEvent::create_user_event();
+        copy_complete_events.insert(local_completion);
+        if (!src_requirements[idx].is_restricted())
         {
-          UserEvent new_copy_complete = UserEvent::create_user_event();
-          new_copy_complete.trigger();
-          copy_complete_event = new_copy_complete;
-        }
-        LegionSpy::log_event_dependences(copy_complete_events, 
-            copy_complete_event);
-        LegionSpy::log_event_dependence(copy_complete_event,
-            completion_event);
-#endif
-
-        // Chain all the unlock and barrier arrivals off of the
-        // copy complete event
-        if (!arrive_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+          // Do the conversion and check for errors
+          src_composite = 
+            perform_conversion<true/*src*/>(idx, src_requirements[idx],
+                                            output.src_instances[idx],
+                                            src_targets,
+                                            IS_REDUCE(dst_requirements[idx]));
+          // If we have a compsite reference, we need to map it
+          // as a virtual region
+          if (src_composite >= 0)
           {
-            it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
-#ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(completion_event, 
-                it->phase_barrier);
+            runtime->forest->map_virtual_region(src_contexts[idx],
+                                                src_requirements[idx],
+                                                src_targets[src_composite],
+                                                src_versions[idx],
+                                                parent_ctx,
+                                                false/*needs fields*/
+#ifdef DEBUG_LEGION
+                                                , idx, get_logging_name()
+                                                , unique_op_id
 #endif
+                                                );
+            // No need to do the registration here
+            continue;
           }
+          // Now do the registration
+          set_mapping_state(idx, true/*src*/);
+          runtime->forest->physical_register_only(src_contexts[idx],
+                                                  src_requirements[idx],
+                                                  src_versions[idx],
+                                                  this, idx, local_completion,
+                                                  false/*defer add users*/,
+                                                  map_applied_conditions,
+                                                  src_targets
+#ifdef DEBUG_LEGION
+                                                  , get_logging_name()
+                                                  , unique_op_id
+#endif
+                                                  );
         }
-
-        // Mark that we completed mapping
-        if (!applied_conditions.empty())
-          complete_mapping(Event::merge_events(applied_conditions));
         else
-          complete_mapping();
-        // Notify the mapper if it wanted to be notified
-        if (notify)
-          runtime->invoke_mapper_notify_result(local_proc, this);
-
-        // Handle the case for marking when the copy completes
-        completion_event.trigger(copy_complete_event);
-        need_completion_trigger = false;
-        complete_execution(copy_complete_event);
+        {
+          // Restricted case, get the instances from the parent
+          parent_ctx->get_physical_references(src_parent_indexes[idx],
+                                              src_targets);
+          set_mapping_state(idx, true/*src*/);
+          runtime->forest->traverse_and_register(src_contexts[idx],
+                                                 src_privilege_paths[idx],
+                                                 src_requirements[idx],
+                                                 src_versions[idx], this, idx,
+                                                 local_completion, 
+                                                 false/*defer add users*/,
+                                                 map_applied_conditions,
+                                                 src_targets
+#ifdef DEBUG_LEGION
+                                                 , get_logging_name()
+                                                 , unique_op_id
+#endif
+                                                 );
+        }
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx, 
+                                                src_requirements[idx],
+                                                src_targets);
+        // Little bit of a hack here, if we are going to do a reduction
+        // explicit copy, switch the privileges to read-write when doing
+        // the registration since we know we are using normal instances
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        // Common case is not restricted
+        if (!dst_requirements[idx].is_restricted())
+        {
+          perform_conversion<false/*src*/>(idx, dst_requirements[idx],
+                                           output.dst_instances[idx],
+                                           dst_targets);
+          // Now do the registration
+          set_mapping_state(idx, false/*src*/);
+          runtime->forest->physical_register_only(dst_contexts[idx],
+                                                  dst_requirements[idx],
+                                                  dst_versions[idx],
+                                                  this, idx, local_completion,
+                                                  false/*defer add users*/,
+                                                  map_applied_conditions,
+                                                  dst_targets
+#ifdef DEBUG_LEGION
+                                                  , get_logging_name()
+                                                  , unique_op_id
+#endif
+                                                  );
+        }
+        else
+        {
+          // Restricted case, get the instances from the parent
+          parent_ctx->get_physical_references(dst_parent_indexes[idx],
+                                              dst_targets);
+          set_mapping_state(idx, false/*src*/);
+          runtime->forest->traverse_and_register(dst_contexts[idx],
+                                                 dst_privilege_paths[idx],
+                                                 dst_requirements[idx],
+                                                 dst_versions[idx], this, idx,
+                                                 local_completion, 
+                                                 false/*defer add users*/, 
+                                                 map_applied_conditions,
+                                                 dst_targets
+#ifdef DEBUG_LEGION
+                                                 , get_logging_name()
+                                                 , unique_op_id
+#endif
+                                                 );
+        }
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, 
+             idx + src_requirements.size(), dst_requirements[idx], dst_targets);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+        Event local_sync_precondition = sync_precondition;
+        // See if we have any atomic locks we have to acquire
+        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
+        {
+          // Issue the acquires and releases for the reservations
+          // necessary for performing this across operation
+          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
+          for (std::map<Reservation,bool>::const_iterator it = 
+                local_locks.begin(); it != local_locks.end(); it++)
+          {
+            local_sync_precondition = 
+              Runtime::acquire_reservation<false>(it->first, it->second,
+                                                  local_sync_precondition);
+            // We can also issue the release here too
+            Runtime::release_reservation<false>(it->first, local_completion);
+          }
+        }
+        // If we made it here, we passed all our error-checking so
+        // now we can issue the copy/reduce across operation
+        // Trigger our local completion event contingent upon 
+        // the copy/reduce across being done
+        if (!IS_REDUCE(dst_requirements[idx]))
+        {
+          Event across_done = 
+            runtime->forest->copy_across(src_contexts[idx], dst_contexts[idx], 
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, src_versions[idx], 
+                                  src_composite, this, idx, 
+                                  local_sync_precondition, 
+                                  map_applied_conditions);
+          Runtime::trigger_event<false>(local_completion, across_done);
+        }
+        else
+        {
+          // Composite instances are not valid sources for reductions across
+#ifdef DEBUG_LEGION
+          assert(src_composite == -1);
+#endif
+          Event across_done = 
+            runtime->forest->reduce_across(src_contexts[idx], dst_contexts[idx],
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, src_versions[idx], 
+                                  this, local_sync_precondition);
+          Runtime::trigger_event<false>(local_completion, across_done);
+        }
+        // Apply our changes to the version states
+        src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
+                            runtime->address_space, map_applied_conditions);
+        dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
+                            runtime->address_space, map_applied_conditions); 
       }
-      else
+      Event copy_complete_event = 
+        Runtime::merge_events<false>(copy_complete_events);
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
+                                        completion_event);
+#endif
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
       {
-        // We failed to map, so notify the mapper
-        runtime->invoke_mapper_failed_mapping(local_proc, this);
-        // Clear our our instances that did map so we start
-        // again next time.
-        src_mapping_refs.clear();
-        dst_mapping_refs.clear();
-        for (unsigned idx = 0; idx < src_versions.size(); idx++)
-          src_versions[idx].reset();
-        for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-          dst_versions[idx].reset();
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);    
+        }
       }
-      return map_success;
+      // Mark that we completed mapping
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
+      else
+        complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event<false>(completion_event, copy_complete_event);
+      need_completion_trigger = false;
+      complete_execution(copy_complete_event);
+      // We succeeded mapping
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2919,7 +3269,8 @@ namespace LegionRuntime {
       {
         it->release();
       }
-      Operation::trigger_commit();
+      // Don't commit this operation until we've reported our profiling
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -2936,9 +3287,9 @@ namespace LegionRuntime {
                     "copy operation (UID %lld) in task %s (UID %lld).",
                     actual_idx1, is_src1 ? "source" : "destination",
                     actual_idx2, is_src2 ? "source" : "destination",
-                    unique_op_id, parent_ctx->variants->name,
-                    parent_ctx->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
+                    unique_op_id, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
@@ -2958,7 +3309,7 @@ namespace LegionRuntime {
       if (idx >= src_parent_indexes.size())
       {
         idx -= src_parent_indexes.size();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(idx < dst_parent_indexes.size());
 #endif
         return dst_parent_indexes[idx];
@@ -2968,53 +3319,67 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Mappable::MappableKind CopyOp::get_mappable_kind(void) const
+    void CopyOp::select_sources(const InstanceRef &target,
+                                const InstanceSet &sources,
+                                std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
-      return COPY_MAPPABLE;
+      Mapper::SelectCopySrcInput input;
+      Mapper::SelectCopySrcOutput output;
+      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(target, input.target);
+      input.is_src = current_src;
+      input.region_req_index = current_index;
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_copy_sources(this, &input, &output);
+      // Fill in the ranking based on the output
+      compute_ranking(output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
-    Task* CopyOp::as_mappable_task(void) const
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                        CopyOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
-      return NULL;
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
-    Copy* CopyOp::as_mappable_copy(void) const
+    void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      CopyOp *proxy_this = const_cast<CopyOp*>(this);
-      return proxy_this;
-    }
-    
-    //--------------------------------------------------------------------------
-    Inline* CopyOp::as_mappable_inline(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-    
-    //--------------------------------------------------------------------------
-    Acquire* CopyOp::as_mappable_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
+      // We should only be doing analysis on one region requirement
+      // at a time so we don't need to hold the operation lock when 
+      // updating this data structure
+      if (current_index >= atomic_locks.size())
+        atomic_locks.resize(current_index+1);
+      std::map<Reservation,bool> &local_locks = atomic_locks[current_index];
+      std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
+      if (finder != local_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        local_locks[lock] = exclusive;
     }
 
     //--------------------------------------------------------------------------
-    Release* CopyOp::as_mappable_release(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID CopyOp::get_unique_mappable_id(void) const
+    UniqueID CopyOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id; 
+    }
+
+    //--------------------------------------------------------------------------
+    int CopyOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -3027,8 +3392,8 @@ namespace LegionRuntime {
       {
         log_region.error("Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
-                               parent_ctx->variants->name);
-#ifdef DEBUG_HIGH_LEVEL
+                               parent_ctx->get_task_name());
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PROJECTION_USE);
@@ -3052,7 +3417,7 @@ namespace LegionRuntime {
                                    requirement.region.tree_id, 
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -3064,12 +3429,12 @@ namespace LegionRuntime {
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
             log_region.error("Field %d is not a valid field of field "
-                                   "space %d for index %d of %s requirements"
+                                   "space %d for index %d of %s requirements "
                                    "of copy operation (ID %lld)",
                                    bad_field, sp.id, idx, 
                                    (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -3082,7 +3447,7 @@ namespace LegionRuntime {
                                     bad_field, idx, 
                                     (src ? "source" : "destination"),
                                     unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -3095,7 +3460,7 @@ namespace LegionRuntime {
                                     bad_field, idx,
                                     (src ? "source" : "destination"),
                                     unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -3107,14 +3472,14 @@ namespace LegionRuntime {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of %s region "
                                    "requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id,
                                    idx, (src ? "source" : "destination"));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -3134,7 +3499,7 @@ namespace LegionRuntime {
                                    requirement.parent.tree_id,
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -3147,7 +3512,7 @@ namespace LegionRuntime {
                                    "region requirements",
                                    unique_op_id, bad_field, idx,
                                    (src ? "source" : "destination"));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -3165,7 +3530,7 @@ namespace LegionRuntime {
                                    requirement.region.tree_id, 
                                    idx, (src ? "source" : "destination"),
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -3194,13 +3559,13 @@ namespace LegionRuntime {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of source region "
                                    "requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    src_requirements[idx].region.index_space.id,
                                    src_requirements[idx].region.field_space.id, 
                                    src_requirements[idx].region.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_BAD_PARENT_REGION);
@@ -3219,13 +3584,13 @@ namespace LegionRuntime {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of destination "
                                    "region requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    dst_requirements[idx].region.index_space.id,
                                    dst_requirements[idx].region.field_space.id, 
                                    dst_requirements[idx].region.tree_id, idx);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_BAD_PARENT_REGION);
@@ -3235,12 +3600,201 @@ namespace LegionRuntime {
       }
     }
 
+    //--------------------------------------------------------------------------
+    template<bool IS_SRC>
+    int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
+                                   std::vector<MappingInstance> &output,
+                                   InstanceSet &targets, bool is_reduce)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_idx = runtime->forest->physical_convert_mapping(
+                              req, output, targets, bad_tree, missing_fields,
+                              &acquired_instances, unacquired, 
+                              !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper selected an instance from "
+                      "region tree %d to satisfy %s region requirement %d "
+                      "for explicit region-to_region copy in task %s (ID %lld) "
+                      "but the logical region for this requirement is from "
+                      "region tree %d.", mapper->get_mapper_name(), bad_tree,
+                      IS_SRC ? "source" : "destination", idx, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      req.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %ld fields of the region requirement %d "
+                      "of explicit region-to-region copy in task %s (ID %lld). "
+                      "Ths missing fields are listed below.",
+                      mapper->get_mapper_name(), missing_fields.size(), idx,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          runtime->retrieve_semantic_information(
+              req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+              name, name_size, false, false);
+          log_run.error("Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          {
+            log_run.error("Invalid mapper output from 'map_copy' invocation "
+                          "on mapper %s. Mapper selected physical instance "
+                          "for %s region requirement %d of explicit region-to-"
+                          "region copy in task %s (ID %lld) which has already "
+                          "been collected. If the mapper had properly acquired "
+                          "this instance as part of the mapper call it would "
+                          "have detected this. Please update the mapper to "
+                          "abide by proper mapping conventions.",
+                          mapper->get_mapper_name(), 
+                          IS_SRC ? "source" : "destination", idx,
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s failed to acquire instances "
+                        "for %s region requirement %d of explicit region-to-"
+                        "region copy in task %s (ID %lld) in 'map_copy' call. "
+                        "You may experience undefined behavior as a "
+                        "consequence.", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+      }
+      // Destination is not allowed to have composite instances
+      if (!IS_SRC && (composite_idx >= 0))
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for destination region requiremnt "
+                      "%d. Only source region requirements are permitted to "
+                      "be composite instances for explicit region-to-region "
+                      "copy operations. Operation was issued in task %s "
+                      "(ID %lld).", mapper->get_mapper_name(), idx,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT); 
+      } 
+      if (IS_SRC && (composite_idx >= 0) && is_reduce)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for the source requirement %d of "
+                      "an explicit region-to-region reduction. Only real "
+                      "physical instances are permitted to be sources of "
+                      "explicit region-to-region reductions. Operation was "
+                      "issued in task %s (ID %lld).", mapper->get_mapper_name(),
+                      idx, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (Runtime::unsafe_mapper)
+        return composite_idx;
+      std::vector<LogicalRegion> regions_to_check(1, req.region);
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        PhysicalManager *manager = ref.get_manager();
+        if (manager->is_virtual_instance())
+          continue;
+        if (!manager->meets_regions(regions_to_check))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an instance for %s "
+                        "region requirement at index %d that does not meet "
+                        "the logical region requirement. The copy operation "
+                        "was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), 
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      // Make sure all the destinations are real instances, this has
+      // to be true for all kinds of explicit copies including reductions
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        if (IS_SRC && (int(idx) == composite_idx))
+          continue;
+        if (!targets[idx].get_manager()->is_instance_manager())
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an illegal "
+                        "specialized instance as the target for %s "
+                        "region requirement %d of an explicit copy operation "
+                        "in task %s (ID %lld).", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx, 
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      return composite_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_copy_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // Fence Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FenceOp::FenceOp(Internal *rt)
+    FenceOp::FenceOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -3276,8 +3830,8 @@ namespace LegionRuntime {
     {
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_fence_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
     }
 
@@ -3316,15 +3870,7 @@ namespace LegionRuntime {
     {
       begin_dependence_analysis();
       // Register this fence with all previous users in the parent's context
-      RegionTreeContext ctx = parent_ctx->get_context();
-      for (unsigned idx = 0; idx < parent_ctx->regions.size(); idx++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(parent_ctx->regions[idx].handle_type == SINGULAR);
-#endif
-        runtime->forest->perform_fence_analysis(ctx, this, 
-                          parent_ctx->regions[idx].region, true/*dominate*/);
-      }
+      parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence
       // before we can complete the dependence analysis
       // and possibly be deactivated
@@ -3366,7 +3912,7 @@ namespace LegionRuntime {
               if (it->second == it->first->get_generation())
                 trigger_events.insert(complete);
             }
-            Event wait_on = Event::merge_events(trigger_events);
+            Event wait_on = Runtime::merge_events<false>(trigger_events);
             if (!wait_on.has_triggered())
             {
               DeferredExecuteArgs deferred_execute_args;
@@ -3375,6 +3921,7 @@ namespace LegionRuntime {
               runtime->issue_runtime_meta_task(&deferred_execute_args,
                                                sizeof(deferred_execute_args),
                                               HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+                                               HLR_LATENCY_PRIORITY,
                                                this, wait_on);
             }
             else
@@ -3414,7 +3961,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FrameOp::FrameOp(Internal *rt)
+    FrameOp::FrameOp(Runtime *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -3514,7 +4061,7 @@ namespace LegionRuntime {
         if (it->second == it->first->get_generation())
           trigger_events.insert(complete);
       }
-      Event wait_on = Event::merge_events(trigger_events);
+      Event wait_on = Runtime::merge_events<false>(trigger_events);
       if (!wait_on.has_triggered())
       {
         DeferredExecuteArgs deferred_execute_args;
@@ -3523,6 +4070,7 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&deferred_execute_args,
                                          sizeof(deferred_execute_args),
                                          HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, wait_on);
       }
       else
@@ -3546,7 +4094,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DeletionOp::DeletionOp(Internal *rt)
+    DeletionOp::DeletionOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -3584,8 +4132,8 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3597,8 +4145,8 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3610,8 +4158,8 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3624,8 +4172,8 @@ namespace LegionRuntime {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields.insert(fid);
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3638,8 +4186,8 @@ namespace LegionRuntime {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3651,8 +4199,8 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3664,8 +4212,8 @@ namespace LegionRuntime {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
-      if (Internal::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3796,9 +4344,7 @@ namespace LegionRuntime {
           assert(false); // should never get here
       }
       // Commit this operation
-      commit_operation();
-      // Then deactivate it
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3806,7 +4352,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CloseOp::CloseOp(Internal *rt)
+    CloseOp::CloseOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -3837,6 +4383,20 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
+    UniqueID CloseOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    int CloseOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
     size_t CloseOp::get_region_count(void) const
     //--------------------------------------------------------------------------
     {
@@ -3848,24 +4408,37 @@ namespace LegionRuntime {
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      parent_task = ctx;
+      requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::perform_logging(bool is_intermediate_close_op)
+    void CloseOp::initialize_close(SingleTask *ctx, unsigned idx, bool track)
     //--------------------------------------------------------------------------
     {
-      if (!Internal::legion_spy_enabled)
+#ifdef DEBUG_LEGION
+      assert(completion_event.exists());
+#endif
+      initialize_operation(ctx, track);
+      parent_task = ctx;
+      ctx->clone_requirement(idx, requirement);
+      initialize_privilege_path(privilege_path, requirement);
+    }
+
+    //--------------------------------------------------------------------------
+    void CloseOp::perform_logging(bool is_intermediate_close_op, bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      if (!Runtime::legion_spy_enabled)
         return;
-      LegionSpy::log_close_operation(parent_ctx->get_unique_task_id(),
+      LegionSpy::log_close_operation(parent_ctx->get_unique_id(),
                                      unique_op_id,
-                                     is_intermediate_close_op);
+                                     is_intermediate_close_op, read_only);
       if (requirement.handle_type == PART_PROJECTION)
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
@@ -3874,7 +4447,8 @@ namespace LegionRuntime {
                                   requirement.partition.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -3883,7 +4457,8 @@ namespace LegionRuntime {
                                   requirement.region.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/,
                                 requirement.privilege_fields);
     } 
@@ -3893,7 +4468,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
     }
@@ -3920,7 +4495,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -3928,7 +4504,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3936,7 +4512,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCloseOp::TraceCloseOp(Internal *runtime)
+    TraceCloseOp::TraceCloseOp(Runtime *runtime)
       : CloseOp(runtime)
     //--------------------------------------------------------------------------
     {
@@ -3966,21 +4542,13 @@ namespace LegionRuntime {
       // are tracing from the creation operation.
       if (trace != NULL)
         set_trace(trace, create->is_tracing());
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      requirement = req;
       initialize_privilege_path(privilege_path, requirement);
       target_children = targets;
       close_idx = close;
       close_mask = close_m;
       create_op = create;
-      create_gen = create_op->get_generation();
-      if (Internal::legion_spy_enabled)
-      {
-        perform_logging(true/*is intermediate close op*/);
-        LegionSpy::log_close_op_creator(unique_op_id,
-                                        create->get_unique_op_id(),
-                                        close_idx);
-      }
+      create_gen = create_op->get_generation(); 
     }
 
     //--------------------------------------------------------------------------
@@ -4012,7 +4580,7 @@ namespace LegionRuntime {
                                                const FieldMask &dependent_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(close_idx >= 0);
 #endif
       // Check to see if the target is also our creator
@@ -4035,7 +4603,7 @@ namespace LegionRuntime {
     void TraceCloseOp::add_next_child(const ColorPoint &next_child)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(next_child.is_valid());
 #endif
       next_children.insert(next_child);
@@ -4046,7 +4614,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InterCloseOp::InterCloseOp(Internal *runtime)
+    InterCloseOp::InterCloseOp(Runtime *runtime)
       : TraceCloseOp(runtime)
     //--------------------------------------------------------------------------
     {
@@ -4093,6 +4661,13 @@ namespace LegionRuntime {
       version_info.merge(ver_info, close_m);
       restrict_info.merge(res_info, close_m);
       parent_req_index = create->find_parent_index(close_idx);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(true/*is intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        create->get_unique_op_id(),
+                                        close_idx);
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -4100,6 +4675,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_trace_close();  
+      mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4107,6 +4684,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_trace_close();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
 
@@ -4128,86 +4710,265 @@ namespace LegionRuntime {
     bool InterCloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor(); 
-      // Never need to premap close operations
-      Event close_event = Event::NO_EVENT;
-      // If our requirement is restricted, then we already know what
-      // our target should be.
-      MappingRef target;
-      if (restrict_info.has_restrictions())
+      // See if we are restricted or not and if not find our valid instances 
+      InstanceSet chosen_instances;
+      int composite_idx = -1;
+      std::set<Event> map_applied_conditions;
+      if (!restrict_info.has_restrictions())
       {
-        InstanceRef target_inst = privilege_path.translate_ref( 
-            parent_ctx->get_local_reference(parent_req_index));
-        target = runtime->forest->map_restricted_region(physical_ctx,
-                                                        requirement,
-                                                        0/*idx*/,
-                                                        version_info,
-                                                        local_proc,
-                                                        target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                        , get_logging_name()
-                                                        , unique_op_id
+        InstanceSet valid_instances;
+        runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                                requirement, version_info,
+                                                this, 0/*idx*/, 
+                                                true/*find valid*/,
+                                                map_applied_conditions,
+                                                valid_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                                        );
+                                                );
+        // now invoke the mapper to find the instances to use
+        composite_idx = invoke_mapper(valid_instances, chosen_instances);
       }
-      // For partition operations that don't have a next child we
-      // always want to make a composite instance because the low-level
-      // runtime knows how to deal with lots of small instances
-      bool force_composite = next_children.empty() && 
-                             create_op->is_partition_op();
-      bool success = runtime->forest->perform_close_operation(physical_ctx,
-                                              requirement, parent_ctx,
-                                              local_proc, target_children,
-                                              next_children, 
-                                              close_event, target,
-                                              version_info, force_composite
-#ifdef DEBUG_HIGH_LEVEL
-                                              , 0 /*idx*/ 
-                                              , get_logging_name()
-                                              , unique_op_id
-#endif
-                                              );
-      // If we didn't succeed, then return
-      if (!success)
+      else
       {
-        version_info.reset();
-        return false;
-      }
-      std::set<Event> applied_conditions;
-      version_info.apply_close(physical_ctx.get_id(), runtime->address_space,
-                               target_children, applied_conditions);
+        parent_ctx->get_physical_references(parent_req_index, chosen_instances);
+      } 
+      // Now we can perform our close operation
+      Event close_event = 
+        runtime->forest->physical_perform_close(physical_ctx, requirement,
+                                                version_info, this, 0/*idx*/, 
+                                                composite_idx, target_children,
+                                                next_children, completion_event,
+                                                map_applied_conditions,
+                                                chosen_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
+      if (Runtime::legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              chosen_instances);
 #ifdef LEGION_SPY
-      if (target.has_ref())
-        LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          target.get_view()->get_manager()->get_instance().id);
-      {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
+        LegionSpy::log_operation_events(unique_op_id, close_event, 
+                                        completion_event);
 #endif
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+      }
+      version_info.apply_close(physical_ctx.get_id(), runtime->address_space,
+                               target_children, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_execution(close_event);
       // This should always succeed
       return true;
     }
 
     //--------------------------------------------------------------------------
+    void InterCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      // Don't commit this operation until the profiling information is reported
+      commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned InterCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
       assert(create_op != NULL);
 #endif
       return create_op->find_parent_index(close_idx);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::select_sources(const InstanceRef &target,
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCloseSrcInput input;
+      Mapper::SelectCloseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_close_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                  InterCloseOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    int InterCloseOp::invoke_mapper(const InstanceSet &valid_instances,
+                                          InstanceSet &chosen_instances)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapCloseInput input;
+      Mapper::MapCloseOutput output;
+      // No need to filter for close operations
+      prepare_for_mapping(valid_instances, input.valid_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      if (requirement.handle_type == PART_PROJECTION)
+      {
+        // Always tell the mapper that we are closing to the parent region
+        // if we are actually closing to a partition
+        LogicalPartition partition = requirement.partition;
+        requirement.handle_type = SINGULAR;
+        requirement.region = 
+          runtime->forest->get_parent_logical_region(partition); 
+        mapper->invoke_map_close(this, &input, &output);
+        requirement.handle_type = PART_PROJECTION;
+        requirement.partition = partition;
+      }
+      else // This is the common case
+        mapper->invoke_map_close(this, &input, &output);
+      // Now we have to validate the output
+      // Make sure we have at least one instance for every field
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_index = runtime->forest->physical_convert_mapping(
+                                  requirement, output.chosen_instances, 
+                                  chosen_instances, bad_tree, missing_fields,
+                                  &acquired_instances, unacquired, 
+                                  !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_close' "
+                      "on mapper %s. Mapper selected a physical instance from "
+                      "region tree %d to satisfy region requirement from "
+                      "close operation in task %s (ID %lld) whose logical "
+                      "region is from region tree %d",mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id(), 
+                      requirement.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit (ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_close' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %ld fields fo the region requirement to "
+                      "a close operation in task %s (ID %lld). The missing "
+                      "fields are listed below.", mapper->get_mapper_name(),
+                      missing_fields.size(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          runtime->retrieve_semantic_information(
+              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+              name, name_size, false, false);
+          log_run.error("Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          { 
+            log_run.error("Invalid mapper output from 'map_close' invocation "
+                          "on mapper %s. Mapper selected physical instance for "
+                          "close operation in task %s (ID %lld) which has "
+                          "already been collected. If the mapper had properly "
+                          "acquired this instance as part of the mapper call "
+                          "it would have detected this. Please update the "
+                          "mapper to abide by proper mapping conventions.",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s failed to acquire instance "
+                        "for close operation in task %s (ID %lld) in "
+                        "'map_close' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+      } 
+      if (Runtime::unsafe_mapper)
+        return composite_index;
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
+      for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+      {
+        if (int(idx) == composite_index)
+          continue;
+        const InstanceRef &ref = chosen_instances[idx];
+        if (!ref.get_manager()->meets_regions(regions_to_check))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_close' "
+                        "on mapper %s. Mapper specified an instance which does "
+                        "not meet the logical region requirement. The close "
+                        "operation was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      return composite_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_close_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4215,7 +4976,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReadCloseOp::ReadCloseOp(Internal *rt)
+    ReadCloseOp::ReadCloseOp(Runtime *rt)
       : TraceCloseOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -4255,6 +5016,13 @@ namespace LegionRuntime {
       initialize_trace_close_op(ctx, req, targets, 
                                 trace, close, close_m, create);
       parent_req_index = create->find_parent_index(close_idx);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(true/*is intermediate close op*/, true/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        create->get_unique_op_id(),
+                                        close_idx);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4290,7 +5058,7 @@ namespace LegionRuntime {
     unsigned ReadCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -4301,7 +5069,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PostCloseOp::PostCloseOp(Internal *runtime)
+    PostCloseOp::PostCloseOp(Runtime *runtime)
       : CloseOp(runtime)
     //--------------------------------------------------------------------------
     {
@@ -4332,22 +5100,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx, 
-                                 const InstanceRef &ref)
+    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[idx], true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
-#endif
-      reference = ref;
+      initialize_close(ctx, idx, true/*track*/);
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;
       parent_idx = idx;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(false/*intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        ctx->get_unique_op_id(),
+                                        parent_idx);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4355,6 +5124,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_close();
+      mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4362,7 +5133,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
-      reference = InstanceRef();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_post_close_op(this);
     }
 
@@ -4384,7 +5159,7 @@ namespace LegionRuntime {
     void PostCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       // This stage is only done for close operations issued
@@ -4411,44 +5186,44 @@ namespace LegionRuntime {
     bool PostCloseOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // We never need to premap close operations 
-
-      // If we have a reference then we know we are closing a context
-      // to a specific physical instance, so we can issue that without
-      // worrying about failing.
-      Event close_event = runtime->forest->close_physical_context(physical_ctx,
-                                            requirement, version_info, this,
-                                            local_proc, reference
-#ifdef DEBUG_HIGH_LEVEL
-                                            , 0 /*idx*/ 
-                                            , get_logging_name()
-                                            , unique_op_id
+      // We already know the instances that we are going to need
+      InstanceSet chosen_instances;
+      parent_ctx->get_physical_references(parent_idx, chosen_instances);
+      std::set<Event> map_applied_conditions;
+      Event close_event = 
+        runtime->forest->physical_close_context(physical_ctx, requirement,
+                                                version_info, this, 0/*idx*/,
+                                                map_applied_conditions,
+                                                chosen_instances
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                            );
-      // No need to apply our mapping because we are done!
-#ifdef LEGION_SPY
-      // Log an implicit dependence on the parent's start event
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(), 
-                                         close_event);
-      // Note this gives us a dependence to the parent's termination event
-      // We log this only when close operations are used for closing contexts
-      LegionSpy::log_op_events(unique_op_id, close_event, 
-                             parent_ctx->get_task_completion());
-      LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          reference.get_manager()->get_instance().id);
+                                                );
+      if (Runtime::legion_spy_enabled)
       {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              chosen_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, close_event, 
+                                        completion_event);
 #endif
-      complete_mapping();
-      completion_event.trigger(close_event);
+      }
+      // No need to apply our mapping because we are done!
+      if (!map_applied_conditions.empty())
+        complete_mapping(
+            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
+      else
+        complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      Runtime::trigger_event<false>(completion_event, close_event);
       need_completion_trigger = false;
       complete_execution(close_event);
       // This should always succeed
@@ -4456,13 +5231,65 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void PostCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      // Only commit this operation if we are done profiling
+      commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned PostCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::select_sources(const InstanceRef &target,
+                                     const InstanceSet &sources,
+                                     std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCloseSrcInput input;
+      Mapper::SelectCloseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_close_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                   PostCloseOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_close_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4470,7 +5297,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    VirtualCloseOp::VirtualCloseOp(Internal *rt)
+    VirtualCloseOp::VirtualCloseOp(Runtime *rt)
       : CloseOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -4504,14 +5331,19 @@ namespace LegionRuntime {
     void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index)
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[index], true/*track*/);
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
+      initialize_close(ctx, index, true/*track*/);
+      // Make this read-write to pick up the earlier changes
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(false/*intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        ctx->get_unique_op_id(),
+                                        parent_idx);
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -4562,16 +5394,30 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
-      CompositeRef virtual_ref = 
-        runtime->forest->map_virtual_region(physical_ctx, requirement, 
-                                            0/*idx*/, version_info
-#ifdef DEBUG_HIGH_LEVEL
-                                            , get_logging_name()
-                                            , unique_op_id
+      // We already know the instances that we are going to need
+      InstanceSet chosen_instances;
+      parent_ctx->get_physical_references(parent_idx, chosen_instances);
+      // This should have exactly one instance and it should be 
+      // composite reference
+#ifdef DEBUG_LEGION
+      assert(chosen_instances.size() == 1);
+      assert(chosen_instances[0].is_composite_ref());
 #endif
-                                            );
+      InstanceSet composite_refs(1);
+      composite_refs[0] = InstanceRef(true/*composite*/);
+      // Always eagerly translate composite instances back out into
+      // the parent context
+      runtime->forest->map_virtual_region(physical_ctx, requirement,
+                                          composite_refs[0], version_info,
+                                          parent_ctx->get_parent(),
+                                          true/*needs fields*/
+#ifdef DEBUG_LEGION
+                                          , 0/*idx*/, get_logging_name()
+                                          , unique_op_id
+#endif
+                                          );
       // Pass the reference back to the parent task
-      parent_ctx->return_virtual_instance(parent_idx, virtual_ref);
+      parent_ctx->return_virtual_instance(parent_idx, composite_refs); 
       // Then we can mark that we are mapped and executed
       complete_mapping();
       complete_execution();
@@ -4582,7 +5428,7 @@ namespace LegionRuntime {
     unsigned VirtualCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_idx;
@@ -4593,7 +5439,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AcquireOp::AcquireOp(Internal *rt)
+    AcquireOp::AcquireOp(Runtime *rt)
       : Acquire(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -4638,7 +5484,6 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region); 
-      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -4647,16 +5492,16 @@ namespace LegionRuntime {
                                            physical_req.region))
         {
           log_task.error("ERROR: Acquire operation requested privileges "
-                               "on logical region (%x,%d,%d) which is "
-                               "not a subregion of the physical instance "
-                               "region (%x,%d,%d)",
-                               launcher.logical_region.index_space.id,
-                               launcher.logical_region.field_space.id,
-                               launcher.logical_region.get_tree_id(),
-                               physical_req.region.index_space.id,
-                               physical_req.region.field_space.id,
-                               physical_req.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+                         "on logical region (%x,%d,%d) which is "
+                         "not a subregion of the physical instance "
+                         "region (%x,%d,%d)",
+                         launcher.logical_region.index_space.id,
+                         launcher.logical_region.field_space.id,
+                         launcher.logical_region.get_tree_id(),
+                         physical_req.region.index_space.id,
+                         physical_req.region.field_space.id,
+                         physical_req.region.get_tree_id());
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_ACQUIRE_MISMATCH);
@@ -4668,9 +5513,9 @@ namespace LegionRuntime {
               physical_req.privilege_fields.end())
           {
             log_task.error("ERROR: Acquire operation requested on "
-                                 "field %d which is not contained in the "
-                                 "requested physical instance", *it);
-#ifdef DEBUG_HIGH_LEVEL
+                           "field %d which is not contained in the "
+                           "requested physical instance", *it);
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_ACQUIRE_MISMATCH);
@@ -4680,10 +5525,10 @@ namespace LegionRuntime {
       if (launcher.fields.empty())
       {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
-                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
-                               "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                         "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                         "FIELDS! DID YOU FORGET THEM?!?",
+                         parent_ctx->get_task_name(), 
+                         parent_ctx->get_unique_id());
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
@@ -4713,9 +5558,9 @@ namespace LegionRuntime {
       if (check_privileges)
         check_acquire_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_acquire_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -4724,7 +5569,8 @@ namespace LegionRuntime {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -4735,6 +5581,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4750,7 +5598,11 @@ namespace LegionRuntime {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
-      restrict_info.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      profiling_results = Mapper::AcquireProfilingInfo();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
     }
@@ -4793,6 +5645,7 @@ namespace LegionRuntime {
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
+      RestrictInfo restrict_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
@@ -4818,7 +5671,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -4836,6 +5690,7 @@ namespace LegionRuntime {
     {
       // Clean up this operation
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -4843,8 +5698,20 @@ namespace LegionRuntime {
     bool AcquireOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_acquire_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4853,71 +5720,32 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        // Use our parent_ctx as the mappable since technically
-        // we aren't a mappable.  Technically this shouldn't do anything
-        // because we've marked ourselves as being restricted.
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
-      
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
-      InstanceRef target_inst = privilege_path.translate_ref( 
-          parent_ctx->get_local_reference(parent_req_index));
-      MappingRef map_ref = runtime->forest->map_restricted_region(physical_ctx,
-                                                                  requirement,
-                                                                  0/*idx*/,
-                                                                  version_info,
-                                                                  local_proc,
-                                                                  target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
+      InstanceSet mapped_instances;
+      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      // Invoke the mapper before doing anything else 
+      invoke_mapper();
+      // Now we can map the operation
+      std::set<Event> map_applied_conditions;
+      runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                             requirement, version_info, 
+                                             this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
+                                             map_applied_conditions,
+                                             mapped_instances
+#ifdef DEBUG_LEGION
+                                             , get_logging_name()
+                                             , unique_op_id
 #endif
-                                                                  );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_ref.has_ref());
-#endif
-      InstanceRef result = runtime->forest->register_physical_region(
-                                                          physical_ctx,
-                                                          map_ref,
-                                                          requirement,
-                                                          0/*idx*/,
-                                                          version_info,
-                                                          this,
-                                                          local_proc,
-                                                          completion_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
-#endif
-                                                          );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result.has_ref());
-#endif
-      std::set<Event> applied_conditions;
+                                             );
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+                                 runtime->address_space,map_applied_conditions);
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
-#ifdef LEGION_SPY
-      std::set<Event> acquire_preconditions_spy;
-      acquire_preconditions.insert(result.get_ready_event());
-#endif
-      acquire_preconditions.insert(result.get_ready_event());
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        acquire_preconditions.insert(mapped_instances[idx].get_ready_event());
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -4925,10 +5753,6 @@ namespace LegionRuntime {
         {
           Event e = it->phase_barrier.get_previous_phase();
           acquire_preconditions.insert(e);
-#ifdef LEGION_SPY
-          acquire_preconditions_spy.insert(
-              it->phase_barrier.get_previous_phase());
-#endif
         }
       }
       if (!grants.empty())
@@ -4938,55 +5762,38 @@ namespace LegionRuntime {
         {
           Event e = it->impl->acquire_grant();
           acquire_preconditions.insert(e);
-#ifdef LEGION_SPY
-          acquire_preconditions_spy.insert(e);
-#endif
         }
       }
-      Event acquire_complete = Event::merge_events(acquire_preconditions);
+      Event acquire_complete = 
+        Runtime::merge_events<false>(acquire_preconditions);
+      if (Runtime::legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
 #ifdef LEGION_SPY
-      if (!acquire_complete.exists())
-      {
-        UserEvent new_acquire_complete = UserEvent::create_user_event();
-        new_acquire_complete.trigger();
-        acquire_complete = new_acquire_complete;
-      }
-      LegionSpy::log_event_dependences(acquire_preconditions_spy,
-          acquire_complete);
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-          acquire_complete);
-      LegionSpy::log_op_events(unique_op_id, acquire_complete,
-          completion_event);
-      LegionSpy::log_implicit_dependence(acquire_complete,
-          parent_ctx->get_task_completion());
-      LegionSpy::log_op_user(unique_op_id, 0,
-          result.get_manager()->get_instance().id);
-      LegionSpy::log_event_dependence(acquire_complete, completion_event);
-      {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
+        LegionSpy::log_operation_events(unique_op_id, acquire_complete,
+                                        completion_event);
 #endif
+      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          it->phase_barrier.arrive(1/*count*/, acquire_complete);
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier);
-#endif
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
-      
       // Mark that we completed mapping
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(acquire_complete);
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      Runtime::trigger_event<false>(completion_event, acquire_complete);
       need_completion_trigger = false;
       complete_execution(acquire_complete);
       // we succeeded in mapping
@@ -4998,67 +5805,40 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit thisoperation until we've reported profiling information
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
     unsigned AcquireOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
     }
 
     //--------------------------------------------------------------------------
-    Mappable::MappableKind AcquireOp::get_mappable_kind(void) const
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                     AcquireOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
-      return ACQUIRE_MAPPABLE;
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
-    Task* AcquireOp::as_mappable_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Copy* AcquireOp::as_mappable_copy(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Inline* AcquireOp::as_mappable_inline(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Acquire* AcquireOp::as_mappable_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-      AcquireOp *proxy_this = const_cast<AcquireOp*>(this);
-      return proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    Release* AcquireOp::as_mappable_release(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID AcquireOp::get_unique_mappable_id(void) const
+    UniqueID AcquireOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    int AcquireOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -5092,7 +5872,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -5107,7 +5887,7 @@ namespace LegionRuntime {
                                    "space %d of requirement for acquire "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -5117,13 +5897,13 @@ namespace LegionRuntime {
             log_region.error("Parent task %s (ID %lld) of acquire "
                              "operation (ID %lld) does not have a region "
                              "requirement for region (%x,%x,%x) as a parent",
-                             parent_ctx->variants->name, 
-                             parent_ctx->get_unique_task_id(),
+                             parent_ctx->get_task_name(), 
+                             parent_ctx->get_unique_id(),
                              unique_op_id, 
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
                              requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -5139,7 +5919,7 @@ namespace LegionRuntime {
                              requirement.parent.index_space.id,
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -5150,7 +5930,7 @@ namespace LegionRuntime {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -5176,13 +5956,13 @@ namespace LegionRuntime {
         log_region.error("Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -5191,12 +5971,42 @@ namespace LegionRuntime {
         parent_req_index = unsigned(parent_index);
     }
 
+    //--------------------------------------------------------------------------
+    void AcquireOp::invoke_mapper(void)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapAcquireInput input;
+      Mapper::MapAcquireOutput output;
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_acquire(this, &input, &output);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_acquire_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // Release Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReleaseOp::ReleaseOp(Internal *rt)
+    ReleaseOp::ReleaseOp(Runtime *rt)
       : Release(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -5241,7 +6051,6 @@ namespace LegionRuntime {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region); 
-      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -5259,7 +6068,7 @@ namespace LegionRuntime {
                                physical_req.region.index_space.id,
                                physical_req.region.field_space.id,
                                physical_req.region.get_tree_id());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_RELEASE_MISMATCH);
@@ -5273,7 +6082,7 @@ namespace LegionRuntime {
             log_task.error("ERROR: Release operation requested on "
                                  "field %d which is not contained in the "
                                  "requested physical instance", *it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_RELEASE_MISMATCH);
@@ -5285,8 +6094,8 @@ namespace LegionRuntime {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF RELEASE OPERATION"
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
@@ -5315,9 +6124,9 @@ namespace LegionRuntime {
       if (check_privileges)
         check_release_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_release_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -5326,7 +6135,8 @@ namespace LegionRuntime {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -5337,6 +6147,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_speculative(); 
+      mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5352,7 +6164,11 @@ namespace LegionRuntime {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
-      restrict_info.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      profiling_results = Mapper::ReleaseProfilingInfo();
       // Return this operation to the runtime
       runtime->free_release_op(this);
     }
@@ -5395,6 +6211,7 @@ namespace LegionRuntime {
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
+      RestrictInfo restrict_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
@@ -5421,7 +6238,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -5439,6 +6257,7 @@ namespace LegionRuntime {
     {
       // Clean up this operation
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -5446,8 +6265,20 @@ namespace LegionRuntime {
     bool ReleaseOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_release_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -5456,75 +6287,29 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        // Use our parent_ctx as the mappable since technically
-        // we aren't a mappable.  Technically this shouldn't do anything
-        // because we've marked ourselves as being restricted.
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+      // We already know what the answer has to be here 
+      InstanceSet mapped_instances;
+      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      // Invoke the mapper before doing anything else 
+      invoke_mapper();
+      // Now we can map the operation
+      std::set<Event> map_applied_conditions;
+      runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                             requirement, version_info, 
+                                             this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
+                                             map_applied_conditions,
+                                             mapped_instances
+#ifdef DEBUG_LEGION
+                                             , get_logging_name()
+                                             , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
-      
-#ifdef LEGION_SPY
-      LegionSpy::IDType inst_id;
-      {
-        const InstanceRef& ref = region.impl->get_reference();
-        inst_id = ref.get_manager()->get_instance().id;
-      }
-#endif
-      // Map this is a restricted region and then register it. The process
-      // of registering it will close up any open children to this instance.
-      MappingRef map_ref = runtime->forest->remap_physical_region(physical_ctx,
-                                                                  requirement,
-                                                                  0/*idx*/,
-                                                                  version_info,
-                                                  region.impl->get_reference()
-#ifdef DEBUG_HIGH_LEVEL
-                                                            , get_logging_name()
-                                                            , unique_op_id
-#endif
-                                                                  );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_ref.has_ref());
-#endif
-      InstanceRef result = runtime->forest->register_physical_region(
-                                                            physical_ctx,
-                                                            map_ref,
-                                                            requirement,
-                                                            0/*idx*/,
-                                                            version_info,
-                                                            this,
-                                                            local_proc,
-                                                            completion_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                            , get_logging_name()
-                                                            , unique_op_id
-#endif
-                                                            );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result.has_ref());
-#endif
-      std::set<Event> applied_conditions;
+                                             );
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
-
-      Event release_event = result.get_ready_event();
+                                 runtime->address_space,map_applied_conditions);
       std::set<Event> release_preconditions;
-      release_preconditions.insert(release_event);
-#ifdef LEGION_SPY
-      std::set<Event> release_preconditions_spy;
-      release_preconditions_spy.insert(release_event);
-#endif
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        release_preconditions.insert(mapped_instances[idx].get_ready_event());
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -5532,10 +6317,6 @@ namespace LegionRuntime {
         {
           Event e = it->phase_barrier.get_previous_phase();
           release_preconditions.insert(e);
-#ifdef LEGION_SPY
-          release_preconditions_spy.insert(
-              it->phase_barrier.get_previous_phase());
-#endif
         }
       }
       if (!grants.empty())
@@ -5545,54 +6326,38 @@ namespace LegionRuntime {
         {
           Event e = it->impl->acquire_grant();
           release_preconditions.insert(e);
-#ifdef LEGION_SPY
-          release_preconditions_spy.insert(e);
-#endif
         }
       }
-      Event release_complete = Event::merge_events(release_preconditions);
+      Event release_complete = 
+        Runtime::merge_events<false>(release_preconditions);
+      if (Runtime::legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
 #ifdef LEGION_SPY
-      if (!release_complete.exists())
-      {
-        UserEvent new_release_complete = UserEvent::create_user_event();
-        new_release_complete.trigger();
-        release_complete = new_release_complete;
-      }
-      LegionSpy::log_event_dependences(release_preconditions_spy,
-          release_complete);
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-          release_complete);
-      LegionSpy::log_op_events(unique_op_id, release_complete,
-          completion_event);
-      LegionSpy::log_op_user(unique_op_id, 0, inst_id);
-      LegionSpy::log_implicit_dependence(release_complete,
-          parent_ctx->get_task_completion());
-      LegionSpy::log_event_dependence(release_complete, completion_event);
-      {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
+        LegionSpy::log_operation_events(unique_op_id, release_complete,
+                                        completion_event);
 #endif
+      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier);
-#endif
-          it->phase_barrier.arrive(1/*count*/, release_complete);
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
-      
       // Mark that we completed mapping
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(release_complete);
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      Runtime::trigger_event<false>(completion_event, release_complete);
       need_completion_trigger = false;
       complete_execution(release_complete);
       // We succeeded in mapping
@@ -5604,67 +6369,59 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit this operation until the profiling is done
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
     unsigned ReleaseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
     }
 
     //--------------------------------------------------------------------------
-    Mappable::MappableKind ReleaseOp::get_mappable_kind(void) const
+    void ReleaseOp::select_sources(const InstanceRef &target,
+                                   const InstanceSet &sources,
+                                   std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
-      return RELEASE_MAPPABLE;
+      Mapper::SelectReleaseSrcInput input;
+      Mapper::SelectReleaseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_release_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
-    Task* ReleaseOp::as_mappable_task(void) const
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                     ReleaseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
-      return NULL;
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
-    Copy* ReleaseOp::as_mappable_copy(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Inline* ReleaseOp::as_mappable_inline(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Acquire* ReleaseOp::as_mappable_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Release* ReleaseOp::as_mappable_release(void) const
-    //--------------------------------------------------------------------------
-    {
-      ReleaseOp *proxy_this = const_cast<ReleaseOp*>(this);
-      return proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID ReleaseOp::get_unique_mappable_id(void) const
+    UniqueID ReleaseOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    int ReleaseOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -5701,7 +6458,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -5716,7 +6473,7 @@ namespace LegionRuntime {
                                    "space %d of requirement for release "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -5726,13 +6483,13 @@ namespace LegionRuntime {
             log_region.error("Parent task %s (ID %lld) of release "
                              "operation (ID %lld) does not have a region "
                              "requirement for region (%x,%x,%x) as a parent",
-                             parent_ctx->variants->name, 
-                             parent_ctx->get_unique_task_id(),
+                             parent_ctx->get_task_name(), 
+                             parent_ctx->get_unique_id(),
                              unique_op_id, 
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
                              requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -5749,7 +6506,7 @@ namespace LegionRuntime {
                                    requirement.parent.index_space.id,
                                    requirement.parent.field_space.id,
                                    requirement.parent.tree_id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -5760,7 +6517,7 @@ namespace LegionRuntime {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -5785,13 +6542,13 @@ namespace LegionRuntime {
         log_region.error("Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -5800,12 +6557,42 @@ namespace LegionRuntime {
         parent_req_index = unsigned(parent_index);
     }
 
+    //--------------------------------------------------------------------------
+    void ReleaseOp::invoke_mapper(void)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapReleaseInput input;
+      Mapper::MapReleaseOutput output;
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_release(this, &input, &output);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_release_report_profiling(this, &profiling_results);
+#ifdef DEBUG_LEGION
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // Dynamic Collective Operation
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicCollectiveOp::DynamicCollectiveOp(Internal *rt)
+    DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -5842,7 +6629,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      future = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+      future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), runtime->address_space,
             runtime->address_space, this));
       collective = dc;
@@ -5893,6 +6680,7 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&deferred_execute_args,
                                          sizeof(deferred_execute_args),
                                          HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, barrier);
       }
       else
@@ -5905,17 +6693,17 @@ namespace LegionRuntime {
     void DynamicCollectiveOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
-      const ReductionOp *redop = Internal::get_reduction_op(collective.redop);
+      const ReductionOp *redop = Runtime::get_reduction_op(collective.redop);
       const size_t result_size = redop->sizeof_lhs;
       void *result_buffer = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
       bool result = 
 #endif
 #endif
       collective.phase_barrier.get_previous_phase().get_result(result_buffer,
 							       result_size);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result);
 #endif
       future.impl->set_result(result_buffer, result_size, true/*own*/);
@@ -5935,7 +6723,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FuturePredOp::FuturePredOp(Internal *rt)
+    FuturePredOp::FuturePredOp(Runtime *rt)
       : PredicateOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -5999,7 +6787,7 @@ namespace LegionRuntime {
     void FuturePredOp::initialize(SingleTask *ctx, Future f)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(f.impl != NULL);
 #endif
@@ -6016,7 +6804,7 @@ namespace LegionRuntime {
     {
       bool valid;
       bool value = future.impl->get_boolean_value(valid);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(valid);
 #endif
       set_resolved_value(get_generation(), value);
@@ -6026,7 +6814,7 @@ namespace LegionRuntime {
     void FuturePredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(future.impl != NULL);
 #endif
       begin_dependence_analysis();
@@ -6054,6 +6842,7 @@ namespace LegionRuntime {
         args.future_pred_op = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_RESOLVE_FUTURE_PRED_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, future.impl->get_ready_event());
       }
       // Mark that we completed mapping this operation
@@ -6065,7 +6854,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    NotPredOp::NotPredOp(Internal *rt)
+    NotPredOp::NotPredOp(Runtime *rt)
       : PredicateOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -6099,7 +6888,7 @@ namespace LegionRuntime {
     void NotPredOp::initialize(SingleTask *ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -6113,7 +6902,7 @@ namespace LegionRuntime {
         set_resolved_value(get_generation(), true);
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p.impl != NULL);
 #endif
         pred_op = p.impl;
@@ -6186,7 +6975,7 @@ namespace LegionRuntime {
       // No short circuit in this one
       // We can test this without the lock because 
       // it is monotonically increasing
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(prev_gen == get_generation());
 #endif
       // Don't forget to negate the value
@@ -6198,7 +6987,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AndPredOp::AndPredOp(Internal *rt)
+    AndPredOp::AndPredOp(Runtime *rt)
       : PredicateOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -6230,10 +7019,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void AndPredOp::initialize(SingleTask *ctx,
-                               const Predicate &p1, const Predicate &p2)
+                               const Predicate &p1, 
+                               const Predicate &p2)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -6241,7 +7031,8 @@ namespace LegionRuntime {
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
       // Short circuit case
-      if ((p1 == Predicate::FALSE_PRED) || (p2 == Predicate::FALSE_PRED))
+      if ((p1 == Predicate::FALSE_PRED) || 
+          (p2 == Predicate::FALSE_PRED))
       {
         set_resolved_value(get_generation(), false);
         return;
@@ -6253,7 +7044,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p1.impl != NULL);
 #endif
         left_valid = false;
@@ -6267,7 +7058,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(p2.impl != NULL);
 #endif
         right_valid = false;
@@ -6389,7 +7180,7 @@ namespace LegionRuntime {
           else
           {
             // Figure out which of the two values to fill in
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(!left_valid || !right_valid);
 #endif
             if (!left_valid)
@@ -6423,7 +7214,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OrPredOp::OrPredOp(Internal *rt)
+    OrPredOp::OrPredOp(Runtime *rt)
       : PredicateOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -6455,10 +7246,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void OrPredOp::initialize(SingleTask *ctx,
-                              const Predicate &p1, const Predicate &p2)
+                              const Predicate &p1, 
+                              const Predicate &p2)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
       // Don't track this as it can lead to deadlock because
@@ -6466,7 +7258,8 @@ namespace LegionRuntime {
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
       // Short circuit case
-      if ((p1 == Predicate::TRUE_PRED) || (p2 == Predicate::TRUE_PRED))
+      if ((p1 == Predicate::TRUE_PRED) || 
+          (p2 == Predicate::TRUE_PRED))
       {
         set_resolved_value(get_generation(), true);
         return;
@@ -6608,7 +7401,7 @@ namespace LegionRuntime {
           else
           {
             // Figure out which of the two values to fill in
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(!left_valid || !right_valid);
 #endif
             if (!left_valid)
@@ -6643,7 +7436,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MustEpochOp::MustEpochOp(Internal *rt)
+    MustEpochOp::MustEpochOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -6675,8 +7468,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     FutureMap MustEpochOp::initialize(SingleTask *ctx,
-                                      const MustEpochLauncher &launcher,
-                                      bool check_privileges)
+                                              const MustEpochLauncher &launcher,
+                                              bool check_privileges)
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
@@ -6691,11 +7484,11 @@ namespace LegionRuntime {
         indiv_tasks[idx] = runtime->get_available_individual_task(true);
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           check_privileges, false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this, idx);
+        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, !trace->is_fixed());
-        indiv_tasks[idx]->must_parallelism = true;
+        indiv_tasks[idx]->must_epoch_task = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -6704,52 +7497,50 @@ namespace LegionRuntime {
         index_tasks[idx] = runtime->get_available_index_task(true);
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           check_privileges, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);
+        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
+                                         true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, !trace->is_fixed());
-        index_tasks[idx]->must_parallelism = true;
+        index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = legion_new<FutureMap::Impl>(ctx, 
-                                               get_completion_event(), runtime);
-#ifdef DEBUG_HIGH_LEVEL
+      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, 
+                                             get_completion_event(), runtime));
+#ifdef DEBUG_LEGION
+      size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
         result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
+        total_points++;
       }
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
         result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
+        total_points += index_tasks[idx]->index_domain.get_volume();
+      }
+      // Assume for now that all msut epoch launches have to be
+      // mapped to CPUs
+      Machine::ProcessorQuery all_cpus(runtime->machine);
+      all_cpus.only_kind(Processor::LOC_PROC); 
+      if (total_points > all_cpus.count())
+      {
+        log_run.error("Illegal must epoch launch in task %s (UID %lld). "
+            "Must epoch launch requested %ld tasks, but only %ld CPUs "
+            "exist in this machine.", parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id(), total_points, all_cpus.count());
+        assert(false);
       }
 #endif
       return result_map;
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::set_task_options(ProcessorManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      // Mark that all these operations will map locally because we
-      // have to do a single mapping call for all our operations.
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-      {
-        manager->invoke_mapper_set_task_options(indiv_tasks[idx]);
-        indiv_tasks[idx]->map_locally = true;
-      }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        manager->invoke_mapper_set_task_options(index_tasks[idx]);
-        index_tasks[idx]->map_locally = true;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::find_conflicted_regions(
-                                         std::vector<PhysicalRegion> &conflicts)
+                                 std::vector<PhysicalRegion> &conflicts)
     //--------------------------------------------------------------------------
     {
       // Dump them all into a set when they are done to deduplicate them
@@ -6800,8 +7591,16 @@ namespace LegionRuntime {
       result_map = FutureMap();
       constraints.clear();
       task_sets.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       dependences.clear();
       mapping_dependences.clear();
+      input.tasks.clear();
+      input.constraints.clear();
+      output.task_processors.clear();
+      output.constraint_mappings.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
     }
@@ -6884,13 +7683,19 @@ namespace LegionRuntime {
         index_tasks[idx]->trigger_remote_state_analysis(index_event);
         preconditions.insert(index_event);
       }
-      ready_event.trigger(Event::merge_events(preconditions));
+      Runtime::trigger_event<true>(ready_event,
+          Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
     bool MustEpochOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
+      // First mark that each of the tasks will be locally mapped
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        indiv_tasks[idx]->set_locally_mapped(true);
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        index_tasks[idx]->set_locally_mapped(true);
       // Call trigger execution on each of our sub-operations, since they
       // each have marked that they have a must_epoch owner, they will
       // not actually map and launch, but instead will register all the base
@@ -6906,11 +7711,12 @@ namespace LegionRuntime {
                                      dependences, dependence_count))
           return false;
 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!single_tasks.empty());
 #endif 
         // Next build the set of single tasks and all their constraints.
         // Iterate over all the recorded dependences
+        std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
         constraints.reserve(dependences.size());
         for (std::deque<DependenceRecord>::const_iterator it = 
               dependences.begin(); it != dependences.end(); it++)
@@ -6924,10 +7730,13 @@ namespace LegionRuntime {
             for (std::set<SingleTask*>::const_iterator it2 = s2.begin();
                   it2 != s2.end(); it2++)
             {
-              constraints.push_back(Mapper::MappingConstraint(
-                                                       *it1, it->reg1_idx,
-                                                       *it2, it->reg2_idx,
-                                                       it->dtype));
+              Mapper::MappingConstraint constraint;
+              constraint.t1 = *it1;
+              constraint.t2 = *it2;
+              constraint.idx1 = it->reg1_idx;
+              constraint.idx2 = it->reg2_idx;
+              constraint.dtype = it->dtype;
+              constraints.push_back(constraint);
               mapping_dependences[*it1].push_back(*it2);
               mapping_dependences[*it2].push_back(*it1);
               // Tell the tasks they will need to refetch physical
@@ -6945,54 +7754,68 @@ namespace LegionRuntime {
         // we don't have to redo it if we end up failing a mapping.
         triggering_complete = true;
       }
-      // Next make the mapper call to perform the mapping for all the tasks
-      std::vector<Task*> copy_single_tasks(single_tasks.begin(),
-                                           single_tasks.end());
+      // Fill in the rest of the inputs to the mapper call
+      input.mapping_tag = mapper_tag;
+      input.tasks.insert(input.tasks.end(), single_tasks.begin(),
+                                            single_tasks.end());
+      // Also resize the outputs so the mapper knows what it is doing
+      output.constraint_mappings.resize(input.constraints.size());
+      output.task_processors.resize(single_tasks.size(), Processor::NO_PROC);
       Processor mapper_proc = parent_ctx->get_executing_processor();
-      bool notify = runtime->invoke_mapper_map_must_epoch(
-          mapper_proc, copy_single_tasks, constraints, mapper_id, mapper_tag);
-
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      // We've got all our meta-data set up so go ahead and issue the call
+      mapper->invoke_map_must_epoch(this, &input, &output);
       // Check that all the tasks have been assigned to different processors
-      std::map<Processor,SingleTask*> target_procs;
-      for (std::deque<SingleTask*>::const_iterator it = 
-            single_tasks.begin(); it != single_tasks.end(); it++)
       {
-        if (target_procs.find((*it)->target_proc) != target_procs.end())
+        std::map<Processor,SingleTask*> target_procs;
+        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
         {
-          SingleTask *other = target_procs[(*it)->target_proc];
-          log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) and "
-              "task %s (ID %lld) both requested to be run on processor "
-              IDFMT "!",
-              (*it)->variants->name, (*it)->get_unique_task_id(),
-              other->variants->name, other->get_unique_task_id(),
-              other->target_proc.id);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
+          Processor proc = output.task_processors[idx];
+          SingleTask *task = single_tasks[idx];
+          if (!proc.exists())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                "'map_must_epoch' on mapper %s. Mapper failed to specify "
+                "a valid processor for task %s (ID %lld) at index %d. Call "
+                "occurred in parent task %s (ID %lld).", 
+                mapper->get_mapper_name(), task->get_task_name(),
+                task->get_unique_id(), idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
 #endif
-          exit(ERROR_MUST_EPOCH_FAILURE);
-        }
-        if (!(*it)->additional_procs.empty())
-        {
-          log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) "
-              "has requested additional processors!",
-              (*it)->variants->name, (*it)->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (target_procs.find(proc) != target_procs.end())
+          {
+            SingleTask *other = target_procs[proc];
+            log_run.error("Invalid mapper output from invocation of "
+                "'map_must_epoch' on mapper %s. Mapper requests both tasks "
+                "%s (ID %lld) and %s (ID %lld) be mapped to the same "
+                "processor (" IDFMT ") which is illegal in a must epoch "
+                "launch. Must epoch was launched inside of task %s (ID %lld).",
+                mapper->get_mapper_name(), other->get_task_name(),
+                other->get_unique_id(), task->get_task_name(),
+                task->get_unique_id(), proc.id, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
 #endif
-          exit(ERROR_MUST_EPOCH_FAILURE);
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          } 
+          target_procs[proc] = task;
+          task->target_proc = proc;
         }
-        target_procs[(*it)->target_proc] = *it;
       }
-
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
         if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
       }
-
       // Everybody successfully mapped so now check that all
       // of the constraints have been satisfied
+      std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
       for (std::vector<Mapper::MappingConstraint>::const_iterator it = 
             constraints.begin(); it != constraints.end(); it++)
       {
@@ -7000,34 +7823,25 @@ namespace LegionRuntime {
         // so doing static casts are safe
         SingleTask *t1 = static_cast<SingleTask*>(const_cast<Task*>(it->t1));
         SingleTask *t2 = static_cast<SingleTask*>(const_cast<Task*>(it->t2));
-        PhysicalManager *inst1 = t1->get_instance(it->idx1);
-        PhysicalManager *inst2 = t2->get_instance(it->idx2);
-        // Check to make sure they selected the same instance 
-        if (inst1 != inst2)
+        InstanceSet inst1, inst2;
+        t1->get_physical_references(it->idx1, inst1);
+        t2->get_physical_references(it->idx2, inst2);
+        if (!runtime->forest->match_instance_fields(t1->regions[it->idx1],
+              t2->regions[it->idx2], inst1, inst2))
         {
-          log_run.error("MUST EPOCH ERROR: failed constraint! "
-              "Task %s (ID %lld) mapped region %d to instance " IDFMT " in "
-              "memory " IDFMT " , but task %s (ID %lld) mapped region %d to "
-              "instance " IDFMT " in memory " IDFMT ".",
-              t1->variants->name, t1->get_unique_task_id(), it->idx1,
-              inst1->get_instance().id, inst1->memory.id,
-              t2->variants->name, t2->get_unique_task_id(), it->idx2,
-              inst2->get_instance().id, inst2->memory.id);
-#ifdef DEBUG_HIGH_LEVEL
+          log_run.error("Invalid mapper output from invocation of "
+              "'map_must_epoch' on mapper %s. Region requirement %d of task %s "
+              "(ID %lld) and region requirement %d of task %s (ID %lld) were "
+              "mapped to non-equivalent sets of physical instances resulting "
+              "in a failed constraint. The must epoch launch occurred inside "
+              "task %s (ID %lld).", mapper->get_mapper_name(), it->idx1, 
+              t1->get_task_name(), t1->get_unique_id(), it->idx2,
+              t2->get_task_name(), t2->get_unique_id(), 
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
-          exit(ERROR_MUST_EPOCH_FAILURE);
-        }
-      }
-
-      // If the mapper wanted to know on success, then tell it
-      if (notify)
-      {
-        // Notify the mappers that the tasks successfully mapped
-        for (std::deque<SingleTask*>::const_iterator it = 
-              single_tasks.begin(); it != single_tasks.end(); it++)
-        {
-          runtime->invoke_mapper_notify_result(mapper_proc, *it);
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
 
@@ -7049,12 +7863,14 @@ namespace LegionRuntime {
       }
       // If we passed all the constraints, then kick everything off
       MustEpochDistributor distributor(this);
-      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks);
+      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks); 
       
       // Mark that we are done mapping and executing this operation
-      Event all_mapped = Event::merge_events(tasks_all_mapped);
-      Event all_complete = Event::merge_events(tasks_all_complete);
+      Event all_mapped = Runtime::merge_events<true>(tasks_all_mapped);
+      Event all_complete = Runtime::merge_events<false>(tasks_all_complete);
       complete_mapping(all_mapped);
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_execution(all_complete);
       return true;
     }
@@ -7066,7 +7882,7 @@ namespace LegionRuntime {
       bool need_complete;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_completes > 0);
 #endif
         remaining_subop_completes--;
@@ -7086,14 +7902,14 @@ namespace LegionRuntime {
       bool need_commit;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
         remaining_subop_commits--;
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation();
+        commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7110,16 +7926,16 @@ namespace LegionRuntime {
       if (src_index >= 0)
       {
         int dst_index = find_operation_index(dst_op, dst_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(dst_index >= 0);
 #endif
         TaskOp *src_task = find_task_by_index(src_index);
         TaskOp *dst_task = find_task_by_index(dst_index);
         log_run.error("MUST EPOCH ERROR: dependence between task "
             "%s (ID %lld) and task %s (ID %lld)\n",
-            src_task->variants->name, src_task->get_unique_task_id(),
-            dst_task->variants->name, dst_task->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
+            src_task->get_task_name(), src_task->get_unique_id(),
+            dst_task->get_task_name(), dst_task->get_unique_id());
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_MUST_EPOCH_FAILURE);
@@ -7149,13 +7965,13 @@ namespace LegionRuntime {
           TaskOp *dst_task = find_task_by_index(dst_index);
           log_run.error("MUST EPOCH ERROR: dependence between region %d "
               "of task %s (ID %lld) and region %d of task %s (ID %lld) of "
-              " type %s", src_idx, src_task->variants->name,
-              src_task->get_unique_task_id(), dst_idx, 
-              dst_task->variants->name, dst_task->get_unique_task_id(),
+              " type %s", src_idx, src_task->get_task_name(),
+              src_task->get_unique_id(), dst_idx, 
+              dst_task->get_task_name(), dst_task->get_unique_id(),
               (dtype == TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
                 (dtype == ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
                 "ATOMIC DEPENDENCE");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(false);
 #endif
           exit(ERROR_MUST_EPOCH_FAILURE);
@@ -7164,7 +7980,7 @@ namespace LegionRuntime {
         {
           // Record the dependence kind
           int dst_index = find_operation_index(dst_op, dst_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(dst_index >= 0);
 #endif
           dependences.push_back(DependenceRecord(src_index, dst_index,
@@ -7178,10 +7994,76 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void MustEpochOp::must_epoch_map_task_callback(SingleTask *task,
+                                              Mapper::MapTaskInput &map_input,
+                                              Mapper::MapTaskOutput &map_output)
+    //--------------------------------------------------------------------------
+    {
+      // We have to do three things here
+      // 1. Update the target processor
+      // 2. Mark as inputs and outputs any regions which we know
+      //    the results for as a result of our must epoch mapping
+      // 3. Record that we premapped those regions
+      // First find the index for this task
+#ifdef DEBUG_LEGION
+      bool found = false;
+#endif
+      unsigned index = 0;
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+      {
+        if (single_tasks[idx] == task)
+        {
+          index = idx;
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(found);
+#endif
+      // Set the target processor by the index 
+      task->target_proc = output.task_processors[index]; 
+      // Now iterate over the constraints figure out which ones
+      for (unsigned idx = 0; idx < input.constraints.size(); idx++)
+      {
+        const Mapper::MappingConstraint &constraint = 
+          input.constraints[idx];
+        if (constraint.t1 == task)
+        {
+          // Save the valid instances and the destination instances
+          map_input.valid_instances[constraint.idx1] = 
+            output.constraint_mappings[idx];
+          map_output.chosen_instances[constraint.idx1] = 
+            output.constraint_mappings[idx];
+          // Also record that we premapped this
+          map_input.premapped_regions.push_back(constraint.idx1);
+        }
+        else if (constraint.t2 == task)
+        {
+          map_input.valid_instances[constraint.idx2] = 
+            output.constraint_mappings[idx];
+          map_output.chosen_instances[constraint.idx2] = 
+            output.constraint_mappings[idx];
+          map_input.premapped_regions.push_back(constraint.idx2);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                   MustEpochOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances; 
+    }
+
+    //--------------------------------------------------------------------------
     void MustEpochOp::add_mapping_dependence(Event precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(dependence_tracker.mapping != NULL);
 #endif
       dependence_tracker.mapping->add_mapping_dependence(precondition);
@@ -7192,7 +8074,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Can do the first part without the lock 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index < task_sets.size());
 #endif
       task_sets[index].insert(single);
@@ -7242,7 +8124,7 @@ namespace LegionRuntime {
       bool need_complete;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_completes > 0);
 #endif
         remaining_subop_completes--;
@@ -7263,14 +8145,14 @@ namespace LegionRuntime {
       bool need_commit;
       {
         AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(remaining_subop_commits > 0);
 #endif
         remaining_subop_commits--;
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation();
+        commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7369,7 +8251,7 @@ namespace LegionRuntime {
           {
             const MustEpochOp::DependenceRecord &record = 
               deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(idx == record.op1_idx);
             assert(record.op1_idx < triggered_events.size());
 #endif
@@ -7379,15 +8261,18 @@ namespace LegionRuntime {
           }
           Event precondition;
           if (!preconditions.empty())
-            precondition = Event::merge_events(preconditions);
+            precondition = Runtime::merge_events<true>(preconditions);
           else
             precondition = Event::NO_EVENT;
           MustEpochIndivArgs args;
           args.hlr_id = HLR_MUST_INDIV_ID;
           args.triggerer = this;
           args.task = indiv_tasks[idx];
-          Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                  sizeof(args), HLR_MUST_INDIV_ID, owner, precondition);
+          Event wait = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                                    HLR_MUST_INDIV_ID, 
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner, precondition);
           if (wait.exists())
           {
             wait_events.insert(wait);
@@ -7408,7 +8293,7 @@ namespace LegionRuntime {
           {
             const MustEpochOp::DependenceRecord &record = 
               deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(idx == record.op1_idx);
             assert(record.op1_idx < triggered_events.size());
 #endif
@@ -7418,15 +8303,18 @@ namespace LegionRuntime {
           }
           Event precondition;
           if (!preconditions.empty())
-            precondition = Event::merge_events(preconditions);
+            precondition = Runtime::merge_events<true>(preconditions);
           else
             precondition = Event::NO_EVENT;
           MustEpochIndexArgs args;
           args.hlr_id = HLR_MUST_INDEX_ID;
           args.triggerer = this;
           args.task = index_tasks[idx];
-          Event wait = owner->runtime->issue_runtime_meta_task(&args,
-                sizeof(args), HLR_MUST_INDEX_ID, owner, precondition);
+          Event wait = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                                    HLR_MUST_INDEX_ID, 
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner, precondition);
           if (wait.exists())
           {
             wait_events.insert(wait);
@@ -7440,7 +8328,7 @@ namespace LegionRuntime {
       // We can safely block to free up the utility processor
       if (!wait_events.empty())
       {
-        Event trigger_event = Event::merge_events(wait_events);
+        Event trigger_event = Runtime::merge_events<true>(wait_events);
         trigger_event.wait();
       }
       
@@ -7576,9 +8464,12 @@ namespace LegionRuntime {
         }
         Event precondition = Event::NO_EVENT;
         if (!preconditions.empty())
-          precondition = Event::merge_events(preconditions);
-        Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                            sizeof(args), HLR_MUST_MAP_ID, owner, precondition);
+          precondition = Runtime::merge_events<true>(preconditions);
+        Event wait = 
+          owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                                  HLR_MUST_MAP_ID, 
+                                                  HLR_THROUGHPUT_PRIORITY,
+                                                  owner, precondition);
         if (wait.exists())
         {
           mapping_events[*it] = wait;
@@ -7588,19 +8479,12 @@ namespace LegionRuntime {
       
       if (!wait_events.empty())
       {
-        Event mapped_event = Event::merge_events(wait_events);
+        Event mapped_event = Runtime::merge_events<true>(wait_events);
         mapped_event.wait();
       }
-
-      // If we failed to map then unmap all the tasks 
-      if (!success)
-      {
-        for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
-              it != single_tasks.end(); it++)
-        {
-          (*it)->unmap_all_regions();
-        }
-      }
+#ifdef DEBUG_LEGION
+      assert(success); // should always succeed now
+#endif
       return success;
     }
 
@@ -7611,7 +8495,7 @@ namespace LegionRuntime {
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
-      if (!task->perform_mapping(true/*mapper invoked already*/))
+      if (!task->perform_mapping(owner))
         success = false;
     }
 
@@ -7660,7 +8544,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochDistributor::distribute_tasks(Internal *runtime,
+    void MustEpochDistributor::distribute_tasks(Runtime *runtime,
                                 const std::vector<IndividualTask*> &indiv_tasks,
                                 const std::set<SliceTask*> &slice_tasks)
     //--------------------------------------------------------------------------
@@ -7676,16 +8560,20 @@ namespace LegionRuntime {
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
-          Event wait = runtime->issue_runtime_meta_task(&dist_args,
-                          sizeof(dist_args), HLR_MUST_DIST_ID, owner);
+          Event wait = 
+            runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
+                                             HLR_MUST_DIST_ID, 
+                                             HLR_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
         else
         {
           launch_args.task = *it;
-          Event wait = runtime->issue_runtime_meta_task(&launch_args,
-                          sizeof(launch_args), HLR_MUST_LAUNCH_ID, owner);
+          Event wait = 
+            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args), 
+                                             HLR_MUST_LAUNCH_ID, 
+                                             HLR_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -7696,23 +8584,27 @@ namespace LegionRuntime {
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
-          Event wait = runtime->issue_runtime_meta_task(&dist_args,
-                          sizeof(dist_args), HLR_MUST_DIST_ID, owner);
+          Event wait = 
+            runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
+                                             HLR_MUST_DIST_ID, 
+                                             HLR_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
         else
         {
           launch_args.task = *it;
-          Event wait = runtime->issue_runtime_meta_task(&launch_args,
-                          sizeof(launch_args), HLR_MUST_LAUNCH_ID, owner);
+          Event wait = 
+            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args), 
+                                             HLR_MUST_LAUNCH_ID, 
+                                             HLR_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
       }
       if (!wait_events.empty())
       {
-        Event dist_event = Event::merge_events(wait_events);
+        Event dist_event = Runtime::merge_events<true>(wait_events);
         dist_event.wait();
       }
     }
@@ -7741,7 +8633,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PendingPartitionOp::PendingPartitionOp(Internal *rt)
+    PendingPartitionOp::PendingPartitionOp(Runtime *rt)
       : Operation(rt), thunk(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7779,11 +8671,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new EqualPartitionThunk(pid, granularity);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7795,11 +8687,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new WeightedPartitionThunk(pid, granularity, weights);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7811,11 +8703,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new UnionPartitionThunk(pid, h1, h2);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7827,11 +8719,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new IntersectionPartitionThunk(pid, h1, h2);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7843,11 +8735,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new DifferencePartitionThunk(pid, h1, h2);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7859,11 +8751,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new CrossProductThunk(base, source, handles);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7874,11 +8766,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handles);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7889,11 +8781,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, true/*union*/, handle);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7903,11 +8795,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handles);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7917,11 +8809,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingSpace(target, false/*union*/, handle);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7932,11 +8824,11 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
       thunk = new ComputePendingDifference(target, initial, handles);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -7945,7 +8837,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_pending_partition_operation(
-          parent_ctx->get_unique_task_id(),
+          parent_ctx->get_unique_id(),
           unique_op_id);
       thunk->perform_logging(this);
     }
@@ -7958,22 +8850,8 @@ namespace LegionRuntime {
       Event ready_event = thunk->perform(runtime->forest);
       // We can trigger the handle ready event now
       handle_ready.trigger();
-#ifdef LEGION_SPY
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-          ready_event);
-      LegionSpy::log_op_events(unique_op_id, ready_event,
-          completion_event);
-      LegionSpy::log_implicit_dependence(completion_event,
-          parent_ctx->get_task_completion());
-      LegionSpy::log_event_dependence(handle_ready, ready_event);
-      LegionSpy::log_event_dependence(ready_event, completion_event);
-      {
-        Processor local_proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, local_proc.id);
-      }
-#endif
       complete_mapping();
-      completion_event.trigger(ready_event);
+      Runtime::trigger_event<false>(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(ready_event);
       // Return true since we succeeded
@@ -8018,7 +8896,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DependentPartitionOp::DependentPartitionOp(Internal *rt)
+    DependentPartitionOp::DependentPartitionOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -8062,10 +8940,9 @@ namespace LegionRuntime {
       requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -8083,10 +8960,9 @@ namespace LegionRuntime {
       requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -8103,11 +8979,10 @@ namespace LegionRuntime {
       requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
       projection = proj;
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -8116,7 +8991,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_dependent_partition_operation(
-          parent_ctx->get_unique_task_id(),
+          parent_ctx->get_unique_id(),
           unique_op_id,
           partition_handle.id,
           partition_kind);
@@ -8128,7 +9003,8 @@ namespace LegionRuntime {
                                   requirement.partition.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -8137,7 +9013,8 @@ namespace LegionRuntime {
                                   requirement.region.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
     }
@@ -8177,7 +9054,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -8186,60 +9064,46 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
-      {
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+      // We still have to do the traversal to flush any reductions
+      InstanceSet empty_instances;
+      std::set<Event> map_applied_conditions;
+      runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                              requirement, version_info, 
+                                              this, 0/*idx*/, 
+                                              false/*find valid*/,
+                                              map_applied_conditions,
+                                              empty_instances
+#ifdef DEBUG_LEGION
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
-
+                                              );
       Event ready_event = Event::NO_EVENT;
       switch (partition_kind)
       {
         case BY_FIELD:
           {
             ready_event = 
-              runtime->forest->create_partition_by_field(physical_ctx,
-                                                         local_proc,
-                                                         requirement,
-                                                         partition_handle,
-                                                         color_space,
-                                                         completion_event,
-                                                         version_info);
+              runtime->forest->create_partition_by_field(physical_ctx, 
+                this, 0/*idx*/, requirement, partition_handle, color_space,
+                completion_event, version_info, map_applied_conditions);
             break;
           }
         case BY_IMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_image(physical_ctx,
-                                                         local_proc,
-                                                         requirement,
-                                                         partition_handle,
-                                                         color_space,
-                                                         completion_event,
-                                                         version_info);
+              runtime->forest->create_partition_by_image(physical_ctx, 
+                this, 0/*idx*/, requirement, partition_handle, color_space,
+                completion_event, version_info, map_applied_conditions);
             break;
           }
         case BY_PREIMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_preimage(physical_ctx,
-                                                            local_proc,
-                                                            requirement,
-                                                            projection,
-                                                            partition_handle,
-                                                            color_space,
-                                                            completion_event,
-                                                            version_info);
+              runtime->forest->create_partition_by_preimage(physical_ctx, 
+                this, 0/*idx*/, requirement, projection, partition_handle,
+                color_space, completion_event, version_info, 
+                map_applied_conditions);
             break;
           }
         default:
@@ -8247,23 +9111,16 @@ namespace LegionRuntime {
       }
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(handle_ready.exists() && !handle_ready.has_triggered());
 #endif
       handle_ready.trigger();
-#ifdef LEGION_SPY
-      LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-          ready_event);
-      LegionSpy::log_op_events(unique_op_id, ready_event,
-          completion_event);
-      LegionSpy::log_implicit_dependence(completion_event,
-          parent_ctx->get_task_completion());
-      LegionSpy::log_op_proc_user(unique_op_id, local_proc.id);
-      LegionSpy::log_event_dependence(handle_ready, ready_event);
-      LegionSpy::log_event_dependence(ready_event, completion_event);
-#endif
-      complete_mapping();
-      completion_event.trigger(ready_event);
+      if (!map_applied_conditions.empty())
+        complete_mapping(
+            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
+      else
+        complete_mapping();
+      Runtime::trigger_event<false>(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(ready_event);
       // return true since we succeeded
@@ -8274,7 +9131,7 @@ namespace LegionRuntime {
     unsigned DependentPartitionOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -8284,7 +9141,7 @@ namespace LegionRuntime {
     FatTreePath* DependentPartitionOp::compute_fat_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       if (requirement.handle_type == PART_PROJECTION)
@@ -8346,7 +9203,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8360,13 +9217,13 @@ namespace LegionRuntime {
                                    "operation (ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -8454,7 +9311,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FillOp::FillOp(Internal *rt)
+    FillOp::FillOp(Runtime *rt)
       : SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -8488,14 +9345,13 @@ namespace LegionRuntime {
     void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
                             LogicalRegion parent, FieldID fid,
                             const void *ptr, size_t size,
-                            const Predicate &pred, bool check_privileges)
+                            const Predicate &pred,bool check_privileges)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
-      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, value_size);
@@ -8507,15 +9363,15 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
-                            LogicalRegion parent, FieldID fid, const Future &f,
-                            const Predicate &pred, bool check_privileges)
+                            LogicalRegion parent, FieldID fid, 
+                            const Future &f,
+                            const Predicate &pred,bool check_privileges)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
-      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
@@ -8528,14 +9384,13 @@ namespace LegionRuntime {
                             LogicalRegion parent,
                             const std::set<FieldID> &fields,
                             const void *ptr, size_t size,
-                            const Predicate &pred, bool check_privileges)
+                            const Predicate &pred,bool check_privileges)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
-      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, size);
@@ -8548,20 +9403,20 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
                             LogicalRegion parent,
-                            const std::set<FieldID> &fields, const Future &f,
-                            const Predicate &pred, bool check_privileges)
+                            const std::set<FieldID> &fields, 
+                            const Future &f,
+                            const Predicate &pred,bool check_privileges)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
-      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -8575,7 +9430,6 @@ namespace LegionRuntime {
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
-      requirement.initialize_mapping_fields();
       value_size = launcher.argument.get_size();
       if (value_size > 0)
       {
@@ -8590,7 +9444,7 @@ namespace LegionRuntime {
       if (check_privileges)
         check_fill_privilege();
       initialize_privilege_path(privilege_path, requirement);
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
@@ -8598,7 +9452,7 @@ namespace LegionRuntime {
     void FillOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
-      LegionSpy::log_fill_operation(parent_ctx->get_unique_task_id(), 
+      LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                     unique_op_id);
       LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
                                          true/*region*/,
@@ -8607,7 +9461,8 @@ namespace LegionRuntime {
                                          requirement.region.tree_id,
                                          requirement.privilege,
                                          requirement.prop,
-                                         requirement.redop);
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
     }
@@ -8635,6 +9490,7 @@ namespace LegionRuntime {
       version_info.clear();
       future = Future();
       restrict_info.clear();
+      map_applied_conditions.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
@@ -8694,7 +9550,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
     
     //--------------------------------------------------------------------------
@@ -8714,6 +9571,7 @@ namespace LegionRuntime {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -8731,62 +9589,69 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
-      {
-        Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+      // Still have to walk the path
+      InstanceSet empty_instances;
+      runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                              requirement, version_info, 
+                                              this, 0/*idx*/, 
+                                              false/*find valid*/,
+                                              map_applied_conditions,
+                                              empty_instances
+#ifdef DEBUG_LEGION
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      } 
-      
+                                              );
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(value != NULL);
 #endif
-        MappingRef map_ref;
+        InstanceSet mapped_instances;
         if (restrict_info.has_restrictions())
         {
-          InstanceRef restrict_inst = privilege_path.translate_ref(
-              parent_ctx->get_local_reference(parent_req_index));
-          Processor local_proc = parent_ctx->get_executing_processor();
-          map_ref = runtime->forest->map_restricted_region(physical_ctx,
-                                                           requirement,
-                                                           0/*idx*/,
-                                                           version_info,
-                                                           local_proc,
-                                                           restrict_inst 
-#ifdef DEBUG_HIGH_LEVEL
-                                                           , get_logging_name()
-                                                           , unique_op_id
+          parent_ctx->get_physical_references(parent_req_index, 
+                                              mapped_instances);
+          runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                                 requirement, version_info, 
+                                                 this, 0/*idx*/, 
+                                                 Event::NO_EVENT,
+                                                 false/*defer add users*/,
+                                                 map_applied_conditions,
+                                                 mapped_instances
+#ifdef DEBUG_LEGION
+                                                 , get_logging_name()
+                                                 , unique_op_id
 #endif
-                                                           );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(map_ref.has_ref());
-#endif
+                                                 );
         }
         Event sync_precondition = compute_sync_precondition();
         Event done_event = 
-          runtime->forest->fill_fields(physical_ctx, this, requirement, value,
-           value_size, version_info, restrict_info, map_ref, sync_precondition);
-        std::set<Event> applied_conditions;
+          runtime->forest->fill_fields(physical_ctx, this, requirement, 
+                                       0/*idx*/, value, value_size, 
+                                       version_info, restrict_info, 
+                                       mapped_instances, sync_precondition,
+                                       map_applied_conditions);
+        if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
+        {
+          runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                                requirement,
+                                                mapped_instances);
+#ifdef LEGION_SPY
+          LegionSpy::log_operation_events(unique_op_id, done_event,
+                                          completion_event);
+#endif
+        }
         version_info.apply_mapping(physical_ctx.get_id(),
-                                   runtime->address_space, applied_conditions);
+                               runtime->address_space, map_applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
         value_size = 0;
-        if (!applied_conditions.empty())
-          complete_mapping(Event::merge_events(applied_conditions));
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
         else
           complete_mapping();
         // See if we have any arrivals to trigger
@@ -8795,7 +9660,8 @@ namespace LegionRuntime {
           for (std::vector<PhaseBarrier>::const_iterator it = 
                 arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           {
-            it->phase_barrier.arrive(1/*count*/, completion_event);
+            Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                                 completion_event);
           }
         }
         complete_execution(done_event);
@@ -8813,6 +9679,7 @@ namespace LegionRuntime {
           runtime->issue_runtime_meta_task(&deferred_execute_args,
                                            sizeof(deferred_execute_args),
                                            HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+                                           HLR_LATENCY_PRIORITY,
                                            this, future_ready_event);
         }
         else
@@ -8833,36 +9700,44 @@ namespace LegionRuntime {
       memcpy(result, future.impl->get_untyped_result(), result_size);
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      MappingRef map_ref;
+      InstanceSet mapped_instances;
       if (restrict_info.has_restrictions())
       {
-        InstanceRef restrict_inst = privilege_path.translate_ref(
-            parent_ctx->get_local_reference(parent_req_index));
-        Processor local_proc = parent_ctx->get_executing_processor();
-        map_ref = runtime->forest->map_restricted_region(physical_ctx,
-                                                         requirement,
-                                                         0/*idx*/,
-                                                         version_info,
-                                                         local_proc,
-                                                         restrict_inst 
-#ifdef DEBUG_HIGH_LEVEL
-                                                         , get_logging_name()
-                                                         , unique_op_id
+        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                               requirement, version_info, 
+                                               this, 0/*idx*/, 
+                                               Event::NO_EVENT, 
+                                               false/*defer add users*/,
+                                               map_applied_conditions,
+                                               mapped_instances
+#ifdef DEBUG_LEGION
+                                               , get_logging_name()
+                                               , unique_op_id
 #endif
-                                                         );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(map_ref.has_ref());
-#endif
+                                               );
       }
       Event sync_precondition = compute_sync_precondition();
       Event done_event = 
-        runtime->forest->fill_fields(physical_ctx, this, requirement, result,
-          result_size, version_info, restrict_info, map_ref, sync_precondition);
-      std::set<Event> applied_conditions;
+          runtime->forest->fill_fields(physical_ctx, this, requirement, 
+                                       0/*idx*/, value, value_size, 
+                                       version_info, restrict_info, 
+                                       mapped_instances, sync_precondition,
+                                       map_applied_conditions);
+      if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, done_event,
+                                        completion_event);
+#endif
+      }
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+                              runtime->address_space, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
       // See if we have any arrivals to trigger
@@ -8871,7 +9746,8 @@ namespace LegionRuntime {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          it->phase_barrier.arrive(1/*count*/, completion_event);
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
       complete_execution(done_event);
@@ -8881,7 +9757,7 @@ namespace LegionRuntime {
     unsigned FillOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -8892,7 +9768,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8916,7 +9792,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -8930,7 +9806,7 @@ namespace LegionRuntime {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for fill operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -8941,7 +9817,7 @@ namespace LegionRuntime {
                                    "privilege fields for fill operation"
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -8951,7 +9827,7 @@ namespace LegionRuntime {
             log_region.error("Instance field %d is a duplicate for "
                                     "fill operation (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -8962,13 +9838,13 @@ namespace LegionRuntime {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -8986,7 +9862,7 @@ namespace LegionRuntime {
                                    requirement.parent.field_space.id,
                                    requirement.parent.tree_id,
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -8997,7 +9873,7 @@ namespace LegionRuntime {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -9013,7 +9889,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
@@ -9035,13 +9911,13 @@ namespace LegionRuntime {
         log_region.error("Parent task %s (ID %lld) of fill "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -9075,7 +9951,7 @@ namespace LegionRuntime {
           sync_preconditions.insert(e);
         }
       }
-      return Event::merge_events(sync_preconditions);
+      return Runtime::merge_events<false/*meta*/>(sync_preconditions);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -9083,7 +9959,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AttachOp::AttachOp(Internal *rt)
+    AttachOp::AttachOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -9128,15 +10004,14 @@ namespace LegionRuntime {
       {
         log_run.warning("WARNING: HDF5 ATTACH OPERATION ISSUED WITH NO "
                         "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->variants->name,
-                        parent_ctx->get_unique_task_id());
+                        "FORGET THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 
       }
       file_type = HDF5_FILE;
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.initialize_mapping_fields();
       for (std::map<FieldID,const char*>::const_iterator it = fmap.begin();
             it != fmap.end(); it++)
       {
@@ -9144,7 +10019,7 @@ namespace LegionRuntime {
         field_map[it->first] = strdup(it->second);
       }
       file_mode = mode;
-      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
       if (check_privileges)
@@ -9168,22 +10043,21 @@ namespace LegionRuntime {
       {
         log_run.warning("WARNING: FILE ATTACH OPERATION ISSUED WITH NO "
                         "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->variants->name,
-                        parent_ctx->get_unique_task_id());
+                        "FORGET THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 
       }
       file_type = NORMAL_FILE;
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.initialize_mapping_fields();
       for (std::vector<FieldID>::const_iterator it = fvec.begin();
             it != fvec.end(); it++)
       {
         requirement.add_field(*it);
       }
       file_mode = mode;
-      region = PhysicalRegion(legion_new<PhysicalRegion::Impl>(requirement,
+      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
       if (check_privileges)
@@ -9267,7 +10141,7 @@ namespace LegionRuntime {
                       requirement.region.index_space.id,
                       requirement.region.field_space.id,
                       requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_FILE_ATTACH);
@@ -9294,7 +10168,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -9303,41 +10178,39 @@ namespace LegionRuntime {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
-      {
-        Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+      // We still have to do a traversal to make sure everything is open
+      InstanceSet empty_instances;
+      std::set<Event> map_applied_conditions;
+      runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                              requirement, version_info, 
+                                              this, 0/*idx*/,
+                                              false/*find valid*/,
+                                              map_applied_conditions,
+                                              empty_instances
+#ifdef DEBUG_LEGION
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
-      
+                                              );
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
                                                         requirement, this,
                                                         version_info);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
-      std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+                                 runtime->address_space,map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
-      if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
-      Event acquired_event = result.get_ready_event();
-      completion_event.trigger(acquired_event);
+      Event attach_event = result.get_ready_event();
+      Runtime::trigger_event<false>(completion_event, attach_event);
       need_completion_trigger = false;
-      complete_execution(acquired_event);
+      complete_execution(attach_event);
       // Should always succeed
       return true;
     }
@@ -9346,7 +10219,7 @@ namespace LegionRuntime {
     unsigned AttachOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -9357,32 +10230,36 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(const Domain &dom,
-                                               const std::vector<size_t> &sizes)
+             const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
+      // TODO: Update attach operation to fill in 
+      // constraints for different file types
+      assert(false);
       if (file_type == HDF5_FILE) {
         // First build the set of field paths
         std::vector<const char*> field_files(field_map.size());
         unsigned idx = 0;
-        for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
-              it != field_map.end(); it++, idx++)
+        for (std::map<FieldID,const char*>::const_iterator it = 
+              field_map.begin(); it != field_map.end(); it++, idx++)
         {
           field_files[idx] = it->second;
         }
         // Now ask the low-level runtime to create the instance
         PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
-                               field_files, (file_mode == LEGION_FILE_READ_ONLY));
-#ifdef DEBUG_HIGH_LEVEL
+                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
+#ifdef DEBUG_LEGION
       assert(result.exists());
 #endif
         return result;
       } else if (file_type == NORMAL_FILE) {
-        PhysicalInstance result = dom.create_file_instance(file_name, sizes, file_mode);
+        PhysicalInstance result = 
+          dom.create_file_instance(file_name, sizes, file_mode);
         return result;
       } else {
         assert(0);
@@ -9415,7 +10292,7 @@ namespace LegionRuntime {
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id, 
                                    unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_REGION_HANDLE);
@@ -9429,7 +10306,7 @@ namespace LegionRuntime {
             log_region.error("Field %d is not a valid field of field "
                                    "space %d for attach operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
@@ -9440,7 +10317,7 @@ namespace LegionRuntime {
                                    "privilege fields for attach operation "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_INSTANCE_FIELD);
@@ -9450,7 +10327,7 @@ namespace LegionRuntime {
             log_region.error("Instance field %d is a duplicate for "
                                     "attach operation (ID %lld)",
                                     bad_field, unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_DUPLICATE_INSTANCE_FIELD);
@@ -9461,13 +10338,13 @@ namespace LegionRuntime {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
                                    requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_PARENT_REGION);
@@ -9485,7 +10362,7 @@ namespace LegionRuntime {
                              requirement.parent.field_space.id,
                              requirement.parent.tree_id,
                              unique_op_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_PATH);
@@ -9496,7 +10373,7 @@ namespace LegionRuntime {
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_BAD_REGION_TYPE);
@@ -9518,13 +10395,13 @@ namespace LegionRuntime {
         log_region.error("Parent task %s (ID %lld) of attach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -9538,7 +10415,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DetachOp::DetachOp(Internal *rt)
+    DetachOp::DetachOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -9569,14 +10446,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::initialize_detach(SingleTask *ctx, PhysicalRegion region)
+    void DetachOp::initialize_detach(SingleTask *ctx, 
+                                     PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
-      requirement.copy_without_mapping_info(region.impl->get_requirement());
-      requirement.initialize_mapping_fields();
+      requirement = region.impl->get_requirement();
       initialize_privilege_path(privilege_path, requirement);
       // Delay getting a reference until trigger_execution().  This means we
       //  have to keep region
@@ -9656,7 +10533,8 @@ namespace LegionRuntime {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
     
     //--------------------------------------------------------------------------
@@ -9667,10 +10545,15 @@ namespace LegionRuntime {
       if (region.impl->is_mapped())
         region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
-      InstanceRef reference = region.impl->get_reference();
+      InstanceSet references;
+      region.impl->get_references(references);
+#ifdef DEBUG_LEGION
+      assert(references.size() == 1);
+#endif
+      InstanceRef reference = references[0];
       // Check that this is actually a file
       PhysicalManager *manager = reference.get_manager();
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
       InstanceManager *inst_manager = manager->as_instance_manager(); 
@@ -9678,7 +10561,7 @@ namespace LegionRuntime {
       {
         log_run.error("Illegal detach operation on a physical region which "
                       "was not attached!");
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
@@ -9686,31 +10569,17 @@ namespace LegionRuntime {
 
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
-      {
-        Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
-#endif
-      }
       Event detach_event = 
-        runtime->forest->detach_file(physical_ctx, requirement, this,
-                                     version_info, reference);
+        runtime->forest->detach_file(physical_ctx, requirement, 
+                                     this, version_info, reference);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);
       if (!applied_conditions.empty())
-        complete_mapping(Event::merge_events(applied_conditions));
+        complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(detach_event);
+      Runtime::trigger_event<false>(completion_event, detach_event);
       need_completion_trigger = false;
       complete_execution(detach_event);
       // This should always succeed
@@ -9721,7 +10590,7 @@ namespace LegionRuntime {
     unsigned DetachOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx == 0);
 #endif
       return parent_req_index;
@@ -9732,7 +10601,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9745,13 +10614,13 @@ namespace LegionRuntime {
         log_region.error("Parent task %s (ID %lld) of detach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_BAD_PARENT_REGION);
@@ -9765,7 +10634,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TimingOp::TimingOp(Internal *rt)
+    TimingOp::TimingOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -9801,7 +10670,7 @@ namespace LegionRuntime {
     {
       kind = ABSOLUTE_MEASUREMENT;
       precondition = pre; 
-      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
       return result;
@@ -9813,7 +10682,7 @@ namespace LegionRuntime {
     {
       kind = MICROSECOND_MEASUREMENT;
       precondition = pre;
-      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
       return result;
@@ -9825,7 +10694,7 @@ namespace LegionRuntime {
     {
       kind = NANOSECOND_MEASUREMENT;
       precondition = pre;
-      result = Future(legion_new<Future::Impl>(runtime, true/*register*/,
+      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
       return result;
@@ -9887,6 +10756,7 @@ namespace LegionRuntime {
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_EXECUTE_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, wait_on);
       }
       else
@@ -9933,8 +10803,8 @@ namespace LegionRuntime {
       complete_operation();
     }
  
-  }; // namespace LegionRuntime
-}; // namespace HighLevel
+  }; // namespace Internal 
+}; // namespace Legion 
 
 // EOF
 

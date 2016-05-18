@@ -24,15 +24,14 @@
 
 #include "legion.h"
 #include "legion_c.h"
+#include "legion_mapping.h"
 #include "mapping_utilities.h"
-#include "default_mapper.h"
 
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
     class CContext;
 
@@ -99,10 +98,10 @@ namespace LegionRuntime {
     class CObjectWrapper {
     public:
 
-      typedef Accessor::AccessorType::Generic Generic;
-      typedef Accessor::AccessorType::SOA<0> SOA;
-      typedef Accessor::RegionAccessor<Generic> AccessorGeneric;
-      typedef Accessor::RegionAccessor<SOA, char> AccessorArray;
+      typedef LegionRuntime::Accessor::AccessorType::Generic Generic;
+      typedef LegionRuntime::Accessor::AccessorType::SOA<0> SOA;
+      typedef LegionRuntime::Accessor::RegionAccessor<Generic> AccessorGeneric;
+      typedef LegionRuntime::Accessor::RegionAccessor<SOA, char> AccessorArray;
 
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
@@ -126,6 +125,8 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
+      NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);
+      NEW_OPAQUE_WRAPPER(legion_domain_point_coloring_t, DomainPointColoring *);
       NEW_OPAQUE_WRAPPER(legion_multi_domain_point_coloring_t, MultiDomainPointColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_field_allocator_t, FieldAllocator *);
@@ -143,14 +144,16 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
-      NEW_OPAQUE_WRAPPER(legion_inline_t, Inline *);
+      NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapper *);
+      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
+      NEW_OPAQUE_WRAPPER(legion_processor_query_t, Machine::ProcessorQuery *);
+      NEW_OPAQUE_WRAPPER(legion_memory_query_t, Machine::MemoryQuery *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
-                         MappingUtilities::MachineQueryInterface*);
-      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, DefaultMapper*);
+                         Mapping::Utilities::MachineQueryInterface *);
+      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper*);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -385,17 +388,17 @@ namespace LegionRuntime {
       }
 
       static const legion_byte_offset_t
-      wrap(const Accessor::ByteOffset offset)
+      wrap(const LegionRuntime::Accessor::ByteOffset offset)
       {
         legion_byte_offset_t offset_;
         offset_.offset = offset.offset;
         return offset_;
       }
 
-      static const Accessor::ByteOffset
+      static const LegionRuntime::Accessor::ByteOffset
       unwrap(const legion_byte_offset_t offset_)
       {
-        const Accessor::ByteOffset offset(offset_.offset);
+        const LegionRuntime::Accessor::ByteOffset offset(offset_.offset);
         return offset;
       }
 
@@ -492,24 +495,24 @@ namespace LegionRuntime {
         return static_cast<Memory::Kind>(options_);
       }
 
-      static legion_domain_split_t
-      wrap(Mapper::DomainSplit domain_split) {
-        legion_domain_split_t domain_split_;
-        domain_split_.domain = wrap(domain_split.domain);
-        domain_split_.proc = wrap(domain_split.proc);
-        domain_split_.recurse = domain_split.recurse;
-        domain_split_.stealable = domain_split.stealable;
-        return domain_split_;
+      static legion_task_slice_t
+      wrap(Mapping::Mapper::TaskSlice task_slice) {
+        legion_task_slice_t task_slice_;
+        task_slice_.domain = wrap(task_slice.domain);
+        task_slice_.proc = wrap(task_slice.proc);
+        task_slice_.recurse = task_slice.recurse;
+        task_slice_.stealable = task_slice.stealable;
+        return task_slice_;
       }
 
-      static Mapper::DomainSplit
-      unwrap(legion_domain_split_t domain_split_) {
-        Mapper::DomainSplit domain_split(
-            unwrap(domain_split_.domain),
-            unwrap(domain_split_.proc),
-            domain_split_.recurse,
-            domain_split_.stealable);
-        return domain_split;
+      static Mapping::Mapper::TaskSlice
+      unwrap(legion_task_slice_t task_slice_) {
+        Mapping::Mapper::TaskSlice task_slice;
+            task_slice.domain = unwrap(task_slice_.domain);
+            task_slice.proc = unwrap(task_slice_.proc);
+            task_slice.recurse = task_slice_.recurse;
+            task_slice.stealable = task_slice_.stealable;
+        return task_slice;
       }
 
       static legion_phase_barrier_t
@@ -528,6 +531,26 @@ namespace LegionRuntime {
         barrier.phase_barrier.gen = barrier_.gen;
         barrier.phase_barrier.timestamp = barrier_.timestamp;
         return barrier;
+      }
+
+      static legion_dynamic_collective_t
+      wrap(DynamicCollective collective) {
+        legion_dynamic_collective_t collective_;
+        collective_.id = collective.get_barrier().id;
+        collective_.gen = collective.get_barrier().gen;
+        collective_.timestamp = collective.get_barrier().timestamp;
+        collective_.redop = collective.redop;
+        return collective_;
+      }
+
+      static DynamicCollective
+      unwrap(legion_dynamic_collective_t collective_) {
+        DynamicCollective collective;
+        collective.phase_barrier.id = collective_.id;
+        collective.phase_barrier.gen = collective_.gen;
+        collective.phase_barrier.timestamp = collective_.timestamp;
+        collective.redop = collective_.redop;
+        return collective;
       }
     };
 
@@ -572,7 +595,6 @@ namespace LegionRuntime {
       std::vector<legion_physical_region_t> physical_regions;
     };
 
-  }
-}
+};
 
 #endif // __LEGION_C_UTIL_H__

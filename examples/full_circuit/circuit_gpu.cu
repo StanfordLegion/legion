@@ -75,24 +75,24 @@ float find_node_voltage(const RegionAccessor<AT,float> &pvt,
   return 0.f;
 }
 
-template<typename AT>
+template<typename AT1, typename AT2>
 __global__
 void calc_new_currents_kernel(ptr_t first,
                               int num_wires,
 			      float dt,
 			      int steps,
-                              RegionAccessor<AT,ptr_t> fa_in_ptr,
-                              RegionAccessor<AT,ptr_t> fa_out_ptr,
-                              RegionAccessor<AT,PointerLocation> fa_in_loc,
-                              RegionAccessor<AT,PointerLocation> fa_out_loc,
-                              RegionAccessor<AT,float> fa_inductance,
-                              RegionAccessor<AT,float> fa_resistance,
-                              RegionAccessor<AT,float> fa_wire_cap,
-                              RegionAccessor<AT,float> fa_pvt_voltage,
-                              RegionAccessor<AT,float> fa_shr_voltage,
-                              RegionAccessor<AT,float> fa_ghost_voltage,
-                              SegmentAccessors<RegionAccessor<AT,float>,WIRE_SEGMENTS> fa_currents,
-                              SegmentAccessors<RegionAccessor<AT,float>,WIRE_SEGMENTS-1> fa_voltages)
+                              RegionAccessor<AT1,ptr_t> fa_in_ptr,
+                              RegionAccessor<AT1,ptr_t> fa_out_ptr,
+                              RegionAccessor<AT2,PointerLocation> fa_in_loc,
+                              RegionAccessor<AT2,PointerLocation> fa_out_loc,
+                              RegionAccessor<AT2,float> fa_inductance,
+                              RegionAccessor<AT2,float> fa_resistance,
+                              RegionAccessor<AT2,float> fa_wire_cap,
+                              RegionAccessor<AT2,float> fa_pvt_voltage,
+                              RegionAccessor<AT2,float> fa_shr_voltage,
+                              RegionAccessor<AT2,float> fa_ghost_voltage,
+                              SegmentAccessors<RegionAccessor<AT2,float>,WIRE_SEGMENTS> fa_currents,
+                              SegmentAccessors<RegionAccessor<AT2,float>,WIRE_SEGMENTS-1> fa_voltages)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -294,20 +294,20 @@ void reduce_local(const RegionAccessor<AT1, float> &pvt,
   }
 }
 
-template<typename AT1, typename AT2>
+template<typename AT1, typename AT2, typename AT3>
 __global__
 void distribute_charge_kernel(ptr_t first,
                               const int num_wires,
 			      float dt,
-                              RegionAccessor<AT1,ptr_t> fa_in_ptr,
-                              RegionAccessor<AT1,ptr_t> fa_out_ptr,
+                              RegionAccessor<AT2,ptr_t> fa_in_ptr,
+                              RegionAccessor<AT2,ptr_t> fa_out_ptr,
                               RegionAccessor<AT1,PointerLocation> fa_in_loc,
                               RegionAccessor<AT1,PointerLocation> fa_out_loc,
                               RegionAccessor<AT1,float> fa_in_current,
                               RegionAccessor<AT1,float> fa_out_current,
                               RegionAccessor<AT1,float> fa_pvt_charge,
-                              RegionAccessor<AT2,float> fa_shr_charge,
-                              RegionAccessor<AT2,float> fa_ghost_charge)
+                              RegionAccessor<AT3,float> fa_shr_charge,
+                              RegionAccessor<AT3,float> fa_ghost_charge)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   

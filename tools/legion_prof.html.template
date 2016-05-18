@@ -358,7 +358,7 @@
           .style("opacity", function(d) {
             if (!searchEnabled ||
                 searchRegex[currentPos].exec(d.title) != null)
-              return 1.0;
+              return d.opacity;
             else return 0.05;
           })
           .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
@@ -580,6 +580,8 @@
         var min_feature_time = min_feature_width / f;
         var min_gap_time = min_gap_width / f;
         for (var level in items) {
+          // gap merging below assumes intervals are sorted - do that first
+          items[level].sort(function(a,b) { return a.start - b.start; });
           for (var i = 0; i < items[level].length; ++i) {
             var d = items[level][i];
             var start = d.start;
@@ -923,6 +925,7 @@
               start: parseFloat(d.start),
               end: parseFloat(d.end),
               color: d.color,
+              opacity: d.opacity,
               title: d.title
             };
         },

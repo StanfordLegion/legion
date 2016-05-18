@@ -37,6 +37,7 @@ namespace Realm {
     PMID_OP_STATUS,    // completion status of operation
     PMID_OP_BACKTRACE,  // backtrace of a failed operation
     PMID_OP_TIMELINE,  // when task was ready, started, completed
+    PMID_OP_EVENT_WAITS,  // intervals when operation is waiting on events
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_TIMELINE, // timeline for a physical instance
@@ -99,6 +100,27 @@ namespace Realm {
       inline void record_end_time(void);
       inline void record_complete_time(void);
       inline bool is_valid(void);
+    };
+
+    // records time intervals in which the operation was waiting on events
+    struct OperationEventWaits {
+      static const ProfilingMeasurementID ID = PMID_OP_EVENT_WAITS;
+          
+      typedef long long timestamp_t;
+      static const timestamp_t INVALID_TIMESTAMP = LLONG_MIN;
+
+      struct WaitInterval {
+	timestamp_t wait_start;   // when did the interval begin?
+	timestamp_t wait_ready;   // when did the event trigger?
+	timestamp_t wait_end;     // when did the interval actually end
+	Event       wait_event;   // which event was waited on
+
+	inline void record_wait_start(void);
+	inline void record_wait_ready(void);
+	inline void record_wait_end(void);
+      };
+
+      std::vector<WaitInterval> intervals;
     };
 
     // Track processor used for tasks

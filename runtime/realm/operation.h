@@ -80,6 +80,9 @@ namespace Realm {
     //  the operation)
     void add_async_work_item(AsyncWorkItem *item);
 
+    // used to record event wait intervals, if desired
+    ProfilingMeasurements::OperationEventWaits::WaitInterval *create_wait_interval(Event e);
+
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
     void work_item_finished(AsyncWorkItem *item, bool successful);
@@ -101,6 +104,8 @@ namespace Realm {
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
+    bool wants_event_waits;
+    ProfilingMeasurements::OperationEventWaits waits;
     ProfilingRequestSet requests; 
     ProfilingMeasurementCollection measurements;
 
@@ -133,6 +138,7 @@ namespace Realm {
       TableCleaner(OperationTable *_table);
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       OperationTable *table;

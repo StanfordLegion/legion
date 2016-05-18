@@ -36,7 +36,7 @@ namespace Realm {
 	if(!data->valid) {
 	  // get a valid copy of the static data by taking and then releasing
 	  //  a shared lock
-	  Event e = thing_with_data->lock.acquire(1, false);
+	  Event e = thing_with_data->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
 	  if(!e.has_triggered()) 
             e.wait();
 	  thing_with_data->lock.release();
@@ -53,7 +53,7 @@ namespace Realm {
       if(already_held) {
 	assert(lock->is_locked(1, true));
       } else {
-	Event e = thing_with_data->lock.acquire(1, false);
+	Event e = thing_with_data->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
 	if(!e.has_triggered())
           e.wait();
       }
@@ -67,7 +67,7 @@ namespace Realm {
       if(already_held) {
 	assert(lock->is_locked(0, true));
       } else {
-	Event e = thing_with_data->lock.acquire(0, true);
+	Event e = thing_with_data->lock.acquire(0, true, ReservationImpl::ACQUIRE_BLOCKING);
 	if(!e.has_triggered())
           e.wait();
       }

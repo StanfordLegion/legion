@@ -62,20 +62,20 @@ void lua_push_opaque_object_array(lua_State* L, T* objs, unsigned num_objs)
 
 struct ObjectWrapper
 {
-  typedef LegionRuntime::HighLevel::Mapper::DomainSplit DomainSplit;
+  typedef LegionRuntime::HighLevel::Mapper::TaskSlice TaskSlice;
 
-  static vector_legion_domain_split_t
-  wrap(std::vector<DomainSplit>* slices)
+  static vector_legion_task_slice_t
+  wrap(std::vector<TaskSlice>* slices)
   {
-    vector_legion_domain_split_t slices_;
+    vector_legion_task_slice_t slices_;
     slices_.impl = slices;
     return slices_;
   }
 
-  static std::vector<DomainSplit>*
-  unwrap(vector_legion_domain_split_t slices_)
+  static std::vector<TaskSlice>*
+  unwrap(vector_legion_task_slice_t slices_)
   {
-    return reinterpret_cast<std::vector<DomainSplit>*>(slices_.impl);
+    return reinterpret_cast<std::vector<TaskSlice>*>(slices_.impl);
   }
 };
 

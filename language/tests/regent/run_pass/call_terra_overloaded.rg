@@ -14,13 +14,15 @@
 
 import "regent"
 
-terra f(x : int) : int
-  return x + 1
-end
-
-terra f(x : double) : int
-  return x - 1
-end
+local f = terralib.overloadedfunction(
+  "f", {
+    terra(x : int) : int
+      return x + 1
+    end,
+    terra(x : double) : int
+      return x - 1
+    end
+  })
 
 task g(x : bool) : int
   var y : int = 4

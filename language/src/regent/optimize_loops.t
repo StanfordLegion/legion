@@ -138,11 +138,16 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
@@ -175,11 +180,17 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
@@ -419,16 +430,16 @@ function optimize_loops.block(cx, node)
   return ast.map_node_postorder(optimize_loops_node(cx), node)
 end
 
-function optimize_loops.stat_task(cx, node)
+function optimize_loops.top_task(cx, node)
   local cx = cx:new_task_scope(node.prototype:get_constraints())
   local body = optimize_loops.block(cx, node.body)
 
   return node { body = body }
 end
 
-function optimize_loops.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_loops.stat_task(cx, node)
+function optimize_loops.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_loops.top_task(cx, node)
 
   else
     return node
@@ -437,7 +448,7 @@ end
 
 function optimize_loops.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_loops.stat_top(cx, node)
+  return optimize_loops.top(cx, node)
 end
 
 return optimize_loops

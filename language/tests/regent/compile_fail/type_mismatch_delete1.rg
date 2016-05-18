@@ -13,15 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_dynamic_cast2.rg:25: dynamic_cast requires ptr as argument 2, got int32
---   var y = dynamic_cast(ptr(int, r), x)
---                      ^
+-- type_mismatch_delete1.rg:24: type mismatch in delete: expected a region or partition but got int32
+--   __delete(x)
+--            ^
 
 import "regent"
 
-task f()
-  var r = region(ispace(ptr, 5), int)
-  var x = 5
-  var y = dynamic_cast(ptr(int, r), x)
+task main()
+  var x : int = 1
+  __delete(x)
 end
-f:compile()
+regentlib.start(main)

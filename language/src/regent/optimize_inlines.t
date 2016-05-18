@@ -433,6 +433,11 @@ function optimize_inlines.stat_expr(cx, node)
   return annotate(node, usage, usage)
 end
 
+function optimize_inlines.stat_raw_delete(cx, node)
+  local usage = analyze_usage(cx, node)
+  return annotate(node, usage, usage)
+end
+
 function optimize_inlines.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_inlines.stat_if(cx, node)
@@ -479,6 +484,9 @@ function optimize_inlines.stat(cx, node)
   elseif node:is(ast.typed.stat.Expr) then
     return optimize_inlines.stat_expr(cx, node)
 
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return optimize_inlines.stat_raw_delete(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -489,14 +497,14 @@ function task_initial_usage(cx, privileges)
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
       local region = privilege.region
-      assert(std.type_supports_privileges(region.type))
-      usage = usage_meet(usage, uses(cx, region.type, inline))
+      assert(std.type_supports_privileges(region:gettype()))
+      usage = usage_meet(usage, uses(cx, region:gettype(), inline))
     end
   end
   return usage
 end
 
-function optimize_inlines.stat_task(cx, node)
+function optimize_inlines.top_task(cx, node)
   local cx = cx:new_task_scope(
     node.prototype:get_constraints(),
     node.prototype:get_region_universe())
@@ -507,11 +515,11 @@ function optimize_inlines.stat_task(cx, node)
   return node { body = body }
 end
 
-function optimize_inlines.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) and
+function optimize_inlines.top(cx, node)
+  if node:is(ast.typed.top.Task) and
      not node.config_options.inner
   then
-    return optimize_inlines.stat_task(cx, node)
+    return optimize_inlines.top_task(cx, node)
 
   else
     return node
@@ -520,7 +528,7 @@ end
 
 function optimize_inlines.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_inlines.stat_top(cx, node)
+  return optimize_inlines.top(cx, node)
 end
 
 return optimize_inlines
