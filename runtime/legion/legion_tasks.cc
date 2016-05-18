@@ -1748,16 +1748,15 @@ namespace Legion {
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
       // Set up the inputs and outputs 
-      std::vector<InstanceSet> valid_instances(must_premap.size());
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
       {
+        InstanceSet valid;    
         VersionInfo &version_info = get_version_info(*it);
         RegionTreeContext req_ctx = get_parent_context(*it);
         RegionTreePath &privilege_path = get_privilege_path(*it);
-        InstanceSet &valid = valid_instances[*it];    
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[*it],
