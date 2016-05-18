@@ -1101,6 +1101,8 @@ namespace Legion {
       static void handle_node_child_request(
            RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void handle_node_child_response(Deserializer &derez);
+      static void handle_notification(RegionTreeForest *context, 
+                                      Deserializer &derez);
     public:
       const IndexPartition handle;
       const Domain color_space;

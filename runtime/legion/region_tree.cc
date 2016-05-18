@@ -116,6 +116,31 @@ namespace Legion {
       if (!part_color.is_valid())
         part_color = ColorPoint(DomainPoint::from_point<1>(
               LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
+      // If we are making this partition on a different node than the
+      // owner node of the parent index space then we have to tell that
+      // owner node about the existence of this partition
+      Event parent_notified = Event::NO_EVENT;
+      const AddressSpaceID parent_owner = parent_node->get_owner_space();
+      // If we have to send the notification and we know the disjointness
+      // then we can send it now, otherwise, wait for disjointness test
+      if ((parent_owner != runtime->address_space) && 
+          (part_kind != COMPUTE_KIND))
+      {
+        UserEvent notified_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(pid);
+          rez.serialize(parent);
+          rez.serialize(part_color);
+          rez.serialize(color_space);
+          rez.serialize(part_kind);
+          rez.serialize(mode);
+          rez.serialize(notified_event);
+        }
+        runtime->send_index_partition_notification(parent_owner, rez);
+        parent_notified = notified_event;
+      }
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       if (part_kind == COMPUTE_KIND)
@@ -174,6 +199,35 @@ namespace Legion {
                                          HLR_DISJOINTNESS_TASK_ID,
                                          HLR_LATENCY_PRIORITY);
       }
+      // If we didn't send the notification yet because we need the 
+      // disjointness test, now we can send it
+      if ((parent_owner != runtime->address_space) && 
+          (part_kind == COMPUTE_KIND))
+      {
+        // Get the disjointness result, this will likely wait on
+        // the disjointness test issued above
+        const bool disjoint = new_part->is_disjoint(true/*app*/);
+        UserEvent notified_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(pid);
+          rez.serialize(parent);
+          rez.serialize(part_color);
+          rez.serialize(color_space);
+          if (disjoint)
+            rez.serialize(DISJOINT_KIND);
+          else
+            rez.serialize(ALIASED_KIND);
+          rez.serialize(mode);
+          rez.serialize(notified_event);
+        }
+        runtime->send_index_partition_notification(parent_owner, rez);
+        parent_notified = notified_event;
+      }
+      // Wait for the parent index space to be notified if necessary
+      if (parent_notified.exists())
+        parent_notified.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -188,6 +242,31 @@ namespace Legion {
       if (!part_color.is_valid())
         part_color = ColorPoint(DomainPoint::from_point<1>(
               LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
+      // If we are making this partition on a different node than the
+      // owner node of the parent index space then we have to tell that
+      // owner node about the existence of this partition
+      Event parent_notified = Event::NO_EVENT;
+      const AddressSpaceID parent_owner = parent_node->get_owner_space();
+      // If we know the disjointness result, we can send the notification
+      // now otherwise we will wait until we know the disjointness
+      if ((parent_owner != runtime->address_space) &&
+          (part_kind != COMPUTE_KIND))
+      {
+        UserEvent notified_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(pid);
+          rez.serialize(parent);
+          rez.serialize(part_color);
+          rez.serialize(color_space);
+          rez.serialize(part_kind);
+          rez.serialize(mode);
+          rez.serialize(notified_event);
+        }
+        runtime->send_index_partition_notification(parent_owner, rez);
+        parent_notified = notified_event;
+      }
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       if (part_kind == COMPUTE_KIND)
@@ -198,7 +277,7 @@ namespace Legion {
       }
       else
         new_part = create_node(pid, parent_node, part_color, color_space, 
-                                            (part_kind == DISJOINT_KIND), mode);
+                               (part_kind == DISJOINT_KIND), mode);
 
       if (Runtime::legion_spy_enabled)
       {
@@ -252,6 +331,35 @@ namespace Legion {
                                          HLR_DISJOINTNESS_TASK_ID,
                                          HLR_LATENCY_PRIORITY);
       }
+      // If we didn't send the notification yet because we need the 
+      // disjointness test, now we can send it
+      if ((parent_owner != runtime->address_space) && 
+          (part_kind == COMPUTE_KIND))
+      {
+        // Get the disjointness result, this will likely wait on
+        // the disjointness test issued above
+        const bool disjoint = new_part->is_disjoint(true/*app*/);
+        UserEvent notified_event = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(pid);
+          rez.serialize(parent);
+          rez.serialize(part_color);
+          rez.serialize(color_space);
+          if (disjoint)
+            rez.serialize(DISJOINT_KIND);
+          else
+            rez.serialize(ALIASED_KIND);
+          rez.serialize(mode);
+          rez.serialize(notified_event);
+        }
+        runtime->send_index_partition_notification(parent_owner, rez);
+        parent_notified = notified_event;
+      }
+      // Wait for the parent index space to be notified if necessary
+      if (parent_notified.exists())
+        parent_notified.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -8016,6 +8124,38 @@ namespace Legion {
       derez.deserialize(to_trigger);
       (*target) = handle;
       to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_notification(RegionTreeForest *forest,
+                                                       Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition pid;
+      derez.deserialize(pid);
+      IndexSpace parent;
+      derez.deserialize(parent);
+      ColorPoint part_color;
+      derez.deserialize(part_color);
+      Domain color_space;
+      derez.deserialize(color_space);
+      PartitionKind part_kind;
+      derez.deserialize(part_kind);
+      AllocateMode mode;
+      derez.deserialize(mode);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+#ifdef DEBUG_LEGION
+      assert(part_kind != COMPUTE_KIND);
+#endif
+      IndexSpaceNode *parent_node = forest->get_node(parent);
+      // We know it is safe to make this node because this message only
+      // comes before the handle has been given back to the application
+      forest->create_node(pid, parent_node, part_color, color_space,
+                          (part_kind == DISJOINT_KIND), mode);
+      // Now we can trigger the done event
+      done_event.trigger();
     }
 
     /////////////////////////////////////////////////////////////

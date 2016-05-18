@@ -3758,7 +3758,7 @@ namespace Legion {
         {
           log_run.error("Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an illegal "
-                        "specialized instance as the target for %s"
+                        "specialized instance as the target for %s "
                         "region requirement %d of an explicit copy operation "
                         "in task %s (ID %lld).", mapper->get_mapper_name(),
                         IS_SRC ? "source" : "destination", idx, 

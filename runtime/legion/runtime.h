@@ -1816,6 +1816,8 @@ namespace Legion {
                                           Serializer &rez);
       void send_index_space_child_response(AddressSpaceID target,
                                            Serializer &rez);
+      void send_index_partition_notification(AddressSpaceID target, 
+                                             Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
       void send_index_partition_return(AddressSpaceID target, Serializer &rez);
@@ -1942,6 +1944,7 @@ namespace Legion {
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);
+      void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_index_partition_request(Deserializer &derez,

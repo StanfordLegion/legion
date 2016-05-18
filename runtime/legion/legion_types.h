@@ -457,6 +457,7 @@ namespace Legion {
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_CHILD_REQUEST,
       SEND_INDEX_SPACE_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
       SEND_INDEX_PARTITION_RETURN,
@@ -563,6 +564,7 @@ namespace Legion {
         "Send Index Space Return",                                    \
         "Send Index Space Child Request",                             \
         "Send Index Space Child Response",                            \
+        "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
