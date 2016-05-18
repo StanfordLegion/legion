@@ -2830,22 +2830,20 @@ namespace Legion {
                                              RegionTreeContext remote_outermost)
     //--------------------------------------------------------------------------
     {
-#if 0
       for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
         RegionRequirement &req = created_requirements[idx];
-        if (deleted_regions.find(req.region) != deleted_regions.end())
+        // If it was deleted, then we don't care
+        if (created_regions.find(req.region) == created_regions.end())
           continue;
         FieldSpace fs = req.region.get_field_space();
-        if (deleted_field_spaces.find(fs) != deleted_field_spaces.end())
-          continue;
         bool all_fields_deleted = true;
         for (std::set<FieldID>::const_iterator it = 
               req.privilege_fields.begin(); it != 
               req.privilege_fields.end(); it++)
         {
-          if (deleted_fields.find(std::pair<FieldSpace,FieldID>(fs,*it)) == 
-              deleted_fields.end())
+          if (created_fields.find(std::pair<FieldSpace,FieldID>(fs,*it)) != 
+              created_fields.end())
           {
             all_fields_deleted = false;
             break;
@@ -2857,7 +2855,6 @@ namespace Legion {
         runtime->forest->send_back_logical_state(get_parent_context(index),
             remote_outermost, created_requirements[idx], target);
       }
-#endif
     }
 
     //--------------------------------------------------------------------------
