@@ -1345,7 +1345,9 @@ namespace Legion {
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
         versions->get_field_versions();
       bool is_split = false;
+#ifndef LEGION_SPY
       const FieldMask &advance_mask = 
+#endif
         version_info.get_advance_mask(logical_node, is_split);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             field_versions.begin(); it != field_versions.end(); it++)
@@ -1395,6 +1397,10 @@ namespace Legion {
             // at the version number at this view, but we're only
             // really at the version number if we are not a split
             // version number and we're not reducing
+            // We skip this optimization if we are doing Legion Spy
+            // because Legion Spy doesn't currently understand
+            // version numbers and so it can't do the same check
+#ifndef LEGION_SPY
             if (!is_reduction)
             {
               if (is_split)
@@ -1402,6 +1408,7 @@ namespace Legion {
               else
                 write_skip_mask |= intersect;
             }
+#endif
             overlap -= intersect;
             if (!overlap)
               continue;
@@ -2211,9 +2218,9 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
-#endif
         if (preconditions.find(cit->first) != preconditions.end())
           continue;
+#endif
         const EventUsers &event_users = cit->second;
         const FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
@@ -2285,8 +2292,10 @@ namespace Legion {
         const EventUsers &event_users = pit->second;
         if (user_mask * event_users.user_mask)
           continue;
+#ifndef LEGION_SPY
         if (preconditions.find(pit->first) != preconditions.end())
           continue;
+#endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
@@ -2336,9 +2345,9 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
-#endif
         if (preconditions.find(cit->first) != preconditions.end())
           continue;
+#endif
         const EventUsers &event_users = cit->second;
         const FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
@@ -2418,8 +2427,10 @@ namespace Legion {
         const FieldMask overlap = user_mask & event_users.user_mask;
         if (!overlap)
           continue;
+#ifndef LEGION_SPY
         if (preconditions.find(pit->first) != preconditions.end())
           continue;
+#endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
