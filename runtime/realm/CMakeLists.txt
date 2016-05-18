@@ -25,6 +25,7 @@ set(realm_HEADERS
   logging.h
   logging.inl
   machine.h
+  machine.inl
   machine_impl.h
   mem_impl.h
   memory.h
