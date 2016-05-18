@@ -1982,7 +1982,8 @@ namespace Legion {
         node_info.set_close_node();
       if (leave_open)
         node_info.set_leave_open();
-      if (split_node)
+      // Path only nodes that capture previous are split
+      if (split_node || (path_only && capture_previous))
         node_info.set_split_node();
       if (capture_previous)
         node_info.advance_mask |= mask;
@@ -3583,11 +3584,22 @@ namespace Legion {
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
                         PHYSICAL_STATE_CAPTURE_STATE_CALL);
-      if (split_node)
+      // Path only first since path only can also be a split
+      if (path_only)
       {
-#ifdef DEBUG_LEGION
-        assert(!path_only);
-#endif
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+              vit = version_states.begin(); vit != version_states.end(); vit++)
+        {
+          const VersionStateInfo &info = vit->second;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->first->update_path_only_state(this, it->second);
+          }
+        }
+      }
+      else if (split_node)
+      {
         // Capture everything but the open children below from the
         // normal version states, but get the open children from the
         // advance states since that's where the sub-operations have
@@ -3610,19 +3622,6 @@ namespace Legion {
                 info.states.begin(); it != info.states.end(); it++)
           {
             it->first->update_split_advance_state(this, it->second);
-          }
-        }
-      }
-      else if (path_only)
-      {
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-              vit = version_states.begin(); vit != version_states.end(); vit++)
-        {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
-          {
-            it->first->update_path_only_state(this, it->second);
           }
         }
       }

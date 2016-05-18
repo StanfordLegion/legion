@@ -841,8 +841,14 @@ namespace Legion {
         outstanding_gc_events.insert(copy_term);
         // See if we need to check for read only invalidates
         if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-          perform_read_invalidations(copy_mask, version_info, 
-                                     source, applied_events);
+        {
+          // We only actually have to do the invalidations if we are not split
+          bool is_split = false;
+          version_info.get_advance_mask(logical_node, is_split);
+          if (!is_split)
+            perform_read_invalidations(copy_mask, version_info, 
+                                       source, applied_events);
+        }
       }
       if (issue_collect)
         defer_collect_user(copy_term);
@@ -1102,8 +1108,14 @@ namespace Legion {
       add_current_user(new_user, term_event, user_mask);
       // See if we need to check for read only invalidates
       if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-        perform_read_invalidations(user_mask, version_info, 
-                                   source, applied_events);
+      {
+        // We only actually have to do the invalidations if we are not split
+        bool is_split = false;
+        version_info.get_advance_mask(logical_node, is_split);
+        if (!is_split)
+          perform_read_invalidations(user_mask, version_info, 
+                                     source, applied_events);
+      }
       if (outstanding_gc_events.find(term_event) == 
           outstanding_gc_events.end())
       {
