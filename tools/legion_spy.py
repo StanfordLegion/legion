@@ -3157,8 +3157,14 @@ class LogicalState(object):
         for prev_op,prev_req in closed_users:
             # Check for replays
             if prev_op is op:
-                op.need_logical_replay = True
-                return False
+                # If it is a previous registration of ourself, skip it
+                # This will only happen during replays
+                if prev_req.index == req.index:
+                    continue
+                if not op.need_logical_replay:
+                    op.need_logical_replay = set()
+                op.need_logical_replay.add((prev_req.index,self.field))
+                continue
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only() 
                                   else TRUE_DEPENDENCE, self.field):
@@ -3173,8 +3179,14 @@ class LogicalState(object):
         for prev_op,prev_req in previous_deps:
             # Check for replays
             if prev_op is op:
-                op.need_logical_replay = True
-                return False
+                # If it is a previous registration of ourself, skip it
+                # This will only happen during replays
+                if prev_req.index == req.index:
+                    continue
+                if not op.need_logical_replay:
+                    op.need_logical_replay = set()
+                op.need_logical_replay.add((prev_req.index,self.field))
+                continue
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only()
                                   else TRUE_DEPENDENCE, self.field):
@@ -3275,8 +3287,15 @@ class LogicalState(object):
                 continue
             # If we have a replay op, see if we've hit it
             if replay_op is not None and prev_op is replay_op:
-                replay_op.need_logical_replay = True
-                return False
+                # If it is a previous registration of ourself, skip it
+                # This will only happen during replays
+                if prev_req.index == req.index:
+                    dominates = False
+                    continue
+                if not replay_op.need_logical_replay:
+                    replay_op.need_logical_replay = set()
+                replay_op.need_logical_replay.add((prev_req.index,self.field))
+                continue
             # Check to see if it has the mapping dependence
             if perform_checks:
                 if not op.has_mapping_dependence(req, prev_op, prev_req, 
@@ -3297,8 +3316,14 @@ class LogicalState(object):
                     continue
                 # If we have a replay op, see if we've hit it
                 if replay_op is not None and prev_op is replay_op:
-                    replay_op.need_logical_replay = True
-                    return False
+                    # If it is a previous registration of ourself, skip it
+                    # This will only happen during replays
+                    if prev_req.index == req.index:
+                        continue
+                    if not replay_op.need_logical_replay:
+                        replay_op.need_logical_replay = set()
+                    replay_op.need_logical_replay.add((prev_req.index,self.field))
+                    continue
                 if perform_checks:
                     if not op.has_mapping_dependence(req, prev_op, prev_req, 
                                                      dep_type, self.field):
@@ -3892,7 +3917,7 @@ class Operation(object):
         self.cluster_name = None 
         # For traversals
         self.generation = 0
-        self.need_logical_replay = False
+        self.need_logical_replay = None 
         self.reachable_cache = None
 
     def is_close(self):
@@ -4245,7 +4270,8 @@ class Operation(object):
         traverser.visit_event(self.start_event)
         return traverser.cycle
 
-    def analyze_logical_requirement(self, index, projecting, perform_checks):
+    def analyze_logical_requirement(self, index, projecting, 
+                                    perform_checks, exact_field=None):
         # Special out for no access
         assert index in self.reqs
         req = self.reqs[index]
@@ -4267,11 +4293,36 @@ class Operation(object):
         assert not not path
         # TODO: check restricted coherence too
         # Now do the traversal for each of the fields
-        for field in req.fields:
+        if exact_field is None:
+            # This is the common case
+            for field in req.fields:
+                # Keep track of the previous dependences so we can 
+                # use them for adding/checking dependences on close operations
+                previous_deps = list()
+                if not req.parent.perform_logical_analysis(0, path, self, req, field, 
+                          projecting, not projecting, previous_deps, perform_checks):
+                    return False
+                # If we are projecting we have to iterate all the points
+                # and walk their paths, still doing the checking for ourself
+                if projecting:
+                    assert self.points
+                    for point in self.points.itervalues():
+                        assert index in point.op.reqs
+                        point_req = point.op.reqs[index]
+                        point_path = list()
+                        point_req.logical_node.compute_path(point_path, req.logical_node)
+                        point_deps = copy.copy(previous_deps)
+                        if not req.logical_node.perform_logical_analysis(0, point_path, self, 
+                                point_req, field, False, False, point_deps, perform_checks):
+                            return False
+                    # Now register our user
+                    req.logical_node.register_logical_user(self, req, field)
+        else:
+            # This happens for replay fields
             # Keep track of the previous dependences so we can 
             # use them for adding/checking dependences on close operations
             previous_deps = list()
-            if not req.parent.perform_logical_analysis(0, path, self, req, field, 
+            if not req.parent.perform_logical_analysis(0, path, self, req, exact_field, 
                       projecting, not projecting, previous_deps, perform_checks):
                 return False
             # If we are projecting we have to iterate all the points
@@ -4285,10 +4336,10 @@ class Operation(object):
                     point_req.logical_node.compute_path(point_path, req.logical_node)
                     point_deps = copy.copy(previous_deps)
                     if not req.logical_node.perform_logical_analysis(0, point_path, self, 
-                            point_req, field, False, False, point_deps, perform_checks):
+                        point_req, exact_field, False, False, point_deps, perform_checks):
                         return False
                 # Now register our user
-                req.logical_node.register_logical_user(self, req, field)
+                req.logical_node.register_logical_user(self, req, exact_field)
         # Restore the privileges if necessary
         if copy_reduce:
             req.priv = REDUCE
@@ -4335,18 +4386,17 @@ class Operation(object):
             return True
         assert not self.need_logical_replay
         projecting = self.kind is INDEX_TASK_KIND
-        replay_regions = list()
         for idx in self.reqs.iterkeys():
             if not self.analyze_logical_requirement(idx, projecting, perform_checks):
-                # We might have failed because we have a replay region
-                if self.need_logical_replay:
-                    replay_regions.append(idx)
-                    self.need_logical_replay = False
-                else: # We really did fail
-                    return False
+                return False
         # If we had any replay regions, analyze them now
-        for idx in replay_regions:
-            if not self.analyze_logical_requirement(idx, projecting, perform_checks):
+        if self.need_logical_replay:
+            replays = self.need_logical_replay
+            self.need_logical_replay = None
+            for idx,field in replays:
+                if not self.analyze_logical_requirement(idx, projecting, 
+                                                        perform_checks, field):
+                    return False
                 if self.need_logical_replay:
                     print "ERROR: Replay failed! This is really bad! "+\
                           "Region requirement "+str(idx)+" of "+str(self)+\
