@@ -46,9 +46,7 @@ local option = {
   end,
 }
 
-function config.parse_args()
-  local rawargs = rawget(_G, "arg")
-
+function config.parse_args(rawargs)
   local options = {}
   for k, v in pairs(default_options) do
     options[k] = v
@@ -86,6 +84,16 @@ function config.parse_args()
   end
 
   return setmetatable(options, option), args
+end
+
+local memoize_args = terralib.memoize(
+  function()
+    local rawargs = rawget(_G, "arg")
+    return {config.parse_args(rawargs)}
+  end)
+
+function config.args()
+  return unpack(memoize_args())
 end
 
 return config
