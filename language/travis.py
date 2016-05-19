@@ -46,7 +46,7 @@ def install_dependencies():
 
     return env
 
-def test(root_dir, debug, env):
+def test(root_dir, debug, spy, env):
     subprocess.check_call(
         ['time', './install.py', '-j', '2'] + (['--debug'] if debug else []),
         env = env,
@@ -55,6 +55,11 @@ def test(root_dir, debug, env):
         ['time', './test.py', '-q', '-j', '2'] + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
+    if spy:
+        subprocess.check_call(
+            ['time', './test.py', '-q', '-j', '2', '--spy']
+            env = env,
+            cwd = root_dir)
 
 if __name__ == '__main__':
     root_dir = os.path.realpath(os.path.dirname(__file__))
@@ -70,4 +75,4 @@ if __name__ == '__main__':
     if 'MAKEFLAGS' not in env:
         env['MAKEFLAGS'] = 's'
 
-    test(root_dir, env['DEBUG'], env)
+    test(root_dir, env['DEBUG'], 'TEST_SPY' in env and env['TEST_SPY'], env)
