@@ -70,5 +70,4 @@ if __name__ == '__main__':
     if 'MAKEFLAGS' not in env:
         env['MAKEFLAGS'] = 's'
 
-    test(root_dir, True, env)
-    test(root_dir, False, env)
+    test(root_dir, env['DEBUG'], env)

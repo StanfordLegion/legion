@@ -11,10 +11,10 @@ env:
   global:
   - WARN_AS_ERROR=1
   matrix:
-  - CC_FLAGS=
-  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  - CC_FLAGS=-DLEGION_SPY
-  - CC_FLAGS=-std=c++0x
+  - CC_FLAGS= DEBUG=0
+  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
+  - CC_FLAGS=-DLEGION_SPY DEBUG=1
+  - CC_FLAGS=-std=c++0x DEBUG=0
 matrix:
   exclude:
     - os: osx
@@ -80,8 +80,12 @@ script:
     make -s -C examples/full_ghost LG_RT_DIR=../../runtime
     examples/full_ghost/ghost -ll:cpu 4
   - |
-    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+    if [ $DEBUG -eq 0 ]; then
+      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+    fi
   - |
-    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+    if [ $DEBUG -eq 0 ]; then
+      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
+      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+    fi
