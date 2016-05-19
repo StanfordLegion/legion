@@ -1,0 +1,49 @@
+list(INSERT CMAKE_MODULE_PATH 0 @Legion_SOURCE_DIR@/cmake)
+
+# HWLOC is a private dependency and only need to be pulled in for static
+# builds
+if(NOT @BUILD_SHARED_LIBS@)
+  set(Legion_USE_HWLOC @Legion_USE_HWLOC@)
+  if(Legion_USE_HWLOC)
+    set(HWLOC_INCLUDE_DIR @HWLOC_INCLUDE_DIR@)
+    set(HWLOC_LIBRARY @HWLOC_LIBRARY@)
+    find_package(HWLOC REQUIRED)
+  endif()
+endif()
+
+# GASNet is a public dependency and always needs to be pulled in
+set(Legion_USE_GASNet @Legion_USE_GASNet@)
+if(Legion_USE_GASNet)
+  set(GASNet_CONDUIT @GASNet_CONDUIT@)
+  set(GASNet_THREADING @GASNet_THREADING@)
+  set(GASNet_INCLUDE_DIR @GASNet_INCLUDE_DIR@)
+  find_package(GASNet REQUIRED)
+endif()
+
+# LLVM is a private dependency and only need to be pulled in for static
+# builds
+if(NOT @BUILD_SHARED_LIBS@)
+  set(Legion_USE_LLVM @Legion_USE_LLVM@)
+  if(Legion_USE_LLVM)
+    set(Legion_LLVM_COMPONENTS @Legion_LLVM_COMPONENTS@)
+    set(LLVM_CONFIG_EXECUTABLE @LLVM_CONFIG_EXECUTABLE@)
+    find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
+  endif()
+endif()
+
+# CUDA is is only a private dependency of Legion but has a few usage
+# so we add it in here
+set(Legion_USE_CUDA @Legion_USE_CUDA@)
+if(Legion_USE_CUDA)
+  set(CUDA_USE_STATIC_CUDA_RUNTIME @CUDA_USE_STATIC_CUDA_RUNTIME@)
+  find_package(CUDA REQUIRED)
+
+  CUDA_INCLUDE_DIRECTORIES(
+    "@Legion_SOURCE_DIR@/runtime"
+    "@Legion_SOURCE_DIR@/runtime/legion"
+    "@Legion_SOURCE_DIR@/runtime/mappers" 
+    "@Legion_SOURCE_DIR@/runtime/realm"
+  )
+endif()
+
+include(@Legion_BINARY_DIR@/LegionTargets.cmake)
