@@ -22,5 +22,9 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(spmd_cgsolver cgtasks.cc cgmapper.cc cgsolver.cc)
+add_executable(spmd_cgsolver
+  cgmapper.h  cgmapper.cc
+  cgsolver.h  cgsolver.cc
+  cgtasks.h   cgtasks.cc
+)
 target_link_libraries(spmd_cgsolver legion)

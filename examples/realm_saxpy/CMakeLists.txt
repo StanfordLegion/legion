@@ -22,7 +22,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CPU_SOURCES realm_saxpy_cpu.cc)
+set(CPU_SOURCES realm_saxpy.h realm_saxpy_cpu.cc)
 set(GPU_SOURCES realm_saxpy_gpu.cu)
 if(Legion_USE_CUDA)
   cuda_add_executable(realm_saxpy ${CPU_SOURCES} ${GPU_SOURCES})

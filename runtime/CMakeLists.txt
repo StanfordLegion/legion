@@ -25,49 +25,99 @@ if(Legion_USE_SHARED_LOWLEVEL)
   list(APPEND LOW_RUNTIME_SRC shared_lowlevel.cc)
 else()
   list(APPEND LOW_RUNTIME_SRC
-    realm/runtime_impl.cc
-    lowlevel_dma.cc
-    realm/module.cc
-    realm/threads.cc
-    realm/faults.cc
-    realm/operation.cc
-    realm/tasks.cc
-    realm/metadata.cc
-    realm/event_impl.cc
-    realm/rsrv_impl.cc
-    realm/proc_impl.cc
-    realm/mem_impl.cc
-    realm/inst_impl.cc
-    realm/idx_impl.cc
-    realm/machine_impl.cc
-    realm/sampling_impl.cc
-    lowlevel.cc
+    lowlevel_config.h
     lowlevel_disk.cc
-    realm/numa/numa_module.cc
-    realm/numa/numasysif.cc
+    lowlevel_dma.h            lowlevel_dma.cc
+    lowlevel_dma.inl
+    lowlevel.h                lowlevel.cc
+    lowlevel_impl.h
+    realm/event_impl.h        realm/event_impl.cc
+    realm/event_impl.inl
+    realm/faults.h            realm/faults.cc
+    realm/faults.inl
+    realm/idx_impl.h          realm/idx_impl.cc
+    realm/inst_impl.h         realm/inst_impl.cc
+    realm/machine_impl.h      realm/machine_impl.cc
+    realm/mem_impl.h          realm/mem_impl.cc
+    realm/metadata.h          realm/metadata.cc
+    realm/module.h            realm/module.cc
+    realm/nodeset.h
+    realm/numa/numa_module.h  realm/numa/numa_module.cc
+    realm/numa/numasysif.h    realm/numa/numasysif.cc
+    realm/operation.h         realm/operation.cc
+    realm/operation.inl
+    realm/proc_impl.h         realm/proc_impl.cc
+    realm/rsrv_impl.h         realm/rsrv_impl.cc
+    realm/runtime_impl.h      realm/runtime_impl.cc
+    realm/sampling_impl.h     realm/sampling_impl.cc
+    realm/tasks.h             realm/tasks.cc
+    realm/threads.h           realm/threads.cc
+    realm/threads.inl
   )
   if(Legion_USE_CUDA)
     list(APPEND LOW_RUNTIME_SRC
-      realm/cuda/cuda_module.cc
-      realm/cuda/cudart_hijack.cc
+      realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
+      realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
     )
   endif()
   if(Legion_USE_LLVM)
     list(APPEND LOW_RUNTIME_SRC
-      realm/llvmjit/llvmjit_module.cc
-      realm/llvmjit/llvmjit_internal.cc
-    )
+      realm/llvmjit/llvmjit.h
+      realm/llvmjit/llvmjit.inl
+      realm/llvmjit/llvmjit_internal.h  realm/llvmjit/llvmjit_internal.cc
+      realm/llvmjit/llvmjit_module.h    realm/llvmjit/llvmjit_module.cc
+  )
   endif()
   if(Legion_USE_GASNet)
-    list(APPEND LOW_RUNTIME_SRC activemsg.cc)
+    list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
   endif()
 endif()
 list(APPEND LOW_RUNTIME_SRC
-  realm/logging.cc
-  realm/cmdline.cc
-  realm/profiling.cc
-  realm/codedesc.cc
-  realm/timers.cc
+  accessor.h
+  arrays.h
+  atomics.h
+  common.h
+  realm/bytearray.h
+  realm/bytearray.inl
+  realm/circ_queue.h
+  realm/circ_queue.inl
+  realm/cmdline.h          realm/cmdline.cc
+  realm/cmdline.inl
+  realm/codedesc.h         realm/codedesc.cc
+  realm/codedesc.inl
+  realm/custom_serdez.h
+  realm/custom_serdez.inl
+  realm/dynamic_table.h
+  realm/dynamic_table.inl
+  realm/event.h
+  realm/id.h
+  realm/id.inl
+  realm/indexspace.h
+  realm/instance.h
+  realm/logging.h          realm/logging.cc
+  realm/logging.inl
+  realm/machine.h
+  realm/machine.inl
+  realm/memory.h
+  realm/pri_queue.h
+  realm/pri_queue.inl
+  realm/processor.h
+  realm/processor.inl
+  realm/profiling.h        realm/profiling.cc
+  realm/profiling.inl
+  realm/realm_config.h
+  realm/realm.h
+  realm/redop.h
+  realm/reservation.h
+  realm/runtime.h
+  realm/sampling.h
+  realm/sampling.inl
+  realm/serialize.h
+  realm/serialize.inl
+  realm/timers.h           realm/timers.cc
+  realm/timers.inl
+  realm/utils.h
+  utilities.h
 )
 find_package(Threads REQUIRED)
 add_library(legion_low_runtime ${LOW_RUNTIME_SRC})
@@ -122,35 +172,42 @@ install(TARGETS legion_low_runtime EXPORT LegionTargets
 
 # Mapper objects
 list(APPEND MAPPER_SRC
-  mappers/default_mapper.cc
-  mappers/mapping_utilities.cc
-  mappers/shim_mapper.cc
-  mappers/test_mapper.cc
-  mappers/replay_mapper.cc
-  mappers/debug_mapper.cc
+  mappers/debug_mapper.h       mappers/debug_mapper.cc
+  mappers/default_mapper.h     mappers/default_mapper.cc
+  mappers/mapping_utilities.h  mappers/mapping_utilities.cc
+  mappers/replay_mapper.h      mappers/replay_mapper.cc
+  mappers/shim_mapper.h        mappers/shim_mapper.cc
+  mappers/test_mapper.h        mappers/test_mapper.cc
 )
-if(Legion_USE_ALTERNATIVE_MAPPERS)
-  list(APPEND MAPPER_SRC mappers/alt_mappers.cc)
-endif()
 
 # High level runtime
 list(APPEND HIGH_RUNTIME_SRC
-  legion/legion.cc
-  legion/legion_c.cc
-  legion/legion_ops.cc
-  legion/legion_tasks.cc
-  legion/legion_trace.cc
-  legion/legion_spy.cc
-  legion/legion_profiling.cc
-  legion/legion_instances.cc
-  legion/legion_views.cc
-  legion/legion_analysis.cc
-  legion/legion_constraint.cc
-  legion/legion_mapping.cc
-  legion/region_tree.cc
-  legion/runtime.cc
-  legion/garbage_collection.cc
-  legion/mapper_manager.cc
+  legion/field_tree.h
+  legion/garbage_collection.h  legion/garbage_collection.cc
+  legion/interval_tree.h
+  legion/legion_allocation.h
+  legion/legion_analysis.h     legion/legion_analysis.cc
+  legion/legion_c.h            legion/legion_c.cc
+  legion/legion_config.h
+  legion/legion_constraint.h   legion/legion_constraint.cc
+  legion/legion_c_util.h
+  legion/legion.h              legion/legion.cc
+  legion/legion.inl
+  legion/legion_instances.h    legion/legion_instances.cc
+  legion/legion_mapping.h      legion/legion_mapping.cc
+  legion/legion_ops.h          legion/legion_ops.cc
+  legion/legion_profiling.h    legion/legion_profiling.cc
+  legion/legion_realm.h
+  legion/legion_spy.h          legion/legion_spy.cc
+  legion/legion_tasks.h        legion/legion_tasks.cc
+  legion/legion_trace.h        legion/legion_trace.cc
+  legion/legion_types.h
+  legion/legion_utilities.h
+  legion/legion_views.h        legion/legion_views.cc
+  legion/mapper_manager.h      legion/mapper_manager.cc
+  legion/rectangle_set.h
+  legion/region_tree.h         legion/region_tree.cc
+  legion/runtime.h             legion/runtime.cc
 )
 
 add_library(legion ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})

@@ -27,6 +27,6 @@ if(NOT Legion_USE_CUDA)
 endif()
 
 set(CPU_SOURCES thrust_interop.cc)
-set(GPU_SOURCES thrust_shim.cu)
+set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
 cuda_add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
 target_link_libraries(thrust_interop legion)

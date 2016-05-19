@@ -22,7 +22,11 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CPU_SOURCES circuit.cc circuit_cpu.cc circuit_mapper.cc)
+set(CPU_SOURCES
+  circuit.h         circuit.cc
+                    circuit_cpu.cc
+  circuit_mapper.h  circuit_mapper.cc
+)
 set(GPU_SOURCES circuit_gpu.cu)
 if(Legion_USE_CUDA)
   cuda_add_executable(full_circuit ${CPU_SOURCES} ${GPU_SOURCES})

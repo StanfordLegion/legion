@@ -103,7 +103,6 @@ endif()
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 option(Legion_USE_SHARED_LOWLEVEL     "Use shared-memory runtime" OFF)
-option(Legion_USE_ALTERNATIVE_MAPPERS "Use alternative mappers" OFF)
 
 #------------------------------------------------------------------------------#
 # Runtime library targets
@@ -116,6 +115,7 @@ export(EXPORT LegionTargets
 configure_file(
   cmake/LegionConfig.cmake.in
   ${Legion_BINARY_DIR}/LegionConfig.cmake
+  @ONLY
 )
 install(EXPORT LegionTargets
   FILE LegionTargets.cmake

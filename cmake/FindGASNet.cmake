@@ -14,7 +14,7 @@
 # limitations under the License.
 #=============================================================================
 
-# This module produces the "LLVM" link target which carries with it all the
+# This module produces the "GASNet" link target which carries with it all the
 # necessary interface properties.  The following options determine which
 # GASNet backend configuration get's used:
 #
