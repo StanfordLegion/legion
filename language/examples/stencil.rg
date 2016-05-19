@@ -97,21 +97,42 @@ task make_bloated_partition(points : region(ispace(int2d), point),
   return p
 end
 
-__demand(__inline)
-task off(i : int2d, x : int, y : int)
-  return int2d { x = i.x - x, y = i.y - y }
+local function off(i, x, y)
+  return rexpr int2d { x = i.x + x, y = i.y + y } end
 end
 
-task stencil(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
-where reads writes(private.output), reads(ghost.input) do
-  for i in private do
-    private[i].output = ghost[i].input +
-      -0.5*ghost[off(i, -1, -1)].input +
-      -0.5*ghost[off(i, -1,  1)].input +
-       0.5*ghost[off(i,  1, -1)].input +
-       0.5*ghost[off(i,  1,  1)].input
+local function make_stencil_pattern(points, index, off_x, off_y, radius)
+  local value
+  for i = 1, radius do
+    local neg = off_x < 0 or off_y < 0
+    local coeff = ((neg and -1) or 1)/(2*i*radius)
+    local x, y = off_x*i, off_y*i
+    local component = rexpr coeff*points[ [off(index, x, y)] ].input end
+    if value then
+      value = rexpr value + component end
+    else
+      value = rexpr component end
+    end
   end
+  return value
 end
+
+local function make_stencil(radius)
+  local task st(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
+  where reads writes(private.output), reads(ghost.input) do
+    for i in private do
+      private[i].output = ghost[i].input +
+        [make_stencil_pattern(ghost, i,  0, -1, radius)] +
+        [make_stencil_pattern(ghost, i, -1,  0, radius)] +
+        [make_stencil_pattern(ghost, i,  1,  0, radius)] +
+        [make_stencil_pattern(ghost, i,  0,  1, radius)]
+    end
+  end
+  return st
+end
+
+local RADIUS = 1
+local stencil = make_stencil(RADIUS)
 
 task increment(points : region(ispace(int2d), point))
 where reads writes(points.input) do
@@ -130,7 +151,7 @@ end
 
 task main()
   var n : int64, nt : int64, ts : int64 = 10, 4, 10
-  var radius : int64 = 1
+  var radius : int64 = RADIUS
   var grid = ispace(int2d, { x = n, y = n })
   var tiles = ispace(int2d, { x = nt, y = nt })
 

@@ -71,7 +71,7 @@ def run(filename, debug, verbose, flags, env):
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
 def run_spy(logfile, verbose):
-    cmd = [os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
+    cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
            '-lpa', logfile]
     proc = subprocess.Popen(
         cmd,
