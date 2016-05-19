@@ -15,12 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_05_physical_regions)
+project(LegionExample_thrust_interop)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
+if(NOT Legion_USE_CUDA)
+  message(FATAL_ERROR
+    "The thrust_interop example requires Legion to be built with CUDA")
+endif()
 
-add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions legion)
+set(CPU_SOURCES thrust_interop.cc)
+set(GPU_SOURCES thrust_shim.cu)
+cuda_add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
+target_link_libraries(thrust_interop legion)

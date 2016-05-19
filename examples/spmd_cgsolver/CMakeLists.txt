@@ -15,12 +15,12 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_05_physical_regions)
+project(LegionExample_spmd_cgsolver)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions legion)
+add_executable(spmd_cgsolver cgtasks.cc cgmapper.cc cgsolver.cc)
+target_link_libraries(spmd_cgsolver legion)

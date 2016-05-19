@@ -35,9 +35,17 @@ if(Legion_USE_HDF)
   add_subdirectory(attach-file)
 endif()
 
+# Currently broken with master
 #add_subdirectory(dependent_circuit)
-#add_subdirectory(dynamic_registration)
-#add_subdirectory(full_circuit)
-#add_subdirectory(full_ghost)
-#add_subdirectory(realm_saxpy)
-#add_subdirectory(thrust_interop)
+
+add_subdirectory(dynamic_registration)
+add_subdirectory(full_circuit)
+add_subdirectory(full_ghost)
+add_subdirectory(realm_saxpy)
+
+# Currently broken with master
+#add_subdirectory(spmd_cgsolver)
+
+if(Legion_USE_CUDA)
+  add_subdirectory(thrust_interop)
+endif()

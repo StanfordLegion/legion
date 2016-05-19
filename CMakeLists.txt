@@ -91,10 +91,16 @@ if(Legion_USE_CUDA)
     set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   endif()
   find_package(CUDA REQUIRED)
+  CUDA_INCLUDE_DIRECTORIES(
+    "${Legion_SOURCE_DIR}/runtime"
+    "${Legion_SOURCE_DIR}/runtime/legion"
+    "${Legion_SOURCE_DIR}/runtime/mappers" 
+    "${Legion_SOURCE_DIR}/runtime/realm"
+  )
 endif()
 
 #------------------------------------------------------------------------------#
-# MIscelaneous other options
+# Miscelaneous other options
 #------------------------------------------------------------------------------#
 option(Legion_USE_SHARED_LOWLEVEL     "Use shared-memory runtime" OFF)
 option(Legion_USE_ALTERNATIVE_MAPPERS "Use alternative mappers" OFF)
@@ -122,6 +128,24 @@ install(FILES ${Legion_BINARY_DIR}/LegionConfig.cmake
 #------------------------------------------------------------------------------#
 # Examples
 #------------------------------------------------------------------------------#
+if(Legion_USE_CUDA)
+  # CUDA has some issue propogating interface compile flags so we have to
+  # extract them from the target so we can manually add them
+  foreach(tgt legion_low_runtime legion)
+    get_target_property(opts ${tgt} INTERFACE_COMPILE_OPTIONS)
+    get_target_property(defs ${tgt} INTERFACE_COMPILE_DEFINITIONS)
+    if(opts)
+      foreach(opt IN LISTS opts)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${opt}")
+      endforeach()
+    endif()
+    if(defs)
+      foreach(def IN LISTS defs)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D${def}")
+      endforeach()
+    endif()
+  endforeach()
+endif()
 
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 if(Legion_BUILD_EXAMPLES)

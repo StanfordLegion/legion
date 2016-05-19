@@ -70,51 +70,51 @@ list(APPEND LOW_RUNTIME_SRC
   realm/timers.cc
 )
 find_package(Threads REQUIRED)
-add_library(low_runtime ${LOW_RUNTIME_SRC})
-target_link_libraries(low_runtime
+add_library(legion_low_runtime ${LOW_RUNTIME_SRC})
+target_link_libraries(legion_low_runtime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
-set_target_properties(low_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(legion_low_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
-  target_compile_definitions(low_runtime PUBLIC -DDEBUG_LOW_LEVEL)
+  target_compile_definitions(legion_low_runtime PUBLIC DEBUG_LOW_LEVEL)
 endif()
-target_compile_definitions(low_runtime
+target_compile_definitions(legion_low_runtime
   PUBLIC -DCOMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
 
 if(Legion_USE_HWLOC)
-  target_compile_definitions(low_runtime PRIVATE -DREALM_USE_HWLOC)
-  target_link_libraries(low_runtime PRIVATE HWLOC)
+  target_compile_definitions(legion_low_runtime PRIVATE REALM_USE_HWLOC)
+  target_link_libraries(legion_low_runtime PRIVATE HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_compile_definitions(low_runtime PUBLIC -DUSE_GASNET)
-  target_link_libraries(low_runtime PUBLIC GASNet)
+  target_compile_definitions(legion_low_runtime PUBLIC USE_GASNET)
+  target_link_libraries(legion_low_runtime PUBLIC GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_compile_definitions(low_runtime PRIVATE -DREALM_USE_LLVM)
-  target_link_libraries(low_runtime PRIVATE LLVM)
+  target_compile_definitions(legion_low_runtime PRIVATE REALM_USE_LLVM)
+  target_link_libraries(legion_low_runtime PRIVATE LLVM)
 endif()
 
 if(Legion_USE_CUDA)
-  target_compile_definitions(low_runtime PRIVATE -DUSE_CUDA)
-  target_include_directories(low_runtime PRIVATE ${CUDA_INCLUDE_DIRS})
-  target_link_libraries(low_runtime PRIVATE ${CUDA_CUDA_LIBRARY})
+  target_compile_definitions(legion_low_runtime PUBLIC USE_CUDA)
+  target_include_directories(legion_low_runtime PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(legion_low_runtime PRIVATE ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(Legion_USE_SHARED_LOWLEVEL)
-  set_target_properties(low_runtime PROPERTIES OUTPUT_NAME sharedllr)
+  set_target_properties(legion_low_runtime PROPERTIES OUTPUT_NAME sharedllr)
 else()
-  set_target_properties(low_runtime PROPERTIES OUTPUT_NAME realm)
+  set_target_properties(legion_low_runtime PROPERTIES OUTPUT_NAME realm)
 endif()
 
-target_include_directories(low_runtime
+target_include_directories(legion_low_runtime
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
 )
 
-install(TARGETS low_runtime EXPORT LegionTargets
+install(TARGETS legion_low_runtime EXPORT LegionTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -154,13 +154,13 @@ list(APPEND HIGH_RUNTIME_SRC
 )
 
 add_library(legion ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
-target_link_libraries(legion low_runtime)
+target_link_libraries(legion legion_low_runtime)
 set_target_properties(legion PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
   target_compile_definitions(legion PUBLIC -DDEBUG_HIGH_LEVEL)
 endif()
 target_compile_definitions(legion
-  PUBLIC -DCOMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
+  PUBLIC COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
 target_include_directories(legion
   INTERFACE

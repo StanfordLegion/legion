@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(custom_mapper custom_mapper.cc)
-target_link_libraries(custom_mapper legion)
+add_executable(09_custom_mapper custom_mapper.cc)
+target_link_libraries(09_custom_mapper legion)

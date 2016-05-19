@@ -31,7 +31,7 @@ if(NOT @BUILD_SHARED_LIBS@)
   endif()
 endif()
 
-# CUDA is is only a private dependency of Legion but has a few usage
+# CUDA is only a private dependency of Legion but has a few usage requirements
 # so we add it in here
 set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
@@ -47,3 +47,22 @@ if(Legion_USE_CUDA)
 endif()
 
 include(@Legion_BINARY_DIR@/LegionTargets.cmake)
+
+# CUDA has some issue propogating interface compile flags so we have to extract
+# them from the target so we can manually add them
+if(Legion_USE_CUDA)
+  foreach(tgt legion_low_runtime legion)
+    get_target_property(opts ${tgt} INTERFACE_COMPILE_OPTIONS)
+    get_target_property(defs ${tgt} INTERFACE_COMPILE_DEFINITIONS)
+    if(opts)
+      foreach(opt IN LISTS opts)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${opt}")
+      endforeach()
+    endif()
+    if(defs)
+      foreach(def IN LISTS defs)
+        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D${def}")
+      endforeach()
+    endif()
+  endforeach()
+endif()

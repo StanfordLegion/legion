@@ -15,12 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_05_physical_regions)
+project(LegionExample_dependent_circuit)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions legion)
+set(CPU_SOURCES circuit.cc circuit_cpu.cc circuit_mapper.cc)
+if(Legion_USE_CUDA)
+  cuda_add_executable(dependent_circuit ${CPU_SOURCES} circuit_gpu.cu)
+else()
+  add_executable(dependent_circuit ${CPU_SOURCES})
+endif()
+
+target_link_libraries(dependent_circuit legion)

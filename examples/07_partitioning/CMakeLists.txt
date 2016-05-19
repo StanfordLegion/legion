@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(partitioning partitioning.cc)
-target_link_libraries(partitioning legion)
+add_executable(07_partitioning partitioning.cc)
+target_link_libraries(07_partitioning legion)

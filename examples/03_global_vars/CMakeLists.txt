@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(global_vars global_vars.cc)
-target_link_libraries(global_vars legion)
+add_executable(03_global_vars global_vars.cc)
+target_link_libraries(03_global_vars legion)

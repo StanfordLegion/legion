@@ -15,12 +15,12 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_05_physical_regions)
+project(LegionExample_dynamic_registration)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions legion)
+add_executable(dynamic_registration dynamic_registration.cc)
+target_link_libraries(dynamic_registration legion)
