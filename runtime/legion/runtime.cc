@@ -16290,16 +16290,19 @@ namespace Legion {
       if (has_outstanding_tasks())
       {
 #ifdef DEBUG_LEGION
-        for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it = 
-              outstanding_task_counts.begin(); it != 
-              outstanding_task_counts.end(); it++)
         {
-          if (it->second == 0)
-            continue;
-          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
-                          address_space, it->second, it->first.second ? 
-                           "meta" : "application", it->first.first);
+          AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
+          for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
+                outstanding_task_counts.begin(); it != 
+                outstanding_task_counts.end(); it++)
+          {
+            if (it->second == 0)
+              continue;
+            log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
+                            address_space, it->second, it->first.second ? 
+                             "meta" : "application", it->first.first);
 
+          }
         }
 #endif
         local_manager->record_outstanding_tasks();
