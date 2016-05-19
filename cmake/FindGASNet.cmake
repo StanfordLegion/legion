@@ -132,6 +132,9 @@ include(FindPackageHandleStandardArgs)
 FIND_PACKAGE_HANDLE_STANDARD_ARGS(GASNET
     REQUIRED_VARS GASNET_LIBRARY_FOUND GASNET_INCLUDE_DIR)
 
+
+mark_as_advanced(FORCE GASNET_INCLUDE_DIR)
+mark_as_advanced(FORCE GASNET_${GASNET_CONDUIT}_${GASNET_MODEL})
 #------------------------------------------------------------------------------#
 # Formatting options for emacs and vim.
 # vim: set tabstop=4 shiftwidth=4 expandtab :

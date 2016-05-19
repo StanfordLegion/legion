@@ -154,6 +154,7 @@ include_directories(
   "${PROJECT_SOURCE_DIR}"   
   "${PROJECT_BINARY_DIR}")
 
+set (CMAKE_INSTALL_PREFIX ${LEGION_INSTALL_DIR})
 #------------------------------------------------------------------------------#
 # Runtime library target
 #------------------------------------------------------------------------------#
@@ -221,6 +222,8 @@ install(
 )
 
 export (PACKAGE legion)
+
+mark_as_advanced(FORCE CMAKE_INSTALL_PREFIX)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
