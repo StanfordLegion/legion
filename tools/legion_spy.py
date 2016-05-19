@@ -5866,10 +5866,10 @@ class CompositeNode(object):
                             return False
                     else:
                         # Figure out which instance to copy from
-                        if len(valid) > 1:
+                        if len(local_valid) > 1:
                             print "INFO: Multiple valid instances to choose from in "+\
                                   "composite instance... picking one"
-                        src = next(iter(valid))
+                        src = next(iter(local_valid))
                         if self.node is not region:
                             src_preconditions = src.find_copy_dependences(
                                 depth=self.owner.depth, field=self.owner.field, 
