@@ -438,7 +438,7 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].privilege_fields.empty())
+        if (regions[idx].privilege != NO_ACCESS && regions[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: REGION REQUIREMENT %d OF "
                            "TASK %s (ID %lld) HAS NO PRIVILEGE "
