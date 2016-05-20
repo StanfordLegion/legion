@@ -37,7 +37,7 @@ class CircuitMapper : public DefaultMapper
 {
 public:
   CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
-                const char *maper_name,
+                const char *mapper_name,
                 std::vector<Processor>* procs_list,
                 std::vector<Memory>* sysmems_list,
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
@@ -58,7 +58,7 @@ private:
 };
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
-                             const char *maper_name,
+                             const char *mapper_name,
                              std::vector<Processor>* _procs_list,
                              std::vector<Memory>* _sysmems_list,
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
@@ -84,8 +84,8 @@ Processor CircuitMapper::default_policy_select_initial_processor(
   {
     std::vector<Processor> &local_procs =
       sysmem_local_procs[proc_sysmems[local_proc]];
-    Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
-    if (local_procs.size() > 1) {
+    if (local_procs.size() > 1 && task.regions[0].handle_type == SINGULAR) {
+      Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
       return local_procs[(index % (local_procs.size() - 1)) + 1];
     } else {
       return local_proc;
