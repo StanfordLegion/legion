@@ -148,6 +148,13 @@ namespace Legion {
   class ColorPoint;
   class Serializer;
   class Deserializer;
+  class LgEvent; // base event type for legion
+  class ApEvent; // application event
+  class ApUserEvent; // application user event
+  class ApBarrier; // application barrier
+  class RtEvent; // runtime event
+  class RtUserEvent; // runtime user event
+  class RtBarrier;
   template<typename T> class Fraction;
   template<typename T, unsigned int MAX, 
            unsigned SHIFT, unsigned MASK> class BitMask;
@@ -1279,10 +1286,7 @@ namespace Legion {
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
-  typedef Realm::Event Event;
-  typedef Realm::UserEvent UserEvent;
   typedef Realm::Reservation Reservation;
-  typedef Realm::Barrier Barrier;
   typedef ::legion_reduction_op_id_t ReductionOpID;
   typedef Realm::ReductionOpUntyped ReductionOp;
   typedef ::legion_custom_serdez_id_t CustomSerdezID;
@@ -1502,6 +1506,100 @@ namespace Legion {
 #undef PROC_SHIFT
 #undef PROC_MASK
   }; // namespace Internal
+
+  // Legion derived event types
+  class LgEvent : public Realm::Event {
+  public:
+    LgEvent(void) { id = 0; gen = 0; }
+    LgEvent(const LgEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    explicit LgEvent(const Realm::Event e) { id = e.id; gen = e.gen; }
+  public:
+    inline LgEvent& operator=(const LgEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class ApEvent : public LgEvent {
+  public:
+    static const ApEvent NO_AP_EVENT;
+  public:
+    ApEvent(void) : LgEvent() { }
+    ApEvent(const ApEvent &rhs) : LgEvent(rhs) { }
+    explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+  public:
+    inline ApEvent& operator=(const ApEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class ApUserEvent : public ApEvent {
+  public:
+    ApUserEvent(void) : ApEvent() { }
+    ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
+    explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
+  public:
+    inline ApUserEvent& operator=(const ApUserEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+  };
+
+  class ApBarrier : public ApEvent {
+  public:
+    ApBarrier(void) : ApEvent(), timestamp(0) { }
+    ApBarrier(const ApBarrier &rhs) 
+      : ApEvent(rhs), timestamp(rhs.timestamp) { }
+    explicit ApBarrier(const Realm::Barrier &b) 
+      : ApEvent(b), timestamp(b.timestamp) { }
+  public:
+    inline ApBarrier& operator=(const ApBarrier &rhs)
+      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+    inline operator Realm::Barrier() const
+      { Realm::Barrier b; b.id = id; b.gen = gen; 
+        b.timestamp = timestamp; return b; }
+  protected:
+    Realm::Barrier::timestamp_t timestamp;
+  };
+
+  class RtEvent : public LgEvent {
+  public:
+    static const RtEvent NO_RT_EVENT;
+  public:
+    RtEvent(void) : LgEvent() { }
+    RtEvent(const RtEvent &rhs) : LgEvent(rhs) { }
+    explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+  public:
+    inline RtEvent& operator=(const RtEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class RtUserEvent : public RtEvent {
+  public:
+    RtUserEvent(void) : RtEvent() { }
+    RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
+    explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
+  public:
+    inline RtUserEvent& operator=(const RtUserEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+  };
+
+  class RtBarrier : public RtEvent {
+  public:
+    RtBarrier(void) : RtEvent(), timestamp(0) { }
+    RtBarrier(const RtBarrier &rhs)
+      : RtEvent(rhs), timestamp(rhs.timestamp) { }
+    explicit RtBarrier(const Realm::Barrier &b)
+      : RtEvent(b), timestamp(b.timestamp) { }
+  public:
+    inline RtBarrier& operator=(const RtBarrier &rhs)
+      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+    inline operator Realm::Barrier() const
+      { Realm::Barrier b; b.id = id; b.gen = gen; 
+        b.timestamp = timestamp; return b; } 
+  protected:
+    Realm::Barrier::timestamp_t timestamp;
+  };
+
 }; // Legion namespace
 
 #endif // __LEGION_TYPES_H__

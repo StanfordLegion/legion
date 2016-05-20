@@ -211,20 +211,20 @@ namespace Legion {
     class AutoLock { 
     public:
       AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
-               Event wait_on = Event::NO_EVENT)
+               RtEvent wait_on = RtEvent::NO_RT_EVENT) 
         : low_lock(r)
       {
 #define AUTOLOCK_USE_TRY_ACQUIRE
 #ifdef AUTOLOCK_USE_TRY_ACQUIRE
-	Event retry_event = r.try_acquire(false /*!retry*/,
-	                                  mode, exclusive, wait_on);
+	RtEvent retry_event(r.try_acquire(false /*!retry*/,
+	                                  mode, exclusive, wait_on));
 	while(retry_event.exists()) {
  	  retry_event.wait();
-	  retry_event = r.try_acquire(true /*retry*/,
-				      mode, exclusive, wait_on);
+	  retry_event = RtEvent(r.try_acquire(true /*retry*/,
+                                              mode, exclusive, wait_on));
 	}
 #else
-        Event lock_event = r.acquire(mode,exclusive,wait_on);
+        RtEvent lock_event(r.acquire(mode,exclusive,wait_on));
         if (lock_event.exists())
           lock_event.wait();
 #endif
@@ -263,16 +263,15 @@ namespace Legion {
       SemanticInfo(void)
         : buffer(NULL), size(0) { }  
       SemanticInfo(void *buf, size_t s, bool is_mut = true) 
-        : buffer(buf), size(s), 
-          ready_event(UserEvent::NO_USER_EVENT), is_mutable(is_mut) { }
-      SemanticInfo(UserEvent ready)
+        : buffer(buf), size(s), is_mutable(is_mut) { }
+      SemanticInfo(RtUserEvent ready)
         : buffer(NULL), size(0), ready_event(ready), is_mutable(true) { }
     public:
       inline bool is_valid(void) const { return !ready_event.exists(); }
     public:
       void *buffer;
       size_t size;
-      UserEvent ready_event;
+      RtUserEvent ready_event;
       bool is_mutable;
     };
 

@@ -54,7 +54,7 @@ namespace Legion {
       struct DisjointnessArgs {
         HLRTaskID hlr_id;
         IndexPartition handle;
-        UserEvent ready;
+        RtUserEvent ready;
       };  
     public:
       RegionTreeForest(Runtime *rt);
@@ -80,26 +80,26 @@ namespace Legion {
                                   const Domain &color_space, 
                                   PartitionKind part_kind, AllocateMode mode);
       void compute_partition_disjointness(IndexPartition handle,
-                                          UserEvent ready_event);
+                                          RtUserEvent ready_event);
       bool destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
-      Event create_equal_partition(IndexPartition pid, size_t granularity);
-      Event create_weighted_partition(IndexPartition pid, size_t granularity,
+      RtEvent create_equal_partition(IndexPartition pid, size_t granularity);
+      RtEvent create_weighted_partition(IndexPartition pid, size_t granularity,
                                       const std::map<DomainPoint,int> &weights);
     public:
-      Event create_partition_by_union(IndexPartition pid,
-                                      IndexPartition handle1,
-                                      IndexPartition handle2);
-      Event create_partition_by_intersection(IndexPartition pid,
-                                             IndexPartition handle1,
-                                             IndexPartition handle2);
-      Event create_partition_by_difference(IndexPartition pid,
+      RtEvent create_partition_by_union(IndexPartition pid,
+                                        IndexPartition handle1,
+                                        IndexPartition handle2);
+      RtEvent create_partition_by_intersection(IndexPartition pid,
+                                               IndexPartition handle1,
+                                               IndexPartition handle2);
+      RtEvent create_partition_by_difference(IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      Event create_cross_product_partitions(IndexPartition base,
-                                            IndexPartition source,
+      RtEvent create_cross_product_partitions(IndexPartition base,
+                                              IndexPartition source,
                       std::map<DomainPoint,IndexPartition> &handles);
     public:
       void compute_pending_color_space(IndexSpace parent,
@@ -113,8 +113,8 @@ namespace Legion {
                                     ColorPoint partition_color,
                                     PartitionKind part_kind,
                                     bool allocable, 
-                                    Event handle_ready,
-                                    Event domain_ready,
+                                    RtEvent handle_ready,
+                                    RtEvent domain_ready,
                                     bool create = false);
       void create_pending_cross_product(IndexPartition handle1,
                                         IndexPartition handle2,
@@ -123,47 +123,47 @@ namespace Legion {
                                            PartitionKind kind,
                                            ColorPoint &part_color,
                                            bool allocable,
-                                           Event handle_ready,
-                                           Event domain_ready);
-      Event create_partition_by_field(RegionTreeContext ctx,
+                                           RtEvent handle_ready,
+                                           RtEvent domain_ready);
+      ApEvent create_partition_by_field(RegionTreeContext ctx,
+                                        Operation *op, unsigned index,
+                                        const RegionRequirement &req,
+                                        IndexPartition pending,
+                                        const Domain &color_space,
+                                        ApEvent term_event,
+                                        VersionInfo &version_info,
+                                        std::set<RtEvent> &applied_events);
+      ApEvent create_partition_by_image(RegionTreeContext ctx,
                                       Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
-                                      Event term_event,
+                                      ApEvent term_event,
                                       VersionInfo &version_info,
-                                      std::set<Event> &applied_events);
-      Event create_partition_by_image(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition pending,
-                                      const Domain &color_space,
-                                      Event term_event,
-                                      VersionInfo &version_info,
-                                      std::set<Event> &applied_events);
-      Event create_partition_by_preimage(RegionTreeContext ctx,
+                                      std::set<RtEvent> &applied_events);
+      ApEvent create_partition_by_preimage(RegionTreeContext ctx,
                                       Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
                                       const Domain &color_space,
-                                      Event term_event,
+                                      ApEvent term_event,
                                       VersionInfo &version_info,
-                                      std::set<Event> &applied_events);
+                                      std::set<RtEvent> &applied_events);
     public:
       IndexSpace find_pending_space(IndexPartition parent,
                                     const DomainPoint &color,
-                                    UserEvent &handle_ready,
-                                    UserEvent &domain_ready);
-      Event compute_pending_space(IndexSpace result,
-                                  const std::vector<IndexSpace> &handles,
-                                  bool is_union);
-      Event compute_pending_space(IndexSpace result,
-                                  IndexPartition handle,
-                                  bool is_union);
-      Event compute_pending_space(IndexSpace result,
-                                  IndexSpace initial,
-                                  const std::vector<IndexSpace> &handles);
+                                    RtUserEvent &handle_ready,
+                                    RtUserEvent &domain_ready);
+      RtEvent compute_pending_space(IndexSpace result,
+                                    const std::vector<IndexSpace> &handles,
+                                    bool is_union);
+      RtEvent compute_pending_space(IndexSpace result,
+                                    IndexPartition handle,
+                                    bool is_union);
+      RtEvent compute_pending_space(IndexSpace result,
+                                    IndexSpace initial,
+                                    const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(IndexSpace parent, 
                                          const ColorPoint &color);
@@ -269,7 +269,7 @@ namespace Legion {
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
-                    Event term_event, SingleTask *context, unsigned index,
+                    ApEvent term_event, SingleTask *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
@@ -290,7 +290,7 @@ namespace Legion {
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
                                   bool find_valid,
-                                  std::set<Event> &map_applied,
+                                  std::set<RtEvent> &map_applied,
                                   InstanceSet &valid_insts
 #ifdef DEBUG_LEGION
                                   , const char *log_name
@@ -302,9 +302,9 @@ namespace Legion {
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
                                  Operation *op, unsigned index,
-                                 Event term_event, 
+                                 ApEvent term_event, 
                                  bool defer_add_users,
-                                 std::set<Event> &map_applied,
+                                 std::set<RtEvent> &map_applied,
                                  InstanceSet &targets
 #ifdef DEBUG_LEGION
                                  , const char *log_name
@@ -327,9 +327,9 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
-                                  Event term_event,
+                                  ApEvent term_event,
                                   bool defer_add_users,
-                                  std::set<Event> &map_applied,
+                                  std::set<RtEvent> &map_applied,
                                   InstanceSet &targets
 #ifdef DEBUG_LEGION
                                  , const char *log_name
@@ -337,72 +337,72 @@ namespace Legion {
 #endif
                                  );
       // For when we deferred registration of users
-      void physical_register_users(Operation *op, Event term_event,
+      void physical_register_users(Operation *op, ApEvent term_event,
                    const std::vector<RegionRequirement> &regions,
                    const std::vector<bool> &to_skip,
                    const std::vector<VersionInfo> &version_infos,
                    std::deque<InstanceSet> &targets,
-                   std::set<Event> &map_applied_events);
-      Event physical_perform_close(RegionTreeContext ctx,
-                                   const RegionRequirement &req,
-                                   VersionInfo &version_info,
-                                   Operation *op, unsigned index,
-                                   int composite_index,
+                   std::set<RtEvent> &map_applied_events);
+      ApEvent physical_perform_close(RegionTreeContext ctx,
+                                     const RegionRequirement &req,
+                                     VersionInfo &version_info,
+                                     Operation *op, unsigned index,
+                                     int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
-                    Event term_event, std::set<Event> &map_applied,
+                    ApEvent term_event, std::set<RtEvent> &map_applied,
                     const InstanceSet &targets
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
 #endif
                                   );
-      Event physical_close_context(RegionTreeContext ctx,
-                                   const RegionRequirement &req,
-                                   VersionInfo &version_info,
-                                   Operation *op, unsigned index,
-                                   std::set<Event> &map_applied,
-                                   InstanceSet &targets
+      ApEvent physical_close_context(RegionTreeContext ctx,
+                                     const RegionRequirement &req,
+                                     VersionInfo &version_info,
+                                     Operation *op, unsigned index,
+                                     std::set<RtEvent> &map_applied,
+                                     InstanceSet &targets
 #ifdef DEBUG_LEGION
-                                   , const char *log_name
-                                   , UniqueID uid
+                                     , const char *log_name
+                                     , UniqueID uid
 #endif
-                                   );
-      Event copy_across(RegionTreeContext src_ctx,
-                        RegionTreeContext dst_ctx,
-                        const RegionRequirement &src_req,
-                        const RegionRequirement &dst_req,
-                        const InstanceSet &src_targets, 
-                        const InstanceSet &dst_targets,
-                        VersionInfo &src_version_info, 
-                        int src_composite, Operation *op, 
-                        unsigned index, Event precondition,
-                        std::set<Event> &map_applied);
-      Event reduce_across(RegionTreeContext src_ctx,
+                                     );
+      ApEvent copy_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
                           const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                          const InstanceSet &src_targets,
+                          const InstanceSet &src_targets, 
                           const InstanceSet &dst_targets,
-                          VersionInfo &src_version_info,
-                          Operation *op, Event precondition);
+                          VersionInfo &src_version_info, 
+                          int src_composite, Operation *op, 
+                          unsigned index, ApEvent precondition,
+                          std::set<RtEvent> &map_applied);
+      ApEvent reduce_across(RegionTreeContext src_ctx,
+                            RegionTreeContext dst_ctx,
+                            const RegionRequirement &src_req,
+                            const RegionRequirement &dst_req,
+                            const InstanceSet &src_targets,
+                            const InstanceSet &dst_targets,
+                            VersionInfo &src_version_info,
+                            Operation *op, ApEvent precondition);
       void convert_views_into_context(const RegionRequirement &req,
                                       SingleTask *context,
                                       unsigned index,
                                       VersionInfo &version_info,
                                       InstanceView *src_view,
                                       InstanceView *dst_view,
-                                      Event ready_event,
+                                      ApEvent ready_event,
                                       const std::vector<ColorPoint> &path,
-                                      std::set<Event> &applied_events);
+                                      std::set<RtEvent> &applied_events);
       void convert_views_from_context(const RegionRequirement &req,
                                       SingleTask *context,
                                       unsigned index,
                                       VersionInfo &version_info,
                                       InstanceView *dst_view,
-                                      Event ready_event,
+                                      ApEvent ready_event,
                                       bool initial_user,
-                                      std::set<Event> &applied_events);
+                                      std::set<RtEvent> &applied_events);
     public:
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
@@ -432,21 +432,21 @@ namespace Legion {
                          unsigned &idx1, unsigned &idx2);
     public:
       // This takes ownership of the value buffer
-      Event fill_fields(RegionTreeContext ctx, Operation *op,
-                        const RegionRequirement &req,
-                        const unsigned index,
-                        const void *value, size_t value_size,
-                        VersionInfo &version_info,
-                        RestrictInfo &restrict_info,
-                        InstanceSet &instances, Event precondition,
-                        std::set<Event> &map_applied_events);
+      ApEvent fill_fields(RegionTreeContext ctx, Operation *op,
+                          const RegionRequirement &req,
+                          const unsigned index,
+                          const void *value, size_t value_size,
+                          VersionInfo &version_info,
+                          RestrictInfo &restrict_info,
+                          InstanceSet &instances, ApEvent precondition,
+                          std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               AttachOp *attach_op,
                               VersionInfo &version_info);
-      Event detach_file(RegionTreeContext ctx, 
-                        const RegionRequirement &req, DetachOp *detach_op, 
-                        VersionInfo &version_info, const InstanceRef &ref);
+      ApEvent detach_file(RegionTreeContext ctx, 
+                          const RegionRequirement &req, DetachOp *detach_op, 
+                          VersionInfo &version_info, const InstanceRef &ref);
     public:
       void send_back_logical_state(RegionTreeContext local_context,
                                    RegionTreeContext remote_context,
@@ -461,12 +461,12 @@ namespace Legion {
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // Give the event for when the domain is ready
-      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, Event ready,
+      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, RtEvent ready,
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // Give two events for when the domain handle and domain are ready
       IndexSpaceNode* create_node(IndexSpace is, 
-                                  Event handle_ready, Event domain_ready,
+                                  RtEvent handle_ready, RtEvent domain_ready,
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // We know the disjointness of the index partition
@@ -476,7 +476,7 @@ namespace Legion {
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   ColorPoint color, Domain color_space,
-                                  Event ready_event, AllocateMode mode);
+                                  RtEvent ready_event, AllocateMode mode);
       FieldSpaceNode* create_node(FieldSpace space);
       FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
@@ -539,7 +539,7 @@ namespace Legion {
       FatTreePath* compute_full_fat_path(IndexPartNode *node);
     public:
 #ifdef NEW_INSTANCE_CREATION
-      Event create_instance(const Domain &dom, Memory target,
+      RtEvent create_instance(const Domain &dom, Memory target,
                             const std::vector<std::pair<FieldID,size_t> > &fids,
                             PhysicalInstance &instance,
                             LegionConstraintSet &constraints);
@@ -622,10 +622,10 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*>        tree_nodes;
     private:
       // pending events for requested nodes
-      std::map<IndexSpace,Event>       index_space_requests;
-      std::map<IndexPartition,Event>    index_part_requests;
-      std::map<FieldSpace,Event>       field_space_requests;
-      std::map<RegionTreeID,Event>     region_tree_requests;
+      std::map<IndexSpace,RtEvent>       index_space_requests;
+      std::map<IndexPartition,RtEvent>    index_part_requests;
+      std::map<FieldSpace,RtEvent>       field_space_requests;
+      std::map<RegionTreeID,RtEvent>     region_tree_requests;
     public:
       static bool are_disjoint(const Domain &left,
                                const Domain &right);
@@ -771,7 +771,7 @@ namespace Legion {
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-        SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
+        SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -804,7 +804,7 @@ namespace Legion {
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     protected:
-      std::map<std::pair<ColorPoint,ColorPoint>,Event> pending_tests;
+      std::map<std::pair<ColorPoint,ColorPoint>,RtEvent> pending_tests;
     };
 
     /**
@@ -840,11 +840,11 @@ namespace Legion {
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, const Domain &d, Event ready,
+      IndexSpaceNode(IndexSpace handle, const Domain &d, RtEvent ready,
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, Event handle_ready, Event dom_ready,
+      IndexSpaceNode(IndexSpace handle, RtEvent handle_ready, RtEvent dom_ready,
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
@@ -868,11 +868,11 @@ namespace Legion {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-           SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
+           SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                            const void *buffer, size_t size, bool is_mutable);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
-                            bool can_fail, bool wait_until, UserEvent ready);
+                            bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -886,13 +886,13 @@ namespace Legion {
       void get_children(std::map<ColorPoint,IndexPartNode*> &children);
       void get_child_colors(std::set<ColorPoint> &colors, bool only_valid);
     public:
-      Event get_domain_precondition(void);
+      RtEvent get_domain_precondition(void);
       const Domain& get_domain_blocking(void);
-      const Domain& get_domain(Event &ready_event);
+      const Domain& get_domain(RtEvent &ready_event);
       const Domain& get_domain_no_wait(void);
       void set_domain(const Domain &dom);
       void get_domains_blocking(std::vector<Domain> &domains);
-      void get_domains(std::vector<Domain> &domains, Event &precondition);
+      void get_domains(std::vector<Domain> &domains, RtEvent &precondition);
       size_t get_domain_volume(bool app_query = false);
     public:
       bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2); 
@@ -908,7 +908,7 @@ namespace Legion {
       bool has_component_domains(void) const;
       void update_component_domains(const std::set<Domain> &domains);
       const std::set<Domain>& get_component_domains_blocking(void) const;
-      const std::set<Domain>& get_component_domains(Event &precondition) const;
+      const std::set<Domain>& get_component_domains(RtEvent &pre) const;
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
@@ -916,18 +916,18 @@ namespace Legion {
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
     public:
-      Event create_subspaces_by_field(
+      ApEvent create_subspaces_by_field(
           const std::vector<FieldDataDescriptor> &field_data,
           std::map<DomainPoint, Realm::IndexSpace> &subspaces,
-          bool mutable_results, Event precondition);
-      Event create_subspaces_by_image(
+          bool mutable_results, ApEvent precondition);
+      ApEvent create_subspaces_by_image(
           const std::vector<FieldDataDescriptor> &field_data,
           std::map<Realm::IndexSpace, Realm::IndexSpace> &subpsaces,
-          bool mutable_results, Event precondition);
-      Event create_subspaces_by_preimage(
+          bool mutable_results, ApEvent precondition);
+      ApEvent create_subspaces_by_preimage(
           const std::vector<FieldDataDescriptor> &field_data,
           std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-          bool mutable_results, Event precondition);
+          bool mutable_results, ApEvent precondition);
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
@@ -938,7 +938,7 @@ namespace Legion {
                                        Deserializer &derez, 
                                        AddressSpaceID source);
       void send_child_node(AddressSpaceID target, 
-                    const ColorPoint &child_color, UserEvent to_trigger);
+                    const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -958,9 +958,9 @@ namespace Legion {
       const AllocateMode mode;
     protected:
       // Track when the domain handle is ready
-      Event handle_ready;
+      RtEvent handle_ready;
       // Track when the domain has actually been computed
-      Event domain_ready;
+      RtEvent domain_ready;
       Domain domain;
     protected:
       // Must hold the node lock when accessing the
@@ -1007,7 +1007,7 @@ namespace Legion {
                     RegionTreeForest *ctx);
       IndexPartNode(IndexPartition p, IndexSpaceNode *par,
                     ColorPoint c, Domain color_space,
-                    Event ready_event, AllocateMode mode,
+                    RtEvent ready_event, AllocateMode mode,
                     RegionTreeForest *ctx);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
@@ -1029,11 +1029,11 @@ namespace Legion {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
+           SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
-                              bool can_fail, bool wait_until, UserEvent ready);
+                            bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1046,7 +1046,7 @@ namespace Legion {
       size_t get_num_children(void) const;
       void get_children(std::map<ColorPoint,IndexSpaceNode*> &children);
     public:
-      void compute_disjointness(UserEvent ready_event);
+      void compute_disjointness(RtUserEvent ready_event);
       bool is_disjoint(bool from_app = false);
       bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2,
                         bool force_compute = false);
@@ -1060,21 +1060,21 @@ namespace Legion {
       void destroy_node(AddressSpaceID source);
     public:
       void add_pending_child(const ColorPoint &child_color,
-                             UserEvent handle_ready, UserEvent domain_ready);
+                         RtUserEvent handle_ready, RtUserEvent domain_ready);
       bool get_pending_child(const ColorPoint &child_color,
-                             UserEvent &handle_ready, UserEvent &domain_ready);
+                         RtUserEvent &handle_ready, RtUserEvent &domain_ready);
       void remove_pending_child(const ColorPoint &child_color);
       static void handle_pending_child_task(const void *args);
     public:
-      Event create_equal_children(size_t granularity);
-      Event create_weighted_children(const std::map<DomainPoint,int> &weights,
-                                     size_t granularity);
-      Event create_by_operation(IndexPartNode *left, IndexPartNode *right,
-                                Realm::IndexSpace::IndexSpaceOperation op);
-      Event create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
-                                Realm::IndexSpace::IndexSpaceOperation op);
+      ApEvent create_equal_children(size_t granularity);
+      ApEvent create_weighted_children(const std::map<DomainPoint,int> &weights,
+                                       size_t granularity);
+      ApEvent create_by_operation(IndexPartNode *left, IndexPartNode *right,
+                                  Realm::IndexSpace::IndexSpaceOperation op);
+      ApEvent create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
+                                  Realm::IndexSpace::IndexSpaceOperation op);
     public:
-      void get_subspace_domain_preconditions(std::set<Event> &preconditions);
+      void get_subspace_domain_preconditions(std::set<RtEvent> &preconditions);
       void get_subspace_domains(std::set<Domain> &subspaces);
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true);
@@ -1092,7 +1092,7 @@ namespace Legion {
                                        Deserializer &derez, 
                                        AddressSpaceID source);
       void send_child_node(AddressSpaceID target,
-                           const ColorPoint &child_color, UserEvent to_trigger);
+                         const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -1110,7 +1110,7 @@ namespace Legion {
       IndexSpaceNode *const parent;
     protected:
       bool disjoint;
-      Event disjoint_ready;
+      RtEvent disjoint_ready;
     protected:
       bool has_complete, complete;
     protected:
@@ -1123,7 +1123,7 @@ namespace Legion {
       std::set<std::pair<ColorPoint,ColorPoint> > aliased_subspaces;
     protected:
       // Support for pending child spaces that still need to be computed
-      std::map<ColorPoint,std::pair<UserEvent,UserEvent> > pending_children;
+      std::map<ColorPoint,std::pair<RtUserEvent,RtUserEvent> > pending_children;
     };
 
     /**
@@ -1195,9 +1195,9 @@ namespace Legion {
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
-                              bool can_fail, bool wait_until, UserEvent ready);
+                             bool can_fail, bool wait_until, RtUserEvent ready);
       void process_semantic_field_request(FieldID fid, SemanticTag tag, 
-       AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready);
+      AddressSpaceID source, bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_semantic_request(RegionTreeForest *forest,
@@ -1207,11 +1207,11 @@ namespace Legion {
       static void handle_field_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      Event allocate_field(FieldID fid, size_t size,
-                           CustomSerdezID serdez_id);
-      Event allocate_fields(const std::vector<size_t> &sizes,
-                            const std::vector<FieldID> &fids,
-                            CustomSerdezID serdez_id);
+      RtEvent allocate_field(FieldID fid, size_t size,
+                             CustomSerdezID serdez_id);
+      RtEvent allocate_fields(const std::vector<size_t> &sizes,
+                              const std::vector<FieldID> &fids,
+                              CustomSerdezID serdez_id);
       void free_field(FieldID fid, AddressSpaceID source);
       void free_fields(const std::vector<FieldID> &to_free,
                        AddressSpaceID source);
@@ -1228,7 +1228,7 @@ namespace Legion {
                          std::set<FieldID> &to_set);
     public:
       void add_instance(RegionNode *inst);
-      Event add_instance(LogicalRegion top_handle, AddressSpaceID source);
+      RtEvent add_instance(LogicalRegion top_handle, AddressSpaceID source);
       bool has_instance(RegionTreeID tid);
       void destroy_node(AddressSpaceID source);
     public:
@@ -1357,7 +1357,7 @@ namespace Legion {
       bool retrieve_semantic_information(SemanticTag tag,
            const void *&result, size_t &size, bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-          SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
+        SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                           const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -1533,22 +1533,22 @@ namespace Legion {
       // Issue copies for fields with the same event preconditions
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst,
-                      LegionMap<Event,FieldMask>::aligned &preconditions,
+                      LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                 const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                                 const VersionInfo &src_version_info,
-                      LegionMap<Event,FieldMask>::aligned &postconditions,
+                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL);
       static void compute_event_sets(FieldMask update_mask,
-          const LegionMap<Event,FieldMask>::aligned &preconditions,
+          const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
           LegionList<EventSet>::aligned &event_sets);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    const VersionInfo &version_info,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op, unsigned index,
-                                   std::set<Event> &map_applied_events);
+                                   std::set<RtEvent> &map_applied_events);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
@@ -1618,21 +1618,21 @@ namespace Legion {
       virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       // Interfaces to Realm
-      virtual Event issue_copy(Operation *op,
+      virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
-      virtual Event issue_fill(Operation *op,
+      virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  Event precondition, RegionTreeNode *intersect = NULL) = 0;
+                  ApEvent precondition, RegionTreeNode *intersect = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
       virtual const Domain& get_domain_blocking(void) const = 0;
-      virtual const Domain& get_domain(Event &precondition) const = 0;
+      virtual const Domain& get_domain(RtEvent &precondition) const = 0;
       virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other) = 0;
@@ -1650,12 +1650,12 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info) = 0;
-      virtual Event perform_close_operation(const TraversalInfo &info,
-                                            const FieldMask &closing_mask,
+      virtual ApEvent perform_close_operation(const TraversalInfo &info,
+                                              const FieldMask &closing_mask,
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                            const InstanceSet &targets, 
-                                            VersionInfo &version_info,
-                                            Event term_event,
+                                              const InstanceSet &targets, 
+                                              VersionInfo &version_info,
+                                              ApEvent term_event,
                                  const std::set<ColorPoint> &next_children) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual InstanceView* find_context_view(PhysicalManager *manager, 
@@ -1751,15 +1751,15 @@ namespace Legion {
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
     public:
-      virtual Event issue_copy(Operation *op,
+      virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
-      virtual Event issue_fill(Operation *op,
+      virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  Event precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
@@ -1775,7 +1775,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain(RtEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
@@ -1792,23 +1792,23 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual Event perform_close_operation(const TraversalInfo &info,
-                                            const FieldMask &closing_mask,
+      virtual ApEvent perform_close_operation(const TraversalInfo &info,
+                                              const FieldMask &closing_mask,
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                            const InstanceSet &targets,
-                                            VersionInfo &version_info,
-                                            Event term_event,
+                                              const InstanceSet &targets,
+                                              VersionInfo &version_info,
+                                              ApEvent term_event,
                                      const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
+           SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
-                              bool can_fail, bool wait_until, UserEvent ready);
+                            bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1844,13 +1844,13 @@ namespace Legion {
                                        const FieldMask &virtual_mask,
                                        VersionInfo &version_info,
                                        SingleTask *target_ctx);
-      void register_region(const TraversalInfo &info, Event term_event,
+      void register_region(const TraversalInfo &info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
                            InstanceSet &targets);
       void register_virtual(ContextID ctx, const InstanceRef &ref,
                             VersionInfo &version_info,
                             const FieldMask &composite_mask);
-      void seed_state(ContextID ctx, Event term_event,
+      void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              const InstanceSet &targets,
@@ -1858,29 +1858,29 @@ namespace Legion {
                              const std::vector<LogicalView*> &corresponding);
       void close_state(const TraversalInfo &info,
                        RegionUsage &usage, InstanceSet &targets);
-      void find_field_descriptors(ContextID ctx, Event term_event,
+      void find_field_descriptors(ContextID ctx, ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   FieldID fid, Operation *op, unsigned index,
                                   std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<Event> &preconditions,
+                                  std::set<ApEvent> &preconditions,
                                   VersionInfo &version_info,
-                                  std::set<Event> &applied_events);
+                                  std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
-      Event eager_fill_fields(ContextID ctx, Operation *op,
+      ApEvent eager_fill_fields(ContextID ctx, Operation *op,
                               const unsigned index,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
-                              Event precondition,
-                              std::set<Event> &map_applied_events);
+                              ApEvent precondition,
+                              std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
-      Event detach_file(ContextID ctx, DetachOp *detach_op, 
-                        VersionInfo &version_info, const InstanceRef &ref);
+      ApEvent detach_file(ContextID ctx, DetachOp *detach_op, 
+                          VersionInfo &version_info, const InstanceRef &ref);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,
                                               SingleTask *context);
@@ -1938,15 +1938,15 @@ namespace Legion {
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
     public:
-      virtual Event issue_copy(Operation *op,
+      virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
-      virtual Event issue_fill(Operation *op,
+      virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  Event precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
@@ -1963,7 +1963,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(Event &precondition) const;
+      virtual const Domain& get_domain(RtEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
@@ -1980,12 +1980,12 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual Event perform_close_operation(const TraversalInfo &info,
+      virtual ApEvent perform_close_operation(const TraversalInfo &info,
                                             const FieldMask &closing_mask,
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                             const InstanceSet &targets,
                                             VersionInfo &version_info,
-                                            Event term_event,
+                                            ApEvent term_event,
                                      const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
     public:
@@ -2001,11 +2001,11 @@ namespace Legion {
                                   std::vector<InstanceView*> &results);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
+           SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
       void process_semantic_request(SemanticTag tag, AddressSpaceID source,
-                              bool can_fail, bool wait_until, UserEvent ready);
+                            bool can_fail, bool wait_until, RtUserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,

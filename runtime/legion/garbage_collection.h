@@ -220,7 +220,7 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
-      inline Event get_destruction_event(void) const 
+      inline RtEvent get_destruction_event(void) const 
         { return destruction_event; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
@@ -229,7 +229,8 @@ namespace Legion {
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
-      void register_remote_instance(AddressSpaceID source, Event destroy_event);
+      void register_remote_instance(AddressSpaceID source, 
+                                    RtEvent destroy_event);
       void register_with_runtime(void);
     public:
       virtual void send_remote_registration(void);
@@ -294,10 +295,10 @@ namespace Legion {
       NodeSet                  remote_instances;
     protected:
       // Only valid on owner
-      std::set<Event>          recycle_events;
+      std::set<RtEvent>        recycle_events;
     protected:
       // Only matter on remote nodes
-      UserEvent destruction_event;
+      RtUserEvent destruction_event;
     protected:
       bool registered_with_runtime;
     };

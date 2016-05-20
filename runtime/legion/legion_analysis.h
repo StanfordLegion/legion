@@ -145,11 +145,11 @@ namespace Legion {
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
-                         std::set<Event> &applied_conditions,
+                         std::set<RtEvent> &applied_conditions,
 			 bool copy_previous = false);
       void apply_close(ContextID ctx, AddressSpaceID target,
              const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
-                       std::set<Event> &applied_conditions); 
+                       std::set<RtEvent> &applied_conditions); 
       void reset(void);
       void release(void);
       void clear(void);
@@ -164,7 +164,7 @@ namespace Legion {
       void pack_version_info(Serializer &rez, AddressSpaceID local_space,
                              ContextID ctx);
       void unpack_version_info(Deserializer &derez);
-      void make_local(std::set<Event> &preconditions,
+      void make_local(std::set<RtEvent> &preconditions,
                       RegionTreeForest *forest, ContextID ctx);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
@@ -304,7 +304,7 @@ namespace Legion {
       TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
                     const RegionRequirement &req, VersionInfo &version_info, 
                     const FieldMask &traversal_mask, 
-                    std::set<Event> &map_applied_events);
+                    std::set<RtEvent> &map_applied_events);
     public:
       const ContextID ctx;
       Operation *const op;
@@ -313,7 +313,7 @@ namespace Legion {
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;
-      std::set<Event> &map_applied_events;
+      std::set<RtEvent> &map_applied_events;
     };
 
     /**
@@ -406,7 +406,7 @@ namespace Legion {
       void reset(void);
       void sanity_check(void);
     public:
-      void initialize_state(Event term_event,
+      void initialize_state(ApEvent term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask,
                             const InstanceSet &targets,
@@ -604,7 +604,7 @@ namespace Legion {
         : set_mask(m) { }
     public:
       FieldMask set_mask;
-      std::set<Event> preconditions;
+      std::set<ApEvent> preconditions;
     }; 
     
     /**
@@ -636,20 +636,20 @@ namespace Legion {
       void add_advance_state(VersionState *state, const FieldMask &mask);
       void capture_state(bool path_only, bool split_node);
       void apply_path_only_state(const FieldMask &advance_mask,
-            AddressSpaceID target, std::set<Event> &applied_conditions) const;
+            AddressSpaceID target, std::set<RtEvent> &applied_conditions) const;
       void apply_state(const FieldMask &advance_mask, 
-            AddressSpaceID target, std::set<Event> &applied_conditions);
+            AddressSpaceID target, std::set<RtEvent> &applied_conditions);
       void filter_and_apply(const FieldMask &advance_mask,AddressSpaceID target,
             bool filter_masks, bool filter_views, bool filter_children,
             const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
-                            std::set<Event> &applied_conditions);
+                            std::set<RtEvent> &applied_conditions);
       void reset(void);
       void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
       PhysicalState* clone(const FieldMask &clone_mask, 
                            bool clone_state, bool need_advance) const;
-      void make_local(std::set<Event> &preconditions, 
+      void make_local(std::set<RtEvent> &preconditions, 
                       bool needs_final, bool needs_advance); 
     public:
       void print_physical_state(const FieldMask &capture_mask,
@@ -697,7 +697,7 @@ namespace Legion {
       struct RequestInfo {
       public:
         AddressSpaceID target;
-        UserEvent to_trigger;
+        RtUserEvent to_trigger;
         FieldMask request_mask;
         VersionRequestKind kind;
       };
@@ -709,7 +709,7 @@ namespace Legion {
         AddressSpaceID target;
         VersionRequestKind request_kind;
         FieldMask *request_mask;
-        UserEvent to_trigger;
+        RtUserEvent to_trigger;
       };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
@@ -724,7 +724,7 @@ namespace Legion {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void initialize(Event term_event, const RegionUsage &usage,
+      void initialize(ApEvent term_event, const RegionUsage &usage,
                       const FieldMask &user_mask, const InstanceSet &targets,
                       UniqueID init_op_id, unsigned init_index,
                       const std::vector<LogicalView*> &corresponding);
@@ -740,18 +740,18 @@ namespace Legion {
       void merge_path_only_state(const PhysicalState *state,
                                  const FieldMask &merge_mask,
                                  AddressSpaceID target,
-                                 std::set<Event> &applied_conditions);
+                                 std::set<RtEvent> &applied_conditions);
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
                                 AddressSpaceID target,
-                                std::set<Event> &applied_conditions,
+                                std::set<RtEvent> &applied_conditions,
                                 bool need_lock = true);
       void filter_and_merge_physical_state(const PhysicalState *state,
                                 const FieldMask &merge_mask,
                                 AddressSpaceID target, bool filter_masks,
                                 bool filter_views, bool filter_children,
             const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
-                                std::set<Event> &applied_conditions);
+                                std::set<RtEvent> &applied_conditions);
     public:
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -759,39 +759,39 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       void request_initial_version_state(const FieldMask &request_mask,
-                                         std::set<Event> &preconditions);
+                                         std::set<RtEvent> &preconditions);
       void request_final_version_state(const FieldMask &request_mask,
-                                       std::set<Event> &preconditions);
+                                       std::set<RtEvent> &preconditions);
       void select_initial_targets(AddressSpaceID request_space, 
                                   FieldMask &needed_mask,
                                   LegionDeque<RequestInfo>::aligned &targets,
-                                  std::set<Event> &preconditions);
+                                  std::set<RtEvent> &preconditions);
       void select_final_targets(AddressSpaceID request_space,
                                 FieldMask &needed_mask,
                                 LegionDeque<RequestInfo>::aligned &targets,
-                                std::set<Event> &preconditions);
+                                std::set<RtEvent> &preconditions);
     public:
       void send_version_state(AddressSpaceID target, VersionRequestKind kind,
-                           const FieldMask &request_mask, UserEvent to_trigger);
+                         const FieldMask &request_mask, RtUserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                            UserEvent to_trigger, const FieldMask &request_mask,
-                            VersionRequestKind request_kind);
+                          RtUserEvent to_trigger, const FieldMask &request_mask,
+                          VersionRequestKind request_kind);
       void launch_send_version_state(AddressSpaceID target,
-                                     UserEvent to_trigger, 
+                                     RtUserEvent to_trigger, 
                                      VersionRequestKind request_kind,
                                      const FieldMask &request_mask, 
-                                     Event precondition = Event::NO_EVENT);
+                                     RtEvent precondition=RtEvent::NO_RT_EVENT);
     public:
       void handle_version_state_path_only(AddressSpaceID source,
                                           FieldMask &path_only_mask);
       void handle_version_state_initialization(AddressSpaceID source,
                                                FieldMask &initial_mask);
       void handle_version_state_request(AddressSpaceID source, 
-                                        UserEvent to_trigger, 
+                                        RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,
                                         FieldMask &request_mask);
       void handle_version_state_response(AddressSpaceID source,
-            UserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
+          RtUserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
       static void process_version_state_path_only(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
@@ -831,8 +831,8 @@ namespace Legion {
       // Fields which are in the final state
       FieldMask final_fields;
       // Initial ready events
-      LegionMap<Event,FieldMask>::aligned initial_events;
-      LegionMap<Event,FieldMask>::aligned final_events;
+      LegionMap<RtEvent,FieldMask>::aligned initial_events;
+      LegionMap<RtEvent,FieldMask>::aligned final_events;
       // These are valid on the owner node only
       LegionMap<AddressSpaceID,FieldMask>::aligned path_only_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
@@ -1047,7 +1047,7 @@ namespace Legion {
                       const FieldMask &reduc_mask, 
                       VersionInfo &version_info, 
                       Operation *op, unsigned index,
-                      std::set<Event> &map_applied_events);
+                      std::set<RtEvent> &map_applied_events);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1060,7 +1060,7 @@ namespace Legion {
       VersionInfo &version_info;
       Operation *const op;
       const unsigned index;
-      std::set<Event> &map_applied_events;
+      std::set<RtEvent> &map_applied_events;
     protected:
       std::set<ReductionView*> issued_reductions;
     };
@@ -1074,7 +1074,7 @@ namespace Legion {
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
       InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
-                  Event ready_event = Event::NO_EVENT);
+                  ApEvent ready_event = ApEvent::NO_AP_EVENT);
       ~InstanceRef(void);
     public:
       InstanceRef& operator=(const InstanceRef &rhs);
@@ -1089,8 +1089,8 @@ namespace Legion {
 #endif
         return (ptr.manager != NULL);
       }
-      inline Event get_ready_event(void) const { return ready_event; }
-      inline void set_ready_event(Event ready) { ready_event = ready; }
+      inline ApEvent get_ready_event(void) const { return ready_event; }
+      inline void set_ready_event(ApEvent ready) { ready_event = ready; }
       inline PhysicalManager* get_manager(void) const 
       { 
 #ifdef DEBUG_LEGION
@@ -1123,10 +1123,10 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez, Event &ready);
+      void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
     private:
       FieldMask valid_fields; 
-      Event ready_event;
+      ApEvent ready_event;
       union {
         PhysicalManager *manager;
         CompositeView *view;
@@ -1186,12 +1186,12 @@ namespace Legion {
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, Deserializer &derez,
-                             std::set<Event> &ready_events);
+                             std::set<RtEvent> &ready_events);
     public:
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;
     public:
-      void update_wait_on_events(std::set<Event> &wait_on_events) const;
+      void update_wait_on_events(std::set<RtEvent> &wait_on_events) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>

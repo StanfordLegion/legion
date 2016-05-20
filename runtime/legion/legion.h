@@ -655,7 +655,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(Barrier b);
+      PhaseBarrier(ApBarrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
@@ -664,9 +664,9 @@ namespace Legion {
       void arrive(unsigned count = 1);
       void wait(void);
       void alter_arrival_count(int delta);
-      Barrier get_barrier(void) const { return phase_barrier; }
+      Realm::Barrier get_barrier(void) const { return phase_barrier; }
     protected:
-      Barrier phase_barrier;
+      ApBarrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
@@ -690,7 +690,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty dynamic collectives
       FRIEND_ALL_RUNTIME_CLASSES
-      DynamicCollective(Barrier b, ReductionOpID redop);
+      DynamicCollective(ApBarrier b, ReductionOpID redop);
     public:
       // All the same operations as a phase barrier
       void arrive(const void *value, size_t size, unsigned count = 1);
