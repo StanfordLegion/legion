@@ -1017,7 +1017,7 @@ PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor lo
                             std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
                             std::map<Processor, Memory>* _proc_sysmems,
                             std::map<Processor, Memory>* _proc_regmems)
-  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local),
     procs_list(*_procs_list),
     sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
