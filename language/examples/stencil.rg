@@ -131,7 +131,7 @@ local function make_stencil(radius)
   return st
 end
 
-local RADIUS = 1
+local RADIUS = 2
 local stencil = make_stencil(RADIUS)
 
 task increment(points : region(ispace(int2d), point))
@@ -150,7 +150,7 @@ where reads(points.{input, output}) do
 end
 
 task main()
-  var n : int64, nt : int64, ts : int64 = 10, 4, 10
+  var n : int64, nt : int64, ts : int64 = 12, 4, 10
   var radius : int64 = RADIUS
   var grid = ispace(int2d, { x = n, y = n })
   var tiles = ispace(int2d, { x = nt, y = nt })
