@@ -722,6 +722,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperRuntime::get_field_space_fields(MapperContext ctx, 
+                          FieldSpace handle, std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> local;
+      ctx->manager->get_field_space_fields(ctx, handle, local);
+      fields.insert(local.begin(), local.end());
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition MapperRuntime::get_logical_partition(MapperContext ctx,
                               LogicalRegion parent, IndexPartition handle) const
     //--------------------------------------------------------------------------

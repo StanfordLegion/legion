@@ -1068,6 +1068,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShimMapper::get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_runtime->get_field_space_fields(current_ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::broadcast_message(const void *message, size_t message_size)
     //--------------------------------------------------------------------------
     {
