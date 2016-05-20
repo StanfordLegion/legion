@@ -13237,15 +13237,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         SingleTask *ctx = dynamic_cast<SingleTask*>(task);
         assert(ctx != NULL);
-#else
-        SingleTask *ctx = static_cast<SingleTask*>(task);
-#endif
-        ctx->end_task(result, result_size, owned);
-#ifdef DEBUG_LEGION
         decrement_total_outstanding_tasks(task->task_id, false/*meta*/);
 #else
+        SingleTask *ctx = static_cast<SingleTask*>(task);
         decrement_total_outstanding_tasks();
 #endif
+        ctx->end_task(result, result_size, owned);
       }
       else
         task->end_inline_task(result, result_size, owned);
