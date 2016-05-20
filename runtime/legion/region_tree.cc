@@ -12128,6 +12128,8 @@ namespace Legion {
         derez.deserialize(field_state.redop);
         unsigned num_children;
         derez.deserialize(num_children);
+        if (num_children == 0)
+          continue;
         for (unsigned idx2 = 0; idx2 < num_children; idx2++)
         {
           ColorPoint child;
