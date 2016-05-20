@@ -1516,6 +1516,10 @@ function symbol:getsymbol()
   return self.symbol_value
 end
 
+function symbol:hash()
+  return self
+end
+
 function symbol:__tostring()
   if self:hasname() then
     return "$" .. tostring(self:getname())

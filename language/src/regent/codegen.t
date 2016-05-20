@@ -4831,7 +4831,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
   if std.is_region(region_type) then
     field_space = `([region.value].impl.field_space)
   elseif std.is_list_of_regions(region_type) then
-    field_space = terralib.newsymbol("field_space")
+    field_space = terralib.newsymbol(c.legion_field_space_t, "field_space")
     actions = quote
       regentlib.assert([region.value].__size > 0, "attempting to allocate scratch fields for empty list")
       var r = [region_type:data(region.value)][0]
