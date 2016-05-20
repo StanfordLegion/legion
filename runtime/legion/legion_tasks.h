@@ -1333,7 +1333,8 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       void return_privileges(PointTask *point);
-      void return_virtual_instance(unsigned index, InstanceSet &refs);
+      void return_virtual_instance(unsigned index, InstanceSet &refs,
+                                   const RegionRequirement &req);
       void record_child_mapped(Event child_complete);
       void record_child_complete(void);
       void record_child_committed(void);
