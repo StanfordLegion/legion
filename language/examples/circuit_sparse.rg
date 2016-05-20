@@ -14,9 +14,11 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "4", "-findex-launches", "0"],
+--   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2", "-findex-launches", "0"]
 -- ]
+
+-- FIXME: Index launches trigger runtime bug
 
 import "regent"
 
@@ -37,7 +39,7 @@ do
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
+  local cxx_flags = "-O2 -Wall -Werror"
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
