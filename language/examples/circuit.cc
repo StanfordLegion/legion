@@ -85,7 +85,11 @@ Processor CircuitMapper::default_policy_select_initial_processor(
     std::vector<Processor> &local_procs =
       sysmem_local_procs[proc_sysmems[local_proc]];
     Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
-    return local_procs[(index % (local_procs.size() - 1)) + 1];
+    if (local_procs.size() > 1) {
+      return local_procs[(index % (local_procs.size() - 1)) + 1];
+    } else {
+      return local_proc;
+    }
   }
 
   return DefaultMapper::default_policy_select_initial_processor(ctx, task);
