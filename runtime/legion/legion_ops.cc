@@ -45,7 +45,7 @@ namespace Legion {
     {
       dependence_tracker.mapping = NULL;
       if (!Runtime::resilient_mode)
-        commit_event = UserEvent::NO_USER_EVENT;
+        commit_event = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -83,11 +83,11 @@ namespace Legion {
       track_parent = false;
       parent_ctx = NULL;
       need_completion_trigger = true;
-      mapped_event = UserEvent::create_user_event();
-      resolved_event = UserEvent::create_user_event();
-      completion_event = UserEvent::create_user_event();
+      mapped_event = Runtime::create_rt_user_event();
+      resolved_event = Runtime::create_rt_user_event();
+      completion_event = Runtime::create_rt_user_event();
       if (Runtime::resilient_mode)
-        commit_event = UserEvent::create_user_event();
+        commit_event = Runtime::create_rt_user_event();
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
@@ -121,13 +121,13 @@ namespace Legion {
         dependence_tracker.commit = NULL;
       }
       if (!mapped_event.has_triggered())
-        mapped_event.trigger();
+        Runtime::trigger_event(mapped_event);
       if (!resolved_event.has_triggered())
-        resolved_event.trigger();
+        Runtime::trigger_event(resolved_event);
       if (need_completion_trigger && !completion_event.has_triggered())
-        completion_event.trigger();
+        Runtime::trigger_event(completion_event);
       if (!commit_event.has_triggered())
-        commit_event.trigger();
+        Runtime::trigger_event(commit_event);
     }
 
     //--------------------------------------------------------------------------
@@ -288,11 +288,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::trigger_remote_state_analysis(UserEvent ready_event)
+    void Operation::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       // We have nothing to check for so just trigger the event
-      ready_event.trigger();
+      Runtime::trigger_event(ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -418,7 +418,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_mapping(Event wait_on /*= Event::NO_EVENT*/)
+    void Operation::complete_mapping(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -428,11 +428,11 @@ namespace Legion {
         mapped = true;
       }
 #endif
-      Runtime::trigger_event<true>(mapped_event, wait_on);
+      Runtime::trigger_event(mapped_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_execution(Event wait_on /*= Event::NO_EVENT*/)
+    void Operation::complete_execution(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
       if (!wait_on.has_triggered())
@@ -462,8 +462,8 @@ namespace Legion {
       // Now see if we are ready to complete this operation
       if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
-        Event trigger_pre = 
-          Runtime::merge_events<true>(mapped_event, resolved_event);
+        RtEvent trigger_pre = 
+          Runtime::merge_events(mapped_event, resolved_event);
         DeferredCompleteArgs args;
         args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         args.proxy_this = this;
@@ -477,7 +477,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::resolve_speculation(Event wait_on /*= Event::NO_EVENT*/)
+    void Operation::resolve_speculation(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -487,7 +487,7 @@ namespace Legion {
         resolved = true;
       }
 #endif
-      Runtime::trigger_event<true>(resolved_event, wait_on);
+      Runtime::trigger_event(resolved_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -534,7 +534,7 @@ namespace Legion {
         }
       }
       if (need_completion_trigger)
-        completion_event.trigger(); 
+        Runtime::trigger_event(completion_event);
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -555,7 +555,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::commit_operation(bool do_deactivate,
-                                     Event wait_on /*= Event::NO_EVENT*/)
+                                     RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
       if (!wait_on.has_triggered())
@@ -588,7 +588,7 @@ namespace Legion {
       } 
       // Trigger the commit event
       if (Runtime::resilient_mode)
-        commit_event.trigger();
+        Runtime::trigger_event(commit_event);
       if (do_deactivate)
         deactivate();
     }
@@ -789,7 +789,7 @@ namespace Legion {
                                          Operation *op, GenerationID op_gen,
                                          bool &registered_dependence,
                                          MappingDependenceTracker *tracker,
-                                         Event other_commit_event)
+                                         RtEvent other_commit_event)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
@@ -895,7 +895,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event Operation::invoke_state_analysis(void)
+    RtEvent Operation::invoke_state_analysis(void)
     //--------------------------------------------------------------------------
     {
       // First check to see if the parent context has remote state
@@ -905,7 +905,7 @@ namespace Legion {
         // a slight priority boost because we know that it will likely
         // involve some inter-node communication and we want to get 
         // that in flight quickly to help hide latency.
-        UserEvent ready_event = UserEvent::create_user_event();
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
         StateAnalysisArgs args;
         args.hlr_id = HLR_STATE_ANALYSIS_ID;
         args.proxy_op = this;
@@ -916,7 +916,7 @@ namespace Legion {
         return ready_event;
       }
       else
-        return Event::NO_EVENT;
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1055,8 +1055,7 @@ namespace Legion {
       bool resolve_now = true;
       if (!mapping_dependences.empty())
       {
-        Event map_precondition = 
-          Runtime::merge_events<true>(mapping_dependences);
+        RtEvent map_precondition = Runtime::merge_events(mapping_dependences);
         if (!map_precondition.has_triggered())
         {
           if (must_epoch == NULL)
@@ -1076,8 +1075,8 @@ namespace Legion {
       }
       if (!resolution_dependences.empty())
       {
-        Event resolve_precondition = 
-          Runtime::merge_events<true>(resolution_dependences);
+        RtEvent resolve_precondition = 
+          Runtime::merge_events(resolution_dependences);
         if (!resolve_precondition.has_triggered())
         {
           DeferredResolutionArgs args;
@@ -1103,8 +1102,7 @@ namespace Legion {
     {
       if (!commit_dependences.empty())
       {
-        Event commit_precondition = 
-          Runtime::merge_events<true>(commit_dependences);
+        RtEvent commit_precondition = Runtime::merge_events(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
           DeferredCommitTriggerArgs args;
@@ -1268,7 +1266,7 @@ namespace Legion {
       speculation_state = RESOLVE_TRUE_STATE;
       predicate = NULL;
       received_trigger_resolution = false;
-      predicate_waiter = UserEvent::NO_USER_EVENT;
+      predicate_waiter = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1322,7 +1320,7 @@ namespace Legion {
     bool SpeculativeOp::get_predicate_value(Processor proc)
     //--------------------------------------------------------------------------
     {
-      Event wait_event = Event::NO_EVENT;
+      RtEvent wait_event = RtEvent::NO_RT_EVENT;
       // this is actually set on all paths, but the compiler can't see it
       bool result = false; 
       {
@@ -1336,7 +1334,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(predicate != NULL);
 #endif
-          predicate_waiter = UserEvent::create_user_event();
+          predicate_waiter = Runtime::create_rt_user_event();
           wait_event = predicate_waiter;
         }
       }

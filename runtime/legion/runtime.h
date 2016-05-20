@@ -144,7 +144,7 @@ namespace Legion {
       public:
         HLRTaskID hlr_id;
         FutureImpl *impl;
-        Barrier barrier;
+        ApBarrier barrier;
         unsigned count;
       };
     public:
@@ -190,7 +190,7 @@ namespace Legion {
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
-      void contribute_to_collective(Barrier barrier, unsigned count);
+      void contribute_to_collective(ApBarrier barrier, unsigned count);
       static void handle_contribute_to_collective(const void *args);
     public:
       // These three fields are only valid on the owner node
@@ -581,7 +581,7 @@ namespace Legion {
       public:
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
-            deferred_collect(RtUserEvent::NO_USER_EVENT),
+            deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
             instance_size(0), min_priority(0) { }
       public:
         InstanceState current_state;
@@ -1254,7 +1254,7 @@ namespace Legion {
         HLRTaskID hlr_id;
         ReductionOpID redop;
         FutureImpl *future;
-        Barrier barrier;
+        ApBarrier barrier;
       };
       struct MapperTaskArgs {
         HLRTaskID hlr_id;
@@ -2703,24 +2703,34 @@ namespace Legion {
     public:
       static unsigned num_profiling_nodes;
     public:
-      template<bool META>
-      static inline Event merge_events(Event e1, Event e2);
-      template<bool META>
-      static inline Event merge_events(Event e1, Event e2, Event e3);
-      template<bool META>
-      static inline Event merge_events(const std::set<Event> &events);
-      template<bool META>
-      static inline void trigger_event(UserEvent to_trigger,
-                                       Event precondition = Event::NO_EVENT);
-      template<bool META>
-      static inline void phase_barrier_arrive(PhaseBarrier bar, unsigned cnt,
-                                       Event precondition = Event::NO_EVENT);
-      template<bool META>
-      static inline Event acquire_reservation(Reservation r, bool exclusive,
-                                       Event precondition = Event::NO_EVENT);
-      template<bool META>
-      static inline void release_reservation(Reservation r, 
-                                       Event precondition = Event::NO_EVENT);
+      static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
+      static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
+      static inline ApEvent merge_events(const std::set<ApEvent> &events);
+    public:
+      static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
+      static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
+      static inline RtEvent merge_events(const std::set<RtEvent> &events);
+    public:
+      static inline ApUserEvent create_ap_user_event(void);
+      static inline void trigger_event(ApUserEvent to_trigger,
+                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline RtUserEvent create_rt_user_event(void);
+      static inline void trigger_event(RtUserEvent to_trigger,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+    public:
+      static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
+                const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      static inline ApEvent get_previous_phase(const PhaseBarrier &bar);
+      static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
+      static inline void advance_barrier(PhaseBarrier &bar);
+    public:
+      static inline ApEvent acquire_reservation(Reservation r, bool exclusive,
+                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline RtEvent acquire_reservation(Reservation r, bool exclusive,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+      static inline void release_reservation(Reservation r,
+                                   LgEvent precondition = LgEvent::NO_LG_EVENT);
     };
 
     /**
@@ -2736,7 +2746,7 @@ namespace Legion {
       inline T get_result(void)
       {
         // Try to take the reservation, see if we get it
-        Event acquire_event = reservation.acquire();
+        RtEvent acquire_event = reservation.acquire();
         if (acquire_event.has_triggered())
         {
           // We got it! Do it now!
@@ -2747,7 +2757,7 @@ namespace Legion {
         }
         // Otherwise we didn't get so issue the deferred task
         // to avoid waiting for a reservation in an application task
-        Event done_event = defer(runtime, acquire_event);
+        RtEvent done_event = defer(runtime, acquire_event);
         done_event.wait();
         return result;
       }
@@ -2858,126 +2868,199 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline Event Runtime::merge_events(Event e1, Event e2)
+    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
     {
-      Event result = Event::merge_events(e1, e2);
+      ApEvent result(Realm::Event::merge_events(e1, e2)); 
 #ifdef LEGION_SPY
-      if (!META)
+      if (!result.exists())
       {
-        if (!result.exists())
-        {
-          UserEvent rename = UserEvent::create_user_event();
-          rename.trigger();
-          result = rename;
-        }
-        LegionSpy::log_event_dependence(e1, result);
-        LegionSpy::log_event_dependence(e2, result);
+        ApUserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = rename;
       }
+      LegionSpy::log_event_dependence(e1, result);
+      LegionSpy::log_event_dependence(e2, result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline Event Runtime::merge_events(Event e1, Event e2, Event e3)
+    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, 
+                                                    ApEvent e2, ApEvent e3) 
     //--------------------------------------------------------------------------
     {
-      Event result = Event::merge_events(e1, e2, e3);
+      ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
 #ifdef LEGION_SPY
-      if (!META)
+      if (!result.exists())
       {
-        if (!result.exists())
-        {
-          UserEvent rename = UserEvent::create_user_event();
-          rename.trigger();
-          result = rename;
-        }
-        LegionSpy::log_event_dependence(e1, result);
-        LegionSpy::log_event_dependence(e2, result);
-        LegionSpy::log_event_dependence(e3, result);
+        ApUserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = rename;
       }
+      LegionSpy::log_event_dependence(e1, result);
+      LegionSpy::log_event_dependence(e2, result);
+      LegionSpy::log_event_dependence(e3, result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline Event Runtime::merge_events(const std::set<Event> &events)
+    /*static*/ inline ApEvent Runtime::merge_events(
+                                                const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
-      Event result = Event::merge_events(events);
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_SPY
-      if (!META)
+      if (!result.exists())
       {
-        if (!result.exists())
-        {
-          UserEvent rename = UserEvent::create_user_event();
-          rename.trigger();
-          result = rename;
-        }
-        for (std::set<Event>::const_iterator it = events.begin();
-              it != events.end(); it++)
-          LegionSpy::log_event_dependence(*it, result);
+        ApUserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = rename;
       }
+      for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
 #endif
       return result;
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline void Runtime::trigger_event(UserEvent to_trigger,
-                                                  Event precondition)
+    /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, RtEvent e2)
     //--------------------------------------------------------------------------
     {
-      to_trigger.trigger(precondition);
+      // No logging for runtime operations currently
+      return RtEvent(Realm::Event::merge_events(e1, e2)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, 
+                                                    RtEvent e2, RtEvent e3) 
+    //--------------------------------------------------------------------------
+    {
+      // No logging for runtime operations currently
+      return RtEvent(Realm::Event::merge_events(e1, e2, e3)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(
+                                                const std::set<RtEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      // No logging for runtime operations currently
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events(*realm_events));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
+    //--------------------------------------------------------------------------
+    {
+      return ApUserEvent(Realm::UserEvent::create_user_event());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(ApUserEvent to_trigger,
+                                                  ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
 #ifdef LEGION_SPY
-      if (!META && precondition.exists())
+      if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline void Runtime::phase_barrier_arrive(PhaseBarrier bar,
-                                             unsigned count, Event precondition)
+    /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
     //--------------------------------------------------------------------------
     {
-      bar.phase_barrier.arrive(count, precondition);
+      return RtUserEvent(Realm::UserEvent::create_user_event());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(RtUserEvent to_trigger,
+                                                  RtEvent precondition) 
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::phase_barrier_arrive(
+                  const PhaseBarrier &bar, unsigned count, ApEvent precondition,
+                  const void *reduce_value, size_t reduce_value_size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      copy.arrive(count, precondition, reduce_value, reduce_value_size);
 #ifdef LEGION_SPY
-      if (!META && precondition.exists())
+      if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
 #endif
     }
 
     //--------------------------------------------------------------------------
-    template<bool META>
-    /*static*/ inline Event Runtime::acquire_reservation(Reservation r, 
-                                             bool exclusive, Event precondition)
+    /*static*/ inline ApEvent Runtime::get_previous_phase(
+                                                        const PhaseBarrier &bar)
     //--------------------------------------------------------------------------
     {
-      Event result = r.acquire(exclusive ? 0 : 1, exclusive, precondition);
+      Realm::Barrier copy = bar.phase_barrier;
+      return ApEvent(copy.get_previous_phase());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::alter_arrival_count(PhaseBarrier &bar,
+                                                        int delta)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      bar.phase_barrier = ApBarrier(copy.alter_arrival_count(delta));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::advance_barrier(PhaseBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      bar.phase_barrier = ApBarrier(copy.advance_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::acquire_reservation(Reservation r,
+                                           bool exclusive, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition));
 #ifdef LEGION_SPY
-      if (!META)
+      if (precondition.exists() && !result.exists())
       {
-        if (!result.exists())
-        {
-          UserEvent rename = UserEvent::create_user_event();
-          rename.trigger();
-          result = rename;
-        }
-        if (precondition.exists())
-          LegionSpy::log_event_dependence(precondition, result);
+        ApUserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = rename;
       }
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, result);
 #endif
       return result;
     }
-    
+
     //--------------------------------------------------------------------------
-    template<bool META>
+    /*static*/ inline RtEvent Runtime::acquire_reservation(Reservation r,
+                                           bool exclusive, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      return RtEvent(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline void Runtime::release_reservation(Reservation r,
-                                                        Event precondition)
+                                                           LgEvent precondition)
     //--------------------------------------------------------------------------
     {
       r.release(precondition);

@@ -415,7 +415,7 @@ namespace Legion {
       }
 
       // Logger calls for realm events
-      static inline void log_event_dependence(Event one, Event two)
+      static inline void log_event_dependence(LgEvent one, LgEvent two)
       {
         if (one != two)
           log_spy.info("Event Event " IDFMT " %u " IDFMT " %u", 
@@ -423,7 +423,7 @@ namespace Legion {
       }
 
       static inline void log_operation_events(UniqueID uid,
-                                              Event pre, Event post)
+                                              LgEvent pre, LgEvent post)
       {
         log_spy.info("Operation Events %llu " IDFMT " %u " IDFMT " %u",
                      uid, pre.id, pre.gen, post.id, post.gen);
@@ -431,7 +431,7 @@ namespace Legion {
 
       static inline void log_copy_events(UniqueID op_unique_id,
                                          LogicalRegion handle,
-                                         Event pre, Event post)
+                                         LgEvent pre, LgEvent post)
       {
         log_spy.info("Copy Events %llu %d %d %d " IDFMT " %u "
                       IDFMT " %u", op_unique_id,
@@ -440,7 +440,7 @@ namespace Legion {
                       pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_copy_field(Event post, FieldID src_fid,
+      static inline void log_copy_field(LgEvent post, FieldID src_fid,
                                         IDType src, FieldID dst_fid,
                                         IDType dst, ReductionOpID redop)
       {
@@ -448,7 +448,7 @@ namespace Legion {
                       post.id, post.gen, src_fid, src, dst_fid, dst, redop);
       }
 
-      static inline void log_copy_intersect(Event post, int is_region,
+      static inline void log_copy_intersect(LgEvent post, int is_region,
                                             IDType index, unsigned field,
                                             unsigned tree_id)
       {
@@ -458,7 +458,7 @@ namespace Legion {
 
       static inline void log_fill_events(UniqueID op_unique_id,
                                          LogicalRegion handle,
-                                         Event pre, Event post)
+                                         LgEvent pre, LgEvent post)
       {
         log_spy.info("Fill Events %llu %d %d %d " IDFMT " %u " IDFMT " %u",
                      op_unique_id, handle.get_index_space().get_id(),
@@ -466,13 +466,13 @@ namespace Legion {
                      pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_fill_field(Event post, FieldID fid, IDType dst)
+      static inline void log_fill_field(LgEvent post, FieldID fid, IDType dst)
       {
         log_spy.info("Fill Field " IDFMT " %u %d " IDFMT, 
                       post.id, post.gen, fid, dst);
       }
 
-      static inline void log_fill_intersect(Event post, int is_region,
+      static inline void log_fill_intersect(LgEvent post, int is_region,
                                             IDType index, unsigned field,
                                             unsigned tree_id)
       {

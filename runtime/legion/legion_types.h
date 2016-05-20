@@ -1510,6 +1510,8 @@ namespace Legion {
   // Legion derived event types
   class LgEvent : public Realm::Event {
   public:
+    static const LgEvent NO_LG_EVENT;
+  public:
     LgEvent(void) { id = 0; gen = 0; }
     LgEvent(const LgEvent &rhs) { id = rhs.id; gen = rhs.gen; }
     explicit LgEvent(const Realm::Event e) { id = e.id; gen = e.gen; }
@@ -1532,6 +1534,8 @@ namespace Legion {
 
   class ApUserEvent : public ApEvent {
   public:
+    static const ApUserEvent NO_AP_USER_EVENT;
+  public:
     ApUserEvent(void) : ApEvent() { }
     ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
     explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
@@ -1544,6 +1548,8 @@ namespace Legion {
 
   class ApBarrier : public ApEvent {
   public:
+    static const ApBarrier NO_AP_BARRIER;
+  public:
     ApBarrier(void) : ApEvent(), timestamp(0) { }
     ApBarrier(const ApBarrier &rhs) 
       : ApEvent(rhs), timestamp(rhs.timestamp) { }
@@ -1555,7 +1561,7 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; b.gen = gen; 
         b.timestamp = timestamp; return b; }
-  protected:
+  public:
     Realm::Barrier::timestamp_t timestamp;
   };
 
@@ -1573,6 +1579,8 @@ namespace Legion {
 
   class RtUserEvent : public RtEvent {
   public:
+    static const RtUserEvent NO_RT_USER_EVENT;
+  public:
     RtUserEvent(void) : RtEvent() { }
     RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
     explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
@@ -1585,6 +1593,8 @@ namespace Legion {
 
   class RtBarrier : public RtEvent {
   public:
+    static const RtBarrier NO_RT_BARRIER;
+  public:
     RtBarrier(void) : RtEvent(), timestamp(0) { }
     RtBarrier(const RtBarrier &rhs)
       : RtEvent(rhs), timestamp(rhs.timestamp) { }
@@ -1596,7 +1606,7 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; b.gen = gen; 
         b.timestamp = timestamp; return b; } 
-  protected:
+  public:
     Realm::Barrier::timestamp_t timestamp;
   };
 

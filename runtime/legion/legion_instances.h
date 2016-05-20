@@ -180,7 +180,7 @@ namespace Legion {
       }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
-      void perform_deletion(Event deferred_event) const;
+      void perform_deletion(RtEvent deferred_event) const;
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
@@ -242,7 +242,7 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      bool register_now, Event use_event, 
+                      bool register_now, ApEvent use_event, 
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
@@ -258,7 +258,7 @@ namespace Legion {
     public:
       virtual size_t get_instance_size(void) const;
     public:
-      inline Event get_use_event(void) const { return use_event; }
+      inline ApEvent get_use_event(void) const { return use_event; }
     public:
       virtual InstanceView* create_instance_top_view(SingleTask *context,
                                             AddressSpaceID logical_owner);
@@ -292,7 +292,7 @@ namespace Legion {
     public:
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const Event use_event;
+      const ApEvent use_event;
     protected:
       // This is monotonic variable that once it becomes true
       // will remain true for the duration of the instance lifetime.
@@ -330,14 +330,14 @@ namespace Legion {
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      virtual Event get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(void) const = 0;
     public:
       // Support for mapper queries
       virtual bool has_field(FieldID fid) const;
@@ -392,14 +392,14 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -420,7 +420,7 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event,
+                           const ReductionOp *op, ApEvent use_event,
                            bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
@@ -438,16 +438,16 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     public:
-      const Event use_event;
+      const ApEvent use_event;
     };
 
     /**

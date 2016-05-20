@@ -543,7 +543,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(reservation_lock.exists());
 #endif
-      Event lock_event = reservation_lock.acquire(mode,exclusive);
+      ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
       if (!lock_event.has_triggered())
         lock_event.wait();
     }
@@ -620,13 +620,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
-      : phase_barrier(Barrier::NO_BARRIER)
+      : phase_barrier(ApBarrier::NO_AP_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier::PhaseBarrier(Barrier b)
+    PhaseBarrier::PhaseBarrier(ApBarrier b)
       : phase_barrier(b)
     //--------------------------------------------------------------------------
     {
@@ -660,7 +660,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      phase_barrier.arrive(count);
+      Internal::Runtime::phase_barrier_arrive(*this, count);
     }
 
     //--------------------------------------------------------------------------
@@ -670,7 +670,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phase_barrier.exists());
 #endif
-      Event e = phase_barrier.get_previous_phase();
+      ApEvent e = Internal::Runtime::get_previous_phase(*this);
       if (!e.has_triggered())
         e.wait();
     }
@@ -679,7 +679,7 @@ namespace Legion {
     void PhaseBarrier::alter_arrival_count(int delta)
     //--------------------------------------------------------------------------
     {
-      phase_barrier.alter_arrival_count(delta);
+      Internal::Runtime::alter_arrival_count(*this, delta);
     }
 
     /////////////////////////////////////////////////////////////
@@ -694,7 +694,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective::DynamicCollective(Barrier b, ReductionOpID r)
+    DynamicCollective::DynamicCollective(ApBarrier b, ReductionOpID r)
       : PhaseBarrier(b), redop(r)
     //--------------------------------------------------------------------------
     {
@@ -705,7 +705,8 @@ namespace Legion {
                                    unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-      phase_barrier.arrive(count, Event::NO_EVENT, value, size); 
+      Internal::Runtime::phase_barrier_arrive(*this, count, 
+                                            ApEvent::NO_AP_EVENT, value, size);
     }
 
     /////////////////////////////////////////////////////////////
