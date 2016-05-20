@@ -14,11 +14,9 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4", "-findex-launches", "0"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2", "-findex-launches", "0"]
+--   ["-ll:cpu", "4"],
+--   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
 -- ]
-
--- FIXME: Index launches trigger runtime bug
 
 import "regent"
 
