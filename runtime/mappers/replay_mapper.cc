@@ -40,7 +40,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplayMapper::ReplayMapper(const ReplayMapper &rhs)
-      : Mapper(rhs.mapper_runtime), machine(rhs.machine), 
+      : Mapper(rhs.runtime), machine(rhs.machine), 
         local_proc(rhs.local_proc), mapper_name(rhs.mapper_name)
     //--------------------------------------------------------------------------
     {

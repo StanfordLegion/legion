@@ -324,6 +324,7 @@ namespace Legion {
                               unsigned splitting_factor, 
                               std::vector<DomainSplit> &slice);
     protected:
+      MapperRuntime *const mapper_runtime;
       const Processor::Kind local_kind;
       const Machine machine;
       Runtime *const runtime;

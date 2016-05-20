@@ -80,7 +80,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TestMapper::TestMapper(const TestMapper &rhs)
-      : DefaultMapper(rhs.mapper_runtime, rhs.machine, 
+      : DefaultMapper(rhs.runtime, rhs.machine, 
                       rhs.local_proc, rhs.mapper_name)
     //--------------------------------------------------------------------------
     {
@@ -181,13 +181,13 @@ namespace Legion {
       if (finder != variant_processor_kinds.end())
         return finder->second;
       std::vector<VariantID> valid_variants;
-      mapper_runtime->find_valid_variants(ctx, task_id, valid_variants);
+      runtime->find_valid_variants(ctx, task_id, valid_variants);
       std::map<VariantID,Processor::Kind> kinds;
       for (std::vector<VariantID>::const_iterator it = valid_variants.begin();
             it != valid_variants.end(); it++)
       {
         const ExecutionConstraintSet &constraints = 
-          mapper_runtime->find_execution_constraints(ctx, task_id, *it);
+          runtime->find_execution_constraints(ctx, task_id, *it);
         if (constraints.processor_constraint.is_valid())
           kinds[*it] = constraints.processor_constraint.get_kind();
         else
@@ -291,9 +291,9 @@ namespace Legion {
       }
       // Get the execution layout constraints for this variant
       const TaskLayoutConstraintSet &layout_constraints = 
-        mapper_runtime->find_task_layout_constraints(ctx, task.task_id, 
+        runtime->find_task_layout_constraints(ctx, task.task_id, 
                                                output.chosen_variant);
-      bool is_inner_variant = mapper_runtime->is_inner_variant(ctx, 
+      bool is_inner_variant = runtime->is_inner_variant(ctx, 
                                   task.task_id, output.chosen_variant);
       for (unsigned idx = 0; idx < task.regions.size(); idx++)
       {
@@ -349,7 +349,7 @@ namespace Legion {
             constraints.end(); lay_it++, output_idx++)
       {
         const LayoutConstraintSet &layout_constraints = 
-          mapper_runtime->find_layout_constraints(ctx, *lay_it);
+          runtime->find_layout_constraints(ctx, *lay_it);
         // TODO: explore the constraints in more detail and exploit randomness
         // We'll use the default mapper to fill in any constraint holes for now
         Machine::MemoryQuery all_memories(machine);
@@ -431,7 +431,7 @@ namespace Legion {
           // Try to make the instance, we always make new instances to
           // generate as much data movement and dependence analysis as
           // we possibly can, it will also stress the garbage collector
-          if (mapper_runtime->create_physical_instance(ctx, target, constraints,
+          if (runtime->create_physical_instance(ctx, target, constraints,
                                    regions, chosen_instances[output_idx]))
           {
             made_instance = true;
@@ -464,8 +464,7 @@ namespace Legion {
           variants.push_back(it->first);
       }
       assert(!variants.empty());
-      mapper_runtime->filter_variants(ctx, task, 
-                                      input.chosen_instances, variants);
+      runtime->filter_variants(ctx, task, input.chosen_instances, variants);
       assert(!variants.empty());
       if (variants.size() == 1)
       {

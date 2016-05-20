@@ -135,7 +135,7 @@ namespace Legion {
       Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
     public:
-      MapperRuntime *const mapper_runtime;
+      MapperRuntime *const runtime;
     public:
       /**
        ** ----------------------------------------------------------------------
