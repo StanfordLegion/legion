@@ -85,7 +85,7 @@ namespace Legion {
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
       resolved_event = Runtime::create_rt_user_event();
-      completion_event = Runtime::create_rt_user_event();
+      completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
         commit_event = Runtime::create_rt_user_event();
       trace = NULL;
@@ -1446,7 +1446,7 @@ namespace Legion {
       }
       // Now do what we need to do
       if (need_trigger)
-        predicate_waiter.trigger();
+        Runtime::trigger_event(predicate_waiter);
       if (continue_true)
         resolve_true();
       if (continue_false)
@@ -1548,7 +1548,7 @@ namespace Legion {
         }
       }
       if (need_trigger)
-        predicate_waiter.trigger();
+        Runtime::trigger_event(predicate_waiter);
       if (continue_true)
         resolve_true();
       if (continue_false)
@@ -1621,7 +1621,7 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
-      termination_event = UserEvent::create_user_event();
+      termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
@@ -1669,7 +1669,7 @@ namespace Legion {
       map_id = id;
       tag = t;
       parent_task = ctx;
-      termination_event = UserEvent::create_user_event();
+      termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, runtime));
@@ -1705,7 +1705,7 @@ namespace Legion {
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       parent_task = ctx;
-      termination_event = UserEvent::create_user_event();
+      termination_event = Runtime::create_ap_user_event();
       region = reg;
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
@@ -1741,7 +1741,7 @@ namespace Legion {
       remap_region = false;
       mapper = NULL;
       layout_constraint_id = 0;
-      profiling_reported = UserEvent::NO_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1808,19 +1808,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::trigger_remote_state_analysis(UserEvent ready_event)
+    void MapOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      std::set<Event> preconditions;  
+      std::set<RtEvent> preconditions;  
       version_info.make_local(preconditions, runtime->forest,
                               physical_ctx.get_id());
       if (preconditions.empty())
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
       else
-        Runtime::trigger_event<true>(ready_event,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(ready_event,
+                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -1830,7 +1830,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       InstanceSet mapped_instances;
-      std::set<Event> map_applied_conditions;
+      std::set<RtEvent> map_applied_conditions;
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
@@ -1905,13 +1905,13 @@ namespace Legion {
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
       region.impl->reset_references(mapped_instances, termination_event);
-      Event map_complete_event = Event::NO_EVENT;
+      ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
-        std::set<Event> mapped_events;
+        std::set<ApEvent> mapped_events;
         for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
           mapped_events.insert(mapped_instances[idx].get_ready_event());
-        map_complete_event = Runtime::merge_events<false>(mapped_events);
+        map_complete_event = Runtime::merge_events(mapped_events);
       }
       else
         map_complete_event = mapped_instances[0].get_ready_event();
@@ -1933,16 +1933,16 @@ namespace Legion {
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
           map_complete_event = 
-            Runtime::acquire_reservation<false>(it->first, it->second,
+                Runtime::acquire_reservation(it->first, it->second,
                                                 map_complete_event);
           // We can also issue the release condition on our termination
-          Runtime::release_reservation<false>(it->first, termination_event);
+          Runtime::release_reservation(it->first, termination_event);
         }
       }
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
       if (!acquired_instances.empty())
@@ -1953,7 +1953,7 @@ namespace Legion {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        Runtime::trigger_event<false>(completion_event, map_complete_event);
+        Runtime::trigger_event(completion_event, map_complete_event);
         need_completion_trigger = false;
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
@@ -1961,8 +1961,8 @@ namespace Legion {
         runtime->issue_runtime_meta_task(&deferred_execute_args,
                                          sizeof(deferred_execute_args),
                                          HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY,
-                                         this, map_complete_event);
+                                         HLR_LATENCY_PRIORITY, this, 
+                               Runtime::protect_event(map_complete_event));
       }
       else
         deferred_execute();
@@ -2500,7 +2500,7 @@ namespace Legion {
       assert(profiling_reported.exists());
 #endif
       // Trigger the event indicating we are done reporting profiling
-      profiling_reported.trigger();
+      Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2786,7 +2786,7 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
-      profiling_reported = UserEvent::NO_USER_EVENT;
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2884,10 +2884,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::trigger_remote_state_analysis(UserEvent ready_event)
+    void CopyOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      std::set<Event> preconditions;
+      std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_versions.size(); idx++)
       {
         RegionTreeContext physical_ctx =
@@ -2903,10 +2903,10 @@ namespace Legion {
                                      physical_ctx.get_id());
       }
       if (preconditions.empty())
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
       else
-        Runtime::trigger_event<true>(ready_event,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(ready_event,
+                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -2964,7 +2964,7 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
-      std::set<Event> map_applied_conditions;
+      std::set<RtEvent> map_applied_conditions;
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -3022,10 +3022,10 @@ namespace Legion {
       mapper->invoke_map_copy(this, &input, &output);
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      Event sync_precondition = Event::NO_EVENT;
+      ApEvent sync_precondition = ApEvent::NO_AP_EVENT;
       if (!wait_barriers.empty() || !grants.empty())
       {
-        std::set<Event> preconditions;
+        std::set<ApEvent> preconditions;
         for (std::vector<PhaseBarrier>::const_iterator it = 
               wait_barriers.begin(); it != wait_barriers.end(); it++)
         {

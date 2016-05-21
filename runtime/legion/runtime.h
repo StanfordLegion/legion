@@ -375,8 +375,8 @@ namespace Legion {
     public:
       GrantImpl& operator=(const GrantImpl &rhs);
     public:
-      void register_operation(RtEvent completion_event);
-      RtEvent acquire_grant(void);
+      void register_operation(ApEvent completion_event);
+      ApEvent acquire_grant(void);
       void release_grant(void);
     public:
       void pack_grant(Serializer &rez);
@@ -384,8 +384,8 @@ namespace Legion {
     private:
       std::vector<ReservationRequest> requests;
       bool acquired;
-      RtEvent grant_event;
-      std::set<RtEvent> completion_events;
+      ApEvent grant_event;
+      std::set<ApEvent> completion_events;
       Reservation grant_lock;
     };
 
@@ -2717,6 +2717,7 @@ namespace Legion {
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
+      static inline RtEvent protect_event(ApEvent to_protect);
     public:
       static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
@@ -2989,6 +2990,13 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::protect_event(ApEvent to_protect)
+    //--------------------------------------------------------------------------
+    {
+      return RtEvent(Realm::Event::ignorefaults(to_protect));
     }
 
     //--------------------------------------------------------------------------

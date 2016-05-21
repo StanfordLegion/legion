@@ -175,7 +175,7 @@ namespace Legion {
       inline GenerationID get_generation(void) const { return gen; }
       inline RtEvent get_mapped_event(void) const { return mapped_event; }
       inline RtEvent get_resolved_event(void) const { return resolved_event; }
-      inline RtEvent get_completion_event(void) const {return completion_event;}
+      inline ApEvent get_completion_event(void) const {return completion_event;}
       inline RtEvent get_commit_event(void) const { return commit_event; }
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
@@ -440,7 +440,7 @@ namespace Legion {
       // The event for when any children this operation has are mapped
       //Event children_mapped;
       // The completion event for this operation
-      RtUserEvent completion_event;
+      ApUserEvent completion_event;
       // The commit event for this operation
       RtUserEvent commit_event;
       // The trace for this operation if any
