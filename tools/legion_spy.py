@@ -5728,8 +5728,6 @@ class CompositeNode(object):
                             changed = True
                     else:
                         copy.valid_instances.add(inst)
-            else:
-                assert not self.valid_instances
             # Add ourselves to the already captured
             already_captured.add(self.node)
         else:
