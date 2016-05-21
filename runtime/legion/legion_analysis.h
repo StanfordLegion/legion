@@ -1191,7 +1191,7 @@ namespace Legion {
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;
     public:
-      void update_wait_on_events(std::set<RtEvent> &wait_on_events) const;
+      void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>

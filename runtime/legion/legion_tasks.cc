@@ -208,7 +208,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::unpack_base_task(Deserializer &derez,
-                                  std::set<Event> &ready_events)
+                                  std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
@@ -373,12 +373,12 @@ namespace Legion {
         case INDIVIDUAL_TASK_KIND:
           {
             IndividualTask *task = rt->get_available_individual_task(false);
-            std::set<Event> ready_events;
+            std::set<RtEvent> ready_events;
             if (task->unpack_task(derez, current, ready_events))
             {
               if (!ready_events.empty())
               {
-                Event ready = Runtime::merge_events<true>(ready_events);
+                RtEvent ready = Runtime::merge_events(ready_events);
                 rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
               }
               else
@@ -389,12 +389,12 @@ namespace Legion {
         case SLICE_TASK_KIND:
           {
             SliceTask *task = rt->get_available_slice_task(false);
-            std::set<Event> ready_events;
+            std::set<RtEvent> ready_events;
             if (task->unpack_task(derez, current, ready_events))
             {
               if (!ready_events.empty())
               {
-                Event ready = Runtime::merge_events<true>(ready_events);
+                RtEvent ready = Runtime::merge_events(ready_events);
                 rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
               }
               else
@@ -1615,7 +1615,7 @@ namespace Legion {
                                 const std::vector<PhaseBarrier> &phase_barriers)
     //--------------------------------------------------------------------------
     {
-      Event arrive_pre = get_task_completion();
+      ApEvent arrive_pre = get_task_completion();
       for (std::vector<PhaseBarrier>::const_iterator it = 
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
@@ -1623,7 +1623,7 @@ namespace Legion {
         arrive_barriers.push_back(*it);
         // Note it is imperative we do this off the new barrier
         // generated after updating the arrival count.
-        Runtime::phase_barrier_arrive<false>(*it, 1/*count*/, arrive_pre);
+        Runtime::phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
       }
     }
 
@@ -1740,7 +1740,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::early_map_regions(std::set<Event> &applied_conditions,
+    bool TaskOp::early_map_regions(std::set<RtEvent> &applied_conditions,
                                    const std::vector<unsigned> &must_premap)
     //--------------------------------------------------------------------------
     {
@@ -2324,19 +2324,19 @@ namespace Legion {
       fence_gen = 0;
       context = RegionTreeContext();
       valid_wait_event = false;
-      deferred_map = Event::NO_EVENT;
-      deferred_complete = Event::NO_EVENT; 
-      pending_done = Event::NO_EVENT;
-      last_registration = Event::NO_EVENT;
-      dependence_precondition = Event::NO_EVENT;
-      profiling_done = Event::NO_EVENT;
+      deferred_map = RtEvent::NO_RT_EVENT;
+      deferred_complete = RtEvent::NO_RT_EVENT; 
+      pending_done = RtEvent::NO_RT_EVENT;
+      last_registration = RtEvent::NO_RT_EVENT;
+      dependence_precondition = RtEvent::NO_RT_EVENT;
+      profiling_done = RtEvent::NO_RT_EVENT;
       current_trace = NULL;
       task_executed = false;
       outstanding_children_count = 0;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
       pending_frames = 0;
-      context_order_event = Event::NO_EVENT;
+      context_order_event = RtEvent::NO_RT_EVENT;
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         Runtime::initial_task_window_size;
@@ -2390,14 +2390,15 @@ namespace Legion {
       }
       while (!context_barriers.empty())
       {
-        context_barriers.back().destroy_barrier();
+        Realm::Barrier bar = context_barriers.back();
+        bar.destroy_barrier();
         context_barriers.pop_back();
       }
       local_fields.clear();
       if (valid_wait_event)
       {
         valid_wait_event = false;
-        window_wait.trigger();
+        Runtime::trigger_event(window_wait);
       }
       // Clean up our instance top views
       for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
@@ -2541,7 +2542,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::destroy_user_barrier(Barrier b)
+    void SingleTask::destroy_user_barrier(ApBarrier b)
     //--------------------------------------------------------------------------
     {
       // Can only be called from user land so no 
@@ -2681,7 +2682,7 @@ namespace Legion {
       inline_task->return_privilege_state(this);
       // Now see if the mapping state of any of our
       // originally mapped regions has changed
-      std::set<Event> wait_events;
+      std::set<ApEvent> wait_events;
       for (unsigned idx = 0; idx < phy_regions_mapped.size(); idx++)
       {
         if (phy_regions_mapped[idx] && !is_region_mapped(idx))
@@ -2701,7 +2702,7 @@ namespace Legion {
       }
       if (!wait_events.empty())
       {
-        Event wait_on = Runtime::merge_events<true>(wait_events);
+        ApEvent wait_on = Runtime::merge_events(wait_events);
         if (!wait_on.has_triggered())
           wait_on.wait();
       }
@@ -2746,7 +2747,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::unpack_single_task(Deserializer &derez,
-                                        std::set<Event> &ready_events)
+                                        std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, UNPACK_SINGLE_TASK_CALL);
@@ -2871,14 +2872,15 @@ namespace Legion {
             (outstanding_count >= context_configuration.max_window_size))
       {
         // Try taking the lock first and see if we succeed
-        Event precondition = op_lock.acquire(0, true/*exclusive*/);
+        RtEvent precondition = 
+          Runtime::acquire_rt_reservation(op_lock, true/*exclusive*/);
         if (precondition.exists() && !precondition.has_triggered())
         {
           // Launch a window-wait task and then wait on the event 
           WindowWaitArgs args;
           args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
           args.parent_ctx = this;  
-          Event wait_done = 
+          RtEvent wait_done = 
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_WINDOW_WAIT_TASK_ID, 
                                              HLR_RESOURCE_PRIORITY,
@@ -2894,14 +2896,14 @@ namespace Legion {
     void SingleTask::perform_window_wait(void)
     //--------------------------------------------------------------------------
     {
-      Event wait_event = Event::NO_EVENT;
+      RtEvent wait_event;
       // We already hold our lock from the callsite above
       if (outstanding_children_count >= context_configuration.max_window_size)
       {
 #ifdef DEBUG_LEGION
         assert(!valid_wait_event);
 #endif
-        window_wait = UserEvent::create_user_event();
+        window_wait = Runtime::create_rt_user_event();
         valid_wait_event = true;
         wait_event = window_wait;
       }
@@ -2917,8 +2919,8 @@ namespace Legion {
     {
       if (!has_lock)
       {
-        Event lock_acquire = 
-          op_lock.acquire(0, true/*exclusive*/, last_registration); 
+        RtEvent lock_acquire = Runtime::acquire_rt_reservation(op_lock, 
+                                true/*exclusive*/, last_registration);
         if (!lock_acquire.has_triggered())
         {
           AddToDepQueueArgs args;
@@ -2947,7 +2949,7 @@ namespace Legion {
       DeferredDependenceArgs args;
       args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
       args.op = op;
-      Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
                                       HLR_TRIGGER_DEPENDENCE_ID, 
                                       HLR_LATENCY_PRIORITY, op,
                                       dependence_precondition);
@@ -2960,7 +2962,7 @@ namespace Legion {
     void SingleTask::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
         std::set<Operation*>::iterator finder = executing_children.find(op);
@@ -2992,7 +2994,7 @@ namespace Legion {
         }
       }
       if (to_trigger.exists())
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -3054,7 +3056,7 @@ namespace Legion {
     void SingleTask::unregister_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
         // Remove it from everything and then see if we need to
@@ -3083,7 +3085,7 @@ namespace Legion {
 #endif
       }
       if (to_trigger.exists())
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -3269,7 +3271,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::issue_frame(FrameOp *frame, Event frame_termination)
+    void SingleTask::issue_frame(FrameOp *frame, ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
       // This happens infrequently enough that we can just issue
@@ -3283,7 +3285,7 @@ namespace Legion {
         args.frame_termination = frame_termination;
         // We know that the issuing is done in order because we block after
         // we launch this meta-task which blocks the application task
-        Event wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
+        RtEvent wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
                                               HLR_ISSUE_FRAME_TASK_ID, 
                                               HLR_THROUGHPUT_PRIORITY, this);
         wait_on.wait();
@@ -3291,11 +3293,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::perform_frame_issue(FrameOp *frame,Event frame_termination)
+    void SingleTask::perform_frame_issue(FrameOp *frame,
+                                         ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
-      Event previous = Event::NO_EVENT;
+      ApEvent wait_on, previous;
       {
         AutoLock o_lock(op_lock);
         const size_t current_frames = frame_events.size();
@@ -3313,7 +3315,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::finish_frame(Event frame_termination)
+    void SingleTask::finish_frame(ApEvent frame_termination)
     //--------------------------------------------------------------------------
     {
       // Pull off all the frame events until we reach ours
@@ -3337,8 +3339,8 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
         if ((outstanding_subtasks == 0) && 
@@ -3350,7 +3352,7 @@ namespace Legion {
                context_configuration.min_frames_to_schedule))))
         {
           wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
+          to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
         }
         outstanding_subtasks++;
@@ -3359,7 +3361,7 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->activate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -3373,8 +3375,8 @@ namespace Legion {
       assert((context_configuration.min_tasks_to_schedule > 0) || 
              (context_configuration.min_frames_to_schedule > 0));
 #endif
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
@@ -3390,7 +3392,7 @@ namespace Legion {
                context_configuration.min_frames_to_schedule))))
         {
           wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
+          to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
         }
       }
@@ -3398,7 +3400,7 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->deactivate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -3409,8 +3411,8 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped frames
       if (context_configuration.min_tasks_to_schedule == 0)
         return;
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
         pending_subtasks++;
@@ -3418,7 +3420,7 @@ namespace Legion {
             (pending_subtasks == context_configuration.min_tasks_to_schedule))
         {
           wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
+          to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
         }
       }
@@ -3426,22 +3428,23 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->deactivate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
     //--------------------------------------------------------------------------
-    Event SingleTask::decrement_pending(SingleTask *child) const
+    RtEvent SingleTask::decrement_pending(SingleTask *child) const
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduled by frames
       if (context_configuration.min_tasks_to_schedule == 0)
-        return Event::NO_EVENT;
+        return RtEvent::NO_RT_EVENT;
       // This may involve waiting, so always issue it as a meta-task 
       DecrementArgs decrement_args;
       decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
       decrement_args.parent_ctx = const_cast<SingleTask*>(this);
-      Event precondition = op_lock.acquire(0, true/*exclusive*/);
+      RtEvent precondition = 
+        Runtime::acquire_rt_reservation(op_lock, true/*exclusive*/);
       return runtime->issue_runtime_meta_task(&decrement_args, 
           sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, 
           HLR_RESOURCE_PRIORITY, child, precondition);
@@ -3451,8 +3454,8 @@ namespace Legion {
     void SingleTask::decrement_pending(void)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       // We already hold the lock from the dispatch site (see above)
 #ifdef DEBUG_LEGION
       assert(pending_subtasks > 0);
@@ -3461,7 +3464,7 @@ namespace Legion {
           (pending_subtasks == context_configuration.min_tasks_to_schedule))
       {
         wait_on = context_order_event;
-        to_trigger = UserEvent::create_user_event();
+        to_trigger = Runtime::create_rt_user_event();
         context_order_event = to_trigger;
       }
       pending_subtasks--;
@@ -3472,7 +3475,7 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->activate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -3483,8 +3486,8 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
         pending_frames++;
@@ -3492,7 +3495,7 @@ namespace Legion {
             (pending_frames == context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
+          to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
         }
       }
@@ -3500,7 +3503,7 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->deactivate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -3511,8 +3514,8 @@ namespace Legion {
       // Don't need to do this if we are scheduling based on mapped tasks
       if (context_configuration.min_frames_to_schedule == 0)
         return;
-      Event wait_on = Event::NO_EVENT;
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
@@ -3522,7 +3525,7 @@ namespace Legion {
             (pending_frames == context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
+          to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
         }
         pending_frames--;
@@ -3531,7 +3534,7 @@ namespace Legion {
       {
         wait_on.wait();
         runtime->activate_context(this);
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       }
     }
 
@@ -3545,7 +3548,8 @@ namespace Legion {
       // since it can be read by tasks that are being packed
       AutoLock o_lock(op_lock);
       local_fields.push_back(
-          LocalFieldInfo(handle, fid, field_size, completion_event, serdez_id));
+          LocalFieldInfo(handle, fid, field_size, 
+            Runtime::protect_event(completion_event), serdez_id));
     }
 
     //--------------------------------------------------------------------------
@@ -3649,7 +3653,7 @@ namespace Legion {
       // Make a new unmapped physical region
       physical_regions.push_back(PhysicalRegion(
             legion_new<PhysicalRegionImpl>(created_requirements.back(), 
-              Event::NO_EVENT, false/*mapped*/, this, map_id, tag, 
+              ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
               is_leaf(), runtime)));
       RemoteTask *outermost = find_outermost_context();
       outermost->add_top_region(handle);
@@ -3674,7 +3678,7 @@ namespace Legion {
         created_requirements.push_back(new_req);
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(created_requirements.back(), 
-                Event::NO_EVENT, false/*mapped*/, this, map_id, tag, 
+                ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
                 is_leaf(), runtime)));
         outermost->add_top_region(*it);
         if (Runtime::legion_spy_enabled)
@@ -5420,14 +5424,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::map_all_regions(Event local_termination_event,
+    bool SingleTask::map_all_regions(ApEvent local_termination_event,
                                      MustEpochOp *must_epoch_op /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
 #ifdef LEGION_SPY
       {
-        Event local_completion = get_completion_event();
+        ApEvent local_completion = get_completion_event();
         // Yes, these events actually trigger in the opposite order, but
         // it is the logical entailement that is important here
         if (local_completion != local_termination_event)
@@ -5675,7 +5679,7 @@ namespace Legion {
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                           regions[idx], get_version_info(idx), this, idx,
-                          Event::NO_EVENT/*done immediately*/, 
+                          ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
                           map_applied_conditions, result
 #ifdef DEBUG_LEGION
@@ -5688,8 +5692,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
-                      const std::vector<UserEvent> &unmap_events,
-                      std::set<Event> &preconditions)
+                      const std::vector<ApUserEvent> &unmap_events,
+                      std::set<ApEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
@@ -5788,7 +5792,7 @@ namespace Legion {
       if (!manager->is_owner())
       {
         InstanceView *volatile result = NULL;
-        UserEvent wait_on = UserEvent::create_user_event();
+        RtUserEvent wait_on = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -5806,7 +5810,7 @@ namespace Legion {
       }
       // Check to see if we already have the 
       // instance, if we do, return it, otherwise make it and save it
-      Event wait_on = Event::NO_EVENT;
+      RtEvent wait_on;
       {
         AutoLock o_lock(op_lock);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
@@ -5815,16 +5819,16 @@ namespace Legion {
           // We've already got the view, so we are done
           return finder->second;
         // See if someone else is already making it
-        std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+        std::map<PhysicalManager*,RtUserEvent>::iterator pending_finder =
           pending_top_views.find(manager);
         if (pending_finder == pending_top_views.end())
           // mark that we are making it
-          pending_top_views[manager] = UserEvent::NO_USER_EVENT;
+          pending_top_views[manager] = RtUserEvent::NO_RT_USER_EVENT;
         else
         {
           // See if we are the first one to follow
           if (!pending_finder->second.exists())
-            pending_finder->second = UserEvent::create_user_event();
+            pending_finder->second = Runtime::create_rt_user_event();
           wait_on = pending_finder->second;
         }
       }
@@ -5903,7 +5907,7 @@ namespace Legion {
       }
       // Record the result and trigger any user event to signal that the
       // view is ready
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
@@ -5911,7 +5915,7 @@ namespace Legion {
                 instance_top_views.end());
 #endif
         instance_top_views[manager] = result;
-        std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+        std::map<PhysicalManager*,RtUserEvent>::iterator pending_finder =
           pending_top_views.find(manager);
 #ifdef DEBUG_LEGION
         assert(pending_finder != pending_top_views.end());
@@ -5920,7 +5924,7 @@ namespace Legion {
         pending_top_views.erase(pending_finder);
       }
       if (to_trigger.exists())
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
       return result;
     }
 
@@ -5964,7 +5968,7 @@ namespace Legion {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          UserEvent remote_done = UserEvent::create_user_event();
+          RtUserEvent remote_done = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
@@ -6062,7 +6066,7 @@ namespace Legion {
       derez.deserialize(manager_did);
       InstanceView **target;
       derez.deserialize(target);
-      UserEvent to_trigger;
+      RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       // Get the context first
       SingleTask *context = runtime->find_context(context_uid);
@@ -6097,17 +6101,17 @@ namespace Legion {
       derez.deserialize(result_did);
       InstanceView **target;
       derez.deserialize(target);
-      UserEvent to_trigger;
+      RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      Event ready;
+      RtEvent ready;
       LogicalView *view = 
         runtime->find_or_request_logical_view(result_did, ready);
       // Have to static cast since it might not be ready
       *target = static_cast<InstanceView*>(view);
       if (ready.exists())
-        Runtime::trigger_event<true/*meta*/>(to_trigger, ready);
+        Runtime::trigger_event(to_trigger, ready);
       else
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -6124,7 +6128,7 @@ namespace Legion {
       VariantImpl *variant = 
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
-      std::set<Event> wait_on_events;
+      std::set<ApEvent> wait_on_events;
       // Get the event to wait on unless we are 
       // doing the inner task optimization
       if (!variant->is_inner())
@@ -6148,12 +6152,13 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
-	Event e = wait_barriers[idx].phase_barrier.get_previous_phase();
+	ApEvent e = 
+          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
         wait_on_events.insert(e);
       }
 
       // STEP 2: Set up the task's context
-      std::vector<UserEvent> unmap_events(regions.size());
+      std::vector<ApUserEvent> unmap_events(regions.size());
       {
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
@@ -6175,7 +6180,7 @@ namespace Legion {
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(regions[idx],
-                    Event::NO_EVENT, false/*mapped*/,
+                    ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             // Don't switch coherence modes since we virtually
             // mapped it which means we will map in the parent's
@@ -6195,15 +6200,15 @@ namespace Legion {
             clone_requirements[idx].privilege = READ_WRITE;
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(regions[idx],
-                    Event::NO_EVENT, false/*mapped*/,
+                    ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
-            unmap_events[idx] = UserEvent::create_user_event();
+            unmap_events[idx] = Runtime::create_ap_user_event();
             // Trigger the user event when the region is 
             // actually ready to be used
-            std::set<Event> ready_events;
+            std::set<ApEvent> ready_events;
             physical_instances[idx].update_wait_on_events(ready_events);
-            Event precondition = Runtime::merge_events<false>(ready_events);
-            Runtime::trigger_event<false>(unmap_events[idx], precondition);
+            ApEvent precondition = Runtime::merge_events(ready_events);
+            Runtime::trigger_event(unmap_events[idx], precondition);
           }
           else
           { 
@@ -6215,12 +6220,12 @@ namespace Legion {
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(clone_requirements[idx],
-                    Event::NO_EVENT/*already mapped*/, true/*mapped*/,
+                    ApEvent::NO_AP_EVENT/*already mapped*/, true/*mapped*/,
                     this, map_id, tag, variant->is_leaf(), runtime)));
             // Now set the reference for this physical region 
             // which is pretty much a dummy physical reference except
             // it references the same view as the outer reference
-            unmap_events[idx] = UserEvent::create_user_event();
+            unmap_events[idx] = Runtime::create_ap_user_event();
             // We reset the reference below after we've
             // initialized the local contexts and received
             // back the local instance references
@@ -6306,16 +6311,15 @@ namespace Legion {
         }
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Runtime::merge_events<false>(wait_on_events);
+      ApEvent start_condition = Runtime::merge_events(wait_on_events);
       // Take all the locks in order in the proper way
       if (!atomic_locks.empty())
       {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          start_condition = 
-            Runtime::acquire_reservation<false>(it->first, it->second,
-                                                start_condition);
+          start_condition = Runtime::acquire_ap_reservation(it->first, 
+                                          it->second, start_condition);
         }
       }
       // STEP 3: Finally we get to launch the task
@@ -6328,7 +6332,7 @@ namespace Legion {
       // is going to occur before actually launching the task to 
       // avoid the race.
       bool perform_chaining_optimization = false; 
-      UserEvent chain_complete_event;
+      ApUserEvent chain_complete_event;
       if (variant->is_leaf() && !has_virtual_instances() &&
           can_early_complete(chain_complete_event))
         perform_chaining_optimization = true;
@@ -6338,7 +6342,7 @@ namespace Legion {
       // invalidating this SingleTask object's fields.  This means
       // that we need to save any variables we need for after the task
       // launch here on the stack before they can be invalidated.
-      Event term_event = get_task_completion();
+      ApEvent term_event = get_task_completion();
 #ifdef DEBUG_LEGION
       assert(!target_processors.empty());
 #endif
@@ -6373,11 +6377,11 @@ namespace Legion {
         LegionSpy::log_operation_events(get_unique_id(), start_condition, 
                                         completion_event);
 #endif
-      Event task_launch_event = variant->dispatch_task(launch_processor, this,
-                          start_condition, task_priority, profiling_requests);
+      ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
+                            start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
-        Runtime::trigger_event<false>(chain_complete_event, task_launch_event);
+        Runtime::trigger_event(chain_complete_event, task_launch_event);
       // STEP 4: After we've launched the task, then we have to release any 
       // locks that we took for while the task was running.  
       if (!atomic_locks.empty())
@@ -6385,7 +6389,7 @@ namespace Legion {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          Runtime::release_reservation<false>(it->first, term_event);
+          Runtime::release_reservation(it->first, term_event);
         }
       }
     }
@@ -6432,7 +6436,7 @@ namespace Legion {
       // Record the results
       info->task->notify_profiling_results(response);
       // Then trigger the event saying we are done
-      info->profiling_done.trigger();
+      Runtime::trigger_event(info->profiling_done);
     }
 
     //--------------------------------------------------------------------------
@@ -6545,7 +6549,7 @@ namespace Legion {
       bool need_commit = false;
       if (!is_leaf())
       {
-        std::set<Event> preconditions;
+        std::set<RtEvent> preconditions;
         {
           AutoLock o_lock(op_lock);
           // Only need to do this for executing and executed children
@@ -6583,7 +6587,7 @@ namespace Legion {
           }
         }
         if (!preconditions.empty())
-          handle_post_mapped(Runtime::merge_events<true>(preconditions));
+          handle_post_mapped(Runtime::merge_events(preconditions));
         else
           handle_post_mapped();
       }
@@ -6617,8 +6621,8 @@ namespace Legion {
       // decrement of our parent task and recorded any profiling
       if (!pending_done.has_triggered() || !profiling_done.has_triggered())
       {
-        Event exec_precondition = 
-          Runtime::merge_events<true>(pending_done, profiling_done);
+        RtEvent exec_precondition = 
+          Runtime::merge_events(pending_done, profiling_done);
         complete_execution(exec_precondition);
       }
       else
@@ -7067,7 +7071,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MultiTask::unpack_multi_task(Deserializer &derez,
-                                      std::set<Event> &ready_events)
+                                      std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, UNPACK_MULTI_CALL);
@@ -7549,17 +7553,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::trigger_remote_state_analysis(UserEvent ready_event)
+    void IndividualTask::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL);
-      std::set<Event> preconditions; 
+      std::set<RtEvent> preconditions; 
       if (is_remote())
       {
         // If we're remote and locally mapped, we are done
         if (is_locally_mapped())
         {
-          ready_event.trigger();
+          Runtime::trigger_event(ready_event);
           return;
         }
         // Otherwise request state for anything 
@@ -7596,10 +7600,10 @@ namespace Legion {
         }
       }
       if (preconditions.empty())
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
       else
-        Runtime::trigger_event<true>(ready_event,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(ready_event,
+                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -7652,7 +7656,7 @@ namespace Legion {
       // Set the future to the false result
       if (predicate_false_future.impl != NULL)
       {
-        Event wait_on = predicate_false_future.impl->get_ready_event();
+        ApEvent wait_on = predicate_false_future.impl->get_ready_event();
         if (wait_on.has_triggered())
         {
           const size_t result_size = 
@@ -7674,8 +7678,8 @@ namespace Legion {
           args.task_op = this;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
                                            HLR_DEFERRED_FUTURE_SET_ID,
-                                           HLR_LATENCY_PRIORITY,
-                                           this, wait_on);
+                                           HLR_LATENCY_PRIORITY, this, 
+                                           Runtime::protect_event(wait_on));
           trigger = false;
         }
       }
@@ -7776,11 +7780,10 @@ namespace Legion {
         // then we get to mark that we are done mapping
         if (is_leaf())
         {
-          Event applied_condition = Event::NO_EVENT;
+          RtEvent applied_condition;
           if (!map_applied_conditions.empty())
           {
-            applied_condition = 
-              Runtime::merge_events<true>(map_applied_conditions);
+            applied_condition = Runtime::merge_events(map_applied_conditions);
             map_applied_conditions.clear();
           }
           if (is_remote())
@@ -7820,7 +7823,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::can_early_complete(UserEvent &chain_event)
+    bool IndividualTask::can_early_complete(ApUserEvent &chain_event)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -7849,7 +7852,7 @@ namespace Legion {
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              index, Event::NO_EVENT, 
+                                              index, ApEvent::NO_AP_EVENT,
                                               false/*defer add users*/, 
                                               map_applied_conditions, refs
 #ifdef DEBUG_LEGION
@@ -7860,7 +7863,7 @@ namespace Legion {
       // Apply our version state information, put map applied information
       // in a temporary data structure and then hold the lock when merging
       // it back into map_applied conditions
-      std::set<Event> temp_map_applied_conditions;
+      std::set<RtEvent> temp_map_applied_conditions;
       if (is_remote())
       {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
@@ -7916,7 +7919,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event IndividualTask::get_task_completion(void) const
+    ApEvent IndividualTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -8087,7 +8090,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::handle_post_mapped(Event mapped_precondition)
+    void IndividualTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
@@ -8121,15 +8124,15 @@ namespace Legion {
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
-          complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
         }
         else 
           complete_mapping(mapped_precondition);
         return;
       }
-      Event applied_condition = Event::NO_EVENT;
+      RtEvent applied_condition;
       if (!map_applied_conditions.empty())
-        applied_condition = Runtime::merge_events<true>(map_applied_conditions);
+        applied_condition = Runtime::merge_events(map_applied_conditions);
       // Send back the message saying that we finished mapping
       Serializer rez;
       // Only need to send back the pointer to the task instance
@@ -8192,7 +8195,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndividualTask::unpack_task(Deserializer &derez, Processor current,
-                                     std::set<Event> &ready_events)
+                                     std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_TASK_CALL);
@@ -8257,7 +8260,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if there is anything that we need to wait on before running
-      std::set<Event> wait_on_events;
+      std::set<ApEvent> wait_on_events;
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = futures[idx].impl; 
@@ -8270,11 +8273,12 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
-	Event e = wait_barriers[idx].phase_barrier.get_previous_phase();
+        ApEvent e = 
+          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
         wait_on_events.insert(e);
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Runtime::merge_events<true>(wait_on_events); 
+      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -8312,7 +8316,7 @@ namespace Legion {
       result.impl->set_result(res, res_size, owned);
       result.impl->complete_future();
       // Trigger our completion event
-      completion_event.trigger();
+      Runtime::trigger_event(completion_event);
       // Now we're done, someone else will deactivate us
     }
 
@@ -8320,12 +8324,12 @@ namespace Legion {
     void IndividualTask::unpack_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      Event applied;
+      RtEvent applied;
       derez.deserialize(applied);
       if (applied.exists())
         map_applied_conditions.insert(applied);
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
     } 
@@ -8563,14 +8567,14 @@ namespace Legion {
       {
         if (!map_applied_conditions.empty())
         {
-          Event done = Runtime::merge_events<true>(map_applied_conditions);
+          RtEvent done = Runtime::merge_events(map_applied_conditions);
           slice_owner->record_child_mapped(done);
           complete_mapping(done);
         }
         else
         {
           // Tell our owner that we mapped
-          slice_owner->record_child_mapped(Event::NO_EVENT);
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
           // Mark that we ourselves have mapped
           complete_mapping();
         }
@@ -8595,7 +8599,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::can_early_complete(UserEvent &chain_event)
+    bool PointTask::can_early_complete(ApUserEvent &chain_event)
     //--------------------------------------------------------------------------
     {
       chain_event = point_termination;
@@ -8639,7 +8643,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event PointTask::get_task_completion(void) const
+    ApEvent PointTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       return point_termination;
@@ -8731,7 +8735,7 @@ namespace Legion {
       // because we would have performed the leaf task
       // early complete chaining operation.
       if (!is_leaf() || has_virtual_instances())
-        point_termination.trigger();
+        Runtime::trigger_event(point_termination);
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
@@ -8806,7 +8810,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PointTask::unpack_task(Deserializer &derez, Processor current,
-                                std::set<Event> &ready_events)
+                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_UNPACK_TASK_CALL);
@@ -8822,7 +8826,7 @@ namespace Legion {
       // task as being mapped
       if (is_locally_mapped() && is_leaf())
       {
-        slice_owner->record_child_mapped(Event::NO_EVENT);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
         complete_mapping();
       }
       return false;
@@ -8848,7 +8852,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::handle_post_mapped(Event mapped_precondition)
+    void PointTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_POST_MAPPED_CALL);
@@ -8868,13 +8872,13 @@ namespace Legion {
       convert_virtual_instance_top_views(remote_instances);
       if (!map_applied_conditions.empty())
       {
-        Event done = Runtime::merge_events<true>(map_applied_conditions);
+        RtEvent done = Runtime::merge_events(map_applied_conditions);
         slice_owner->record_child_mapped(done);
         complete_mapping(done);
       }
       else
       {
-        slice_owner->record_child_mapped(Event::NO_EVENT);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
         // Now we can complete this point task
         complete_mapping();
       }
@@ -8890,7 +8894,7 @@ namespace Legion {
       // Get our argument
       mp->assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
-      point_termination = UserEvent::create_user_event();
+      point_termination = Runtime::create_ap_user_event();
     }  
 
     /////////////////////////////////////////////////////////////
@@ -8972,7 +8976,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::can_early_complete(UserEvent &chain_event)
+    bool WrapperTask::can_early_complete(ApUserEvent &chain_event)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9024,7 +9028,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool WrapperTask::unpack_task(Deserializer &derez, Processor current,
-                                  std::set<Event> &ready_events)
+                                  std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9049,7 +9053,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void WrapperTask::handle_post_mapped(Event mapped_precondition)
+    void WrapperTask::handle_post_mapped(RtEvent mapped_precondition)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9125,7 +9129,7 @@ namespace Legion {
       parent_context_uid = 0;
       depth = -1;
       is_top_level_context = false;
-      remote_completion_event = Event::NO_EVENT;
+      remote_completion_event = ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9273,7 +9277,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event RemoteTask::get_task_completion(void) const
+    ApEvent RemoteTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       return remote_completion_event;
@@ -9355,15 +9359,15 @@ namespace Legion {
       created_requirements.resize(num_created);
       for (unsigned idx = 0; idx < num_created; idx++)
         derez.deserialize(created_requirements[idx]);
-      UserEvent to_trigger;
+      RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       std::map<AddressSpaceID,RemoteTask*> empty_remote;
       convert_virtual_instance_top_views(empty_remote);
       if (!map_applied_conditions.empty())
-        Runtime::trigger_event<true/*meta*/>(to_trigger,
-            Runtime::merge_events<true/*meta*/>(map_applied_conditions));
+        Runtime::trigger_event(to_trigger,
+                               Runtime::merge_events(map_applied_conditions));
       else
-        Runtime::trigger_event<true/*meta*/>(to_trigger);
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -9512,7 +9516,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event InlineTask::get_task_completion(void) const
+    ApEvent InlineTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       return enclosing->get_task_completion();
@@ -10112,11 +10116,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::trigger_remote_state_analysis(UserEvent ready_event)
+    void IndexTask::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_REMOTE_STATE_ANALYSIS_CALL);
-      std::set<Event> preconditions;
+      std::set<RtEvent> preconditions;
       if (is_locally_mapped())
       {
         // If we're locally mapped, request everyone's state
@@ -10138,10 +10142,10 @@ namespace Legion {
         }
       }
       if (preconditions.empty())
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
       else
-        Runtime::trigger_event<true>(ready_event,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(ready_event,
+                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -10283,7 +10287,7 @@ namespace Legion {
         // Handling the future map case
         if (predicate_false_future.impl != NULL)
         {
-          Event wait_on = predicate_false_future.impl->get_ready_event();
+          ApEvent wait_on = predicate_false_future.impl->get_ready_event();
           if (wait_on.has_triggered())
           {
             const size_t result_size = 
@@ -10310,8 +10314,8 @@ namespace Legion {
             args.task_op = this;
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_DEFERRED_FUTURE_MAP_SET_ID,
-                                             HLR_LATENCY_PRIORITY,
-                                             this, wait_on);
+                                             HLR_LATENCY_PRIORITY, this, 
+                                             Runtime::protect_event(wait_on));
             trigger = false;
           }
         }
@@ -10331,7 +10335,7 @@ namespace Legion {
         // Handling a reduction case
         if (predicate_false_future.impl != NULL)
         {
-          Event wait_on = predicate_false_future.impl->get_ready_event();
+          ApEvent wait_on = predicate_false_future.impl->get_ready_event();
           if (wait_on.has_triggered())
           {
             const size_t result_size = 
@@ -10353,8 +10357,8 @@ namespace Legion {
             args.task_op = this;
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_DEFERRED_FUTURE_SET_ID,
-                                             HLR_LATENCY_PRIORITY,
-                                             this, wait_on);
+                                             HLR_LATENCY_PRIORITY, this, 
+                                             Runtime::protect_event(wait_on));
             trigger = false;
           }
         }
@@ -10508,7 +10512,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event IndexTask::get_task_completion(void) const
+    ApEvent IndexTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       return get_completion_event();
@@ -10576,7 +10580,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexTask::unpack_task(Deserializer &derez, Processor current,
-                                std::set<Event> &ready_events)
+                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10590,7 +10594,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
       // See if there is anything to wait for
-      std::set<Event> wait_on_events;
+      std::set<ApEvent> wait_on_events;
       for (unsigned idx = 0; idx < futures.size(); idx++)
       {
         FutureImpl *impl = futures[idx].impl; 
@@ -10603,11 +10607,12 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
       {
-	Event e = wait_barriers[idx].phase_barrier.get_previous_phase();
+	ApEvent e = 
+          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
         wait_on_events.insert(e);
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Runtime::merge_events<true>(wait_on_events); 
+      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -10651,7 +10656,7 @@ namespace Legion {
         reduction_future.impl->complete_future();
       }
       // Trigger all our events event
-      completion_event.trigger();
+      Runtime::trigger_event(completion_event);
     }
 
     //--------------------------------------------------------------------------
@@ -10878,7 +10883,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom,
-                                        Event applied_condition)
+                                        RtEvent applied_condition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_MAPPED_CALL);
@@ -10929,8 +10934,7 @@ namespace Legion {
         // all the responses so no one else will be mutating it.
         if (!map_applied_conditions.empty())
         {
-          Event map_condition = 
-            Runtime::merge_events<true>(map_applied_conditions);
+          RtEvent map_condition = Runtime::merge_events(map_applied_conditions);
           complete_mapping(map_condition);
         }
         else
@@ -11007,7 +11011,7 @@ namespace Legion {
       derez.deserialize(points);
       long long denom;
       derez.deserialize(denom);
-      Event applied_condition;
+      RtEvent applied_condition;
       derez.deserialize(applied_condition);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -11148,7 +11152,7 @@ namespace Legion {
       // Slice tasks never have to resolve speculation
       resolve_speculation();
       reclaim = false;
-      index_complete = Event::NO_EVENT;
+      index_complete = ApEvent::NO_AP_EVENT;
       mapping_index = 0;
       num_unmapped_points = 0;
       num_uncomplete_points = 0;
@@ -11202,18 +11206,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::trigger_remote_state_analysis(UserEvent ready_event)
+    void SliceTask::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_REMOTE_STATE_ANALYSIS_CALL);
       // If we are locally mapped, we are done no matter what
       if (is_locally_mapped())
       {
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
         return;
       }
       // Otherwise we just need to request state for any non-eary mapped regions
-      std::set<Event> preconditions;
+      std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
       {
         if (early_mapped_regions.find(idx) == early_mapped_regions.end())
@@ -11221,10 +11225,10 @@ namespace Legion {
                                         get_parent_context(idx).get_id());
       }
       if (preconditions.empty())
-        ready_event.trigger();
+        Runtime::trigger_event(ready_event);
       else
-        Runtime::trigger_event<true>(ready_event,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(ready_event,
+                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -11249,7 +11253,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_PREWALK_CALL);
       // Premap all regions that were not early mapped
-      std::set<Event> empty_conditions;
+      std::set<RtEvent> empty_conditions;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // If we've already premapped it then we are done
@@ -11276,7 +11280,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::apply_local_version_infos(std::set<Event> &map_conditions)
+    void SliceTask::apply_local_version_infos(std::set<RtEvent> &map_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_APPLY_VERSION_INFO_CALL);
@@ -11456,7 +11460,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event SliceTask::get_task_completion(void) const
+    ApEvent SliceTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
       return index_complete;
@@ -11526,7 +11530,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     bool SliceTask::unpack_task(Deserializer &derez, Processor current,
-                                std::set<Event> &ready_events)
+                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_UNPACK_TASK_CALL);
@@ -11755,14 +11759,14 @@ namespace Legion {
       assert(refs[0].is_composite_ref());
 #endif
       RegionTreeContext virtual_ctx = get_parent_context(index);
-      std::set<Event> empty_conditions;
+      std::set<RtEvent> empty_conditions;
       // Have to control access to the version info data structure
       AutoLock o_lock(op_lock);
       // Hold a reference so it doesn't get deleted
       temporary_virtual_refs.push_back(refs[0]);
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              index, Event::NO_EVENT, 
+                                              index, ApEvent::NO_AP_EVENT,
                                               false/*defer add users*/, 
                                               empty_conditions, refs
 #ifdef DEBUG_LEGION
@@ -11776,7 +11780,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_child_mapped(Event child_complete)
+    void SliceTask::record_child_mapped(RtEvent child_complete)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -11843,7 +11847,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_MAPPED_CALL);
       // No matter what, flush out our physical states
-      Event applied_condition = Event::NO_EVENT;
+      RtEvent applied_condition;
       if (!is_remote() || !is_locally_mapped())
       {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
@@ -11853,11 +11857,10 @@ namespace Legion {
                                            owner_space, map_applied_conditions);
         }
         if (!map_applied_conditions.empty())
-          applied_condition = 
-            Runtime::merge_events<true>(map_applied_conditions);
+          applied_condition = Runtime::merge_events(map_applied_conditions);
       }
       else if (!map_applied_conditions.empty())
-        applied_condition = Runtime::merge_events<true>(map_applied_conditions);
+        applied_condition = Runtime::merge_events(map_applied_conditions);
       if (is_remote())
       {
         bool has_nonleaf_point = false;
@@ -11955,7 +11958,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::pack_remote_mapped(Serializer &rez, Event applied_condition)
+    void SliceTask::pack_remote_mapped(Serializer &rez, 
+                                       RtEvent applied_condition)
     //--------------------------------------------------------------------------
     {
       rez.serialize(index_owner);
@@ -12031,9 +12035,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      UserEvent ready_event;
+      RtUserEvent ready_event;
       derez.deserialize(ready_event);
-      ready_event.trigger();
+      Runtime::trigger_event(ready_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12080,7 +12084,7 @@ namespace Legion {
     {
       // Watch out for the cleanup race with some acrobatics here
       // to handle the case where the iterator is invalidated
-      std::set<Event> wait_events;
+      std::set<RtEvent> wait_events;
       {
         std::list<SliceTask*>::const_iterator it = slices.begin();
         DeferredSliceArgs args;
@@ -12093,7 +12097,7 @@ namespace Legion {
           // the clean-up race
           it++;
           bool done = (it == slices.end()); 
-          Event wait = 
+          RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_DEFERRED_SLICE_ID, 
                                                     HLR_LATENCY_PRIORITY, args.slice);
@@ -12109,7 +12113,7 @@ namespace Legion {
       // perform other operations
       if (!wait_events.empty())
       {
-        Event sliced_event = Runtime::merge_events<true>(wait_events);
+        RtEvent sliced_event = Runtime::merge_events(wait_events);
         sliced_event.wait();
       }
 

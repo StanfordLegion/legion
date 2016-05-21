@@ -771,7 +771,7 @@ namespace Legion {
       FrameOp& operator=(const FrameOp &rhs);
     public:
       void initialize(SingleTask *ctx);
-      void set_previous(RtEvent previous);
+      void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -781,7 +781,7 @@ namespace Legion {
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
     protected:
-      RtEvent previous_completion;
+      ApEvent previous_completion;
     };
 
     /**
@@ -1611,7 +1611,7 @@ namespace Legion {
       public:
         virtual ~PendingPartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest) = 0;
+        virtual ApEvent perform(RegionTreeForest *forest) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
@@ -1620,7 +1620,7 @@ namespace Legion {
           : pid(id), granularity(g) { }
         virtual ~EqualPartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_equal_partition(pid, granularity); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1634,7 +1634,7 @@ namespace Legion {
           : pid(id), weights(w), granularity(g) { }
         virtual ~WeightedPartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_weighted_partition(pid, granularity, weights); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1649,7 +1649,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~UnionPartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_partition_by_union(pid, handle1, handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1664,7 +1664,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~IntersectionPartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(pid, handle1, 
                                                           handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1680,7 +1680,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~DifferencePartitionThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_partition_by_difference(pid, handle1, 
                                                         handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1696,7 +1696,7 @@ namespace Legion {
           : base(b), source(s), handles(h) { }
         virtual ~CrossProductThunk(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(base, source, 
                                                          handles); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1714,7 +1714,7 @@ namespace Legion {
           : is_union(is), is_partition(true), target(t), handle(h) { }
         virtual ~ComputePendingSpace(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { if (is_partition)
             return forest->compute_pending_space(target, handle, is_union);
           else
@@ -1733,7 +1733,7 @@ namespace Legion {
           : target(t), initial(i), handles(h) { }
         virtual ~ComputePendingDifference(void) { }
       public:
-        virtual RtEvent perform(RegionTreeForest *forest)
+        virtual ApEvent perform(RegionTreeForest *forest)
         { return forest->compute_pending_space(target, initial, handles); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:

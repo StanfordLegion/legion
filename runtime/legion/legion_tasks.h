@@ -321,7 +321,7 @@ namespace Legion {
         HLRTaskID hlr_id;
         SingleTask *parent_ctx;
         FrameOp *frame;
-        RtEvent frame_termination;
+        ApEvent frame_termination;
       };
       struct AddToDepQueueArgs {
         HLRTaskID hlr_id;
@@ -396,9 +396,9 @@ namespace Legion {
       void begin_trace(TraceID tid);
       void end_trace(TraceID tid);
     public:
-      void issue_frame(FrameOp *frame, RtEvent frame_termination);
-      void perform_frame_issue(FrameOp *frame, RtEvent frame_termination);
-      void finish_frame(RtEvent frame_termination);
+      void issue_frame(FrameOp *frame, ApEvent frame_termination);
+      void perform_frame_issue(FrameOp *frame, ApEvent frame_termination);
+      void finish_frame(ApEvent frame_termination);
     public:
       void increment_outstanding(void);
       void decrement_outstanding(void);
@@ -634,7 +634,7 @@ namespace Legion {
       // child operations has grown too large.
       bool valid_wait_event;
       RtUserEvent window_wait;
-      std::deque<RtEvent> frame_events;
+      std::deque<ApEvent> frame_events;
       RtEvent deferred_map;
       RtEvent deferred_complete;
       RtEvent pending_done;
@@ -861,7 +861,7 @@ namespace Legion {
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
-      RtEvent remote_completion_event;
+      ApEvent remote_completion_event;
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
       UniqueID remote_owner_uid;
@@ -1075,7 +1075,7 @@ namespace Legion {
       int depth;
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-      RtEvent remote_completion_event;
+      ApEvent remote_completion_event;
       std::vector<VersionInfo> version_infos;
     };
 
@@ -1362,7 +1362,7 @@ namespace Legion {
       // domain we have (1/denominator)
       long long denominator;
       IndexTask *index_owner;
-      RtEvent index_complete;
+      ApEvent index_complete;
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
       bool locally_mapped;

@@ -85,20 +85,20 @@ namespace Legion {
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
-      RtEvent create_equal_partition(IndexPartition pid, size_t granularity);
-      RtEvent create_weighted_partition(IndexPartition pid, size_t granularity,
+      ApEvent create_equal_partition(IndexPartition pid, size_t granularity);
+      ApEvent create_weighted_partition(IndexPartition pid, size_t granularity,
                                       const std::map<DomainPoint,int> &weights);
     public:
-      RtEvent create_partition_by_union(IndexPartition pid,
+      ApEvent create_partition_by_union(IndexPartition pid,
                                         IndexPartition handle1,
                                         IndexPartition handle2);
-      RtEvent create_partition_by_intersection(IndexPartition pid,
+      ApEvent create_partition_by_intersection(IndexPartition pid,
                                                IndexPartition handle1,
                                                IndexPartition handle2);
-      RtEvent create_partition_by_difference(IndexPartition pid,
+      ApEvent create_partition_by_difference(IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      RtEvent create_cross_product_partitions(IndexPartition base,
+      ApEvent create_cross_product_partitions(IndexPartition base,
                                               IndexPartition source,
                       std::map<DomainPoint,IndexPartition> &handles);
     public:
@@ -155,13 +155,13 @@ namespace Legion {
                                     const DomainPoint &color,
                                     RtUserEvent &handle_ready,
                                     RtUserEvent &domain_ready);
-      RtEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(IndexSpace result,
                                     const std::vector<IndexSpace> &handles,
                                     bool is_union);
-      RtEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(IndexSpace result,
                                     IndexPartition handle,
                                     bool is_union);
-      RtEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(IndexSpace result,
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
     public:

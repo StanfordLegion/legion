@@ -160,7 +160,7 @@ namespace Legion {
       void* get_untyped_result(void);
       bool is_empty(bool block);
       size_t get_untyped_size(void);
-      RtEvent get_ready_event(void) const { return ready_event; }
+      ApEvent get_ready_event(void) const { return ready_event; }
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
@@ -201,7 +201,7 @@ namespace Legion {
 #endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
-      RtUserEvent ready_event;
+      ApUserEvent ready_event;
       void *result; 
       size_t result_size;
       volatile bool empty;
@@ -2717,18 +2717,23 @@ namespace Legion {
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
+    public:
       static inline RtEvent protect_event(ApEvent to_protect);
+      static inline RtEvent protect_merge_events(
+                                          const std::set<ApEvent> &events);
     public:
       static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
-      static inline ApEvent get_previous_phase(const PhaseBarrier &bar);
+      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
       static inline void advance_barrier(PhaseBarrier &bar);
+      static inline bool get_barrier_result(ApBarrier bar, void *result,
+                                            size_t result_size);
     public:
-      static inline ApEvent acquire_reservation(Reservation r, bool exclusive,
+      static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
-      static inline RtEvent acquire_reservation(Reservation r, bool exclusive,
+      static inline RtEvent acquire_rt_reservation(Reservation r,bool exclusive,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
       static inline void release_reservation(Reservation r,
                                    LgEvent precondition = LgEvent::NO_LG_EVENT);
@@ -2996,7 +3001,20 @@ namespace Legion {
     /*static*/ inline RtEvent Runtime::protect_event(ApEvent to_protect)
     //--------------------------------------------------------------------------
     {
-      return RtEvent(Realm::Event::ignorefaults(to_protect));
+      if (to_protect.exists())
+        return RtEvent(Realm::Event::ignorefaults(to_protect));
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::protect_merge_events(
+                                                const std::set<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
     }
 
     //--------------------------------------------------------------------------
@@ -3014,12 +3032,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::get_previous_phase(
+    /*static*/ inline ApBarrier Runtime::get_previous_phase(
                                                         const PhaseBarrier &bar)
     //--------------------------------------------------------------------------
     {
       Realm::Barrier copy = bar.phase_barrier;
-      return ApEvent(copy.get_previous_phase());
+      return ApBarrier(copy.get_previous_phase());
     }
 
     //--------------------------------------------------------------------------
@@ -3040,7 +3058,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::acquire_reservation(Reservation r,
+    /*static*/ inline bool Runtime::get_barrier_result(ApBarrier bar,
+                                               void *result, size_t result_size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      return copy.get_result(result, result_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::acquire_ap_reservation(Reservation r,
                                            bool exclusive, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -3059,7 +3086,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline RtEvent Runtime::acquire_reservation(Reservation r,
+    /*static*/ inline RtEvent Runtime::acquire_rt_reservation(Reservation r,
                                            bool exclusive, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
