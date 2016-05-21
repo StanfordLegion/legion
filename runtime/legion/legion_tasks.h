@@ -1370,7 +1370,7 @@ namespace Legion {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      std::deque<InstanceRef> temporary_virtual_refs;
+      LegionDeque<InstanceRef>::aligned temporary_virtual_refs;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<Event> map_applied_conditions;
     };
