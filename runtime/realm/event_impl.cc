@@ -144,6 +144,12 @@ namespace Realm {
     return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
   }
 
+  /*static*/ Event Event::ignorefaults(Event wait_for)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    return GenEventImpl::ignorefaults(wait_for);
+  }
+
   class EventTriggeredCondition {
   public:
     EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
@@ -782,6 +788,31 @@ namespace Realm {
       if(m->arm())
         delete m;
 
+      return finish_event;
+    }
+
+    /*static*/ Event GenEventImpl::ignorefaults(Event wait_for)
+    {
+      bool poisoned = false;
+      // poisoned or not, we return no event if it is done
+      if(wait_for.has_triggered_faultaware(poisoned))
+        return Event::NO_EVENT;
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      EventMerger *m = new EventMerger(finish_event, true/*ignore faults*/);
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) 1", 
+			   finish_event.id, finish_event.gen);
+#endif
+      log_event.info() << "event merging: event=" << finish_event 
+                       << " wait_on=" << wait_for;
+      m->add_event(wait_for);
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
+                           finish_event.id, finish_event.gen,
+                           wait_for.id, wait_for.gen);
+#endif
+      if(m->arm())
+        delete m;
       return finish_event;
     }
 
