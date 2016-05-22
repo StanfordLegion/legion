@@ -892,7 +892,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(Event deferred_event) const
+    void PhysicalManager::perform_deletion(RtEvent deferred_event) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -957,7 +957,7 @@ namespace Legion {
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
-                                     bool register_now, Event u_event, 
+                                     bool register_now, ApEvent u_event, 
                                      InstanceFlag flags/*=NO_INSTANCE_FLAGS*/)
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
@@ -989,7 +989,7 @@ namespace Legion {
     InstanceManager::InstanceManager(const InstanceManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0, NULL,
                     PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, false),
-        use_event(Event::NO_EVENT)
+        use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1217,7 +1217,7 @@ namespace Legion {
       derez.deserialize(inst_domain);
       LogicalRegion handle;
       derez.deserialize(handle);
-      Event use_event;
+      ApEvent use_event;
       derez.deserialize(use_event);
       InstanceFlag flags;
       derez.deserialize(flags);
@@ -1370,7 +1370,7 @@ namespace Legion {
       derez.deserialize(foldable);
       Domain ptr_space;
       derez.deserialize(ptr_space);
-      Event use_event;
+      ApEvent use_event;
       derez.deserialize(use_event);
       RegionNode *target_node = runtime->forest->get_node(handle);
       LayoutDescription *layout = 
@@ -1579,10 +1579,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event ListReductionManager::issue_reduction(Operation *op,
+    ApEvent ListReductionManager::issue_reduction(Operation *op,
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        RegionTreeNode *dst, Event precondition, bool reduction_fold, 
+        RegionTreeNode *dst, ApEvent precondition, bool reduction_fold, 
         bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
@@ -1591,7 +1591,7 @@ namespace Legion {
 #endif
       // TODO: use the "new" Realm interface for list instances
       assert(false);
-      return Event::NO_EVENT;
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1602,10 +1602,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event ListReductionManager::get_use_event(void) const
+    ApEvent ListReductionManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
-      return Event::NO_EVENT;
+      return ApEvent::NO_AP_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1626,7 +1626,7 @@ namespace Legion {
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o,
-                                               Event u_event,
+                                               ApEvent u_event,
                                                bool register_now)
       : ReductionManager(ctx, encode_reduction_fold_did(did), f, owner_space, 
                          local_space, mem, inst, desc, cons, d, own_dom, node, 
@@ -1650,7 +1650,7 @@ namespace Legion {
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
                          Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
-        use_event(Event::NO_EVENT)
+        use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1737,10 +1737,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event FoldReductionManager::issue_reduction(Operation *op,
+    ApEvent FoldReductionManager::issue_reduction(Operation *op,
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        RegionTreeNode *dst, Event precondition, bool reduction_fold, 
+        RegionTreeNode *dst, ApEvent precondition, bool reduction_fold, 
         bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
@@ -1760,7 +1760,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event FoldReductionManager::get_use_event(void) const
+    ApEvent FoldReductionManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
       return use_event;
@@ -1939,13 +1939,13 @@ namespace Legion {
       // If there are no fields then we are done
 #ifdef NEW_INSTANCE_CREATION
       PhysicalInstance instance = PhysicalInstance::NO_INST;
-      Event ready = forest->create_instance(instance_domain, 
+      ApEvent ready = forest->create_instance(instance_domain, 
                   memory_manager->memory, field_sizes, instance, constraints);
 #else
       PhysicalInstance instance = forest->create_instance(instance_domain,
                                        memory_manager->memory, sizes_only, 
                                        block_size, redop_id, creator_id);
-      Event ready = Event::NO_EVENT;
+      ApEvent ready = ApEvent::NO_AP_EVENT;
 #endif
       // If we couldn't make it then we are done
       if (!instance.exists())
@@ -2013,8 +2013,8 @@ namespace Legion {
             Realm::ProfilingRequestSet requests;
             if (forest->runtime->profiler != NULL)
               forest->runtime->profiler->add_fill_request(requests, creator_id);
-            Event filled_and_ready = instance_domain.fill(dsts, requests,
-                                  fill_buffer, reduction_op->sizeof_rhs, ready);
+            ApEvent filled_and_ready(instance_domain.fill(dsts, requests,
+                                 fill_buffer, reduction_op->sizeof_rhs, ready));
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
             result = legion_new<FoldReductionManager>(forest, did, 

@@ -129,7 +129,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TraversalInfo::TraversalInfo(ContextID c, Operation *o, unsigned idx,
                                  const RegionRequirement &r, VersionInfo &info, 
-                                 const FieldMask &k, std::set<Event> &e)
+                                 const FieldMask &k, std::set<RtEvent> &e)
       : ctx(c), op(o), index(idx), req(r), version_info(info),
         traversal_mask(k), context_uid(o->get_parent()->get_context_uid()),
         map_applied_events(e)
@@ -351,7 +351,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::apply_mapping(ContextID ctx, AddressSpaceID target,
-                                    std::set<Event> &applied_conditions,
+                                    std::set<RtEvent> &applied_conditions,
 				    bool copy_previous/*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -409,7 +409,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionInfo::apply_close(ContextID ctx, AddressSpaceID target,
               const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
-                                          std::set<Event> &applied_conditions)
+                                          std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -626,7 +626,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::make_local(std::set<Event> &preconditions, 
+    void VersionInfo::make_local(std::set<RtEvent> &preconditions, 
                                  RegionTreeForest *forest, ContextID ctx)
     //--------------------------------------------------------------------------
     {
@@ -1513,7 +1513,7 @@ namespace Legion {
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
                                      const FieldMask &m, VersionInfo &info, 
                                      Operation *o, unsigned idx,
-                                     std::set<Event> &e)
+                                     std::set<RtEvent> &e)
       : ctx(c), target(t), close_mask(m), version_info(info), op(o), 
         index(idx), map_applied_events(e)
     //--------------------------------------------------------------------------
@@ -1900,7 +1900,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::initialize_state(Event term_event,
+    void CurrentState::initialize_state(ApEvent term_event,
                                         const RegionUsage &usage,
                                         const FieldMask &user_mask,
                                         const InstanceSet &targets,
@@ -3642,7 +3642,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::apply_path_only_state(const FieldMask &adv_mask,
-               AddressSpaceID target, std::set<Event> &applied_conditions) const
+             AddressSpaceID target, std::set<RtEvent> &applied_conditions) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -3704,7 +3704,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::apply_state(const FieldMask &advance_mask,
-                     AddressSpaceID target, std::set<Event> &applied_conditions)
+                   AddressSpaceID target, std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -3774,7 +3774,7 @@ namespace Legion {
                                AddressSpaceID target, bool filter_masks, 
                                bool filter_views, bool filter_children, 
                const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
-                                   std::set<Event> &applied_conditions)
+                               std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -4013,7 +4013,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::make_local(std::set<Event> &preconditions, 
+    void PhysicalState::make_local(std::set<RtEvent> &preconditions, 
                                    bool needs_final, bool needs_advance)
     //--------------------------------------------------------------------------
     {
@@ -4290,7 +4290,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::initialize(Event term_event, const RegionUsage &usage,
+    void VersionState::initialize(ApEvent term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   const InstanceSet &targets,
                                   UniqueID init_op_id, unsigned init_index,
@@ -4536,7 +4536,7 @@ namespace Legion {
     void VersionState::merge_path_only_state(const PhysicalState *state,
                                              const FieldMask &merge_mask,
                                              AddressSpaceID target,
-                                            std::set<Event> &applied_conditions)
+                                          std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -4579,12 +4579,12 @@ namespace Legion {
             rez.serialize(new_path_only);
             if (target != owner_space)
             {
-              UserEvent registered_event = UserEvent::create_user_event();
+              RtUserEvent registered_event = Runtime::create_rt_user_event();
               rez.serialize(registered_event);
               applied_conditions.insert(registered_event);
             }
             else
-              rez.serialize(UserEvent::NO_USER_EVENT);
+              rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
           }
           runtime->send_version_state_path_only(owner_space, rez);
         }
@@ -4596,7 +4596,7 @@ namespace Legion {
     void VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask,
                                             AddressSpaceID target,
-                                            std::set<Event> &applied_conditions,
+                                          std::set<RtEvent> &applied_conditions,
                                             bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
     {
@@ -4605,7 +4605,8 @@ namespace Legion {
       if (need_lock)
       {
         // We're writing so we need the lock in exclusive mode
-        Event acquire_event = state_lock.acquire();
+        RtEvent acquire_event = 
+          Runtime::acquire_rt_reservation(state_lock, true/*exclusive*/);
         acquire_event.wait();
       }
       if (!!state->dirty_mask)
@@ -4695,12 +4696,12 @@ namespace Legion {
             rez.serialize(new_initial_fields);
             if (owner_space != target)
             {
-              UserEvent registered_event = UserEvent::create_user_event();
+              RtUserEvent registered_event = Runtime::create_rt_user_event();
               rez.serialize(registered_event);
               applied_conditions.insert(registered_event);
             }
             else
-              rez.serialize(UserEvent::NO_USER_EVENT);
+              rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
           }
           runtime->send_version_state_initialization(owner_space, rez);
         }
@@ -4716,7 +4717,7 @@ namespace Legion {
                         AddressSpaceID target, bool filter_masks, 
                         bool filter_views, bool filter_children,
                 const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
-                        std::set<Event> &applied_conditions)
+                        std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -4962,12 +4963,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::request_initial_version_state(
-                  const FieldMask &request_mask, std::set<Event> &preconditions)
+                const FieldMask &request_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
                         VERSION_STATE_REQUEST_INITIAL_CALL);
-      UserEvent ready_event = UserEvent::NO_USER_EVENT;
+      RtUserEvent ready_event;
       FieldMask remaining_mask = request_mask;
       LegionDeque<RequestInfo>::aligned targets;
       {
@@ -4977,7 +4978,7 @@ namespace Legion {
         {
           if (!initial_events.empty())
           {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
                   initial_events.begin(); it != initial_events.end(); it++)
             {
               if (remaining_mask * it->second)
@@ -4994,7 +4995,7 @@ namespace Legion {
         {
           if (!final_events.empty())
           {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
                   final_events.begin(); it != final_events.end(); it++)
             {
               if (remaining_mask * it->second)
@@ -5028,7 +5029,7 @@ namespace Legion {
         else
         {
           // Make a user event and record it as a precondition
-          ready_event = UserEvent::create_user_event();
+          ready_event = Runtime::create_rt_user_event();
           initial_events[ready_event] = remaining_mask;
           initial_fields |= remaining_mask;
           preconditions.insert(ready_event);
@@ -5059,12 +5060,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::request_final_version_state(const FieldMask &req_mask,
-                                                 std::set<Event> &preconditions)
+                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
                         VERSION_STATE_REQUEST_FINAL_CALL);
-      UserEvent ready_event;
+      RtUserEvent ready_event;
       FieldMask remaining_mask = req_mask;
       LegionDeque<RequestInfo>::aligned targets;
       {
@@ -5073,7 +5074,7 @@ namespace Legion {
         {
           if (!final_events.empty())
           {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
                   final_events.begin(); it != final_events.end(); it++)
             {
               if (remaining_mask * it->second)
@@ -5099,7 +5100,7 @@ namespace Legion {
           assert(!!remaining_mask);
 #endif
           // Make a user event and record it as a precondition   
-          ready_event = UserEvent::create_user_event();
+          ready_event = Runtime::create_rt_user_event();
           final_fields |= remaining_mask;
           final_events[ready_event] = remaining_mask;
           preconditions.insert(ready_event);
@@ -5125,7 +5126,7 @@ namespace Legion {
     void VersionState::select_initial_targets(AddressSpaceID request_space,
                                               FieldMask &needed_mask,
                                      LegionDeque<RequestInfo>::aligned &targets,
-                                              std::set<Event> &preconditions)
+                                              std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
@@ -5146,7 +5147,7 @@ namespace Legion {
         targets.push_back(RequestInfo());
         RequestInfo &info = targets.back();
         info.target = it->first;
-        info.to_trigger = UserEvent::create_user_event();
+        info.to_trigger = Runtime::create_rt_user_event();
         info.request_mask = overlap;
         info.kind = INITIAL_VERSION_REQUEST;
         // Add the event to the set of preconditions
@@ -5172,7 +5173,7 @@ namespace Legion {
         targets.push_back(RequestInfo());
         RequestInfo &info = targets.back();
         info.target = it->first;
-        info.to_trigger = UserEvent::create_user_event();
+        info.to_trigger = Runtime::create_rt_user_event();
         info.request_mask = overlap;
         info.kind = PATH_ONLY_VERSION_REQUEST;
         // Add the event to the set of preconditions
@@ -5190,7 +5191,7 @@ namespace Legion {
     void VersionState::select_final_targets(AddressSpaceID request_space,
                                             FieldMask &needed_mask,
                                     LegionDeque<RequestInfo>::aligned &targets,
-                                            std::set<Event> &preconditions)
+                                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
@@ -5210,7 +5211,7 @@ namespace Legion {
         targets.push_back(RequestInfo());
         RequestInfo &info = targets.back();
         info.target = it->first;
-        info.to_trigger = UserEvent::create_user_event();
+        info.to_trigger = Runtime::create_rt_user_event();
         info.request_mask = overlap;
         info.kind = FINAL_VERSION_REQUEST;
         // Add the event to the set of preconditions
@@ -5225,7 +5226,7 @@ namespace Legion {
       // Now if we still have needed fields, we need to create a final
       // version from all of the earlier versions across all the nodes
       FieldMask requested_mask;
-      std::set<Event> merge_preconditions;
+      std::set<RtEvent> merge_preconditions;
       for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
             initial_nodes.begin(); it != initial_nodes.end(); it++)
       {
@@ -5237,7 +5238,7 @@ namespace Legion {
         targets.push_back(RequestInfo());
         RequestInfo &info = targets.back();
         info.target = it->first;
-        info.to_trigger = UserEvent::create_user_event();
+        info.to_trigger = Runtime::create_rt_user_event();
         info.request_mask = overlap;
         info.kind = INITIAL_VERSION_REQUEST;
         merge_preconditions.insert(info.to_trigger); 
@@ -5258,7 +5259,7 @@ namespace Legion {
           targets.push_back(RequestInfo());
           RequestInfo &info = targets.back();
           info.target = it->first;
-          info.to_trigger = UserEvent::create_user_event();
+          info.to_trigger = Runtime::create_rt_user_event();
           info.request_mask = overlap;
           info.kind = PATH_ONLY_VERSION_REQUEST;
           merge_preconditions.insert(info.to_trigger); 
@@ -5268,7 +5269,7 @@ namespace Legion {
       }
       if (!!requested_mask)
       {
-        Event precondition = Runtime::merge_events<true>(merge_preconditions);
+        RtEvent precondition = Runtime::merge_events(merge_preconditions);
         if (precondition.exists())
         {
           preconditions.insert(precondition);
@@ -5282,7 +5283,7 @@ namespace Legion {
     void VersionState::send_version_state(AddressSpaceID target,
                                           VersionRequestKind request_kind,
                                           const FieldMask &request_mask,
-                                          UserEvent to_trigger)
+                                          RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -5431,7 +5432,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_request(AddressSpaceID target,
-                                    AddressSpaceID source, UserEvent to_trigger,
+                                    AddressSpaceID source, 
+                                    RtUserEvent to_trigger,
                                     const FieldMask &request_mask, 
                                     VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------
@@ -5450,10 +5452,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state(AddressSpaceID target,
-                                                 UserEvent to_trigger, 
+                                                 RtUserEvent to_trigger, 
                                                  VersionRequestKind req_kind,
                                                  const FieldMask &request_mask, 
-                                                 Event precondition)
+                                                 RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       SendVersionStateArgs args;
@@ -5495,7 +5497,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_request(AddressSpaceID source,
-                    UserEvent to_trigger, VersionRequestKind request_kind, 
+                    RtUserEvent to_trigger, VersionRequestKind request_kind, 
                                                     FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
@@ -5504,14 +5506,14 @@ namespace Legion {
       if (!is_owner())
       {
         // If we are not the owner, we should definitely be able to handle this
-        std::set<Event> launch_preconditions;
+        std::set<RtEvent> launch_preconditions;
 #ifdef DEBUG_LEGION
         FieldMask remaining_mask = request_mask;
 #endif
         if (request_kind == FINAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
                 final_events.begin(); it != final_events.end(); it++)
           {
             if (it->second * request_mask)
@@ -5525,7 +5527,7 @@ namespace Legion {
         else if (request_kind == INITIAL_VERSION_REQUEST)
         {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
                 initial_events.begin(); it != initial_events.end(); it++)
           {
             if (it->second * request_mask)
@@ -5550,7 +5552,7 @@ namespace Legion {
 #endif
         if (!launch_preconditions.empty())
         {
-          Event pre = Runtime::merge_events<true>(launch_preconditions);
+          RtEvent pre = Runtime::merge_events(launch_preconditions);
           launch_send_version_state(source, to_trigger, request_kind, 
                                     request_mask, pre);
         }
@@ -5565,7 +5567,7 @@ namespace Legion {
         FieldMask local_fields;
         int path_only_local_index = -1;
         int initial_local_index = -1;
-        std::set<Event> local_preconditions, done_conditions;
+        std::set<RtEvent> local_preconditions, done_conditions;
         LegionDeque<RequestInfo>::aligned targets;
         if (request_kind == FINAL_VERSION_REQUEST)
         {
@@ -5574,7 +5576,7 @@ namespace Legion {
           local_fields = remaining_fields & final_fields;
           if (!!local_fields)
           {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
                   final_events.begin(); it != final_events.end(); it++)
             {
               if (it->second * local_fields)
@@ -5599,7 +5601,7 @@ namespace Legion {
           local_fields = remaining_fields & initial_fields;
           if (!!local_fields)
           {
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
                   initial_events.begin(); it != initial_events.end(); it++)
             {
               if (it->second * local_fields)
@@ -5654,10 +5656,10 @@ namespace Legion {
         // Now see if we have any local fields to send
         if (!!local_fields)
         {
-          UserEvent local_trigger = UserEvent::create_user_event();
+          RtUserEvent local_trigger = Runtime::create_rt_user_event();
           if (!local_preconditions.empty())
           {
-            Event pre = Runtime::merge_events<true>(local_preconditions);
+            RtEvent pre = Runtime::merge_events(local_preconditions);
             launch_send_version_state(source, local_trigger, request_kind,
                                       local_fields, pre); 
           }
@@ -5681,7 +5683,7 @@ namespace Legion {
           // Retake the lock to read the local data structure
           {
             AutoLock s_lock(state_lock,1,false/*exclusive*/);
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
                   initial_events.begin(); it != initial_events.end(); it++)
             {
               if (it->second * info.request_mask)
@@ -5691,7 +5693,7 @@ namespace Legion {
           }
           if (!local_preconditions.empty())
           {
-            Event pre = Runtime::merge_events<true>(local_preconditions);
+            RtEvent pre = Runtime::merge_events(local_preconditions);
             launch_send_version_state(source, info.to_trigger, info.kind, 
                                       info.request_mask, pre);
           }
@@ -5703,16 +5705,18 @@ namespace Legion {
         // Now if we have any done conditions we trigger the proper 
         // precondition event, otherwise we can do it immediately
         if (!done_conditions.empty())
-          Runtime::trigger_event<true>(to_trigger,
-              Runtime::merge_events<true>(done_conditions));
+          Runtime::trigger_event(to_trigger,
+                                 Runtime::merge_events(done_conditions));
         else
-          to_trigger.trigger();
+          Runtime::trigger_event(to_trigger);
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_response(AddressSpaceID source,
-     UserEvent to_trigger, VersionRequestKind request_kind, Deserializer &derez)
+                                                     RtUserEvent to_trigger, 
+                                            VersionRequestKind request_kind, 
+                                                     Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(manager->owner->context->runtime,
@@ -5745,10 +5749,10 @@ namespace Legion {
             }
           }
         }
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
         return;
       }
-      std::set<Event> preconditions;
+      std::set<RtEvent> preconditions;
       std::vector<LogicalView*> pending_views;
       {
         // Hold the lock when touching the data structures because we might
@@ -5822,7 +5826,7 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            Event ready = Event::NO_EVENT;
+            RtEvent ready;
             LogicalView *view = 
               runtime->find_or_request_logical_view(did, ready);
             FieldMask &mask = valid_views[view];
@@ -5842,7 +5846,7 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            Event ready = Event::NO_EVENT;
+            RtEvent ready;
             LogicalView *view =
               runtime->find_or_request_logical_view(did, ready);
             ReductionView *red_view = static_cast<ReductionView*>(view); 
@@ -5870,7 +5874,7 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            Event ready = Event::NO_EVENT;
+            RtEvent ready;
             LogicalView *view =
               runtime->find_or_request_logical_view(did, ready);
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
@@ -5906,7 +5910,7 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            Event ready = Event::NO_EVENT;
+            RtEvent ready;
             LogicalView *view =
               runtime->find_or_request_logical_view(did, ready);
             ReductionView *red_view = static_cast<ReductionView*>(view);
@@ -5939,10 +5943,10 @@ namespace Legion {
           }
         }
       }
-      Event pending_ready = Event::NO_EVENT;
+      RtEvent pending_ready;
       if (!preconditions.empty())
       {
-        pending_ready = Runtime::merge_events<true>(preconditions);
+        pending_ready = Runtime::merge_events(preconditions);
         preconditions.clear();
       }
       if (pending_ready.exists())
@@ -5956,10 +5960,10 @@ namespace Legion {
         }
       }
       if (!preconditions.empty())
-        Runtime::trigger_event<true>(to_trigger,
-            Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event(to_trigger,
+                               Runtime::merge_events(preconditions));
       else
-        to_trigger.trigger();
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -5980,10 +5984,10 @@ namespace Legion {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_path_only(source, path_only_mask);
-      UserEvent registered_event;
+      RtUserEvent registered_event;
       derez.deserialize(registered_event);
       if (registered_event.exists())
-        registered_event.trigger();
+        Runtime::trigger_event(registered_event);
     }
 
     //--------------------------------------------------------------------------
@@ -6004,10 +6008,10 @@ namespace Legion {
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
       vs->handle_version_state_initialization(source, initial_mask);
-      UserEvent registered_event;
+      RtUserEvent registered_event;
       derez.deserialize(registered_event);
       if (registered_event.exists())
-        registered_event.trigger();
+        Runtime::trigger_event(registered_event);
     }
 
     //--------------------------------------------------------------------------
@@ -6020,7 +6024,7 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID source;
       derez.deserialize(source);
-      UserEvent to_trigger;
+      RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       VersionRequestKind request_kind;
       derez.deserialize(request_kind);
@@ -6045,7 +6049,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      UserEvent to_trigger;
+      RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       VersionRequestKind req_kind;
       derez.deserialize(req_kind);
@@ -6234,7 +6238,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(bool comp)
-      : ready_event(Event::NO_EVENT), composite(comp), local(true)
+      : ready_event(ApEvent::NO_AP_EVENT), composite(comp), local(true)
     //--------------------------------------------------------------------------
     {
       if (composite)
@@ -6260,7 +6264,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m, Event r)
+    InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m,ApEvent r)
       : valid_fields(m), ready_event(r), composite(false), local(true)
     //--------------------------------------------------------------------------
     {
@@ -6492,7 +6496,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceRef::unpack_reference(Runtime *runtime, 
-                                       Deserializer &derez, Event &ready)
+                                       Deserializer &derez, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(valid_fields);
@@ -6964,7 +6968,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez,
-                                        std::set<Event> &ready_events)
+                                        std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       size_t num_refs;
@@ -7001,7 +7005,7 @@ namespace Legion {
           refs.single = legion_new<CollectableRef>();
           refs.single->add_reference();
         }
-        Event ready = Event::NO_EVENT;
+        RtEvent ready;
         refs.single->unpack_reference(runtime, derez, ready);
         if (ready.exists())
           ready_events.insert(ready);
@@ -7023,7 +7027,7 @@ namespace Legion {
         // Now do the unpacking
         for (unsigned idx = 0; idx < num_refs; idx++)
         {
-          Event ready = Event::NO_EVENT;
+          RtEvent ready;
           refs.multi->vector[idx].unpack_reference(runtime, derez, ready);
           if (ready.exists())
             ready_events.insert(ready);
@@ -7066,14 +7070,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::update_wait_on_events(std::set<Event> &wait_on) const 
+    void InstanceSet::update_wait_on_events(std::set<ApEvent> &wait_on) const 
     //--------------------------------------------------------------------------
     {
       if (single)
       {
         if (refs.single != NULL)
         {
-          Event ready = refs.single->get_ready_event();
+          ApEvent ready = refs.single->get_ready_event();
           if (ready.exists())
             wait_on.insert(ready);
         }
@@ -7082,7 +7086,7 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
         {
-          Event ready = refs.multi->vector[idx].get_ready_event();
+          ApEvent ready = refs.multi->vector[idx].get_ready_event();
           if (ready.exists())
             wait_on.insert(ready);
         }

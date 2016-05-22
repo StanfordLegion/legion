@@ -8858,7 +8858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_rt_user_event();
+      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -9155,7 +9155,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_rt_user_event();
+      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------

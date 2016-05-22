@@ -1782,7 +1782,7 @@ namespace Legion {
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
       void perform_logging();
-      inline RtEvent get_handle_ready(void) const { return handle_ready; }
+      inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
       virtual bool trigger_execution(void);
       virtual bool is_partition_op(void) const { return true; } 
@@ -1792,7 +1792,7 @@ namespace Legion {
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
     protected:
-      RtUserEvent handle_ready;
+      ApUserEvent handle_ready;
       PendingPartitionThunk *thunk;
     };
 
@@ -1831,7 +1831,7 @@ namespace Legion {
                                const Domain &color_space);
       void perform_logging();
       const RegionRequirement& get_requirement(void) const;
-      inline RtEvent get_handle_ready(void) const { return handle_ready; }
+      inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
@@ -1849,7 +1849,7 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
     protected:
-      RtUserEvent handle_ready;
+      ApUserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
       VersionInfo version_info;

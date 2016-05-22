@@ -144,7 +144,7 @@ namespace Legion {
       public:
         HLRTaskID hlr_id;
         FutureImpl *impl;
-        ApBarrier barrier;
+        DynamicCollective dc;
         unsigned count;
       };
     public:
@@ -190,7 +190,7 @@ namespace Legion {
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
-      void contribute_to_collective(ApBarrier barrier, unsigned count);
+      void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
     public:
       // These three fields are only valid on the owner node
@@ -417,7 +417,7 @@ namespace Legion {
     private:
       int mpi_count, legion_count;
     private:
-      RtUserEvent mpi_ready, legion_ready;
+      ApUserEvent mpi_ready, legion_ready;
     };
 
     /**
@@ -918,13 +918,13 @@ namespace Legion {
     public:
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
-      void add_collection(LogicalView *view, RtEvent term_event);
+      void add_collection(LogicalView *view, ApEvent term_event);
       RtEvent launch(void);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;
       int remaining;
-      std::map<LogicalView*,std::set<RtEvent> > collections;
+      std::map<LogicalView*,std::set<ApEvent> > collections;
     };
 
     /**
@@ -1126,7 +1126,7 @@ namespace Legion {
     private:
       void *user_data;
       size_t user_data_size;
-      RtEvent ready_event;
+      ApEvent ready_event;
     private: // properties
       bool leaf_variant;
       bool inner_variant;
@@ -1261,7 +1261,7 @@ namespace Legion {
         FutureImpl *future;
         MapperID map_id;
         Processor proc;
-        RtEvent event;
+        ApEvent event;
         RemoteTask *context;
       }; 
       struct SelectTunableArgs {
@@ -1300,7 +1300,7 @@ namespace Legion {
       void initialize_mappers(void);
       void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor target);
-      RtEvent launch_mapper_task(Mapper *mapper, Processor proc, 
+      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args);
@@ -2175,7 +2175,7 @@ namespace Legion {
     public:
       FutureImpl* find_or_create_future(DistributedID did);
     public:
-      void defer_collect_user(LogicalView *view, RtEvent term_event);
+      void defer_collect_user(LogicalView *view, ApEvent term_event);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
       void increment_outstanding_top_level_tasks(void);
@@ -2752,13 +2752,14 @@ namespace Legion {
       inline T get_result(void)
       {
         // Try to take the reservation, see if we get it
-        RtEvent acquire_event = reservation.acquire();
+        RtEvent acquire_event = 
+          Runtime::acquire_rt_reservation(reservation, true/*exclusive*/);
         if (acquire_event.has_triggered())
         {
           // We got it! Do it now!
           result = (runtime->*FUNC_PTR)(false/*do continuation*/,
                                         true/*has lock*/);
-          reservation.release();
+          Runtime::release_reservation(reservation);
           return result;
         }
         // Otherwise we didn't get so issue the deferred task
@@ -2773,7 +2774,7 @@ namespace Legion {
         result = (runtime->*FUNC_PTR)(false/*do continuation*/,
                                       true/*has lock*/); 
         // Now release the reservation 
-        reservation.release();
+        Runtime::release_reservation(reservation);
       }
     protected:
       Runtime *const runtime;
@@ -2882,7 +2883,7 @@ namespace Legion {
       if (!result.exists())
       {
         ApUserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        Runtime::trigger_event(rename);
         result = rename;
       }
       LegionSpy::log_event_dependence(e1, result);
@@ -2901,7 +2902,7 @@ namespace Legion {
       if (!result.exists())
       {
         ApUserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        Runtime::trigger_event(rename);
         result = rename;
       }
       LegionSpy::log_event_dependence(e1, result);
@@ -2923,7 +2924,7 @@ namespace Legion {
       if (!result.exists())
       {
         ApUserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        Runtime::trigger_event(rename);
         result = rename;
       }
       for (std::set<ApEvent>::const_iterator it = events.begin();
@@ -3076,7 +3077,7 @@ namespace Legion {
       if (precondition.exists() && !result.exists())
       {
         ApUserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        Runtime::trigger_event(rename);
         result = rename;
       }
       if (precondition.exists())

@@ -39,7 +39,7 @@ namespace Legion {
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         gc_references(0), valid_references(0), resource_references(0), 
-        destruction_event(UserEvent::create_user_event()),
+        destruction_event(Runtime::create_rt_user_event()),
         registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
@@ -66,7 +66,8 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      destruction_event.trigger(Runtime::merge_events<true>(recycle_events));
+      Runtime::trigger_event(destruction_event,
+                             Runtime::merge_events(recycle_events));
       if (registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);
@@ -525,7 +526,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::register_remote_instance(AddressSpaceID source,
-                                                          Event destroyed)
+                                                          RtEvent destroyed)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -700,7 +701,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      Event destroy_event;
+      RtEvent destroy_event;
       derez.deserialize(destroy_event);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);

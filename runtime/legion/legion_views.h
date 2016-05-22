@@ -460,7 +460,7 @@ namespace Legion {
                                       const UniqueID op_id,
                                       const unsigned index,
                                       std::set<ApEvent> &preconditions,
-                                      std::set<RtEvent> &dead_events,
+                                      std::set<ApEvent> &dead_events,
                   LegionMap<ApEvent,FieldMask>::aligned &filter_events,
                                       FieldMask &observed, 
                                       FieldMask &non_dominated);

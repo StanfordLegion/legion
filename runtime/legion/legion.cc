@@ -29,6 +29,13 @@ namespace Legion {
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
+    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
+    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
+    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
+    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
+    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
+    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
+    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
 
     /////////////////////////////////////////////////////////////
     // Mappable 

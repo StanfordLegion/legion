@@ -113,8 +113,8 @@ namespace Legion {
                                     ColorPoint partition_color,
                                     PartitionKind part_kind,
                                     bool allocable, 
-                                    RtEvent handle_ready,
-                                    RtEvent domain_ready,
+                                    ApEvent handle_ready,
+                                    ApEvent domain_ready,
                                     bool create = false);
       void create_pending_cross_product(IndexPartition handle1,
                                         IndexPartition handle2,
@@ -123,8 +123,8 @@ namespace Legion {
                                            PartitionKind kind,
                                            ColorPoint &part_color,
                                            bool allocable,
-                                           RtEvent handle_ready,
-                                           RtEvent domain_ready);
+                                           ApEvent handle_ready,
+                                           ApEvent domain_ready);
       ApEvent create_partition_by_field(RegionTreeContext ctx,
                                         Operation *op, unsigned index,
                                         const RegionRequirement &req,
@@ -153,8 +153,8 @@ namespace Legion {
     public:
       IndexSpace find_pending_space(IndexPartition parent,
                                     const DomainPoint &color,
-                                    RtUserEvent &handle_ready,
-                                    RtUserEvent &domain_ready);
+                                    ApUserEvent &handle_ready,
+                                    ApUserEvent &domain_ready);
       ApEvent compute_pending_space(IndexSpace result,
                                     const std::vector<IndexSpace> &handles,
                                     bool is_union);
@@ -461,12 +461,12 @@ namespace Legion {
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // Give the event for when the domain is ready
-      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, RtEvent ready,
+      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, ApEvent ready,
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // Give two events for when the domain handle and domain are ready
       IndexSpaceNode* create_node(IndexSpace is, 
-                                  RtEvent handle_ready, RtEvent domain_ready,
+                                  ApEvent handle_ready, ApEvent domain_ready,
                                   IndexPartNode *par, ColorPoint color,
                                   IndexSpaceKind kind, AllocateMode mode);
       // We know the disjointness of the index partition
@@ -539,7 +539,7 @@ namespace Legion {
       FatTreePath* compute_full_fat_path(IndexPartNode *node);
     public:
 #ifdef NEW_INSTANCE_CREATION
-      RtEvent create_instance(const Domain &dom, Memory target,
+      ApEvent create_instance(const Domain &dom, Memory target,
                             const std::vector<std::pair<FieldID,size_t> > &fids,
                             PhysicalInstance &instance,
                             LegionConstraintSet &constraints);
@@ -840,11 +840,11 @@ namespace Legion {
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, const Domain &d, RtEvent ready,
+      IndexSpaceNode(IndexSpace handle, const Domain &d, ApEvent ready,
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, RtEvent handle_ready, RtEvent dom_ready,
+      IndexSpaceNode(IndexSpace handle, ApEvent handle_ready, ApEvent dom_ready,
                      IndexPartNode *par, ColorPoint c,
                      IndexSpaceKind kind, AllocateMode mode,
                      RegionTreeForest *ctx);
@@ -886,13 +886,13 @@ namespace Legion {
       void get_children(std::map<ColorPoint,IndexPartNode*> &children);
       void get_child_colors(std::set<ColorPoint> &colors, bool only_valid);
     public:
-      RtEvent get_domain_precondition(void);
+      ApEvent get_domain_precondition(void);
       const Domain& get_domain_blocking(void);
-      const Domain& get_domain(RtEvent &ready_event);
+      const Domain& get_domain(ApEvent &ready_event);
       const Domain& get_domain_no_wait(void);
       void set_domain(const Domain &dom);
       void get_domains_blocking(std::vector<Domain> &domains);
-      void get_domains(std::vector<Domain> &domains, RtEvent &precondition);
+      void get_domains(std::vector<Domain> &domains, ApEvent &precondition);
       size_t get_domain_volume(bool app_query = false);
     public:
       bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2); 
@@ -908,7 +908,7 @@ namespace Legion {
       bool has_component_domains(void) const;
       void update_component_domains(const std::set<Domain> &domains);
       const std::set<Domain>& get_component_domains_blocking(void) const;
-      const std::set<Domain>& get_component_domains(RtEvent &pre) const;
+      const std::set<Domain>& get_component_domains(ApEvent &pre) const;
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true);
       const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
@@ -958,9 +958,9 @@ namespace Legion {
       const AllocateMode mode;
     protected:
       // Track when the domain handle is ready
-      RtEvent handle_ready;
+      ApEvent handle_ready;
       // Track when the domain has actually been computed
-      RtEvent domain_ready;
+      ApEvent domain_ready;
       Domain domain;
     protected:
       // Must hold the node lock when accessing the
@@ -1060,9 +1060,9 @@ namespace Legion {
       void destroy_node(AddressSpaceID source);
     public:
       void add_pending_child(const ColorPoint &child_color,
-                         RtUserEvent handle_ready, RtUserEvent domain_ready);
+                         ApUserEvent handle_ready, ApUserEvent domain_ready);
       bool get_pending_child(const ColorPoint &child_color,
-                         RtUserEvent &handle_ready, RtUserEvent &domain_ready);
+                         ApUserEvent &handle_ready, ApUserEvent &domain_ready);
       void remove_pending_child(const ColorPoint &child_color);
       static void handle_pending_child_task(const void *args);
     public:
@@ -1074,7 +1074,7 @@ namespace Legion {
       ApEvent create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
                                   Realm::IndexSpace::IndexSpaceOperation op);
     public:
-      void get_subspace_domain_preconditions(std::set<RtEvent> &preconditions);
+      void get_subspace_domain_preconditions(std::set<ApEvent> &preconditions);
       void get_subspace_domains(std::set<Domain> &subspaces);
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true);
@@ -1110,7 +1110,7 @@ namespace Legion {
       IndexSpaceNode *const parent;
     protected:
       bool disjoint;
-      RtEvent disjoint_ready;
+      ApEvent disjoint_ready;
     protected:
       bool has_complete, complete;
     protected:
@@ -1123,7 +1123,7 @@ namespace Legion {
       std::set<std::pair<ColorPoint,ColorPoint> > aliased_subspaces;
     protected:
       // Support for pending child spaces that still need to be computed
-      std::map<ColorPoint,std::pair<RtUserEvent,RtUserEvent> > pending_children;
+      std::map<ColorPoint,std::pair<ApUserEvent,ApUserEvent> > pending_children;
     };
 
     /**
@@ -1632,7 +1632,7 @@ namespace Legion {
                                          const ColorPoint &c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
       virtual const Domain& get_domain_blocking(void) const = 0;
-      virtual const Domain& get_domain(RtEvent &precondition) const = 0;
+      virtual const Domain& get_domain(ApEvent &precondition) const = 0;
       virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other) = 0;
@@ -1775,7 +1775,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(RtEvent &precondition) const;
+      virtual const Domain& get_domain(ApEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
@@ -1963,7 +1963,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(RtEvent &precondition) const;
+      virtual const Domain& get_domain(ApEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);

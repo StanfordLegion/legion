@@ -480,7 +480,7 @@ namespace Legion {
                      post.id, post.gen, is_region, index, field, tree_id);
       }
 
-      static inline void log_phase_barrier(Barrier barrier)
+      static inline void log_phase_barrier(ApBarrier barrier)
       {
         log_spy.info("Phase Barrier " IDFMT, barrier.id);
       } 
