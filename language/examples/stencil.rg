@@ -144,7 +144,17 @@ end
 task check(points : region(ispace(int2d), point), ts : int64)
 where reads(points.{input, output}) do
   for i in points do
+    if not (points[i].input == ts) then
+      for i2 in points do
+        c.printf("input (%d,%d): %d should be %d\n", i2.x, i2.y, points[i2].input, ts)        
+      end
+    end
     regentlib.assert(points[i].input == ts, "test failed")
+    if not (points[i].output == (ts-1)) then
+      for i2 in points do
+        c.printf("output (%d,%d): %d should be %d\n", i2.x, i2.y, points[i2].output, ts-1)
+      end
+    end
     regentlib.assert(points[i].output == ts - 1, "test failed")
   end
 end
