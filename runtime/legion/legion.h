@@ -2886,6 +2886,15 @@ namespace Legion {
        * @param set in which to place the field IDs
        */
       void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::vector<FieldID> &fields);
+
+      /**
+       * Get the IDs of the fields currently allocated in a field space.
+       * @param ctx enclosing task context
+       * @param handle field space handle
+       * @param set in which to place the field IDs
+       */
+      void get_field_space_fields(Context ctx, FieldSpace handle,
                                   std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------

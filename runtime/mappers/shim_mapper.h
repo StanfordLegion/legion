@@ -303,6 +303,7 @@ namespace Legion {
       bool has_parent_logical_partition(LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
       void broadcast_message(const void *message, size_t message_size);
     protected:
       TaskVariantCollection* find_task_variant_collection(MapperContext ctx,
@@ -323,6 +324,7 @@ namespace Legion {
                               unsigned splitting_factor, 
                               std::vector<DomainSplit> &slice);
     protected:
+      MapperRuntime *const mapper_runtime;
       const Processor::Kind local_kind;
       const Machine machine;
       Runtime *const runtime;

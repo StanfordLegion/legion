@@ -2607,6 +2607,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
+                                         std::vector<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_field_space_fields(ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
                                          std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {

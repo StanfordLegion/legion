@@ -135,7 +135,7 @@ namespace Legion {
       Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
     public:
-      MapperRuntime *const mapper_runtime;
+      MapperRuntime *const runtime;
     public:
       /**
        ** ----------------------------------------------------------------------
@@ -1414,6 +1414,8 @@ namespace Legion {
 
       void get_field_space_fields(MapperContext ctx, 
            FieldSpace handle, std::vector<FieldID> &fields) const;
+      void get_field_space_fields(MapperContext ctx,
+           FieldSpace handle, std::set<FieldID> &fields) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees

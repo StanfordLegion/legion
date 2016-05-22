@@ -57,7 +57,7 @@ def test(root_dir, debug, spy, env):
         cwd = root_dir)
     if spy:
         subprocess.check_call(
-            ['time', './test.py', '-q', '-j', '2', '--spy']
+            ['time', './test.py', '-q', '-j', '2', '--spy'],
             env = env,
             cwd = root_dir)
 

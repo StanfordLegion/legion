@@ -1334,7 +1334,8 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       void return_privileges(PointTask *point);
-      void return_virtual_instance(unsigned index, InstanceSet &refs);
+      void return_virtual_instance(unsigned index, InstanceSet &refs,
+                                   const RegionRequirement &req);
       void record_child_mapped(RtEvent child_complete);
       void record_child_complete(void);
       void record_child_committed(void);
@@ -1370,7 +1371,7 @@ namespace Legion {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      std::deque<InstanceRef> temporary_virtual_refs;
+      LegionDeque<InstanceRef>::aligned temporary_virtual_refs;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     };

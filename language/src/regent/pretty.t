@@ -15,7 +15,7 @@
 -- Typed AST Pretty Printer
 
 local ast = require("regent/ast")
-local std = require("regent/std")
+local std = require("regent/std_base")
 
 local context = {}
 context.__index = context

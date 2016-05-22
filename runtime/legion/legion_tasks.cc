@@ -438,7 +438,8 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].privilege_fields.empty())
+        if (regions[idx].privilege != NO_ACCESS && 
+            regions[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: REGION REQUIREMENT %d OF "
                            "TASK %s (ID %lld) HAS NO PRIVILEGE "
@@ -8610,7 +8611,10 @@ namespace Legion {
     void PointTask::return_virtual_instance(unsigned index, InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
-      slice_owner->return_virtual_instance(index, refs);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < regions.size());
+#endif
+      slice_owner->return_virtual_instance(index, refs, regions[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -11749,7 +11753,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::return_virtual_instance(unsigned index, InstanceSet &refs)
+    void SliceTask::return_virtual_instance(unsigned index, InstanceSet &refs,
+                                            const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_RETURN_VIRTUAL_CALL);
@@ -11764,7 +11769,7 @@ namespace Legion {
       AutoLock o_lock(op_lock);
       // Hold a reference so it doesn't get deleted
       temporary_virtual_refs.push_back(refs[0]);
-      runtime->forest->physical_register_only(virtual_ctx, regions[index],
+      runtime->forest->physical_register_only(virtual_ctx, req,
                                               version_infos[index], this,
                                               index, ApEvent::NO_AP_EVENT,
                                               false/*defer add users*/, 

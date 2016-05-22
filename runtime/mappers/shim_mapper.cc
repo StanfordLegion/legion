@@ -372,6 +372,7 @@ namespace Legion {
                            Processor local, const char *name/*=NULL*/)
       : DefaultMapper(mrt, m, local,(name == NULL) ? 
           create_shim_name(local) : name),
+        mapper_runtime(mrt),
         local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -424,6 +425,7 @@ namespace Legion {
     ShimMapper::ShimMapper(const ShimMapper &rhs)
       : DefaultMapper(rhs.mapper_runtime, Machine::get_machine(), 
           Processor::NO_PROC),
+        mapper_runtime(rhs.mapper_runtime),
         local_kind(Processor::LOC_PROC), machine(rhs.machine), runtime(NULL),
         machine_interface(Utilities::MachineQueryInterface(rhs.machine))
     //--------------------------------------------------------------------------
@@ -1065,6 +1067,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return mapper_runtime->get_parent_logical_region(current_ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShimMapper::get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_runtime->get_field_space_fields(current_ctx, handle, fields);
     }
 
     //--------------------------------------------------------------------------
