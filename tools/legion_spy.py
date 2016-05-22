@@ -7978,7 +7978,7 @@ class State(object):
         gc.collect()
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -k -u -v -a -g] "+\
+    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -k -u -v -a -t] "+\
           "<file_name(s)>+"
     print "  -l : perform logical checks"
     print "  -p : perform physical checks"
@@ -7995,7 +7995,7 @@ def usage():
     print "  -u : keep graphs unsimplified (maintains all redundant edges)"
     print "  -v : verbose"
     print "  -a : assert on analysis failure (useful for self-debugging)"
-    print "  -g : test computational geometry"
+    print "  -t : test computational geometry"
     sys.exit(1)
 
 def generate_random_intersecting_rects(dim, max_size):
@@ -8079,7 +8079,7 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
     try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeiqszkuvag')
+        opts, args = getopt(sys.argv[1:],'lpcrmdeiqszkuvat')
     except GetoptError as err:
         print "ERROR: "+str(err)
         sys.exit(1)
@@ -8147,7 +8147,7 @@ def main(temp_dir):
         if opt == '-a':
             assert_on_fail = True
             continue
-        if opt == '-g':
+        if opt == '-t':
             test_geometry = True
             continue
 
