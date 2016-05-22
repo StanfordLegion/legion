@@ -1525,7 +1525,7 @@ namespace Legion {
     static const ApEvent NO_AP_EVENT;
   public:
     ApEvent(void) : LgEvent() { }
-    ApEvent(const ApEvent &rhs) : LgEvent(rhs) { }
+    ApEvent(const ApEvent &rhs) { id = rhs.id; gen = rhs.gen; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
@@ -1570,7 +1570,7 @@ namespace Legion {
     static const RtEvent NO_RT_EVENT;
   public:
     RtEvent(void) : LgEvent() { }
-    RtEvent(const RtEvent &rhs) : LgEvent(rhs) { }
+    RtEvent(const RtEvent &rhs) { id = rhs.id; gen = rhs.gen; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
