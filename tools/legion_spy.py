@@ -7989,6 +7989,7 @@ def usage():
     print "  -e : make event graphs"
     print "  -i : print instance descriptions"
     print "  -q : print mapping decisions"
+    print "  -y : generate mapper replay file"
     print "  -z : add extra detail to graphs"
     print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
     print "  -k : keep temporary files"
@@ -8079,7 +8080,7 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
     try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeiqszkuvat')
+        opts, args = getopt(sys.argv[1:],'lpcrmdeiqsyzkuvat')
     except GetoptError as err:
         print "ERROR: "+str(err)
         sys.exit(1)
@@ -8095,6 +8096,7 @@ def main(temp_dir):
     event_graphs = False
     instance_descriptions = False
     mapping_decisions = False
+    replay_file = False
     detailed_graphs = False
     sanity_checks = False
     keep_temp_files = False
@@ -8128,6 +8130,9 @@ def main(temp_dir):
             continue
         if opt == '-q':
             mapping_decisions = True
+            continue
+        if opt == '-y':
+            replay_file = True
             continue
         if opt == '-z':
             detailed_graphs = True
@@ -8224,6 +8229,9 @@ def main(temp_dir):
     if event_graphs:
         print "Making event graphs..."
         state.make_event_graph(temp_dir)
+    if replay_file:
+        print "Generating mapper replay file..."
+        assert False
     if instance_descriptions:
         state.print_instance_descriptions()
     if mapping_decisions:
