@@ -4871,26 +4871,32 @@ class Operation(object):
                         print '    '+str(fill)+' was unnecessary'
 
     def print_op_mapping_decisions(self, depth):
+        if self.inter_close_ops:
+            assert not self.is_close()
+            for close in self.inter_close_ops:
+                close.print_op_mapping_decisions(depth)
         # If we are an index task just do our points and return
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
             for point in self.points.itervalues():
-                point.print_op_mapping_decisions(depth)
+                point.op.print_op_mapping_decisions(depth)
+            return
         # Print our mapping decisions
         if self.mappings is not None:
             prefix = ''
             for idx in range(depth):
                 prefix += '  '
             print prefix+'-------------------------------------------------'
-            print prefix+' Mapping Decisions for '+str(self)
+            print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
             for index,mappings in self.mappings.iteritems():
                 assert index in self.reqs
                 req = self.reqs[index]
                 print prefix+'  Region Requirement '+str(index)+' Region=('+\
                     str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')'
                 for fid,inst in mappings.iteritems():
-                    field = inst.region.field_space.get_field(fid)
+                    field = req.field_space.get_field(fid)
                     print prefix+'    '+str(field)+': '+str(inst)
+            print prefix+' End '+str(self)+' (depth='+str(depth)+')'
             print prefix+'-------------------------------------------------'
         # If we are a single task recurse
         if self.kind == SINGLE_TASK_KIND and self.task is not None:
@@ -5702,7 +5708,8 @@ class CompositeNode(object):
                     self.valid_instances.add(inst)
         # Always add any reductions to our parent
         for reduction in state.reduction_instances:
-            self.owner.reductions.add(reduction)
+            assert reduction not in self.owner.reductions
+            self.owner.reductions[reduction] = self.node
         # Mark that we've been captured
         already_captured.add(self.node)
         return inst_capture
@@ -5923,7 +5930,7 @@ class CompositeInstance(object):
         self.depth = depth
         self.field = field
         self.nodes = dict()
-        self.reductions = set()
+        self.reductions = dict()
         self.complete = set() # complete nodes
         self.captured = set()
 
@@ -6015,14 +6022,14 @@ class CompositeInstance(object):
         # If we have any reductions issue those now
         if self.reductions:
             if perform_checks:
-                for reduction_inst in self.reductions:
+                for reduction_inst,reduction_region in self.reductions.iteritems():
                     assert reduction_inst.redop <> 0
                     # Check to see if it intersects with the region 
-                    if region.intersects(reduction_inst.region):
-                        if reduction_inst.region is not region:
+                    if region.intersects(reduction_region):
+                        if reduction_region is not region:
                             reduction = op.find_generated_copy_across(self.field, 
                                           dst_field, region, reduction_inst, dst,
-                                          reduction_inst.redop, reduction_inst.region)
+                                          reduction_inst.redop, reduction_region)
                         else:
                             reduction = op.find_generated_copy_across(self.field,
                                           dst_field, region, reduction_inst, dst,
@@ -6041,11 +6048,11 @@ class CompositeInstance(object):
                                 if self.state.assert_on_fail:
                                     assert False
                             return False
-                        if reduction_inst.region is not region:
+                        if reduction_region is not region:
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, index=index, 
                                 region=region, reading=True, redop=0, 
-                                precise=True, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, index=index,
@@ -6070,11 +6077,11 @@ class CompositeInstance(object):
                                 if self.state.assert_on_fail:
                                     assert False
                             return False
-                        if reduction_inst.region is not region:
+                        if reduction_region is not region:
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, index=index, 
                                 region=region, reading=False, redop=reduction_inst.redop,
-                                precise=True, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_region)
                         else:
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, index=index,
@@ -6095,13 +6102,13 @@ class CompositeInstance(object):
                                 if self.state.assert_on_fail:
                                     assert False
                             return False
-                        if reduction_inst.region is not region:
+                        if reduction_region is not region:
                             reduction_inst.add_copy_user(depth=self.depth, field=self.field,
                                 region=region, op=reduction, index=index, reading=True, 
-                                redop=0, intersect=reduction_inst.region)
+                                redop=0, intersect=reduction_region)
                             dst.add_copy_user(depth=dst_depth, field=dst_field, 
                                 region=region, op=reduction, index=index, reading=False, 
-                                redop=reduction_inst.redop, intersect=reduction_inst.region)
+                                redop=reduction_inst.redop, intersect=reduction_region)
                         else:
                             reduction_inst.add_copy_user(depth=self.depth, field=self.field,
                                 region=region, op=reduction, index=index, 
@@ -6110,24 +6117,24 @@ class CompositeInstance(object):
                                 region=region, op=reduction, index=index, 
                                 reading=False, redop=reduction_inst.redop)
             else:
-                for reduction_inst in self.reductions:
+                for reduction_inst,reduction_region in self.reductions.iteritems():
                     assert reduction_inst.redop <> 0
-                    if region.intersects(reduction_inst.region):
+                    if region.intersects(reduction_region):
                         # Make a reduction copy 
                         reduction = self.state.create_copy(op)
                         reduction.add_field(self.field.fid, reduction_inst, 
                                             dst_field.fid, dst, reduction_inst.redop)
                         reduction.set_region(region)
-                        if reduction_inst.region is not region:
-                            reduction.set_intersection(reduction_inst.region)
+                        if reduction_region is not region:
+                            reduction.set_intersection(reduction_region)
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, index=index,
                                 region=region, reading=True, redop=0,
-                                precise=True, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_region)
                             dst_preconditions = dst.find_copy_dependences(
                                 depth=dst_depth, field=dst_field, op=op, index=index,
                                 region=region, reading=False, redop=reduction_inst.redop,
-                                precise=True, intersect=reduction_inst.region)
+                                precise=True, intersect=reduction_region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, index=index,
@@ -6143,14 +6150,14 @@ class CompositeInstance(object):
                         for dst_op in dst_preconditions:
                             dst_op.physical_outgoing.add(reduction)
                             reduction.physical_incoming.add(dst_op)
-                        if reduction_inst.region is not region:
+                        if reduction_region is not region:
                             reduction_inst.add_copy_user(depth=self.depth, field=self.field, 
                                 region=region, op=reduction, index=index, 
-                                reading=True, redop=0, intersect=reduction_inst.region)
+                                reading=True, redop=0, intersect=reduction_region)
                             dst.add_copy_user(depth=dst_depth, field=dst_field, 
                                 region=region, op=reduction, index=index, 
                                 reading=False, redop=reduction_inst.redop, 
-                                intersect=reduction_inst.region)
+                                intersect=reduction_region)
                         else:
                             reduction_inst.add_copy_user(depth=self.depth, field=self.field, 
                                 region=region, op=reduction, index=index, 
