@@ -167,6 +167,8 @@ namespace Legion {
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              AddressSpaceID local_space,
+                             RtUserEvent dest_event 
+                              = RtUserEvent::NO_RT_USER_EVENT,
                              bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:
@@ -231,7 +233,7 @@ namespace Legion {
       // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, 
                                     RtEvent destroy_event);
-      void register_with_runtime(void);
+      void register_with_runtime(bool send_notification);
     public:
       virtual void send_remote_registration(void);
       void send_remote_valid_update(AddressSpaceID target, 

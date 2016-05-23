@@ -399,8 +399,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
                            AddressSpaceID own_space, AddressSpaceID loc_space,
-                           Operation *o /*= NULL*/)
-      : DistributedCollectable(rt, did, own_space, loc_space, register_now),
+                           RtUserEvent destroy_event, Operation *o /*= NULL*/)
+      : DistributedCollectable(rt, did, own_space, loc_space, 
+                               destroy_event, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
@@ -10608,7 +10609,8 @@ namespace Legion {
         }
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, address_space);
+          get_available_distributed_id(true), address_space, 
+          address_space, RtUserEvent::NO_RT_USER_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -10815,7 +10817,8 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/, 
-          get_available_distributed_id(true), address_space, address_space);
+          get_available_distributed_id(true), address_space, 
+          address_space, RtUserEvent::NO_RT_USER_EVENT);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -10887,7 +10890,8 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, address_space));
+          get_available_distributed_id(true), address_space, 
+          address_space, RtUserEvent::NO_RT_USER_EVENT));
       IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -10991,7 +10995,8 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, address_space));
+          get_available_distributed_id(true), address_space, 
+          address_space, RtUserEvent::NO_RT_USER_EVENT));
       IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -12542,7 +12547,8 @@ namespace Legion {
 #endif
       FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
                               get_available_distributed_id(true),
-                              address_space, address_space, ctx);
+                              address_space, address_space, 
+                              RtUserEvent::NO_RT_USER_EVENT, ctx);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs args;
       args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
@@ -16125,7 +16131,8 @@ namespace Legion {
       }
       AddressSpaceID owner_space = determine_owner(did);
       FutureImpl *result = legion_new<FutureImpl>(this, false/*register*/, did,
-                                                  owner_space, address_space);
+                                                 owner_space, address_space,
+                                                 RtUserEvent::NO_RT_USER_EVENT);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -17740,7 +17747,8 @@ namespace Legion {
     {
       return Future(legion_new<FutureImpl>(this, true/*register*/,
                                      get_available_distributed_id(true),
-                                     address_space, address_space, op));
+                                     address_space, address_space, 
+                                     RtUserEvent::NO_RT_USER_EVENT, op));
     }
 
     //--------------------------------------------------------------------------

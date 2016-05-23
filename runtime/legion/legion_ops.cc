@@ -6625,7 +6625,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), runtime->address_space,
-            runtime->address_space, this));
+            runtime->address_space, RtUserEvent::NO_RT_USER_EVENT, this));
       collective = dc;
       return future;
     }
@@ -10666,7 +10666,8 @@ namespace Legion {
       precondition = pre; 
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
+                  runtime->address_space, runtime->address_space, 
+                  RtUserEvent::NO_RT_USER_EVENT, this));
       return result;
     }
 
@@ -10678,7 +10679,8 @@ namespace Legion {
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
+                  runtime->address_space, runtime->address_space, 
+                  RtUserEvent::NO_RT_USER_EVENT, this));
       return result;
     }
 
@@ -10690,7 +10692,8 @@ namespace Legion {
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
+                  runtime->address_space, runtime->address_space, 
+                  RtUserEvent::NO_RT_USER_EVENT, this));
       return result;
     }
 

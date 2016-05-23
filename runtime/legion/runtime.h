@@ -150,7 +150,7 @@ namespace Legion {
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
                  AddressSpaceID owner_space, AddressSpaceID local_space,
-                 Operation *op = NULL);
+                 RtUserEvent destroy_event, Operation *op = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:

@@ -3382,7 +3382,9 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   root, composite_info, true/*register now*/);
+                                   root, composite_info, 
+                                   RtUserEvent::NO_RT_USER_EVENT, 
+                                   true/*register now*/);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty

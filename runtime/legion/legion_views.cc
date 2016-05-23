@@ -36,9 +36,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
                              AddressSpaceID own_addr, AddressSpace loc_space,
-                             RegionTreeNode *node, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, 
-                               own_addr, loc_space, register_now), 
+                             RegionTreeNode *node, RtUserEvent destroy_event,
+                             bool register_now)
+      : DistributedCollectable(ctx->runtime, did, own_addr, loc_space, 
+                               destroy_event, register_now), 
         context(ctx), logical_node(node), 
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -126,9 +127,10 @@ namespace Legion {
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
                                AddressSpaceID log_own, RegionTreeNode *node, 
-                               SingleTask *own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now),
-        owner_context(own_ctx), logical_owner(log_own)
+                               SingleTask *own_ctx, RtUserEvent destroy_event,
+                               bool register_now)
+      : LogicalView(ctx, did, owner_sp, local_sp, node, destroy_event,
+          register_now), owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
     }
@@ -233,10 +235,12 @@ namespace Legion {
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                AddressSpaceID log_own, RegionTreeNode *node, 
                                InstanceManager *man, MaterializedView *par, 
-                               SingleTask *own_ctx, bool register_now)
+                               SingleTask *own_ctx, RtUserEvent destroy_event,
+                               bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-         loc_addr, log_own, node, own_ctx, register_now), manager(man), 
-         parent(par), disjoint_children(node->are_all_children_disjoint())
+         loc_addr, log_own, node, own_ctx, destroy_event, register_now), 
+        manager(man), parent(par), 
+        disjoint_children(node->are_all_children_disjoint())
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -264,7 +268,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, false),
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, 
+          RtUserEvent::NO_RT_USER_EVENT, false),
         manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
     {
@@ -407,6 +412,7 @@ namespace Legion {
                                               owner_space, local_space,
                                               logical_owner, child_node, 
                                               manager, this, owner_context,
+                                              RtUserEvent::NO_RT_USER_EVENT,
                                               true/*reg now*/);
             children[c] = child_view;
           }
@@ -1296,6 +1302,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
+      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1318,9 +1325,10 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
+        rez.serialize(destroy_event);
       }
       runtime->send_materialized_view(target, rez);
-      update_remote_instances(target); 
+      register_remote_instance(target, destroy_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2722,6 +2730,8 @@ namespace Legion {
       derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
+      RtUserEvent destroy_event;
+      derez.deserialize(destroy_event);
       RtEvent man_ready;
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
@@ -2754,14 +2764,16 @@ namespace Legion {
                                               logical_owner, 
                                               target_node, inst_manager,
                                               parent, owner_context,
+                                              destroy_event,
                                               false/*register now*/);
       else
         view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
                                      runtime->address_space, logical_owner,
                                      target_node, inst_manager, parent, 
-                                     owner_context, false/*register now*/);
+                                     owner_context, destroy_event,
+                                     false/*register now*/);
       // Register only after construction
-      view->register_with_runtime();
+      view->register_with_runtime(false/*send notification*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3402,8 +3414,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
-                               RegionTreeNode *node, bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now)
+                               RegionTreeNode *node, RtUserEvent destroy_event,
+                               bool register_now)
+      : LogicalView(ctx, did, owner_sp, local_sp, node, 
+                    destroy_event, register_now)
     //--------------------------------------------------------------------------
     {
     }
@@ -3545,9 +3559,10 @@ namespace Legion {
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, CompositeNode *r,
-                              CompositeVersionInfo *info, bool register_now)
+                              CompositeVersionInfo *info, 
+                              RtUserEvent destroy_event, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
-                     node, register_now), root(r), version_info(info)
+             node, destroy_event, register_now), root(r), version_info(info)
     {
       version_info->add_reference();
       root->set_owner_did(did);
@@ -3566,7 +3581,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false), root(NULL), version_info(NULL)
+      : DeferredView(NULL, 0, 0, 0, NULL, RtUserEvent::NO_RT_USER_EVENT, false),
+        root(NULL), version_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3649,6 +3665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't take the lock, it's alright to have duplicate sends
+      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -3660,12 +3677,13 @@ namespace Legion {
           rez.serialize(logical_node->as_region_node()->handle);
         else
           rez.serialize(logical_node->as_partition_node()->handle);
+        rez.serialize(destroy_event);
         VersionInfo &info = version_info->get_version_info();
         info.pack_version_info(rez, 0, 0);
         root->pack_composite_tree(rez, target);
       }
       runtime->send_composite_view(target, rez);
-      update_remote_instances(target);
+      register_remote_instance(target, destroy_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3695,7 +3713,7 @@ namespace Legion {
         return legion_new<CompositeView>(context, new_did, 
             context->runtime->address_space, logical_node, 
             context->runtime->address_space, new_root, 
-            version_info, true/*register now*/);
+            version_info, RtUserEvent::NO_RT_USER_EVENT, true/*register now*/);
       }
       else // didn't change so we can delete the new root and return ourself
       {
@@ -3776,6 +3794,8 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
+      RtUserEvent destroy_event;
+      derez.deserialize(destroy_event);
       CompositeVersionInfo *version_info = new CompositeVersionInfo();
       VersionInfo &info = version_info->get_version_info();
       info.unpack_version_info(derez);
@@ -3806,14 +3826,15 @@ namespace Legion {
         view = legion_new_in_place<CompositeView>(location, runtime->forest, 
                                            did, owner, target_node, 
                                            runtime->address_space,
-                                           root, version_info,
+                                           root, version_info, destroy_event,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
                            target_node, runtime->address_space, root, 
-                           version_info, false/*register now*/);
+                           version_info, destroy_event, 
+                           false/*register now*/);
       // Register only after construction
-      view->register_with_runtime();
+      view->register_with_runtime(false/*send notification*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4790,9 +4811,9 @@ namespace Legion {
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, FillViewValue *val, 
-                       bool register_now)
-      : DeferredView(ctx, encode_fill_did(did), 
-                     owner_proc, local_proc, node, register_now), value(val)
+                       RtUserEvent destroy_event, bool register_now)
+      : DeferredView(ctx, encode_fill_did(did), owner_proc, local_proc, 
+                     node, destroy_event, register_now), value(val)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4813,7 +4834,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false), value(NULL)
+      : DeferredView(NULL, 0, 0, 0, NULL, RtUserEvent::NO_RT_USER_EVENT, false),
+        value(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4890,6 +4912,7 @@ namespace Legion {
       assert(is_owner());
       assert(logical_node->is_region());
 #endif
+      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -4898,10 +4921,11 @@ namespace Legion {
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(value->value_size);
         rez.serialize(value->value, value->value_size);
+        rez.serialize(destroy_event);
       }
       runtime->send_fill_view(target, rez);
       // We've now done the send so record it
-      update_remote_instances(target);
+      register_remote_instance(target, destroy_event);
     }
 
     //--------------------------------------------------------------------------
@@ -4963,6 +4987,8 @@ namespace Legion {
       derez.deserialize(value_size);
       void *value = malloc(value_size);
       derez.deserialize(value, value_size);
+      RtUserEvent destroy_event;
+      derez.deserialize(destroy_event);
       
       RegionNode *target_node = runtime->forest->get_node(handle);
       FillView::FillViewValue *fill_value = 
@@ -4972,13 +4998,14 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<FillView>(location, runtime->forest, did,
                                       owner_space, runtime->address_space,
-                                      target_node, fill_value,
+                                      target_node, fill_value, destroy_event,
                                       false/*register now*/);
       else
         view = legion_new<FillView>(runtime->forest, did, owner_space,
                                     runtime->address_space, target_node, 
-                                    fill_value, false/*register now*/);
-      view->register_with_runtime();
+                                    fill_value, destroy_event, 
+                                    false/*register now*/);
+      view->register_with_runtime(false/*send notification*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4990,9 +5017,9 @@ namespace Legion {
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  AddressSpaceID log_own, RegionTreeNode *node, 
                                  ReductionManager *man, SingleTask *own_ctx, 
-                                 bool register_now)
-      : InstanceView(ctx, encode_reduction_did(did), 
-             own_sp, loc_sp, log_own, node, own_ctx, register_now), 
+                                 RtUserEvent destroy_event, bool register_now)
+      : InstanceView(ctx, encode_reduction_did(did), own_sp, loc_sp, log_own, 
+          node, own_ctx, destroy_event, register_now), 
         manager(man), remote_request_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -5015,7 +5042,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, 
+          RtUserEvent::NO_RT_USER_EVENT, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5851,6 +5879,7 @@ namespace Legion {
       assert(is_owner());
       assert(logical_node->is_region()); // Always regions at the top
 #endif
+      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
       {
@@ -5861,9 +5890,10 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
+        rez.serialize(destroy_event);
       }
       runtime->send_reduction_view(target, rez);
-      update_remote_instances(target);
+      register_remote_instance(target, destroy_event);
     }
 
     //--------------------------------------------------------------------------
@@ -5898,6 +5928,8 @@ namespace Legion {
       derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
+      RtUserEvent destroy_event;
+      derez.deserialize(destroy_event);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
       RtEvent man_ready;
@@ -5918,14 +5950,15 @@ namespace Legion {
                                            runtime->address_space,
                                            logical_owner,
                                            target_node, red_manager,
-                                           owner_context,false/*register now*/);
+                                           owner_context, destroy_event,
+                                           false/*register now*/);
       else
         view = legion_new<ReductionView>(runtime->forest, did, owner_space,
                                   runtime->address_space, logical_owner,
                                   target_node, red_manager, owner_context,
-                                  false/*register now*/);
+                                  destroy_event, false/*register now*/);
       // Only register after construction
-      view->register_with_runtime();
+      view->register_with_runtime(false/*send notification*/);
     }
 
     //--------------------------------------------------------------------------

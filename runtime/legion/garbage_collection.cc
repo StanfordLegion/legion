@@ -33,14 +33,14 @@ namespace Legion {
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space,
+                                                   RtUserEvent dest_event,
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
         local_space(loc_space), gc_lock(Reservation::create_reservation()),
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         gc_references(0), valid_references(0), resource_references(0), 
-        destruction_event(Runtime::create_rt_user_event()),
-        registered_with_runtime(do_registration)
+        destruction_event(dest_event), registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -50,7 +50,7 @@ namespace Legion {
       if (do_registration)
       {
         runtime->register_distributed_collectable(did, this);
-        if (!is_owner())
+        if (!is_owner() && !dest_event.exists())
           send_remote_registration();
       }
       if (!is_owner())
@@ -66,8 +66,8 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      Runtime::trigger_event(destruction_event,
-                             Runtime::merge_events(recycle_events));
+      if (destruction_event.exists())
+        Runtime::trigger_event(destruction_event);
       if (registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);
@@ -78,7 +78,11 @@ namespace Legion {
           // We have to defer the collection of the ID until
           // after all of the remote nodes notify us that they
           // have finished collecting it.
-          runtime->recycle_distributed_id(did, destruction_event);
+          if (!recycle_events.empty())
+            runtime->recycle_distributed_id(did, 
+                Runtime::merge_events(recycle_events));
+          else
+            runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
         }
       }
       gc_lock.destroy_reservation();
@@ -514,14 +518,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::update_remote_instances(AddressSpaceID remote)
+    void DistributedCollectable::update_remote_instances(
+                                                     AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
-      if (remote != owner_space)
-      {
-        AutoLock gc(gc_lock);
-        remote_instances.add(remote);
-      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_owner());
+#endif
+      AutoLock gc(gc_lock);
+      remote_instances.add(remote_inst);
     }
 
     //--------------------------------------------------------------------------
@@ -531,6 +536,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner()); // This should only happen on the owner node
+      assert(source != local_space);
 #endif
       AutoLock gc(gc_lock);
       remote_instances.add(source);
@@ -538,7 +544,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::register_with_runtime(void)
+    void DistributedCollectable::register_with_runtime(bool send_notification)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -546,7 +552,7 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner())
+      if (!is_owner() && send_notification)
         send_remote_registration();
     }
 

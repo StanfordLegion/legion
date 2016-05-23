@@ -9614,6 +9614,7 @@ namespace Legion {
                                          context->runtime->address_space,
                                          memory, inst, dom, false/*own*/,
                                          node, layout, pointer_constraint,
+                                         RtUserEvent::NO_RT_USER_EVENT,
                                          true/*register now*/, 
                                          ApEvent::NO_AP_EVENT,
                                          InstanceManager::ATTACH_FILE_FLAG);
@@ -15521,7 +15522,8 @@ namespace Legion {
       FillView *fill_view = 
         legion_new<FillView>(context, did, context->runtime->address_space,
                              context->runtime->address_space, this, 
-                             fill_value, true/*register now*/);
+                             fill_value, RtUserEvent::NO_RT_USER_EVENT,
+                             true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(ctx, version_info);
       // Invalidate any open children and any reductions

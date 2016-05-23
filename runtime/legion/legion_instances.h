@@ -115,7 +115,7 @@ namespace Legion {
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, const Domain &intance_domain,
-                      bool own_domain, bool register_now);
+                      bool own_domain, RtUserEvent dest, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -242,6 +242,7 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
+                      RtUserEvent destruction_event,
                       bool register_now, ApEvent use_event, 
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
@@ -315,7 +316,8 @@ namespace Legion {
                        const PointerConstraint &constraint,
                        const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op, bool register_now);
+                       const ReductionOp *op, RtUserEvent destruction_event,
+                       bool register_now);
       virtual ~ReductionManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -375,7 +377,7 @@ namespace Legion {
                            const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
-                           bool register_now);
+                           RtUserEvent dest_event, bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -421,7 +423,7 @@ namespace Legion {
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, ApEvent use_event,
-                           bool register_now);
+                           RtUserEvent dest_event, bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
