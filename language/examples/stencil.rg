@@ -31,7 +31,7 @@ terra make_bloated_rect(rect : c.legion_rect_2d_t, radius : int)
     lo = c.legion_point_2d_t {
       x = arrayof(c.coord_t, rect.lo.x[0] - radius, rect.lo.x[1] - radius) },
     hi = c.legion_point_2d_t {
-      x = arrayof(c.coord_t, rect.hi.x[0] - radius, rect.hi.x[1] - radius) },
+      x = arrayof(c.coord_t, rect.hi.x[0] + radius, rect.hi.x[1] + radius) },
   }
 end
 
@@ -141,26 +141,34 @@ where reads writes(points.input) do
   end
 end
 
-task check(points : region(ispace(int2d), point), ts : int64)
+task check(points : region(ispace(int2d), point), tsteps : int64, init : int64)
 where reads(points.{input, output}) do
+  var expect_in = init + tsteps
+  var expect_out = init + tsteps - 1
   for i in points do
-    if not (points[i].input == ts) then
+    if points[i].input ~= expect_in then
       for i2 in points do
-        c.printf("input (%d,%d): %d should be %d\n", i2.x, i2.y, points[i2].input, ts)        
+        c.printf("input (%lld,%lld): %.0f should be %lld\n",
+                 i2.x, i2.y, points[i2].input, expect_in)
       end
     end
-    regentlib.assert(points[i].input == ts, "test failed")
-    if not (points[i].output == (ts-1)) then
+    regentlib.assert(points[i].input == expect_in, "test failed")
+    if points[i].output ~= expect_out then
       for i2 in points do
-        c.printf("output (%d,%d): %d should be %d\n", i2.x, i2.y, points[i2].output, ts-1)
+        c.printf("output (%lld,%lld): %.0f should be %lld\n",
+                 i2.x, i2.y, points[i2].output, expect_out)
       end
     end
-    regentlib.assert(points[i].output == ts - 1, "test failed")
+    regentlib.assert(points[i].output == expect_out, "test failed")
   end
 end
 
 task main()
-  var n : int64, nt : int64, ts : int64 = 12, 4, 10
+  var n : int64 = 12
+  var nt : int64 = 4
+  var tsteps : int64 = 10
+  var init : int64 = 1000
+
   var radius : int64 = RADIUS
   var grid = ispace(int2d, { x = n, y = n })
   var tiles = ispace(int2d, { x = nt, y = nt })
@@ -170,9 +178,9 @@ task main()
   var interior = make_interior_partition(points, tiles, n, nt, radius)
   var ghost = make_bloated_partition(points, tiles, interior, radius)
 
-  fill(points.{input, output}, 0)
+  fill(points.{input, output}, init)
 
-  for t = 0, ts do
+  for t = 0, tsteps do
     for i in tiles do
       stencil(interior[i], ghost[i])
     end
@@ -182,7 +190,7 @@ task main()
   end
 
   for i in tiles do
-    check(interior[i], ts)
+    check(interior[i], tsteps, init)
   end
 end
 regentlib.start(main)
