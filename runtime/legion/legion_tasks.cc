@@ -6775,9 +6775,22 @@ namespace Legion {
 #endif
       for (unsigned idx = 0; idx < output.slices.size(); idx++)
       {
+        const Mapper::TaskSlice &slice = output.slices[idx]; 
+        if (!slice.proc.exists())
+        {
+          log_run.error("Invalid mapper output from invocation of 'slice_task' "
+                        "on mapper %s. Mapper returned a slice for task "
+                        "%s (ID %lld) with an invalid processor " IDFMT ".",
+                        mapper->get_mapper_name(), get_task_name(),
+                        get_unique_id(), slice.proc.id);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
+        }
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
-        const Domain &d = output.slices[idx].domain;
+        const Domain &d = slice.domain;
         bool empty = false;
         switch (d.dim)
         {
@@ -6821,12 +6834,12 @@ namespace Legion {
           exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
         }
 #endif
-        SliceTask *slice = this->clone_as_slice_task(output.slices[idx].domain,
-                                                   output.slices[idx].proc,
-                                                   output.slices[idx].recurse,
-                                                   output.slices[idx].stealable,
-                                                   output.slices.size());
-        slices.push_back(slice);
+        SliceTask *new_slice = this->clone_as_slice_task(slice.domain,
+                                                         slice.proc,
+                                                         slice.recurse,
+                                                         slice.stealable,
+                                                         output.slices.size());
+        slices.push_back(new_slice);
       }
       // If the volumes don't match, then something bad happend in the mapper
       if (minimal_points_assigned != minimal_points.size())
