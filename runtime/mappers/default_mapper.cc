@@ -127,40 +127,37 @@ namespace Legion {
               break;
           }
         }
-        else
+        switch (it->kind())
         {
-          switch (it->kind())
-          {
-            case Processor::TOC_PROC:
-              {
-                // See if we already have a target GPU processor for this node
-                if (node >= remote_gpus.size())
-                  remote_gpus.resize(node+1, Processor::NO_PROC);
-                if (!remote_gpus[node].exists())
-                  remote_gpus[node] = *it;
-                break;
-              }
-            case Processor::LOC_PROC:
-              {
-                // See if we already have a target CPU processor for this node
-                if (node >= remote_cpus.size())
-                  remote_cpus.resize(node+1, Processor::NO_PROC);
-                if (!remote_cpus[node].exists())
-                  remote_cpus[node] = *it;
-                break;
-              }
-            case Processor::IO_PROC:
-              {
-                // See if we already have a target I/O processor for this node
-                if (node >= remote_ios.size())
-                  remote_ios.resize(node+1, Processor::NO_PROC);
-                if (!remote_ios[node].exists())
-                  remote_ios[node] = *it;
-                break;
-              }
-            default: // ignore anything else
+          case Processor::TOC_PROC:
+            {
+              // See if we already have a target GPU processor for this node
+              if (node >= remote_gpus.size())
+                remote_gpus.resize(node+1, Processor::NO_PROC);
+              if (!remote_gpus[node].exists())
+                remote_gpus[node] = *it;
               break;
-          }
+            }
+          case Processor::LOC_PROC:
+            {
+              // See if we already have a target CPU processor for this node
+              if (node >= remote_cpus.size())
+                remote_cpus.resize(node+1, Processor::NO_PROC);
+              if (!remote_cpus[node].exists())
+                remote_cpus[node] = *it;
+              break;
+            }
+          case Processor::IO_PROC:
+            {
+              // See if we already have a target I/O processor for this node
+              if (node >= remote_ios.size())
+                remote_ios.resize(node+1, Processor::NO_PROC);
+              if (!remote_ios[node].exists())
+                remote_ios[node] = *it;
+              break;
+            }
+          default: // ignore anything else
+            break;
         }
       }
       assert(!local_cpus.empty()); // better have some cpus
