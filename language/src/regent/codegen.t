@@ -462,11 +462,16 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
              std.assert(subrect.hi.x[i] == rect.hi.x[i], "subrect not equal to rect")
            end
          end)]
+
+      -- WARNING: The compiler assumes SOA, so the first stride should
+      -- be equal to the element size. However, the runtime gets
+      -- confused on instances with only a single element, and may
+      -- return a different value. In those cases, force the stride to
+      -- its expected value to avoid problems downstream.
       std.assert(offsets[0].offset == [expected_stride] or
-                 -- wonchan: raw_rect_ptr thinks an SOA instance of one element
-                 --          as an AOS instance and returns an unexpected stride
                  c.legion_domain_get_volume(domain) == 1,
                  "stride does not match expected value")
+      offsets[0].offset = [expected_stride]
 
       -- Fix up the base pointer so it points to the origin (zero),
       -- regardless of where rect is located. This allows us to do
