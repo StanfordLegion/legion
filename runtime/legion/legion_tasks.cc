@@ -4946,13 +4946,32 @@ namespace Legion {
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
+        bool free_acquired = false;
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired = NULL;
+        // Get the acquired instances only if we are checking
+        if (!Runtime::unsafe_mapper)
+        {
+          if (this->must_epoch != NULL)
+          {
+            acquired = new std::map<PhysicalManager*,
+                     std::pair<unsigned,bool> >(*get_acquired_instances_ref());
+            free_acquired = true;
+            // Merge the must epoch owners acquired instances too 
+            // if we need to check for all our instances being acquired
+            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+              *epoch_acquired = this->must_epoch->get_acquired_instances_ref();
+            if (epoch_acquired != NULL)
+              acquired->insert(epoch_acquired->begin(), epoch_acquired->end());  
+          }
+          else
+            acquired = get_acquired_instances_ref();
+        }
         int composite_idx = 
           runtime->forest->physical_convert_mapping(regions[idx],
                 output.chosen_instances[idx], result, bad_tree, missing_fields,
-                Runtime::unsafe_mapper ? NULL : 
-                  (this->must_epoch == NULL) ? get_acquired_instances_ref() : 
-                             this->must_epoch->get_acquired_instances_ref(),
-                unacquired, !Runtime::unsafe_mapper);
+                acquired, unacquired, !Runtime::unsafe_mapper);
+        if (free_acquired)
+          delete acquired;
         if (bad_tree > 0)
         {
           log_run.error("Invalid mapper output from invocation of '%s' on "
@@ -5016,32 +5035,13 @@ namespace Legion {
               exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-          // If we are part of a must epoch launch, check to see if 
-          // this was one of the regions already mapped, in which case
-          // the must epoch op holds the acquired references
-          bool issue_warning = true;
-          if (must_epoch_owner != NULL)
-          {
-            // See if it was one that the must epoch owner mapped 
-            for (std::vector<unsigned>::const_iterator it = 
-                  input.premapped_regions.begin(); it != 
-                  input.premapped_regions.end(); it++)
-            {
-              if ((*it) == idx)
-              {
-                issue_warning = false;
-                break;
-              }
-            }
-          }
           // Event if we did successfully acquire them, still issue the warning
-          if (issue_warning)
-            log_run.warning("WARNING: mapper %s failed to acquire instances "
-                            "for region requirement %d of task %s (ID %lld) "
-                            "in 'map_task' call. You may experience "
-                            "undefined behavior as a consequence.",
-                            mapper->get_mapper_name(), idx, 
-                            get_task_name(), get_unique_id());
+          log_run.warning("WARNING: mapper %s failed to acquire instances "
+                          "for region requirement %d of task %s (ID %lld) "
+                          "in 'map_task' call. You may experience "
+                          "undefined behavior as a consequence.",
+                          mapper->get_mapper_name(), idx, 
+                          get_task_name(), get_unique_id());
         }
         // See if they want a virtual mapping
         if (composite_idx >= 0)
