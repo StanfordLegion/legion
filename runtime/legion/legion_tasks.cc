@@ -5016,13 +5016,32 @@ namespace Legion {
               exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-          // If we did successfully acquire them, still issue the warning
-          log_run.warning("WARNING: mapper %s failed to acquire instances "
-                          "for region requirement %d of task %s (ID %lld) "
-                          "in 'map_task' call. You may experience "
-                          "undefined behavior as a consequence.",
-                          mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id());
+          // If we are part of a must epoch launch, check to see if 
+          // this was one of the regions already mapped, in which case
+          // the must epoch op holds the acquired references
+          bool issue_warning = true;
+          if (must_epoch_owner != NULL)
+          {
+            // See if it was one that the must epoch owner mapped 
+            for (std::vector<unsigned>::const_iterator it = 
+                  input.premapped_regions.begin(); it != 
+                  input.premapped_regions.end(); it++)
+            {
+              if ((*it) == idx)
+              {
+                issue_warning = false;
+                break;
+              }
+            }
+          }
+          // Event if we did successfully acquire them, still issue the warning
+          if (issue_warning)
+            log_run.warning("WARNING: mapper %s failed to acquire instances "
+                            "for region requirement %d of task %s (ID %lld) "
+                            "in 'map_task' call. You may experience "
+                            "undefined behavior as a consequence.",
+                            mapper->get_mapper_name(), idx, 
+                            get_task_name(), get_unique_id());
         }
         // See if they want a virtual mapping
         if (composite_idx >= 0)
