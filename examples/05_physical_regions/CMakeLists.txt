@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions legion)
+target_link_libraries(05_physical_regions Legion)

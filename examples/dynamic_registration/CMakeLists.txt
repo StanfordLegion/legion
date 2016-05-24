@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(dynamic_registration dynamic_registration.cc)
-target_link_libraries(dynamic_registration legion)
+target_link_libraries(dynamic_registration Legion)

@@ -27,11 +27,11 @@ set(CPU_SOURCES
                     circuit_cpu.cc
   circuit_mapper.h  circuit_mapper.cc
 )
-set(GPU_SOURCES circuit_gpu.cu)
 if(Legion_USE_CUDA)
+  set(GPU_SOURCES circuit_gpu.cu)
   cuda_add_executable(dependent_circuit ${CPU_SOURCES} ${GPU_SOURCES})
 else()
   add_executable(dependent_circuit ${CPU_SOURCES})
 endif()
 
-target_link_libraries(dependent_circuit legion)
+target_link_libraries(dependent_circuit Legion)

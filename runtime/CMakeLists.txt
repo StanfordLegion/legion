@@ -120,51 +120,51 @@ list(APPEND LOW_RUNTIME_SRC
   utilities.h
 )
 find_package(Threads REQUIRED)
-add_library(legion_low_runtime ${LOW_RUNTIME_SRC})
-target_link_libraries(legion_low_runtime
+add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
+target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
-set_target_properties(legion_low_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
-  target_compile_definitions(legion_low_runtime PUBLIC DEBUG_LOW_LEVEL)
+  target_compile_definitions(LowLevelRuntime PUBLIC DEBUG_LOW_LEVEL)
 endif()
-target_compile_definitions(legion_low_runtime
+target_compile_definitions(LowLevelRuntime
   PUBLIC -DCOMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
 
 if(Legion_USE_HWLOC)
-  target_compile_definitions(legion_low_runtime PRIVATE REALM_USE_HWLOC)
-  target_link_libraries(legion_low_runtime PRIVATE HWLOC)
+  target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_HWLOC)
+  target_link_libraries(LowLevelRuntime PRIVATE HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_compile_definitions(legion_low_runtime PUBLIC USE_GASNET)
-  target_link_libraries(legion_low_runtime PUBLIC GASNet)
+  target_compile_definitions(LowLevelRuntime PUBLIC USE_GASNET)
+  target_link_libraries(LowLevelRuntime PUBLIC GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_compile_definitions(legion_low_runtime PRIVATE REALM_USE_LLVM)
-  target_link_libraries(legion_low_runtime PRIVATE LLVM)
+  target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_LLVM)
+  target_link_libraries(LowLevelRuntime PRIVATE LLVM)
 endif()
 
 if(Legion_USE_CUDA)
-  target_compile_definitions(legion_low_runtime PUBLIC USE_CUDA)
-  target_include_directories(legion_low_runtime PRIVATE ${CUDA_INCLUDE_DIRS})
-  target_link_libraries(legion_low_runtime PRIVATE ${CUDA_CUDA_LIBRARY})
+  target_compile_definitions(LowLevelRuntime PUBLIC USE_CUDA)
+  target_include_directories(LowLevelRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(LowLevelRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(Legion_USE_SHARED_LOWLEVEL)
-  set_target_properties(legion_low_runtime PROPERTIES OUTPUT_NAME sharedllr)
+  set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME sharedllr)
 else()
-  set_target_properties(legion_low_runtime PROPERTIES OUTPUT_NAME realm)
+  set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)
 endif()
 
-target_include_directories(legion_low_runtime
+target_include_directories(LowLevelRuntime
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
 )
 
-install(TARGETS legion_low_runtime EXPORT LegionTargets
+install(TARGETS LowLevelRuntime EXPORT LegionTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -210,16 +210,16 @@ list(APPEND HIGH_RUNTIME_SRC
   legion/runtime.h             legion/runtime.cc
 )
 
-add_library(legion ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
-target_link_libraries(legion legion_low_runtime)
-set_target_properties(legion PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
+target_link_libraries(HighLevelRuntime LowLevelRuntime)
+set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
-  target_compile_definitions(legion PUBLIC -DDEBUG_HIGH_LEVEL)
+  target_compile_definitions(HighLevelRuntime PUBLIC -DDEBUG_HIGH_LEVEL)
 endif()
-target_compile_definitions(legion
+target_compile_definitions(HighLevelRuntime
   PUBLIC COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
-target_include_directories(legion
+target_include_directories(HighLevelRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
@@ -227,7 +227,7 @@ target_include_directories(legion
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm mappers
 )
 
-install(TARGETS legion EXPORT LegionTargets
+install(TARGETS HighLevelRuntime EXPORT LegionTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin

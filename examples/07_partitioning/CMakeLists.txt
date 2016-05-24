@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(07_partitioning partitioning.cc)
-target_link_libraries(07_partitioning legion)
+target_link_libraries(07_partitioning Legion)

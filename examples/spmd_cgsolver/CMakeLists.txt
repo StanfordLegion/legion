@@ -27,4 +27,4 @@ add_executable(spmd_cgsolver
   cgsolver.h  cgsolver.cc
   cgtasks.h   cgtasks.cc
 )
-target_link_libraries(spmd_cgsolver legion)
+target_link_libraries(spmd_cgsolver Legion)

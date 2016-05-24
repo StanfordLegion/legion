@@ -37,32 +37,21 @@ set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
   set(CUDA_USE_STATIC_CUDA_RUNTIME @CUDA_USE_STATIC_CUDA_RUNTIME@)
   find_package(CUDA REQUIRED)
-
-  CUDA_INCLUDE_DIRECTORIES(
-    "@Legion_SOURCE_DIR@/runtime"
-    "@Legion_SOURCE_DIR@/runtime/legion"
-    "@Legion_SOURCE_DIR@/runtime/mappers" 
-    "@Legion_SOURCE_DIR@/runtime/realm"
-  )
 endif()
 
 include(@Legion_BINARY_DIR@/LegionTargets.cmake)
+if(NOT TARGET Legion)
+  add_library(Legion INTERFACE IMPORTED)
+  set_target_properties(Legion PROPERTIES
+    INTERFACE_LINK_LIBRARIES Legion::HighLevelRuntime
+  )
+endif()
 
-# CUDA has some issue propogating interface compile flags so we have to extract
-# them from the target so we can manually add them
+# CUDA has some issues propogating target interface flags properties so we
+# have to extract them from the target and manually add them to the nvcc
+# flags
 if(Legion_USE_CUDA)
-  foreach(tgt legion_low_runtime legion)
-    get_target_property(opts ${tgt} INTERFACE_COMPILE_OPTIONS)
-    get_target_property(defs ${tgt} INTERFACE_COMPILE_DEFINITIONS)
-    if(opts)
-      foreach(opt IN LISTS opts)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${opt}")
-      endforeach()
-    endif()
-    if(defs)
-      foreach(def IN LISTS defs)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D${def}")
-      endforeach()
-    endif()
-  endforeach()
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:$<TARGET_PROPERTY:HighLevelRuntime,COMPILE_OPTIONS>>:$<TARGET_PROPERTY:HighLevelRuntime,COMPILE_OPTIONS>>")
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:$<TARGET_PROPERTY:HighLevelRuntime,COMPILE_DEFINITIONS>>:-D$<JOIN:$<TARGET_PROPERTY:HighLevelRuntime,COMPILE_DEFINITIONS>, -D>>")
+  set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:$<TARGET_PROPERTY:HighLevelRuntime,INCLUDE_DIRECTORIES>>:-I$<JOIN:$<TARGET_PROPERTY:HighLevelRuntime,INCLUDE_DIRECTORIES>, -I>>")
 endif()

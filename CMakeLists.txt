@@ -35,10 +35,9 @@ endif()
 # More boilerplate to deal with build type and lib type
 #------------------------------------------------------------------------------#
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build")
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
 endif()
 string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
-
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
@@ -91,12 +90,6 @@ if(Legion_USE_CUDA)
     set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   endif()
   find_package(CUDA REQUIRED)
-  CUDA_INCLUDE_DIRECTORIES(
-    "${Legion_SOURCE_DIR}/runtime"
-    "${Legion_SOURCE_DIR}/runtime/legion"
-    "${Legion_SOURCE_DIR}/runtime/mappers" 
-    "${Legion_SOURCE_DIR}/runtime/realm"
-  )
 endif()
 
 #------------------------------------------------------------------------------#
@@ -110,45 +103,48 @@ option(Legion_USE_SHARED_LOWLEVEL     "Use shared-memory runtime" OFF)
 add_subdirectory(runtime)
 
 export(EXPORT LegionTargets
+  NAMESPACE Legion::
   FILE ${Legion_BINARY_DIR}/LegionTargets.cmake
 )
 configure_file(
   cmake/LegionConfig.cmake.in
-  ${Legion_BINARY_DIR}/LegionConfig.cmake
+  ${Legion_BINARY_DIR}/LegionConfig.cmake.pregen
   @ONLY
 )
+file(GENERATE
+  OUTPUT ${Legion_BINARY_DIR}/LegionConfig.cmake
+  INPUT ${Legion_BINARY_DIR}/LegionConfig.cmake.pregen
+)
 install(EXPORT LegionTargets
+  NAMESPACE Legion::
   FILE LegionTargets.cmake
   DESTINATION lib/cmake/Legion
 )
 install(FILES ${Legion_BINARY_DIR}/LegionConfig.cmake
   DESTINATION lib/cmake/Legion
 )
+add_library(Legion INTERFACE)
+set_target_properties(Legion PROPERTIES
+  INTERFACE_LINK_LIBRARIES HighLevelRuntime
+)
 
 #------------------------------------------------------------------------------#
 # Examples
 #------------------------------------------------------------------------------#
-if(Legion_USE_CUDA)
-  # CUDA has some issue propogating interface compile flags so we have to
-  # extract them from the target so we can manually add them
-  foreach(tgt legion_low_runtime legion)
-    get_target_property(opts ${tgt} INTERFACE_COMPILE_OPTIONS)
-    get_target_property(defs ${tgt} INTERFACE_COMPILE_DEFINITIONS)
-    if(opts)
-      foreach(opt IN LISTS opts)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${opt}")
-      endforeach()
-    endif()
-    if(defs)
-      foreach(def IN LISTS defs)
-        set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D${def}")
-      endforeach()
-    endif()
-  endforeach()
-endif()
-
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 if(Legion_BUILD_EXAMPLES)
+  if(Legion_USE_CUDA)
+    # CUDA has some issues propogating target interface flags properties so we
+    # have to extract them from the target and manually add them to the nvcc
+    # flags
+    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,COMPILE_OPTIONS>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:${PROP}>")
+    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,COMPILE_DEFINITIONS>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
+    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,INCLUDE_DIRECTORIES>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
+  endif()
+
   set(Legion_DIR ${Legion_BINARY_DIR})
   add_subdirectory(examples)
 endif()

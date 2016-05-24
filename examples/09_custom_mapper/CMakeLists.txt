@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(09_custom_mapper custom_mapper.cc)
-target_link_libraries(09_custom_mapper legion)
+target_link_libraries(09_custom_mapper Legion)

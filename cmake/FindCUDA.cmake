@@ -14,13 +14,10 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
-project(LegionExample_08_multiple_partitions)
-
-# Only search if were building stand-alone and not as part of Legion
-if(NOT Legion_SOURCE_DIR)
-  find_package(Legion REQUIRED)
+# Replace CMake's FindCUDA with a newer upstream version that supports
+# generator expressions
+if(CMAKE_VERSION VERSION_LESS "3.6")
+  include(${CMAKE_CURRENT_LIST_DIR}/newcmake/FindCUDA.cmake)
+else()
+  include(${CMAKE_ROOT}/Modules/FindCUDA.cmake)
 endif()
-
-add_executable(08_multiple_partitions multiple_partitions.cc)
-target_link_libraries(08_multiple_partitions Legion)
