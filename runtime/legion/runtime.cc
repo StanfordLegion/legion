@@ -18667,6 +18667,8 @@ namespace Legion {
           BOOL_ARG("-hl:resilient",resilient_mode);
           BOOL_ARG("-hl:unsafe_launch",unsafe_launch);
           BOOL_ARG("-hl:unsafe_mapper",unsafe_mapper);
+          if (!strcmp(argv[i],"-hl:safe_mapper"))
+            unsafe_mapper = false;
           BOOL_ARG("-hl:inorder",program_order_execution);
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);

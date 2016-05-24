@@ -4392,6 +4392,11 @@ namespace Legion {
        *              mapper calls. Turning this off may result in 
        *              internal crashes in the runtime if the mapper
        *              provides invalid output from any mapper call.
+       *              (Default: false in debug mode, true in release mode.)
+       * -hl:safe_mapper Tell the runtime to perform all correctness
+       *              checks on mapper calls regardless of the 
+       *              optimization level. (Default: true in debug mode,
+       *              false in release mode.)
        * ---------------------
        *  Resiliency
        * ---------------------
