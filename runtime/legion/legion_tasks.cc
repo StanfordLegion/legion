@@ -8646,7 +8646,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(idx < regions.size());
+      assert(index < regions.size());
 #endif
       slice_owner->return_virtual_instance(index, refs, regions[index]);
     }
