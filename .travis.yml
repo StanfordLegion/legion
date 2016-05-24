@@ -77,7 +77,7 @@ script:
     make -s -C examples/07_partitioning LG_RT_DIR=../../runtime
     examples/07_partitioning/partitioning
     make -s -C examples/08_multiple_partitions LG_RT_DIR=../../runtime
-    examples/08_multiple_partitioning/multiple_partitions
+    examples/08_multiple_partitions/multiple_partitions
     make -s -C examples/09_custom_mapper LG_RT_DIR=../../runtime
     examples/09_custom_mapper/custom_mapper
     make -s -C examples/full_circuit LG_RT_DIR=../../runtime
