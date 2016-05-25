@@ -41,6 +41,7 @@ namespace Legion {
 			static std::vector<Memory> mems_list;
 			static std::vector<Processor> procs_list;
 			static std::map<Processor, int> procs_map;
+			static std::map<int, int> procs_map_int;
 			static std::map<Memory, int> mems_map;
 			static std::map<int, std::string> task_names_map;
 			static bool inputtaken;
