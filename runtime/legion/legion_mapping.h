@@ -1003,11 +1003,9 @@ namespace Legion {
        * the mapping tag passed at the callsite in 'mapping_tag'.
        */
       struct MappingConstraint{
-        const Task*                                 t1;
-        const Task*                                 t2;
-        unsigned                                    idx1;
-        unsigned                                    idx2;
-        DependenceType                              dtype;
+        std::vector<Task*>                          constrained_tasks;
+        std::vector<unsigned>                       requirement_indexes;
+        // tasks.size() == requirement_indexes.size()
       };
       struct MapMustEpochInput {
         std::vector<const Task*>                    tasks;
@@ -1404,6 +1402,12 @@ namespace Legion {
       
       IndexPartition get_parent_index_partition(MapperContext ctx,
                                                 IndexSpace handle) const;
+
+      unsigned get_index_space_depth(MapperContext ctx,
+                                     IndexSpace handle) const;
+
+      unsigned get_index_partition_depth(MapperContext ctx,
+                                         IndexPartition handle) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting field spaces 

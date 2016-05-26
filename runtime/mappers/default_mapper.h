@@ -294,9 +294,10 @@ namespace Legion {
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
     protected: // member helper methods
-      Processor select_random_processor(
+      Processor default_select_random_processor(
                               const std::vector<Processor> &procs) const;
-      VariantInfo find_preferred_variant(const Task &task, MapperContext ctx,
+      VariantInfo default_find_preferred_variant(
+                                 const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
                                  Processor::Kind kind = Processor::NO_KIND);
       void default_slice_task(const Task &task,
@@ -329,6 +330,8 @@ namespace Legion {
       void default_create_copy_instance(MapperContext ctx, const Copy &copy,
                               const RegionRequirement &req, unsigned index,
                               std::vector<PhysicalInstance> &instances);
+      LogicalRegion default_find_common_ancestor(MapperContext ctx,
+                                      const std::set<LogicalRegion> &regions);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>

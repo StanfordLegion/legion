@@ -2828,6 +2828,22 @@ namespace Legion {
        * @return the parent index partition
        */
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
+
+      /**
+       * Return the depth in the index space tree of the given index space.
+       * @param ctx enclosing task context
+       * @param handle the index space
+       * @return depth in the index space tree of the index space
+       */
+      unsigned get_index_space_depth(Context ctx, IndexSpace handle);
+
+      /**
+       * Return the depth in the index space tree of the given index partition.
+       * @param ctx enclosing task context
+       * @param handle the index partition
+       * @return depth in the index space tree of the index partition
+       */
+      unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations

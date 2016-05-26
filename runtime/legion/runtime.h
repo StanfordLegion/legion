@@ -1482,6 +1482,10 @@ namespace Legion {
       bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      unsigned get_index_space_depth(Context ctx, IndexSpace handle);
+      unsigned get_index_space_depth(IndexSpace handle);
+      unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
+      unsigned get_index_partition_depth(IndexPartition handle);
     public:
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       DomainPoint safe_cast(Context ctx, DomainPoint point, 

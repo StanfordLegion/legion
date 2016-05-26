@@ -1154,6 +1154,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned RegionTreeForest::get_index_space_depth(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return get_node(handle)->depth;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RegionTreeForest::get_index_partition_depth(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return get_node(handle)->depth;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceAllocator* RegionTreeForest::get_index_space_allocator(
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------

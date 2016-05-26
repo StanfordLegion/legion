@@ -2270,6 +2270,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned MapperManager::get_index_space_depth(MappingCallInfo *ctx,
+                                                  IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      unsigned result = runtime->get_index_space_depth(handle);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned MapperManager::get_index_partition_depth(MappingCallInfo *ctx,
+                                                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      unsigned result = runtime->get_index_partition_depth(handle);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     size_t MapperManager::get_field_size(MappingCallInfo *ctx,
                                          FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------

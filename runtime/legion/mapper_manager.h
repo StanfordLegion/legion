@@ -404,6 +404,9 @@ namespace Legion {
                                       IndexSpace handle);
       IndexPartition get_parent_index_partition(MappingCallInfo *info,
                                                 IndexSpace handle);
+      unsigned get_index_space_depth(MappingCallInfo *info, IndexSpace handle);
+      unsigned get_index_partition_depth(MappingCallInfo *info, 
+                                         IndexPartition handle);
     public:
       size_t get_field_size(MappingCallInfo *info, 
                             FieldSpace handle, FieldID fid);

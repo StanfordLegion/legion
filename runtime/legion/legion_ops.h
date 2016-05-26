@@ -1393,18 +1393,11 @@ namespace Legion {
     public:
       struct DependenceRecord {
       public:
-        DependenceRecord(unsigned op1, unsigned op2,
-                         unsigned reg1, unsigned reg2,
-                         DependenceType d)
-          : op1_idx(op1), op2_idx(op2), 
-            reg1_idx(reg1), reg2_idx(reg2),
-            dtype(d) { }
+        inline void add_entry(unsigned op_idx, unsigned req_idx)
+          { op_indexes.push_back(op_idx); req_indexes.push_back(req_idx); }
       public:
-        unsigned op1_idx;
-        unsigned op2_idx;
-        unsigned reg1_idx;
-        unsigned reg2_idx;
-        DependenceType dtype;
+        std::vector<unsigned> op_indexes;
+        std::vector<unsigned> req_indexes;
       };
     public:
       MustEpochOp(Runtime *rt);
@@ -1489,9 +1482,10 @@ namespace Legion {
       // Track the physical instances that we've acquired
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
-      std::deque<DependenceRecord> dependences;
-      std::vector<unsigned> dependence_count;
-      std::map<SingleTask*,std::deque<SingleTask*> > mapping_dependences;
+      std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
+               unsigned/*dependence index*/> dependence_map;
+      std::vector<DependenceRecord*> dependences;
+      std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
     };
 
     /**
@@ -1521,9 +1515,7 @@ namespace Legion {
       bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
                          std::vector<bool> &indiv_triggered,
                          const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered,
-                   const std::deque<MustEpochOp::DependenceRecord> &deps,
-                         const std::vector<unsigned> &dep_count);
+                         std::vector<bool> &index_triggered);
       void trigger_individual(IndividualTask *task);
       void trigger_index(IndexTask *task);
     public:
@@ -1555,8 +1547,7 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
-          const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_deps);
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);

@@ -181,6 +181,8 @@ namespace Legion {
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      unsigned get_index_space_depth(IndexSpace handle);
+      unsigned get_index_partition_depth(IndexPartition handle);
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);

@@ -10073,6 +10073,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_space_depth(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_depth(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_space_depth(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_depth(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_partition_depth(Context ctx, 
+                                                IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_depth(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_partition_depth(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_depth(handle);
+    }
+
+    //--------------------------------------------------------------------------
     ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------

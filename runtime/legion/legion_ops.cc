@@ -7590,8 +7590,14 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
+      dependence_map.clear();
+      for (std::vector<DependenceRecord*>::iterator it = dependences.begin();
+            it != dependences.end(); it++)
+      {
+        delete (*it);
+      }
       dependences.clear();
-      mapping_dependences.clear();
+      single_task_map.clear();
       input.tasks.clear();
       input.constraints.clear();
       output.task_processors.clear();
@@ -7641,23 +7647,10 @@ namespace Legion {
       // dependence.  When our sub-operations map, they will trigger these
       // mapping dependences which guarantees that we will not be able to
       // map until all of the sub-operations are ready to map.
-      unsigned prev_count = 0;
-      dependence_count.resize(indiv_tasks.size() + index_tasks.size());
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-      {
         indiv_tasks[idx]->trigger_dependence_analysis();
-        unsigned next_count = dependences.size();
-        dependence_count[idx] = next_count - prev_count;
-        prev_count = next_count;
-      }
-      unsigned offset = indiv_tasks.size();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
         index_tasks[idx]->trigger_dependence_analysis();
-        unsigned next_count = dependences.size();
-        dependence_count[offset+idx] = next_count - prev_count;
-        prev_count = next_count;
-      }
       end_dependence_analysis();
     }
 
@@ -7702,8 +7695,7 @@ namespace Legion {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
         MustEpochTriggerer triggerer(this);
         if (!triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
-                                     index_tasks, index_triggered,
-                                     dependences, dependence_count))
+                                     index_tasks, index_triggered))
           return false;
 
 #ifdef DEBUG_LEGION
@@ -7712,38 +7704,45 @@ namespace Legion {
         // Next build the set of single tasks and all their constraints.
         // Iterate over all the recorded dependences
         std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
-        constraints.reserve(dependences.size());
-        for (std::deque<DependenceRecord>::const_iterator it = 
-              dependences.begin(); it != dependences.end(); it++)
+        constraints.resize(dependences.size());
+        // Clear the dependence map now, we'll fill it in again
+        // with a different set of points
+        dependence_map.clear();
+        unsigned constraint_idx = 0;
+        for (std::vector<DependenceRecord*>::const_iterator it = 
+              dependences.begin(); it != dependences.end(); 
+              it++, constraint_idx++)
         {
+          Mapper::MappingConstraint &constraint = constraints[constraint_idx];
+#ifdef DEBUG_LEGION
+          assert((*it)->op_indexes.size() == (*it)->req_indexes.size());
+#endif
           // Add constraints for all the different elements
-          const std::set<SingleTask*> &s1 = task_sets[it->op1_idx];
-          const std::set<SingleTask*> &s2 = task_sets[it->op2_idx];
-          for (std::set<SingleTask*>::const_iterator it1 = s1.begin();
-                it1 != s1.end(); it1++)
+          for (unsigned idx = 0; idx < (*it)->op_indexes.size(); idx++)
           {
-            for (std::set<SingleTask*>::const_iterator it2 = s2.begin();
-                  it2 != s2.end(); it2++)
+            unsigned req_index = (*it)->req_indexes[idx];
+            const std::set<SingleTask*> &task_set = 
+                        task_sets[(*it)->op_indexes[idx]];
+            for (std::set<SingleTask*>::const_iterator sit = task_set.begin();
+                  sit != task_set.end(); sit++)
             {
-              Mapper::MappingConstraint constraint;
-              constraint.t1 = *it1;
-              constraint.t2 = *it2;
-              constraint.idx1 = it->reg1_idx;
-              constraint.idx2 = it->reg2_idx;
-              constraint.dtype = it->dtype;
-              constraints.push_back(constraint);
-              mapping_dependences[*it1].push_back(*it2);
-              mapping_dependences[*it2].push_back(*it1);
-              // Tell the tasks they will need to refetch physical
-              // state when mapping these regions so we can make
-              // sure that they see other mapped regions from other
-              // tasks in this must epoch launch
-              (*it1)->recapture_version_info(it->reg1_idx);
-              (*it2)->recapture_version_info(it->reg2_idx);
+              constraint.constrained_tasks.push_back(*sit);
+              constraint.requirement_indexes.push_back(req_index);
+#ifdef DEBUG_LEGION
+              assert(single_task_map.find(*sit) != single_task_map.end());
+#endif
+              // Update the dependence map
+              std::pair<unsigned,unsigned> key(single_task_map[*sit],req_index);
+              dependence_map[key] = constraint_idx;
             }
           }
         }
         // Clear this eagerly to save space
+        for (std::vector<DependenceRecord*>::const_iterator it = 
+              dependences.begin(); it != dependences.end(); it++)
+        {
+          delete (*it);
+        }
         dependences.clear();
         // Mark that we have finished building all the constraints so
         // we don't have to redo it if we end up failing a mapping.
@@ -7805,39 +7804,8 @@ namespace Legion {
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
-        if (!mapper.map_tasks(single_tasks, mapping_dependences))
+        if (!mapper.map_tasks(single_tasks))
           return false;
-      }
-      // Everybody successfully mapped so now check that all
-      // of the constraints have been satisfied
-      std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
-      for (std::vector<Mapper::MappingConstraint>::const_iterator it = 
-            constraints.begin(); it != constraints.end(); it++)
-      {
-        // We know that all these tasks are single tasks
-        // so doing static casts are safe
-        SingleTask *t1 = static_cast<SingleTask*>(const_cast<Task*>(it->t1));
-        SingleTask *t2 = static_cast<SingleTask*>(const_cast<Task*>(it->t2));
-        InstanceSet inst1, inst2;
-        t1->get_physical_references(it->idx1, inst1);
-        t2->get_physical_references(it->idx2, inst2);
-        if (!runtime->forest->match_instance_fields(t1->regions[it->idx1],
-              t2->regions[it->idx2], inst1, inst2))
-        {
-          log_run.error("Invalid mapper output from invocation of "
-              "'map_must_epoch' on mapper %s. Region requirement %d of task %s "
-              "(ID %lld) and region requirement %d of task %s (ID %lld) were "
-              "mapped to non-equivalent sets of physical instances resulting "
-              "in a failed constraint. The must epoch launch occurred inside "
-              "task %s (ID %lld).", mapper->get_mapper_name(), it->idx1, 
-              t1->get_task_name(), t1->get_unique_id(), it->idx2,
-              t2->get_task_name(), t2->get_unique_id(), 
-              parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
       }
 
       // Once all the tasks have been initialized we can defer
@@ -7978,8 +7946,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(dst_index >= 0);
 #endif
-          dependences.push_back(DependenceRecord(src_index, dst_index,
-                                                 src_idx, dst_idx, dtype)); 
+          // See if the dependence record already exists
+          std::pair<unsigned,unsigned> src_key(src_index,src_idx);
+          std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
+          std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+            record_finder = dependence_map.find(src_key);
+          if (record_finder == dependence_map.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(dependence_map.find(dst_key) == dependence_map.end());
+#endif
+            // We have to make new record
+            DependenceRecord *new_record = new DependenceRecord();
+            new_record->add_entry(src_index, src_idx);
+            new_record->add_entry(dst_index, dst_idx);
+            unsigned record_index = dependences.size();
+            dependence_map[src_key] = record_index;
+            dependence_map[dst_key] = record_index;
+            dependences.push_back(new_record);
+          }
+          else
+          {
+            // Just add the destination to the collection
+            dependences[record_finder->second]->add_entry(dst_index, dst_idx);
+            dependence_map[dst_key] = record_finder->second;
+          }
           return false;
         }
         // NO_DEPENDENCE and PROMOTED_DEPENDENCE are not errors
@@ -8001,47 +7992,27 @@ namespace Legion {
       // 3. Record that we premapped those regions
       // First find the index for this task
 #ifdef DEBUG_LEGION
-      bool found = false;
+      assert(single_task_map.find(task) != single_task_map.end());
 #endif
-      unsigned index = 0;
-      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-      {
-        if (single_tasks[idx] == task)
-        {
-          index = idx;
-#ifdef DEBUG_LEGION
-          found = true;
-#endif
-          break;
-        }
-      }
-#ifdef DEBUG_LEGION
-      assert(found);
-#endif
+      unsigned index = single_task_map[task];
       // Set the target processor by the index 
       task->target_proc = output.task_processors[index]; 
       // Now iterate over the constraints figure out which ones
-      for (unsigned idx = 0; idx < input.constraints.size(); idx++)
+      // apply to this task
+      std::pair<unsigned,unsigned> key(index,0);
+      for (unsigned idx = 0; idx < task->regions.size(); idx++)
       {
-        const Mapper::MappingConstraint &constraint = 
-          input.constraints[idx];
-        if (constraint.t1 == task)
+        key.second = idx;
+        std::map<std::pair<unsigned,unsigned>,unsigned>::const_iterator
+          record_finder = dependence_map.find(key);
+        if (record_finder != dependence_map.end())
         {
-          // Save the valid instances and the destination instances
-          map_input.valid_instances[constraint.idx1] = 
-            output.constraint_mappings[idx];
-          map_output.chosen_instances[constraint.idx1] = 
-            output.constraint_mappings[idx];
+          map_input.valid_instances[idx] = 
+            output.constraint_mappings[record_finder->second];
+          map_output.chosen_instances[idx] = 
+            output.constraint_mappings[record_finder->second];
           // Also record that we premapped this
-          map_input.premapped_regions.push_back(constraint.idx1);
-        }
-        else if (constraint.t2 == task)
-        {
-          map_input.valid_instances[constraint.idx2] = 
-            output.constraint_mappings[idx];
-          map_output.chosen_instances[constraint.idx2] = 
-            output.constraint_mappings[idx];
-          map_input.premapped_regions.push_back(constraint.idx2);
+          map_input.premapped_regions.push_back(idx);
         }
       }
     }
@@ -8074,7 +8045,9 @@ namespace Legion {
 #endif
       task_sets[index].insert(single);
       AutoLock o_lock(op_lock);
+      const unsigned single_task_index = single_tasks.size();
       single_tasks.push_back(single);
+      single_task_map[single] = single_task_index;
     }
 
     //--------------------------------------------------------------------------
@@ -8227,38 +8200,14 @@ namespace Legion {
                                 const std::vector<IndividualTask*> &indiv_tasks,
                                 std::vector<bool> &indiv_triggered,
                                 const std::vector<IndexTask*> &index_tasks,
-                                std::vector<bool> &index_triggered,
-                          const std::deque<MustEpochOp::DependenceRecord> &deps,
-                                const std::vector<unsigned> &dep_counts)
+                                std::vector<bool> &index_triggered)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> wait_events;
-      unsigned dep_offset = 0; 
-      std::vector<RtEvent> triggered_events(indiv_tasks.size() + 
-                            index_tasks.size(), RtEvent::NO_RT_EVENT);
       for (unsigned idx = 0; idx < indiv_triggered.size(); idx++)
       {
         if (!indiv_triggered[idx])
         {
-          std::set<RtEvent> preconditions;
-          // Figure out the event preconditiions
-          for (unsigned dep_idx = 0; dep_idx < dep_counts[idx]; dep_idx++)
-          {
-            const MustEpochOp::DependenceRecord &record = 
-              deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_LEGION
-            assert(idx == record.op1_idx);
-            assert(record.op1_idx < triggered_events.size());
-#endif
-            RtEvent pre = triggered_events[record.op2_idx]; 
-            if (pre.exists())
-              preconditions.insert(pre);
-          }
-          RtEvent precondition;
-          if (!preconditions.empty())
-            precondition = Runtime::merge_events(preconditions);
-          else
-            precondition = RtEvent::NO_RT_EVENT;
           MustEpochIndivArgs args;
           args.hlr_id = HLR_MUST_INDIV_ID;
           args.triggerer = this;
@@ -8267,40 +8216,15 @@ namespace Legion {
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_MUST_INDIV_ID, 
                                                     HLR_THROUGHPUT_PRIORITY,
-                                                    owner, precondition);
+                                                    owner);
           if (wait.exists())
-          {
             wait_events.insert(wait);
-            triggered_events[idx] = wait;
-          }
         }
-        dep_offset += dep_counts[idx];
       }
-      const unsigned op_offset = indiv_tasks.size();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
         if (!index_triggered[idx])
         {
-          std::set<RtEvent> preconditions;
-          // Figure out the event preconditiions
-          for (unsigned dep_idx = 0; 
-                dep_idx < dep_counts[op_offset + idx]; dep_idx++)
-          {
-            const MustEpochOp::DependenceRecord &record = 
-              deps[dep_offset + dep_idx]; 
-#ifdef DEBUG_LEGION
-            assert(idx == record.op1_idx);
-            assert(record.op1_idx < triggered_events.size());
-#endif
-            RtEvent pre = triggered_events[record.op2_idx]; 
-            if (pre.exists())
-              preconditions.insert(pre);
-          }
-          RtEvent precondition;
-          if (!preconditions.empty())
-            precondition = Runtime::merge_events(preconditions);
-          else
-            precondition = RtEvent::NO_RT_EVENT;
           MustEpochIndexArgs args;
           args.hlr_id = HLR_MUST_INDEX_ID;
           args.triggerer = this;
@@ -8309,16 +8233,11 @@ namespace Legion {
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_MUST_INDEX_ID, 
                                                     HLR_THROUGHPUT_PRIORITY,
-                                                    owner, precondition);
+                                                    owner);
           if (wait.exists())
-          {
             wait_events.insert(wait);
-            triggered_events[op_offset + idx] = wait;
-          }
         }
-        dep_offset += dep_counts[op_offset + idx];
       }
-
       // Wait for all of the launches to be done
       // We can safely block to free up the utility processor
       if (!wait_events.empty())
@@ -8326,7 +8245,6 @@ namespace Legion {
         RtEvent trigger_event = Runtime::merge_events(wait_events);
         trigger_event.wait();
       }
-      
       // Now see if any failed
       // Otherwise mark which ones succeeded
       if (!failed_individual_tasks.empty())
@@ -8428,50 +8346,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
-      const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_dependences)
+    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> wait_events;   
       MustEpochMapArgs args;
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
-      std::map<SingleTask*,RtEvent> mapping_events;
       for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
             it != single_tasks.end(); it++)
       {
         args.task = *it;
-        // Compute the preconditions
-        std::set<RtEvent> preconditions; 
-        std::map<SingleTask*,std::deque<SingleTask*> >::const_iterator 
-          dep_finder = mapping_dependences.find(*it);
-        if (dep_finder != mapping_dependences.end())
-        {
-          const std::deque<SingleTask*> &deps = dep_finder->second;
-          for (std::deque<SingleTask*>::const_iterator dit = 
-                deps.begin(); dit != deps.end(); dit++)
-          {
-            std::map<SingleTask*,RtEvent>::const_iterator finder = 
-              mapping_events.find(*dit);
-            if (finder != mapping_events.end())
-              preconditions.insert(finder->second);
-          }
-        }
-        RtEvent precondition = RtEvent::NO_RT_EVENT;
-        if (!preconditions.empty())
-          precondition = Runtime::merge_events(preconditions);
         RtEvent wait = 
           owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                   HLR_MUST_MAP_ID, 
                                                   HLR_THROUGHPUT_PRIORITY,
-                                                  owner, precondition);
+                                                  owner);
         if (wait.exists())
-        {
-          mapping_events[*it] = wait;
           wait_events.insert(wait);
-        }
       }
-      
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);

@@ -2568,6 +2568,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_space_depth(Context ctx, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_partition_depth(Context ctx,  
+                                                IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
