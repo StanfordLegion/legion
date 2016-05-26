@@ -55,6 +55,10 @@ namespace Legion {
       : Mapper(rt), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
+        next_local_io(0), next_local_cpu(0), next_local_gpu(0),
+        next_global_io(Processor::NO_PROC), next_global_cpu(Processor::NO_PROC),
+        next_global_gpu(Processor::NO_PROC), 
+        global_io_query(NULL), global_cpu_query(NULL), global_gpu_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -285,27 +289,21 @@ namespace Legion {
     {
       VariantInfo info = 
         default_find_preferred_variant(task, ctx, false/*needs tight*/);
-      // If we are the right kind then we return ourselves
-      if (info.proc_kind == local_kind)
+      // If we are the right kind and this is an index space task launch
+      // then we return ourselves
+      if (task.is_index_space && (info.proc_kind == local_kind))
         return local_proc;
-      // Otherwise pick a local one of the right type
+      // Otherwise we round-robin onto the other processors in the machine
+      // TODO: Fix this when we implement a good stealing algorithm
+      // to instead encourage locality
       switch (info.proc_kind)
       {
         case Processor::LOC_PROC:
-          {
-            assert(!local_cpus.empty());
-            return default_select_random_processor(local_cpus); 
-          }
+          return default_get_next_global_cpu();
         case Processor::TOC_PROC:
-          {
-            assert(!local_gpus.empty());
-            return default_select_random_processor(local_gpus);
-          }
-        case Processor::IO_PROC:
-          {
-            assert(!local_ios.empty());
-            return default_select_random_processor(local_ios);
-          }
+          return default_get_next_global_gpu();
+        case Processor::IO_PROC: // Don't distribute I/O
+          return default_get_next_local_io();
         default:
           assert(false);
       }
@@ -320,6 +318,102 @@ namespace Legion {
       const size_t total_procs = options.size();
       const int index = default_generate_random_integer() % total_procs;
       return options[index];
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_cpu(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_cpus[next_local_cpu++];
+      if (next_local_cpu == local_cpus.size())
+        next_local_cpu = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_cpu(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_cpu();
+      if (!next_global_cpu.exists())
+      {
+        global_cpu_query = new Machine::ProcessorQuery(machine);
+        global_cpu_query->only_kind(Processor::LOC_PROC);
+        next_global_cpu = global_cpu_query->first();
+      }
+      Processor result = next_global_cpu;
+      next_global_cpu = global_cpu_query->next(result);
+      if (!next_global_cpu.exists())
+      {
+        delete global_cpu_query;
+        global_cpu_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_gpu(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_gpus[next_local_gpu++];
+      if (next_local_gpu == local_gpus.size())
+        next_local_gpu = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_gpu(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_gpu();
+      if (!next_global_gpu.exists())
+      {
+        global_gpu_query = new Machine::ProcessorQuery(machine);
+        global_gpu_query->only_kind(Processor::TOC_PROC);
+        next_global_gpu = global_gpu_query->first();
+      }
+      Processor result = next_global_gpu;
+      next_global_gpu = global_gpu_query->next(result);
+      if (!next_global_gpu.exists())
+      {
+        delete global_gpu_query;
+        global_gpu_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_io(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_ios[next_local_io++];
+      if (next_local_io == local_ios.size())
+        next_local_io = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_io(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_io();
+      if (!next_global_io.exists())
+      {
+        global_io_query = new Machine::ProcessorQuery(machine);
+        global_io_query->only_kind(Processor::IO_PROC);
+        next_global_io = global_io_query->first();
+      }
+      Processor result = next_global_io;
+      next_global_io = global_io_query->next(result);
+      if (!next_global_io.exists())
+      {
+        delete global_io_query;
+        global_io_query = NULL;
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

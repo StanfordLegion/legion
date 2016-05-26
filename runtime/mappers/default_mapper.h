@@ -296,6 +296,12 @@ namespace Legion {
     protected: // member helper methods
       Processor default_select_random_processor(
                               const std::vector<Processor> &procs) const;
+      Processor default_get_next_local_cpu(void);
+      Processor default_get_next_global_cpu(void);
+      Processor default_get_next_local_gpu(void);
+      Processor default_get_next_global_gpu(void);
+      Processor default_get_next_local_io(void);
+      Processor default_get_next_global_io(void);
       VariantInfo default_find_preferred_variant(
                                  const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
@@ -370,6 +376,12 @@ namespace Legion {
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_gpus;
+    protected:
+      // For doing round-robining of tasks onto processors
+      unsigned next_local_io, next_local_cpu, next_local_gpu;
+      Processor next_global_io,next_global_cpu,next_global_gpu;
+      Machine::ProcessorQuery *global_io_query, *global_cpu_query,
+                              *global_gpu_query;
     protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,
