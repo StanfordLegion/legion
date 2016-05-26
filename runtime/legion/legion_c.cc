@@ -3972,6 +3972,72 @@ legion_inline_get_requirement(legion_inline_t inline_operation_)
 }
 
 //------------------------------------------------------------------------
+// Layout Constraint Set
+//------------------------------------------------------------------------
+
+legion_layout_constraint_set_t
+legion_layout_constraint_set_create(void)
+{
+  LayoutConstraintSet *constraints = new LayoutConstraintSet();
+
+  return CObjectWrapper::wrap(constraints);
+}
+
+void
+legion_layout_constraint_set_destroy(legion_layout_constraint_set_t handle_)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  delete constraints;
+}
+
+legion_layout_constraint_id_t
+legion_runtime_register_layout_constraint_set(legion_runtime_t runtime_,
+                                              legion_field_space_t fs_,
+                                    legion_layout_constraint_set_t handle_,
+                                              const char *set_name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace fs = CObjectWrapper::unwrap(fs_);
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  LayoutConstraintRegistrar registrar(fs, set_name);
+  registrar.layout_constraints = *constraints;
+
+  return runtime->register_layout(registrar);
+}
+
+legion_layout_constraint_id_t
+legion_runtime_preregister_layout_constraint_set(
+                                   legion_layout_constraint_set_t handle_,
+                                                 const char *set_name)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  LayoutConstraintRegistrar registrar(FieldSpace::NO_SPACE, set_name);
+  registrar.layout_constraints = *constraints;
+
+  return Runtime::preregister_layout(registrar);
+}
+
+legion_execution_constraint_set_t
+legion_execution_constraint_set_create(void)
+{
+  ExecutionConstraintSet *constraints = new ExecutionConstraintSet();
+
+  return CObjectWrapper::wrap(constraints);
+}
+
+void
+legion_execution_constraint_set_destroy(
+                              legion_execution_constraint_set_t handle_)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  delete constraints;
+}
+
+//------------------------------------------------------------------------
 // Start-up Operations
 //------------------------------------------------------------------------
 

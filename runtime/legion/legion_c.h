@@ -77,6 +77,8 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_processor_query_t);
   NEW_OPAQUE_TYPE(legion_memory_query_t);
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
+  NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
+  NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -2778,6 +2780,60 @@ typedef long long int coord_t;
    */
   legion_region_requirement_t
   legion_inline_get_requirement(legion_inline_t inline_operation);
+
+  // -----------------------------------------------------------------------
+  // Layout Constraints
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::LayoutConstraintSet
+   */
+  legion_layout_constraint_set_t
+  legion_layout_constraint_set_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter 'handle'
+   *
+   * @see Legion::LayoutConstraintSet
+   */
+  void 
+  legion_layout_constraint_set_destroy(legion_layout_constraint_set_t handle);
+
+  /**
+   * @see Legion::LayoutConstraintSet
+   */
+  legion_layout_constraint_id_t
+  legion_runtime_register_layout_constraint_set(legion_runtime_t runtime_,
+                                                legion_field_space_t fs_,
+                                       legion_layout_constraint_set_t handle_,
+                                                const char *set_name);
+
+  /**
+   * @see Legion::LayoutConstraintSet
+   */
+  legion_layout_constraint_id_t
+  legion_runtime_preregister_layout_constraint_set(
+                                       legion_layout_constraint_set_t handle_,
+                                                   const char *set_name);
+
+  /**
+   * @return Caller takes ownership of return value
+   * 
+   * @see Legion::ExecutionConstraintSet
+   */
+  legion_execution_constraint_set_t
+  legion_execution_constraint_set_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter 'handle'
+   *
+   * @see Legion::ExecutionConstraintSet
+   */
+  void
+  legion_execution_constraint_set_destroy(
+                                  legion_execution_constraint_set_t handle);
 
   // -----------------------------------------------------------------------
   // Start-up Operations
