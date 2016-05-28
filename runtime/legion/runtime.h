@@ -1311,7 +1311,7 @@ namespace Legion {
                                     const std::set<Domain> &domains);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
-      bool finalize_index_space_destroy(IndexSpace handle);
+      void finalize_index_space_destroy(IndexSpace handle);
     public:
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             const Domain &color_space,
@@ -1510,7 +1510,7 @@ namespace Legion {
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
       // Called from deletion ops
-      bool finalize_logical_region_destroy(LogicalRegion handle);
+      void finalize_logical_region_destroy(LogicalRegion handle);
       void finalize_logical_partition_destroy(LogicalPartition handle);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 

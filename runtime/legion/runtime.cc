@@ -7998,7 +7998,6 @@ namespace Legion {
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
-
 #endif
       Processor proc = ctx->get_executing_processor();
       DeletionOp *op = get_available_deletion_op(true);
@@ -8007,10 +8006,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::finalize_index_space_destroy(IndexSpace handle)
+    void Runtime::finalize_index_space_destroy(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->destroy_index_space(handle, address_space);
+      forest->destroy_index_space(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -8080,6 +8079,7 @@ namespace Legion {
       forest->create_index_partition(pid, parent, partition_color, 
                                      new_index_spaces, color_space, part_kind, 
                                      allocable ? MUTABLE : NO_MEMORY);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8224,6 +8224,7 @@ namespace Legion {
                                      new_index_spaces, color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      MUTABLE);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8264,6 +8265,7 @@ namespace Legion {
       forest->create_index_partition(pid, parent, partition_color, 
                                      coloring, color_space, 
                                      part_kind, NO_MEMORY);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8326,6 +8328,7 @@ namespace Legion {
                                      new_subspaces, color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8376,6 +8379,7 @@ namespace Legion {
       forest->create_index_partition(pid, parent, partition_color, 
                                      convex_hulls, coloring,
                                      color_space, part_kind, NO_MEMORY);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8444,6 +8448,7 @@ namespace Legion {
                                      color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -8560,6 +8565,7 @@ namespace Legion {
       forest->create_index_partition(pid, parent, partition_color,
                                      new_index_spaces, color_space,
                                      DISJOINT_KIND, MUTABLE);
+      ctx->register_index_partition_creation(pid);
       return pid;
     }
 
@@ -10333,10 +10339,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::finalize_logical_region_destroy(LogicalRegion handle)
+    void Runtime::finalize_logical_region_destroy(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->destroy_logical_region(handle, address_space);
+      forest->destroy_logical_region(handle, address_space);
     }
 
     //--------------------------------------------------------------------------

@@ -372,14 +372,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::destroy_index_space(IndexSpace handle,
+    void RegionTreeForest::destroy_index_space(IndexSpace handle,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
       node->destroy_node(source);
-      // Return true if this is a top level node
-      return (node->parent == NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -1307,14 +1305,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::destroy_logical_region(LogicalRegion handle,
+    void RegionTreeForest::destroy_logical_region(LogicalRegion handle,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
       node->destroy_node(source);
-      // Return true if this was a top-level region
-      return (node->parent == NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -1520,7 +1516,7 @@ namespace Legion {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_node(ctx.get_id(), user, path, version_info,
+      parent_node->register_logical_user(ctx.get_id(), user, path, version_info,
                                          restrict_info, trace_info, 
                                          (req.handle_type != SINGULAR), 
                                          true/*report uninitialized*/);
@@ -1598,136 +1594,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_index_space(RegionTreeContext ctx,
-                                                       IndexSpace handle,
-                                                       Operation *op,
-                                                       LogicalRegion region)
+    void RegionTreeForest::perform_deletion_analysis(DeletionOp *op, 
+                                                    unsigned idx,
+                                                    RegionRequirement &req,
+                                                    VersionInfo &version_info,
+                                                    RestrictInfo &restrict_info,
+                                                    RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *delete_node = get_node(handle);
-      // Because we lazily instantiate the region tree, we need to do
-      // tree comparisons from the the source nodes at the top of the tree
-      IndexSpaceNode *top_index = delete_node;
-      while (top_index->parent != NULL)
-      {
+      DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
+      SingleTask *parent_ctx = op->get_parent();
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
 #ifdef DEBUG_LEGION
-        assert(top_index->parent->parent != NULL);
+      assert(ctx.exists());
 #endif
-        top_index = top_index->parent->parent;
-      }
-      if (top_index->has_instance(region.get_tree_id()))
+      RegionNode *parent_node = get_node(req.parent);
+      
+      FieldMask user_mask = 
+        parent_node->column_source->get_field_mask(req.privilege_fields);
+      // Then compute the logical user
+      LogicalUser user(op, idx, RegionUsage(req), user_mask);
+      // Check to see if we need to do any restricted tests
+      if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
       {
-        RegionNode *start_node = get_node(region);
-        RegionTreePath path;
-        initialize_path(delete_node,start_node->row_source,path);
-        LogicalPathRegistrar reg(ctx.get_id(), op, 
-                           FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
-        reg.traverse(start_node); 
+        restrict_info.set_check();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_index_partition(
-                                                          RegionTreeContext ctx,
-                                                          IndexPartition handle,
-                                                          Operation *op,
-                                                          LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode *delete_node = get_node(handle);
-      // Because we lazily instantiate the region tree, we need to do
-      // tree comparisons from the the source nodes at the top of the tree
-      IndexSpaceNode *top_index = delete_node->parent;
-      while (top_index->parent != NULL)
-      {
+      version_info.set_upper_bound_node(parent_node);
+      TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req);
 #ifdef DEBUG_LEGION
-        assert(top_index->parent->parent != NULL);
+      TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
+                                     op->get_unique_op_id(), parent_node,
+                                     ctx.get_id(), true/*before*/, 
+                                     false/*premap*/,
+                                     false/*closing*/, true/*logical*/,
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-        top_index = top_index->parent->parent;
-      }
-      if (top_index->has_instance(region.get_tree_id()))
-      {
-        RegionNode *start_node = get_node(region);
-        RegionTreePath path;
-        initialize_path(delete_node,start_node->row_source,path);
-        LogicalPathRegistrar reg(ctx.get_id(), op, 
-                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
-        reg.traverse(start_node);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_field_space(RegionTreeContext ctx,
-                                                       FieldSpace handle,
-                                                       Operation *op,
-                                                       LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *delete_node = get_node(handle);
-      if (delete_node->has_instance(region.get_tree_id()))
-      {
-        RegionNode *start_node = get_node(region);
-        LogicalRegistrar registrar(ctx.get_id(), op, 
-                FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), false/*dominate*/);
-        start_node->visit_node(&registrar);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_fields(RegionTreeContext ctx,
-                                                  FieldSpace handle,
-                                            const std::set<FieldID> &to_delete,
-                                                  Operation *op,
-                                                  LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *delete_node = get_node(handle);
-      if (delete_node->has_instance(region.get_tree_id()))
-      {
-        RegionNode *start_node = get_node(region);
-        LogicalRegistrar registrar(ctx.get_id(), op, 
-                    delete_node->get_field_mask(to_delete), false/*dominate*/);
-        start_node->visit_node(&registrar);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_logical_region(RegionTreeContext ctx,
-                                                          LogicalRegion handle,
-                                                          Operation *op,
-                                                          LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      if (handle.get_tree_id() == region.get_tree_id())
-      {
-        RegionNode *start_node = get_node(region);
-        RegionNode *delete_node = get_node(handle);
-        RegionTreePath path;
-        initialize_path(delete_node->row_source,start_node->row_source,path);
-        LogicalPathRegistrar reg(ctx.get_id(), op, 
-                           FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
-        reg.traverse(start_node);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::analyze_destroy_logical_partition(
-                                                        RegionTreeContext ctx,
-                                                        LogicalPartition handle,
-                                                        Operation *op,
-                                                        LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      if (handle.get_tree_id() == region.get_tree_id())
-      {
-        RegionNode *start_node = get_node(region);
-        PartitionNode *delete_node = get_node(handle);
-        RegionTreePath path;
-        initialize_path(delete_node->row_source,start_node->row_source,path);
-        LogicalPathRegistrar reg(ctx.get_id(), op, 
-                             FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
-        reg.traverse(start_node);
-      }
+      // Do the traversal
+      parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
+                               path, version_info, restrict_info, trace_info);
+      // Once we are done we can clear out the list of recorded dependences
+      op->clear_logical_records();
+#ifdef DEBUG_LEGION
+      TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
+                                     op->get_unique_op_id(), parent_node,
+                                     ctx.get_id(), false/*before*/, 
+                                     false/*premap*/,
+                                     false/*closing*/, true/*logical*/,
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3943,6 +3858,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_node(space)->has_field(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_top_level_index_space(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return (get_node(handle)->parent == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_top_level_region(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return (get_node(handle)->parent == NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -10217,7 +10146,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::register_logical_node(ContextID ctx, 
+    void RegionTreeNode::register_logical_user(ContextID ctx, 
                                                const LogicalUser &user,
                                                RegionTreePath &path,
                                                VersionInfo &version_info,
@@ -10228,7 +10157,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
-                        REGION_NODE_REGISTER_LOGICAL_NODE_CALL);
+                        REGION_NODE_REGISTER_LOGICAL_USER_CALL);
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
@@ -10494,13 +10423,12 @@ namespace Legion {
                                      report_uninitialized);
           }
         }
-        
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
                         restrict_info, trace_info.already_traced, projecting);
         else
-          child->register_logical_node(ctx, user, path, version_info, 
+          child->register_logical_user(ctx, user, path, version_info, 
                                        restrict_info, trace_info, projecting);
       }
     }
@@ -11192,8 +11120,9 @@ namespace Legion {
       }
 
       // Now we can look at all the children
-      for (std::list<FieldState>::iterator it = state.field_states.begin();
-            it != state.field_states.end(); /*nothing*/)
+      for (LegionList<FieldState>::aligned::iterator it = 
+            state.field_states.begin(); it != 
+            state.field_states.end(); /*nothing*/)
       {
         // Quick check for disjointness, in which case we can continue
         if (it->valid_fields * current_mask)
@@ -11985,6 +11914,275 @@ namespace Legion {
         RegionNode *local_this = as_region_node();
         restrict_info.add_restriction(local_this->handle, restricted);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::register_logical_deletion(ContextID ctx,
+                                                   const LogicalUser &user,
+                                                   const FieldMask &check_mask,
+                                                   RegionTreePath &path,
+                                                   VersionInfo &version_info,
+                                                   RestrictInfo &restrict_info,
+                                                   const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_REGISTER_LOGICAL_USER_CALL);
+      CurrentState &state = get_current_state(ctx);
+#ifdef DEBUG_LEGION
+      sanity_check_logical_state(state);
+#endif
+      const unsigned depth = get_depth();
+      const bool arrived = !path.has_child(depth);
+      if (!arrived)
+      {
+        FieldMask open_below;
+        ColorPoint next_child = path.get_child(depth);
+        if (!!check_mask)
+        {
+          // Perform any close operations
+          LogicalCloser closer(ctx, user, false/*validates*/, true/*capture*/);
+          siphon_logical_deletion(closer, state, check_mask, next_child, 
+                              open_below, ((depth+1) == path.get_max_depth()));
+          if (closer.has_close_operations())
+          {
+            // Generate the close operations         
+            // We need to record the version numbers for this node as well
+            closer.record_top_version_numbers(this, state);
+            closer.initialize_close_operations(this, user.op, version_info, 
+                                               restrict_info, trace_info);
+            if (!arrived)
+              closer.add_next_child(next_child);
+            // Perform dependence analysis for all the close operations
+            closer.perform_dependence_analysis(user, open_below,
+                                               state.curr_epoch_users,
+                                               state.prev_epoch_users);
+            // Note we don't need to update the version numbers because
+            // that happened when we recorded dirty fields below. 
+            // However, we do need to mark that there is no longer any
+            // dirty data below this node for all the closed fields
+
+            // Update the dirty_below and partial close fields
+            // and filter the current and previous epochs
+            closer.update_state(state);
+            // Now we can add the close operations to the current epoch
+            closer.register_close_operations(state.curr_epoch_users);
+          }
+          // Perform our checks on dependences
+          FieldMask dominator_mask = 
+                 perform_dependence_checks<CURR_LOGICAL_ALLOC,
+                           true/*record*/,false/*has skip*/,true/*track dom*/>(
+                              user, state.curr_epoch_users, check_mask, 
+                              open_below, false/*validates*/);
+          FieldMask non_dominated_mask = check_mask - dominator_mask;
+          // For the fields that weren't dominated, we have to check
+          // those fields against the previous epoch's users
+          if (!!non_dominated_mask)
+          {
+            perform_dependence_checks<PREV_LOGICAL_ALLOC,
+                         true/*record*/, false/*has skip*/, false/*track dom*/>(
+                         user, state.prev_epoch_users, non_dominated_mask, 
+                         open_below, false/*validates*/);
+          }
+          // No need to update the version numbers since we're not actually
+          // mutating anything here, still need to record the version numbers
+          // though in case we need to issue any close operations
+          FieldMask dirty_overlap = 
+            check_mask & (state.dirty_below - state.partially_closed);
+          if (!dirty_overlap)
+          {
+            // No dirty fields below, which means we don't have any previous
+            state.record_version_numbers(check_mask, user, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   false/*report uninitialized*/);
+          }
+          else
+          {
+            // We have overlapping dirty fields, capture previous
+            // Record split node for readers!
+            state.record_version_numbers(dirty_overlap, user, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   false/*report uninitialized*/);
+            // See if we have any non-overlapping
+            FieldMask non_dirty = check_mask - dirty_overlap;
+            if (!!non_dirty)
+              state.record_version_numbers(non_dirty, user, version_info,
+                                     false/*previous*/, true/*path only*/,
+                                     false/*final*/, false/*close top*/,
+                                     false/*report uninitialized*/);
+          }
+        }
+        // Continue the traversal
+        RegionTreeNode *child = get_tree_child(next_child);
+        // Only continue checking the fields that are open below
+        child->register_logical_deletion(ctx, user, open_below, path,
+                                       version_info, restrict_info, trace_info);
+      }
+      else
+      {
+        // We've arrived, so clear out the current state here and anywhere below
+        DeletionInvalidator invalidator(ctx, user.field_mask);
+        visit_node(&invalidator);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::siphon_logical_deletion(LogicalCloser &closer,
+                                                 CurrentState &state,
+                                                 const FieldMask &current_mask,
+                                                 const ColorPoint &next_child,
+                                                 FieldMask &open_below,
+                                                 bool force_close_next)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(next_child.is_valid());
+      sanity_check_logical_state(state);
+#endif
+      LegionDeque<FieldState>::aligned new_states;
+      for (LegionList<FieldState>::aligned::iterator it = 
+            state.field_states.begin(); it != 
+            state.field_states.end(); /*nothing*/)
+      {
+        // Quick check for disjointness, in which case we can continue
+        if (it->valid_fields * current_mask)
+        {
+          it++;
+          continue;
+        }
+        // See if our child is open, if it's not then we can keep going
+        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+          it->open_children.find(next_child);
+        if (finder == it->open_children.end())
+        {
+          it++;
+          continue;
+        }
+        const FieldMask overlap = finder->second & current_mask;
+        if (!overlap)
+        {
+          it++;
+          continue;
+        }
+        // Now check the current state
+        switch (it->open_state)
+        {
+          case OPEN_READ_ONLY:
+            {
+              finder->second -= overlap;
+              if (!finder->second)
+                it->open_children.erase(finder);
+              // Rebuild the state mask
+              FieldMask new_state_mask;
+              for (LegionMap<ColorPoint,FieldMask>::aligned::iterator
+                    child_it = it->open_children.begin(); child_it !=
+                    it->open_children.end(); child_it++)
+                new_state_mask |= child_it->second;
+              if (!!new_state_mask)
+              {
+                it->valid_fields = new_state_mask;
+                it++;
+              }
+              else
+                it = state.field_states.erase(it);
+              break;
+            }
+          case OPEN_READ_WRITE:
+            {
+              // See if we need to force the close, otherwise we 
+              // can record that it is already open
+              if (force_close_next)
+              {
+                perform_close_operations(closer, current_mask, *it,
+                                         next_child, false/*allow next*/,
+                                         false/*upgrade next child*/,
+                                         false/*permit leave open*/,
+                                         false/*read only close*/,
+                                         true/*record close operations*/,
+                                         true/*record closed fields*/,
+                                         new_states, open_below);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else
+              {
+                open_below |= (finder->second & current_mask);
+                it++;
+              }
+              break;
+            }
+          case OPEN_SINGLE_REDUCE:
+            {
+              // Go to read-write mode and close if necessary
+              if (force_close_next)
+              {
+                perform_close_operations(closer, current_mask, *it,
+                                         next_child, false/*allow next*/,
+                                         false/*upgrade next child*/,
+                                         false/*permit leave open*/,
+                                         false/*read only close*/,
+                                         true/*record close operations*/,
+                                         true/*record closed fields*/,
+                                         new_states, open_below);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else
+              {
+                open_below |= overlap;
+                finder->second -= overlap;
+                // Add the new read-write state
+                new_states.push_back(
+                    FieldState(closer.user, overlap, next_child));
+                if (!finder->second)
+                  it->open_children.erase(finder);  
+                // Rebuild the state mask
+                FieldMask new_state_mask;
+                for (LegionMap<ColorPoint,FieldMask>::aligned::iterator
+                      child_it = it->open_children.begin(); child_it !=
+                      it->open_children.end(); child_it++)
+                  new_state_mask |= child_it->second;
+                if (!!new_state_mask)
+                {
+                  it->valid_fields = new_state_mask;
+                  it++;
+                }
+                else
+                  it = state.field_states.erase(it);
+              }
+              break;
+            }
+          case OPEN_MULTI_REDUCE:
+            {
+              // Do the close here if our child is open
+              perform_close_operations(closer, current_mask, *it,
+                                       next_child, false/*allow next*/,
+                                       false/*upgrade next child*/,
+                                       false/*permit leave open*/,
+                                       false/*read only close*/,
+                                       true/*record close operations*/,
+                                       true/*record closed fields*/,
+                                       new_states, open_below);
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+      }
+      merge_new_field_states(state, new_states);
+#ifdef DEBUG_LEGION
+      sanity_check_logical_state(state);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13877,6 +14075,17 @@ namespace Legion {
         state.clear_logical_users();
       else
         state.reset(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_deleted_state(ContextID ctx,
+                                                  const FieldMask &deleted_mask)
+    //--------------------------------------------------------------------------
+    {
+      if (!current_states.has_entry(ctx))
+        return;
+      CurrentState &state = get_current_state(ctx);
+      state.clear_deleted_state(deleted_mask);
     }
     
     //--------------------------------------------------------------------------

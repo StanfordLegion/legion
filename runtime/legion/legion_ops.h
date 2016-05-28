@@ -831,7 +831,8 @@ namespace Legion {
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_commit(void);
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       DeletionKind kind;
       IndexSpace index_space;
@@ -840,6 +841,7 @@ namespace Legion {
       LogicalRegion logical_region;
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
+      std::vector<unsigned> parent_req_indexes;
     }; 
 
     /**

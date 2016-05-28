@@ -165,6 +165,13 @@ namespace Legion {
       void register_index_space_creations(const std::set<IndexSpace> &spaces);
       void register_index_space_deletions(const std::set<IndexSpace> &spaces);
     public:
+      void register_index_partition_creation(IndexPartition handle);
+      void register_index_partition_deletion(IndexPartition handle);
+      void register_index_partition_creations(
+                                        const std::set<IndexPartition> &parts);
+      void register_index_partition_deletions(
+                                        const std::set<IndexPartition> &parts);
+    public:
       virtual void add_created_region(LogicalRegion handle) = 0;
       virtual void add_created_field(FieldSpace handle, FieldID fid) = 0;
     public:
@@ -212,10 +219,12 @@ namespace Legion {
       std::set<std::pair<FieldSpace,FieldID> >  created_fields;
       std::set<FieldSpace>                      created_field_spaces;
       std::set<IndexSpace>                      created_index_spaces;
+      std::set<IndexPartition>                  created_index_partitions;
       std::set<LogicalRegion>                   deleted_regions;
       std::set<std::pair<FieldSpace,FieldID> >  deleted_fields;
       std::set<FieldSpace>                      deleted_field_spaces;
       std::set<IndexSpace>                      deleted_index_spaces;
+      std::set<IndexPartition>                  deleted_index_partitions;
     protected:
       bool complete_received;
       bool commit_received;
@@ -426,15 +435,25 @@ namespace Legion {
     public:
       void get_top_regions(std::map<LogicalRegion,
                                     RegionTreeContext> &top_regions);
-      void analyze_destroy_index_space(IndexSpace handle, Operation *op);
+      void analyze_destroy_index_space(IndexSpace handle, 
+                                   std::vector<RegionRequirement> &delete_reqs,
+                                   std::vector<unsigned> &parent_req_indexes);
       void analyze_destroy_index_partition(IndexPartition handle, 
-                                           Operation *op);
-      void analyze_destroy_field_space(FieldSpace handle, Operation *op);
-      void analyze_destroy_fields(FieldSpace handle, Operation *op,
-                                  const std::set<FieldID> &to_delete);
-      void analyze_destroy_logical_region(LogicalRegion handle, Operation *op);
+                                   std::vector<RegionRequirement> &delete_reqs,
+                                   std::vector<unsigned> &parent_req_indexes);
+      void analyze_destroy_field_space(FieldSpace handle, 
+                                   std::vector<RegionRequirement> &delete_reqs,
+                                   std::vector<unsigned> &parent_req_indexes);
+      void analyze_destroy_fields(FieldSpace handle,
+                                  const std::set<FieldID> &to_delete,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
+      void analyze_destroy_logical_region(LogicalRegion handle, 
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
       void analyze_destroy_logical_partition(LogicalPartition handle,
-                                             Operation *op);
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);

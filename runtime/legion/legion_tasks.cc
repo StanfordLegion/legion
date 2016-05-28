@@ -161,10 +161,12 @@ namespace Legion {
       created_fields.clear();
       created_field_spaces.clear();
       created_index_spaces.clear();
+      created_index_partitions.clear();
       deleted_regions.clear();
       deleted_fields.clear();
       deleted_field_spaces.clear();
       deleted_index_spaces.clear();
+      deleted_index_partitions.clear();
       parent_req_indexes.clear();
     }
 
@@ -818,17 +820,25 @@ namespace Legion {
     void TaskOp::register_region_deletion(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
+      bool finalize = false;
       // Hold the operation lock when doing this since children could
       // be returning values from the utility processor
-      AutoLock o_lock(op_lock);
-      std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
-      // See if we created this region, if so remove it from the list
-      // of created regions, otherwise add it to the list of deleted
-      // regions to flow backwards
-      if (finder == created_regions.end())
-        deleted_regions.insert(handle);
-      else
-        created_regions.erase(finder);
+      {
+        AutoLock o_lock(op_lock);
+        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
+        // See if we created this region, if so remove it from the list
+        // of created regions, otherwise add it to the list of deleted
+        // regions to flow backwards
+        if (finder != created_regions.end())
+        {
+          created_regions.erase(finder);
+          finalize = true;
+        }
+        else
+          deleted_regions.insert(handle);
+      }
+      if (finalize)
+        runtime->finalize_logical_region_destroy(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -851,15 +861,27 @@ namespace Legion {
     void TaskOp::register_region_deletions(const std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
-            it != regs.end(); it++)
+      std::vector<LogicalRegion> to_finalize;
       {
-        std::set<LogicalRegion>::iterator finder = created_regions.find(*it);
-        if (finder == created_regions.end())
-          deleted_regions.insert(*it);
-        else
-          created_regions.erase(finder);
+        AutoLock o_lock(op_lock);
+        for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+              it != regs.end(); it++)
+        {
+          std::set<LogicalRegion>::iterator finder = created_regions.find(*it);
+          if (finder != created_regions.end())
+          {
+            created_regions.erase(finder);
+            to_finalize.push_back(*it);
+          }
+          else
+            deleted_regions.insert(*it);
+        }
+      }
+      if (!to_finalize.empty())
+      {
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              to_finalize.begin(); it != to_finalize.end(); it++)
+          runtime->finalize_logical_region_destroy(*it);
       }
     } 
 
@@ -898,18 +920,26 @@ namespace Legion {
                                          const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      for (std::set<FieldID>::const_iterator it = to_free.begin();
-            it != to_free.end(); it++)
+      std::set<FieldID> to_finalize;
       {
-        std::pair<FieldSpace,FieldID> key(handle,*it);
-        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-          created_fields.find(key);
-        if (finder == created_fields.end())
-          deleted_fields.insert(key);
-        else
-          created_fields.erase(finder);
+        AutoLock o_lock(op_lock);
+        for (std::set<FieldID>::const_iterator it = to_free.begin();
+              it != to_free.end(); it++)
+        {
+          std::pair<FieldSpace,FieldID> key(handle,*it);
+          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+            created_fields.find(key);
+          if (finder != created_fields.end())
+          {
+            created_fields.erase(finder);
+            to_finalize.insert(*it);
+          }
+          else
+            deleted_fields.insert(key);
+        }
       }
+      if (!to_finalize.empty())
+        runtime->finalize_field_destroy(handle, to_finalize);
     }
 
     //--------------------------------------------------------------------------
@@ -934,16 +964,30 @@ namespace Legion {
                         const std::set<std::pair<FieldSpace,FieldID> > &fields)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
+      std::map<FieldSpace,std::set<FieldID> > to_finalize;
       {
-        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-          created_fields.find(*it);
-        if (finder == created_fields.end())
-          deleted_fields.insert(*it);
-        else
-          created_fields.erase(finder);
+        AutoLock o_lock(op_lock);
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+              fields.begin(); it != fields.end(); it++)
+        {
+          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+            created_fields.find(*it);
+          if (finder != created_fields.end())
+          {
+            created_fields.erase(finder);
+            to_finalize[it->first].insert(it->second);
+          }
+          else
+            deleted_fields.insert(*it);
+        }
+      }
+      if (!to_finalize.empty())
+      {
+        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
+              to_finalize.begin(); it != to_finalize.end(); it++)
+        {
+          runtime->finalize_field_destroy(it->first, it->second);
+        }
       }
     }
 
@@ -962,24 +1006,33 @@ namespace Legion {
     void TaskOp::register_field_space_deletion(FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::deque<FieldID> to_delete;
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            created_fields.begin(); it != created_fields.end(); it++)
+      bool finalize = false;
       {
-        if (it->first == space)
-          to_delete.push_back(it->second);
+        AutoLock o_lock(op_lock);
+        std::deque<FieldID> to_delete;
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+              created_fields.begin(); it != created_fields.end(); it++)
+        {
+          if (it->first == space)
+            to_delete.push_back(it->second);
+        }
+        for (unsigned idx = 0; idx < to_delete.size(); idx++)
+        {
+          std::pair<FieldSpace,FieldID> key(space, to_delete[idx]);
+          created_fields.erase(key);
+        }
+        std::set<FieldSpace>::iterator finder = 
+          created_field_spaces.find(space);
+        if (finder != created_field_spaces.end())
+        {
+          created_field_spaces.erase(finder);
+          finalize = true;
+        }
+        else
+          deleted_field_spaces.insert(space);
       }
-      for (unsigned idx = 0; idx < to_delete.size(); idx++)
-      {
-        std::pair<FieldSpace,FieldID> key(space, to_delete[idx]);
-        created_fields.erase(key);
-      }
-      std::set<FieldSpace>::iterator finder = created_field_spaces.find(space);
-      if (finder == created_field_spaces.end())
-        deleted_field_spaces.insert(space);
-      else
-        created_field_spaces.erase(finder);
+      if (finalize)
+        runtime->finalize_field_space_destroy(space);
     }
 
     //--------------------------------------------------------------------------
@@ -1003,27 +1056,39 @@ namespace Legion {
                                             const std::set<FieldSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
+      std::vector<FieldSpace> to_finalize;
       {
-        std::deque<FieldID> to_delete;
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator cit = 
-              created_fields.begin(); cit != created_fields.end(); cit++)
+        AutoLock o_lock(op_lock);
+        for (std::set<FieldSpace>::const_iterator it = spaces.begin();
+              it != spaces.end(); it++)
         {
-          if (cit->first == *it)
-            to_delete.push_back(cit->second);
+          std::deque<FieldID> to_delete;
+          for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator cit = 
+                created_fields.begin(); cit != created_fields.end(); cit++)
+          {
+            if (cit->first == *it)
+              to_delete.push_back(cit->second);
+          }
+          for (unsigned idx = 0; idx < to_delete.size(); idx++)
+          {
+            std::pair<FieldSpace,FieldID> key(*it, to_delete[idx]);
+            created_fields.erase(key);
+          }
+          std::set<FieldSpace>::iterator finder = created_field_spaces.find(*it);
+          if (finder != created_field_spaces.end())
+          {
+            created_field_spaces.erase(finder);
+            to_finalize.push_back(*it);
+          }
+          else
+            deleted_field_spaces.insert(*it);
         }
-        for (unsigned idx = 0; idx < to_delete.size(); idx++)
-        {
-          std::pair<FieldSpace,FieldID> key(*it, to_delete[idx]);
-          created_fields.erase(key);
-        }
-        std::set<FieldSpace>::iterator finder = created_field_spaces.find(*it);
-        if (finder == created_field_spaces.end())
-          deleted_field_spaces.insert(*it);
-        else
-          created_field_spaces.erase(finder);
+      }
+      if (!to_finalize.empty())
+      {
+        for (std::vector<FieldSpace>::const_iterator it = to_finalize.begin();
+              it != to_finalize.end(); it++)
+          runtime->finalize_field_space_destroy(*it);
       }
     }
 
@@ -1050,12 +1115,21 @@ namespace Legion {
     void TaskOp::register_index_space_deletion(IndexSpace space)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::set<IndexSpace>::iterator finder = created_index_spaces.find(space);
-      if (finder == created_index_spaces.end())
-        deleted_index_spaces.insert(space);
-      else
-        created_index_spaces.erase(finder);
+      bool finalize = false;
+      {
+        AutoLock o_lock(op_lock);
+        std::set<IndexSpace>::iterator finder = 
+          created_index_spaces.find(space);
+        if (finder != created_index_spaces.end())
+        {
+          created_index_spaces.erase(finder);
+          finalize = true;
+        }
+        else
+          deleted_index_spaces.insert(space);
+      }
+      if (finalize)
+        runtime->finalize_index_space_destroy(space);
     }
 
     //--------------------------------------------------------------------------
@@ -1079,15 +1153,108 @@ namespace Legion {
                                             const std::set<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
+      std::vector<IndexSpace> to_finalize;
       {
-        std::set<IndexSpace>::iterator finder = created_index_spaces.find(*it);
-        if (finder == created_index_spaces.end())
-          deleted_index_spaces.insert(*it);
+        AutoLock o_lock(op_lock);
+        for (std::set<IndexSpace>::const_iterator it = spaces.begin();
+              it != spaces.end(); it++)
+        {
+          std::set<IndexSpace>::iterator finder = 
+            created_index_spaces.find(*it);
+          if (finder != created_index_spaces.end())
+          {
+            created_index_spaces.erase(finder);
+            to_finalize.push_back(*it);
+          }
+          else
+            deleted_index_spaces.insert(*it);
+        }
+      }
+      if (!to_finalize.empty())
+      {
+        for (std::vector<IndexSpace>::const_iterator it = to_finalize.begin();
+              it != to_finalize.end(); it++)
+          runtime->finalize_index_space_destroy(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::register_index_partition_creation(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(created_index_partitions.find(handle) == 
+             created_index_partitions.end());
+#endif
+      created_index_partitions.insert(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::register_index_partition_deletion(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      bool finalize = false;
+      {
+        AutoLock o_lock(op_lock);
+        std::set<IndexPartition>::iterator finder = 
+          created_index_partitions.find(handle);
+        if (finder != created_index_partitions.end())
+        {
+          created_index_partitions.erase(finder);
+          finalize = true;
+        }
         else
-          created_index_spaces.erase(finder);
+          deleted_index_partitions.insert(handle);
+      }
+      if (finalize)
+        runtime->finalize_index_partition_destroy(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::register_index_partition_creations(
+                                          const std::set<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<IndexPartition>::const_iterator it = parts.begin();
+            it != parts.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_index_partitions.find(*it) == 
+               created_index_partitions.end());
+#endif
+        created_index_partitions.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::register_index_partition_deletions(
+                                          const std::set<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexPartition> to_finalize;
+      {
+        AutoLock o_lock(op_lock);
+        for (std::set<IndexPartition>::const_iterator it = parts.begin();
+              it != parts.end(); it++)
+        {
+          std::set<IndexPartition>::iterator finder = 
+            created_index_partitions.find(*it);
+          if (finder != created_index_partitions.end())
+          {
+            created_index_partitions.erase(finder);
+            to_finalize.push_back(*it);
+          }
+          else
+            deleted_index_partitions.insert(*it);
+        }
+      }
+      if (!to_finalize.empty())
+      {
+        for (std::vector<IndexPartition>::const_iterator it = 
+              to_finalize.begin(); it != to_finalize.end(); it++)
+          runtime->finalize_index_partition_destroy(*it);
       }
     }
 
@@ -1111,6 +1278,10 @@ namespace Legion {
         target->register_index_space_creations(created_index_spaces);
       if (!deleted_index_spaces.empty())
         target->register_index_space_deletions(deleted_index_spaces);
+      if (!created_index_partitions.empty())
+        target->register_index_partition_creations(created_index_partitions);
+      if (!deleted_index_partitions.empty())
+        target->register_index_partition_deletions(deleted_index_partitions);
     }
 
     //--------------------------------------------------------------------------
@@ -1121,58 +1292,102 @@ namespace Legion {
       // while there is no one else executing
       RezCheck z(rez);
       rez.serialize<size_t>(created_regions.size());
-      for (std::set<LogicalRegion>::const_iterator it =
-            created_regions.begin(); it != created_regions.end(); it++)
+      if (!created_regions.empty())
       {
-        rez.serialize(*it);
+        for (std::set<LogicalRegion>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
       rez.serialize<size_t>(deleted_regions.size());
-      for (std::set<LogicalRegion>::const_iterator it =
-            deleted_regions.begin(); it != deleted_regions.end(); it++)
+      if (!deleted_regions.empty())
       {
-        rez.serialize(*it);
+        for (std::set<LogicalRegion>::const_iterator it =
+              deleted_regions.begin(); it != deleted_regions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
       rez.serialize<size_t>(created_fields.size());
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
-            created_fields.begin(); it != created_fields.end(); it++)
+      if (!created_fields.empty())
       {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
+              created_fields.begin(); it != created_fields.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       rez.serialize<size_t>(deleted_fields.size());
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            deleted_fields.begin(); it != deleted_fields.end(); it++)
+      if (!deleted_fields.empty())
       {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+              deleted_fields.begin(); it != deleted_fields.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
       }
       rez.serialize<size_t>(created_field_spaces.size());
-      for (std::set<FieldSpace>::const_iterator it = 
-            created_field_spaces.begin(); it != 
-            created_field_spaces.end(); it++)
+      if (!created_field_spaces.empty())
       {
-        rez.serialize(*it);
+        for (std::set<FieldSpace>::const_iterator it = 
+              created_field_spaces.begin(); it != 
+              created_field_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
       rez.serialize<size_t>(deleted_field_spaces.size());
-      for (std::set<FieldSpace>::const_iterator it = 
-            deleted_field_spaces.begin(); it !=
-            deleted_field_spaces.end(); it++)
+      if (!deleted_field_spaces.empty())
       {
-        rez.serialize(*it);
+        for (std::set<FieldSpace>::const_iterator it = 
+              deleted_field_spaces.begin(); it !=
+              deleted_field_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
       rez.serialize<size_t>(created_index_spaces.size());
-      for (std::set<IndexSpace>::const_iterator it = 
-            created_index_spaces.begin(); it != 
-            created_index_spaces.end(); it++)
+      if (!created_index_spaces.empty())
       {
-        rez.serialize(*it);
+        for (std::set<IndexSpace>::const_iterator it = 
+              created_index_spaces.begin(); it != 
+              created_index_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
       rez.serialize<size_t>(deleted_index_spaces.size());
-      for (std::set<IndexSpace>::const_iterator it = 
-            deleted_index_spaces.begin(); it !=
-            deleted_index_spaces.end(); it++)
+      if (!deleted_index_spaces.empty())
       {
-        rez.serialize(*it);
+        for (std::set<IndexSpace>::const_iterator it = 
+              deleted_index_spaces.begin(); it !=
+              deleted_index_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(created_index_partitions.size());
+      if (!created_index_partitions.empty())
+      {
+        for (std::set<IndexPartition>::const_iterator it = 
+              created_index_partitions.begin(); it !=
+              created_index_partitions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(deleted_index_partitions.size());
+      if (!deleted_index_partitions.empty())
+      {
+        for (std::set<IndexPartition>::const_iterator it = 
+              deleted_index_partitions.begin(); it !=
+              deleted_index_partitions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
       }
     }
 
@@ -1250,6 +1465,22 @@ namespace Legion {
         IndexSpace sp;
         derez.deserialize(sp);
         deleted_index_spaces.insert(sp);
+      }
+      size_t num_created_index_partitions;
+      derez.deserialize(num_created_index_partitions);
+      for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
+      {
+        IndexPartition ip;
+        derez.deserialize(ip);
+        created_index_partitions.insert(ip);
+      }
+      size_t num_deleted_index_partitions;
+      derez.deserialize(num_deleted_index_partitions);
+      for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
+      {
+        IndexPartition ip;
+        derez.deserialize(ip);
+        deleted_index_partitions.insert(ip);
       }
     }
 
@@ -3741,109 +3972,397 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SingleTask::analyze_destroy_index_space(IndexSpace handle,
-                                                 Operation *op)
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      // Iterate through our region requirements and find the
+      // ones we interfere with
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_index_space(it->second, handle, op,
-                                                     it->first);
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(handle, it->region.index_space))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_index_path(it->region.index_space, 
+                                                handle, dummy_path))
+          req.region = LogicalRegion(it->region.get_tree_id(), handle, 
+                                     it->region.get_field_space());
+        else
+          req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
+      }
+      // Now do the same thing for the created requirements
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(handle, it->region.index_space))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_index_path(it->region.index_space,
+                                                handle, dummy_path))
+          req.region = LogicalRegion(it->region.get_tree_id(), handle, 
+                                     it->region.get_field_space());
+        else
+          req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::analyze_destroy_index_partition(IndexPartition handle,
-                                                     Operation *op)
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      // Iterate through our region requirements and find the
+      // ones we interfere with
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_index_partition(it->second, handle, op,
-                                                         it->first);
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(it->region.index_space, handle))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_partition_path(it->region.index_space,
+                                                    handle, dummy_path))
+        {
+          req.partition = LogicalPartition(it->region.get_tree_id(), handle,
+                                           it->region.get_field_space());
+          req.handle_type = PART_PROJECTION;
+        }
+        else
+        {
+          req.region = it->region;
+          req.handle_type = SINGULAR;
+        }
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        parent_req_indexes.push_back(parent_index);
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(it->region.index_space, handle))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_partition_path(it->region.index_space,
+                                                    handle, dummy_path))
+        {
+          req.partition = LogicalPartition(it->region.get_tree_id(), handle,
+                                           it->region.get_field_space());
+          req.handle_type = PART_PROJECTION;
+        }
+        else
+        {
+          req.region = it->region;
+          req.handle_type = SINGULAR;
+        }
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::analyze_destroy_field_space(FieldSpace handle,
-                                                 Operation *op)
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_field_space(it->second, handle, op,
-                                                     it->first);
+        if (it->region.get_field_space() != handle)
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        if (it->region.get_field_space() != handle)
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::analyze_destroy_fields(FieldSpace handle, Operation *op,
-                                            const std::set<FieldID> &to_delete)
+    void SingleTask::analyze_destroy_fields(FieldSpace handle,
+                                            const std::set<FieldID> &to_delete,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_fields(it->second, handle, to_delete,
-                                                op, it->first);
+        if (it->region.get_field_space() != handle)
+          continue;
+        std::set<FieldID> overlapping_fields;
+        for (std::set<FieldID>::const_iterator fit = to_delete.begin();
+              fit != to_delete.end(); fit++)
+        {
+          if (it->privilege_fields.find(*fit) != it->privilege_fields.end())
+            overlapping_fields.insert(*fit);
+        }
+        if (overlapping_fields.empty())
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = overlapping_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        if (it->region.get_field_space() != handle)
+          continue;
+        std::set<FieldID> overlapping_fields;
+        for (std::set<FieldID>::const_iterator fit = to_delete.begin();
+              fit != to_delete.end(); fit++)
+        {
+          if (it->privilege_fields.find(*fit) != it->privilege_fields.end())
+            overlapping_fields.insert(*fit);
+        }
+        if (overlapping_fields.empty())
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = overlapping_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::analyze_destroy_logical_region(LogicalRegion handle,
-                                                    Operation *op)
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_logical_region(it->second, handle, op,
-                                                        it->first);
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(handle.get_index_space(), 
+                                          it->region.index_space))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_index_path(it->region.index_space,
+                                  handle.get_index_space(), dummy_path))
+          req.region = handle;
+        else
+          req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(handle.get_index_space(), 
+                                          it->region.index_space))
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_index_path(it->region.index_space,
+                                  handle.get_index_space(), dummy_path))
+          req.region = handle;
+        else
+          req.region = it->region;
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 
     //--------------------------------------------------------------------------
     void SingleTask::analyze_destroy_logical_partition(LogicalPartition handle,
-                                                       Operation *op)
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(context.exists());
 #endif
-      std::map<LogicalRegion,RegionTreeContext> top_regions;
-      get_top_regions(top_regions);
-      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
-            top_regions.begin(); it != top_regions.end(); it++)
+      unsigned parent_index = 0;
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++, parent_index++)
       {
-        runtime->forest->analyze_destroy_logical_partition(it->second, handle, 
-                                                           op, it->first);
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(it->region.index_space,
+                                          handle.get_index_partition())) 
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_partition_path(it->region.index_space,
+                                  handle.get_index_partition(), dummy_path))
+        {
+          req.partition = handle;
+          req.handle_type = PART_PROJECTION;
+        }
+        else
+        {
+          req.region = it->region;
+          req.handle_type = SINGULAR;
+        }
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        parent_req_indexes.push_back(parent_index);
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++, parent_index++)
+      {
+        // Different index space trees means we can skip
+        if (handle.get_tree_id() != it->region.get_tree_id())
+          continue;
+        // Disjoint index spaces means we can skip
+        if (runtime->forest->are_disjoint(it->region.index_space,
+                                          handle.get_index_partition())) 
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        std::vector<ColorPoint> dummy_path;
+        // See if we dominate the deleted instance
+        if (runtime->forest->compute_partition_path(it->region.index_space,
+                                  handle.get_index_partition(), dummy_path))
+        {
+          req.partition = handle;
+          req.handle_type = PART_PROJECTION;
+        }
+        else
+        {
+          req.region = it->region;
+          req.handle_type = SINGULAR;
+        }
+        req.parent = it->region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->privilege_fields;
+        parent_req_indexes.push_back(parent_index);
       }
     }
 

@@ -787,7 +787,7 @@ namespace Legion {
       REGION_TREE_PHYSICAL_FILL_FIELDS_CALL,
       REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
       REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
-      REGION_NODE_REGISTER_LOGICAL_NODE_CALL,
+      REGION_NODE_REGISTER_LOGICAL_USER_CALL,
       REGION_NODE_OPEN_LOGICAL_NODE_CALL,
       REGION_NODE_REGISTER_LOGICAL_FAT_PATH_CALL,
       REGION_NODE_OPEN_LOGICAL_FAT_PATH_CALL,
@@ -970,7 +970,7 @@ namespace Legion {
       "Region Tree Physical Fill Fields",                             \
       "Region Tree Physical Attach File",                             \
       "Region Tree Physical Detach File",                             \
-      "Region Node Register Logical Node",                            \
+      "Region Node Register Logical User",                            \
       "Region Node Open Logical Node",                                \
       "Region Node Register Logical Fat Path",                        \
       "Region Node Open Logical Fat Path",                            \

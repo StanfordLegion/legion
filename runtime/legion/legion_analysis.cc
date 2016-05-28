@@ -1465,6 +1465,65 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // DeletionInvalidator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DeletionInvalidator::DeletionInvalidator(ContextID c, const FieldMask &dm)
+      : ctx(c), deletion_mask(dm)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DeletionInvalidator::DeletionInvalidator(const DeletionInvalidator &rhs)
+      : ctx(0), deletion_mask(rhs.deletion_mask)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DeletionInvalidator::~DeletionInvalidator(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DeletionInvalidator& DeletionInvalidator::operator=(
+                                                 const DeletionInvalidator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeletionInvalidator::visit_only_valid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeletionInvalidator::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->invalidate_deleted_state(ctx, deletion_mask); 
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeletionInvalidator::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->invalidate_deleted_state(ctx, deletion_mask);
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // RestrictionMutator
     /////////////////////////////////////////////////////////////
 
@@ -1845,6 +1904,166 @@ namespace Legion {
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
     } 
+
+    //--------------------------------------------------------------------------
+    void CurrentState::clear_deleted_state(const FieldMask &deleted_mask)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionList<FieldState>::aligned::iterator it = field_states.begin();
+            it != field_states.end(); /*nothing*/)
+      {
+        it->valid_fields -= deleted_mask;
+        if (!it->valid_fields)
+        {
+          it = field_states.erase(it);
+          continue;
+        }
+        std::vector<ColorPoint> to_delete;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::iterator child_it = 
+              it->open_children.begin(); child_it != 
+              it->open_children.end(); child_it++)
+        {
+          child_it->second -= deleted_mask;
+          if (!child_it->second)
+            to_delete.push_back(child_it->first);
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<ColorPoint>::const_iterator cit = to_delete.begin();
+                cit != to_delete.end(); cit++)
+            it->open_children.erase(*cit);
+        }
+        if (!it->open_children.empty())
+          it++;
+        else
+          it = field_states.erase(it);
+      }
+      for (LegionList<LogicalUser>::aligned::iterator it = 
+            curr_epoch_users.begin(); it != curr_epoch_users.end(); /*nothing*/)
+      {
+        it->field_mask -= deleted_mask;  
+        if (!it->field_mask)
+        {
+          it->op->remove_mapping_reference(it->gen);
+          it = curr_epoch_users.erase(it);
+        }
+        else
+          it++;
+      }
+      for (LegionList<LogicalUser>::aligned::iterator it = 
+            prev_epoch_users.begin(); it != prev_epoch_users.end(); /*nothing*/)
+      {
+        it->field_mask -= deleted_mask;  
+        if (!it->field_mask)
+        {
+          it->op->remove_mapping_reference(it->gen);
+          it = prev_epoch_users.erase(it);
+        }
+        else
+          it++;
+      }     
+      if (!current_version_infos.empty())
+      {
+        std::vector<VersionID> versions_to_delete;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
+              vit = current_version_infos.begin(); vit != 
+              current_version_infos.end(); vit++)
+        {
+          VersionStateInfo &info = vit->second;
+          info.valid_fields -= deleted_mask;
+          std::vector<VersionState*> states_to_delete;
+          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->second -= deleted_mask;
+            if (!it->second)
+              states_to_delete.push_back(it->first);
+          }
+          if (!states_to_delete.empty())
+          {
+            for (std::vector<VersionState*>::iterator it = 
+                  states_to_delete.begin(); it != states_to_delete.end(); it++)
+            {
+              info.states.erase(*it);
+              if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
+                legion_delete(*it);
+            }
+          }
+          if (info.states.empty())
+            versions_to_delete.push_back(vit->first);
+        }
+        if (!versions_to_delete.empty())
+        {
+          for (std::vector<VersionID>::const_iterator it = 
+                versions_to_delete.begin(); it != 
+                versions_to_delete.end(); it++)
+          {
+            current_version_infos.erase(*it);
+          }
+        }
+      }
+      if (!previous_version_infos.empty())
+      {
+        std::vector<VersionID> versions_to_delete;
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
+              vit = previous_version_infos.begin(); vit != 
+              previous_version_infos.end(); vit++)
+        {
+          VersionStateInfo &info = vit->second;
+          info.valid_fields -= deleted_mask;
+          std::vector<VersionState*> states_to_delete;
+          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                info.states.begin(); it != info.states.end(); it++)
+          {
+            it->second -= deleted_mask;
+            if (!it->second)
+              states_to_delete.push_back(it->first);
+          }
+          if (!states_to_delete.empty())
+          {
+            for (std::vector<VersionState*>::iterator it = 
+                  states_to_delete.begin(); it != states_to_delete.end(); it++)
+            {
+              info.states.erase(*it);
+              if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
+                legion_delete(*it);
+            }
+          }
+          if (info.states.empty())
+            versions_to_delete.push_back(vit->first);
+        }
+        if (!versions_to_delete.empty())
+        {
+          for (std::vector<VersionID>::const_iterator it = 
+                versions_to_delete.begin(); it != 
+                versions_to_delete.end(); it++)
+          {
+            previous_version_infos.erase(*it);
+          }
+        }
+      }
+      outstanding_reduction_fields -= deleted_mask;
+      if (!outstanding_reductions.empty())
+      {
+        std::vector<ReductionOpID> to_delete;
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
+              outstanding_reductions.begin(); it != 
+              outstanding_reductions.end(); it++)
+        {
+          it->second -= deleted_mask;
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        for (std::vector<ReductionOpID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          outstanding_reductions.erase(*it);
+        }
+      }
+      dirty_below -= deleted_mask;
+      partially_closed -= deleted_mask;
+      restricted_fields -= deleted_mask;
+    }
 
     //--------------------------------------------------------------------------
     void CurrentState::sanity_check(void)
@@ -6109,14 +6328,13 @@ namespace Legion {
       max_depth = 0;
     }
 
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     bool RegionTreePath::has_child(unsigned depth) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
       assert(min_depth <= depth);
       assert(depth <= max_depth);
-#endif
       return path[depth].is_valid();
     }
 
@@ -6124,20 +6342,12 @@ namespace Legion {
     const ColorPoint& RegionTreePath::get_child(unsigned depth) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
       assert(min_depth <= depth);
       assert(depth <= max_depth);
       assert(has_child(depth));
-#endif
       return path[depth];
     }
-
-    //--------------------------------------------------------------------------
-    unsigned RegionTreePath::get_path_length(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ((max_depth-min_depth)+1); 
-    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // FatTreePath 

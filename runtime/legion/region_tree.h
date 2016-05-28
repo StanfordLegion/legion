@@ -81,7 +81,7 @@ namespace Legion {
                                   PartitionKind part_kind, AllocateMode mode);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
-      bool destroy_index_space(IndexSpace handle, AddressSpaceID source);
+      void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
@@ -207,7 +207,7 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle);
-      bool destroy_logical_region(LogicalRegion handle, 
+      void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source);
       void destroy_logical_partition(LogicalPartition handle,
                                      AddressSpaceID source);
@@ -246,19 +246,11 @@ namespace Legion {
                                        VersionInfo &version_info);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
-      void analyze_destroy_index_space(RegionTreeContext ctx, 
-                    IndexSpace handle, Operation *op, LogicalRegion region);
-      void analyze_destroy_index_partition(RegionTreeContext ctx,
-                    IndexPartition handle, Operation *op, LogicalRegion region);
-      void analyze_destroy_field_space(RegionTreeContext ctx,
-                    FieldSpace handle, Operation *op, LogicalRegion region);
-      void analyze_destroy_fields(RegionTreeContext ctx,
-            FieldSpace handle, const std::set<FieldID> &fields, 
-            Operation *op, LogicalRegion region);
-      void analyze_destroy_logical_region(RegionTreeContext ctx,
-                  LogicalRegion handle, Operation *op, LogicalRegion region);
-      void analyze_destroy_logical_partition(RegionTreeContext ctx,
-                  LogicalPartition handle, Operation *op, LogicalRegion region);
+      void perform_deletion_analysis(DeletionOp *op, unsigned idx,
+                                     RegionRequirement &req,
+                                     VersionInfo &version_info,
+                                     RestrictInfo &restrict_info,
+                                     RegionTreePath &path);
       void restrict_user_coherence(RegionTreeContext ctx,
                                    SingleTask *parent_ctx,
                                    LogicalRegion handle,
@@ -498,6 +490,9 @@ namespace Legion {
       bool has_node(LogicalPartition handle, bool local_only = false);
       bool has_tree(RegionTreeID tid, bool local_only = false);
       bool has_field(FieldSpace space, FieldID fid);
+    public:
+      bool is_top_level_index_space(IndexSpace handle);
+      bool is_top_level_region(LogicalRegion handle);
     public:
       bool is_subregion(LogicalRegion child, LogicalRegion parent);
       bool is_disjoint(IndexPartition handle);
@@ -1364,10 +1359,10 @@ namespace Legion {
                           const void *buffer, size_t size, bool is_mutable) = 0;
     public:
       // Logical traversal operations
-      void register_logical_node(ContextID ctx,
+      void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
-                                VersionInfo &version_info,
+                                 VersionInfo &version_info,
                                  RestrictInfo &restrict_info,
                                  const TraceInfo &trace_info,
                                  const bool projecting,
@@ -1419,7 +1414,7 @@ namespace Legion {
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
-                                    FieldMask &output_mask);
+                                    FieldMask &output_mask); 
       void merge_new_field_state(CurrentState &state, 
                                  const FieldState &new_state);
       void merge_new_field_states(CurrentState &state, 
@@ -1440,6 +1435,19 @@ namespace Legion {
       void release_restriction(ContextID ctx, const FieldMask &restricted_mask);
       void record_logical_restrictions(ContextID ctx, RestrictInfo &info,
                                        const FieldMask &mask);
+      void register_logical_deletion(ContextID ctx,
+                                     const LogicalUser &user,
+                                     const FieldMask &check_mask,
+                                     RegionTreePath &path,
+                                     VersionInfo &version_info,
+                                     RestrictInfo &restrict_info,
+                                     const TraceInfo &trace_info);
+      void siphon_logical_deletion(LogicalCloser &closer,
+                                   CurrentState &state,
+                                   const FieldMask &current_mask,
+                                   const ColorPoint &next_child,
+                                   FieldMask &open_below,
+                                   bool force_close_next);
     public:
       void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
                                    const FieldMask &send_mask, 
@@ -1452,6 +1460,8 @@ namespace Legion {
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
+      void invalidate_deleted_state(ContextID ctx, 
+                                    const FieldMask &deleted_mask);
     public:
       // Physical traversal operations
       // Entry

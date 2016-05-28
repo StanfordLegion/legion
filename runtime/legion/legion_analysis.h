@@ -404,6 +404,7 @@ namespace Legion {
       void check_init(void);
       void clear_logical_users(void);
       void reset(void);
+      void clear_deleted_state(const FieldMask &deleted_mask);
       void sanity_check(void);
     public:
       void initialize_state(ApEvent term_event,
@@ -852,9 +853,19 @@ namespace Legion {
       void register_child(unsigned depth, const ColorPoint &color);
       void clear();
     public:
+#ifdef DEBUG_LEGION 
       bool has_child(unsigned depth) const;
       const ColorPoint& get_child(unsigned depth) const;
-      unsigned get_path_length(void) const;
+#else
+      inline bool has_child(unsigned depth) const
+        { return path[depth].is_valid(); }
+      inline const ColorPoint& get_child(unsigned depth) const
+        { return path[depth]; }
+#endif
+      inline unsigned get_path_length(void) const
+        { return ((max_depth-min_depth)+1); }
+      inline unsigned get_min_depth(void) const { return min_depth; }
+      inline unsigned get_max_depth(void) const { return max_depth; }
     protected:
       std::vector<ColorPoint> path;
       unsigned min_depth;
@@ -1017,6 +1028,26 @@ namespace Legion {
     protected:
       const ContextID ctx;
       const bool logical_users_only;
+    };
+
+    /**
+     * \class DeletionInvalidator
+     * A class for invalidating current states for deletions
+     */
+    class DeletionInvalidator : public NodeTraverser {
+    public:
+      DeletionInvalidator(ContextID ctx, const FieldMask &deletion_mask);
+      DeletionInvalidator(const DeletionInvalidator &rhs);
+      ~DeletionInvalidator(void);
+    public:
+      DeletionInvalidator& operator=(const DeletionInvalidator &rhs);
+    public:
+      virtual bool visit_only_valid(void) const;
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const FieldMask &deletion_mask;
     };
 
     /**
