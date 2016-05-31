@@ -462,6 +462,18 @@ typedef long long int coord_t;
   legion_domain_point_from_point_3d(legion_point_3d_t p);
 
   /**
+   * @see Legion::DomainPoint::nil()
+   */
+  legion_domain_point_t
+  legion_domain_point_nil();
+
+  /**
+   * @see Legion::DomainPoint::is_null()
+   */
+  bool
+  legion_domain_point_is_null(legion_domain_point_t point);
+
+  /**
    * @see Legion::Runtime::safe_cast(
    *        Context, DomainPoint, LogicalRegion)
    */
