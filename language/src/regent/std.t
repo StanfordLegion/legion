@@ -1260,7 +1260,7 @@ function std.implicit_cast(from, to, expr)
   then
     return to:force_cast(from, to, expr)
   elseif std.is_index_type(to) then
-    return `([to](expr))
+    return `([to]([expr]))
   else
     return quote var v : to = [expr] in v end
   end
@@ -1692,6 +1692,14 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   -- isn't guarranteed to stay within bounds.
   terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
     return a + b
+  end
+
+  function st:to_point(expr)
+    return self.index_type:to_point(`([index_type] { __ptr = [expr].__ptr }))
+  end
+
+  function st:to_domain_point(expr)
+    return self.index_type:to_domain_point(`([index_type] { __ptr = [expr].__ptr }))
   end
 
   function st:force_cast(from, to, expr)
