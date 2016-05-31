@@ -7984,7 +7984,7 @@ namespace Legion {
           std::pair<unsigned,unsigned> src_key(src_index,src_idx);
           std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
           std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
-            record_finder = dependence_map.find(src_key);
+            record_finder = dependence_map.find(dst_key);
           if (record_finder == dependence_map.end())
           {
 #ifdef DEBUG_LEGION
@@ -8001,9 +8001,9 @@ namespace Legion {
           }
           else
           {
-            // Just add the destination to the collection
-            dependences[record_finder->second]->add_entry(dst_index, dst_idx);
-            dependence_map[dst_key] = record_finder->second;
+            // Just add the source to the collection
+            dependences[record_finder->second]->add_entry(src_index, src_idx);
+            dependence_map[src_key] = record_finder->second;
           }
           return false;
         }
