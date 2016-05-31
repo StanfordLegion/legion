@@ -1524,7 +1524,48 @@ namespace Legion {
       op->clear_logical_records();
       // If we have a restriction, then record it on the region requirement
       if (restrict_info.has_restrictions())
+      {
         req.flags |= RESTRICTED_FLAG;
+        if (IS_REDUCE(req))
+        {
+          switch (op->get_operation_kind())
+          {
+            case Operation::MAP_OP_KIND:
+              {
+                log_run.error("Illegal restricted reduction region requirement "
+                              "requested for region requirement %d of inline "
+                              "mapping operation (ID %lld) in parent task "
+                              "(ID %lld).", idx, op->get_unique_op_id(),
+                              op->get_parent()->get_unique_op_id());
+                break;
+              }
+            case Operation::COPY_OP_KIND:
+              {
+                log_run.error("Illegal restricted reduction region requirement "
+                              "requested for region requirement %d of explicit "
+                              "copy operation (ID %lld) in parent task "
+                              "(ID %lld).", idx, op->get_unique_op_id(),
+                              op->get_parent()->get_unique_op_id());
+                break;
+              }
+            case Operation::TASK_OP_KIND:
+              {
+                TaskOp *task = static_cast<TaskOp*>(op);
+                log_run.error("Illegal restricted reduction region requirement "
+                              "requested for region requirement %d of task %s "
+                              "(ID %lld).", idx, task->get_task_name(),
+                              task->get_unique_op_id());
+                break;
+              }
+            default:
+              assert(false);
+          }
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_RESTRICTED_REDUCTION);
+        }
+      }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -15403,7 +15444,7 @@ namespace Legion {
           {
             // Do the fused find preconditions and add user
             ApEvent ready = new_view->add_user_fused(usage,term_event,user_mask,
-                                         info.op, info.index, info.version_info, 
+                                         info.op, info.index, info.version_info,
                                          local_space, info.map_applied_events);
             ref.set_ready_event(ready);
           }
