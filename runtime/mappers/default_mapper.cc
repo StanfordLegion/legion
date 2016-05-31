@@ -1471,8 +1471,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Use Sean's "cheesy" hash function    
-      const unsigned long long c1 = 0x5491C27F12DB3FA4; // big number, mix 1+0s
-      const unsigned long long c2 = 353435096; // chosen by fair dice roll
+      const unsigned long long c1 = 0x5491C27F12DB3FA5; // big number, mix 1+0s
+      const unsigned long long c2 = 353435097; // chosen by fair dice roll
       // We have to hash all region requirements including region names,
       // privileges, coherence modes, reduction operators, and fields
       unsigned long long result = c2 + task.task_id;
