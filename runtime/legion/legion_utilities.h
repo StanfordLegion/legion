@@ -1102,7 +1102,6 @@ namespace Legion {
     public:
       // Allocates memory that becomes owned by the caller
       inline char* to_string(void) const;
-      void print_params(void) const;
     public:
       static inline int pop_count(const 
                         CompoundBitMask<BITMASK,MAX,WORDS> &mask);
@@ -7956,27 +7955,6 @@ namespace Legion {
         }
         return result;
       }
-    }
-
-    //-------------------------------------------------------------------------
-    template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
-    void CompoundBitMask<BITMASK,MAX,WORDS>::print_params(void) const
-    //-------------------------------------------------------------------------
-    {
-      printf("MAX: %d\n", MAX);
-      printf("WORDS: %d\n", WORDS);
-      printf("CNT_BITS: %d\n", CNT_BITS);
-      printf("CNT_MASK: %llx\n", CNT_MASK);
-      printf("VAL_BITS: %d\n", VAL_BITS);
-      printf("VAL_MASK: %llx\n", VAL_MASK);
-      printf("MAX_CNT: %d\n", MAX_CNT);
-      printf("SPARSE_CNT: %d\n", SPARSE_CNT);
-      printf("DENSE_CNT: %d\n", DENSE_CNT);
-      printf("WORD_SIZE: %d\n", WORD_SIZE);
-      printf("WORD_BITS: %d\n", WORD_BITS);
-      printf("WORD_MASK: %llx\n", WORD_MASK);
-      printf("OVERLAP: %d\n", OVERLAP);
-      printf("SPARSE_MAX: %d\n", SPARSE_MAX);
     }
 
     //-------------------------------------------------------------------------
