@@ -158,6 +158,20 @@ legion_domain_point_from_point_3d(legion_point_3d_t p_)
 }
 
 legion_domain_point_t
+legion_domain_point_nil()
+{
+  return CObjectWrapper::wrap(DomainPoint::nil());
+}
+
+bool
+legion_domain_point_is_null(legion_domain_point_t point_)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  return point.is_null();
+}
+
+legion_domain_point_t
 legion_domain_point_safe_cast(legion_runtime_t runtime_,
                               legion_context_t ctx_,
                               legion_domain_point_t point_,
