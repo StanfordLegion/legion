@@ -30,7 +30,7 @@
 #ifndef __MACH__
 #include <malloc.h>
 #endif
-#include "legion_types.h" // StaticAssert
+#include "legion_template_help.h" // StaticAssert
 
 namespace Legion {
   namespace Internal {

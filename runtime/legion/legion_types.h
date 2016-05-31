@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "legion_config.h"
+#include "legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
@@ -43,29 +44,6 @@
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion {
-  /**
-   * \struct LegionStaticAssert
-   * Help with static assertions.
-   */
-  template<bool> struct LegionStaticAssert;
-  template<> struct LegionStaticAssert<true> { };
-#define LEGION_STATIC_ASSERT(condition) \
-  do { LegionStaticAssert<(condition)>(); } while (0)
-
-  /**
-   * \struct LegionTypeEquality
-   * Help with checking equality of types.
-   */
-  template<typename T, typename U>
-  struct LegionTypeInequality {
-  public:
-    static const bool value = true;
-  };
-  template<typename T>
-  struct LegionTypeInequality<T,T> {
-  public:
-    static const bool value = false;
-  };
 
   typedef ::legion_error_t LegionErrorType;
   typedef ::legion_privilege_mode_t PrivilegeMode;
