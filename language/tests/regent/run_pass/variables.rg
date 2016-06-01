@@ -15,14 +15,20 @@
 import "regent"
 
 task f() : int
-  var x : int
+  -- Single variable declarations.
+  var x : int       -- Explicitly typed, not initialized.
   x = 3
-  var y : int = 4
-  var z = 5
-  return x + y + z
+  var y : int = 4   -- Explicitly typed, initialized.
+  var z = 5         -- Type inferred, initialized.
+
+  -- Multiple variable declarations.
+  var u, v : int, w : int = 100, 2000 -- v, w typed; u, v initialized.
+  w = 30000
+
+  return x + y + z + u + v + w
 end
 
 task main()
-  regentlib.assert(f() == 12, "test failed")
+  regentlib.assert(f() == 32112, "test failed")
 end
 regentlib.start(main)

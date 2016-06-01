@@ -6361,9 +6361,9 @@ function codegen.stat_var(cx, node)
     end
   end
 
-  if #rhs > 0 then
-    local decls = terralib.newlist()
-    for i, lh in ipairs(lhs) do
+  local decls = terralib.newlist()
+  for i, lh in ipairs(lhs) do
+    if rhs_values[i] then
       if node.values[i]:is(ast.typed.expr.Ispace) then
         actions = quote
           [actions]
@@ -6381,15 +6381,11 @@ function codegen.stat_var(cx, node)
         end
       end
       decls:insert(quote var [lh] = [ rhs_values[i] ] end)
-    end
-    return quote [actions]; [decls] end
-  else
-    local decls = terralib.newlist()
-    for i, lh in ipairs(lhs) do
+    else
       decls:insert(quote var [lh] end)
     end
-    return quote [decls] end
   end
+  return quote [actions]; [decls] end
 end
 
 function codegen.stat_var_unpack(cx, node)

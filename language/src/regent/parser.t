@@ -1496,14 +1496,14 @@ function parser.stat_var(p, options)
   repeat
     if p:nextif("[") then
       names:insert(p:luaexpr())
-      type_exprs:insert(nil)
+      type_exprs:insert(false)
       p:expect("]")
     else
       names:insert(p:expect(p.name).value)
       if p:nextif(":") then
         type_exprs:insert(p:luaexpr())
       else
-        type_exprs:insert(nil)
+        type_exprs:insert(false)
       end
     end
   until not p:nextif(",")
@@ -1824,16 +1824,13 @@ function parser.top_fspace_fields(p)
     p:expect(":")
     local field_type = p:luaexpr()
 
-    fields:insertall(
-      field_names:map(
-        function(field_name)
-          return ast.unspecialized.top.FspaceField {
-            field_name = field_name,
-            type_expr = field_type,
-            options = ast.default_options(),
-            span = ast.span(start, p),
-          }
-        end))
+    fields:insert(
+      ast.unspecialized.top.FspaceFields {
+        field_names = field_names,
+        type_expr = field_type,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      })
   until not p:sep()
   p:expect("}")
   return fields

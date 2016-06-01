@@ -1464,7 +1464,7 @@ end
 
 local function make_symbol(cx, node, var_name, var_type)
   if type(var_name) == "string" then
-    return std.newsymbol(var_type, var_name)
+    return std.newsymbol(var_type or nil, var_name)
   end
 
   var_name = var_name(cx.env:env())
@@ -1758,21 +1758,29 @@ function specialize.top_fspace_param(cx, node)
   return symbol
 end
 
-function specialize.top_fspace_field(cx, node)
+function specialize.top_fspace_fields(cx, node)
   -- Insert symbol into environment first to allow circular types.
-  local symbol = std.newsymbol(node.field_name)
-  cx.env:insert(node, node.field_name, symbol)
+  local symbols = node.field_names:map(
+    function(field_name)
+      local symbol = std.newsymbol(field_name)
+      cx.env:insert(node, field_name, symbol)
+      return symbol
+    end)
 
   local field_type = node.type_expr(cx.env:env())
   if not field_type then
     log.error(node, "field type is undefined or nil")
   end
-  symbol:settype(field_type)
 
-  return  {
-    field = symbol,
-    type = field_type,
-  }
+  symbols:map(function(symbol) symbol:settype(field_type) end)
+
+  return symbols:map(
+    function(symbol)
+      return {
+        field = symbol,
+        type = field_type,
+      }
+    end)
 end
 
 function specialize.top_fspace(cx, node)
@@ -1781,9 +1789,10 @@ function specialize.top_fspace(cx, node)
   cx.env:insert(node, node.name, fs)
 
   fs.params = node.params:map(
-      function(param) return specialize.top_fspace_param(cx, param) end)
-  fs.fields = node.fields:map(
-      function(field) return specialize.top_fspace_field(cx, field) end)
+    function(param) return specialize.top_fspace_param(cx, param) end)
+  fs.fields = data.flatmap(
+    function(field) return specialize.top_fspace_fields(cx, field) end,
+    node.fields)
   local constraints = specialize.constraints(cx, node.constraints)
 
   return ast.specialized.top.Fspace {

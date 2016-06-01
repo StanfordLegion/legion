@@ -535,7 +535,7 @@ ast.unspecialized.top:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.top:leaf("Fspace", {"name", "params", "fields",
                                       "constraints"})
 ast.unspecialized.top:leaf("FspaceParam", {"param_name", "type_expr"})
-ast.unspecialized.top:leaf("FspaceField", {"field_name", "type_expr"})
+ast.unspecialized.top:leaf("FspaceFields", {"field_names", "type_expr"})
 ast.unspecialized.top:leaf("QuoteExpr", {"expr"})
 ast.unspecialized.top:leaf("QuoteStat", {"block"})
 
