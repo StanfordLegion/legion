@@ -35,14 +35,10 @@ terra make_bloated_rect(rect : c.legion_rect_2d_t, radius : int)
   }
 end
 
-terra to_domain_point(x : int2d) : c.legion_domain_point_t
-  return [int2d:to_domain_point(`x)]
-end
-
 terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
   return c.legion_rect_2d_t {
-    lo = [int2d:to_point(`lo)],
-    hi = [int2d:to_point(`hi)],
+    lo = lo:to_point(),
+    hi = hi:to_point(),
   }
 end
 
@@ -55,7 +51,7 @@ task make_tile_partition(points : region(ispace(int2d), point),
     var hi = int2d { x = (i.x + 1) * n / nt - 1, y = (i.y + 1) * n / nt - 1 }
     var rect = to_rect(lo, hi)
     c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(rect))
+      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -71,7 +67,7 @@ task make_interior_partition(points : region(ispace(int2d), point),
     var hi = int2d { x = min(n - radius, (i.x + 1) * n / nt) - 1, y = min(n - radius, (i.y + 1) * n / nt) - 1 }
     var rect = to_rect(lo, hi)
     c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(rect))
+      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -90,7 +86,7 @@ task make_bloated_partition(points : region(ispace(int2d), point),
         __runtime(), __context(), (__raw(pts)).index_space))
     var bloated = make_bloated_rect(rect, radius)
     c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(bloated))
+      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(bloated))
   end
   var p = partition(aliased, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
