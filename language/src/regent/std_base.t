@@ -277,6 +277,13 @@ function base.task:getname()
 end
 
 function base.task:setname(name)
+  if type(name) == "string" then
+    name = data.newtuple(name)
+  elseif data.is_tuple(name) then
+    assert(data.all(name:map(function(n) return type(n) == "string" end)))
+  else
+    assert(false)
+  end
   self.name = name
 end
 
