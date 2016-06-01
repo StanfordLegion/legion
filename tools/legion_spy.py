@@ -4768,7 +4768,7 @@ class Operation(object):
             dst_req.priv = REDUCE
         else:
             # Normal copy case
-            if dst_inst.is_virtual():
+            if src_inst.is_virtual():
                 error_str = "source field "+str(src_field)+" and destination field "+\
                             str(dst_field)+" of region requirements "+src(src_index)+\
                             " and "+str(dst_index)+" of "+str(self)
