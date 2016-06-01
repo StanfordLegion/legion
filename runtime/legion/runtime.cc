@@ -3048,7 +3048,6 @@ namespace Legion {
             {
               // Send back the response starting with the instance
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3098,7 +3097,6 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3151,7 +3149,6 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3211,7 +3208,6 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3257,7 +3253,6 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3293,7 +3288,6 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -3336,13 +3330,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
              (kind <= FIND_ONLY_LAYOUT));
-      // Find the manager
-      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(
-                            runtime->find_distributed_collectable(did));
-#else
-      PhysicalManager *manager = static_cast<PhysicalManager*>(
-                            runtime->find_distributed_collectable(did));
 #endif
+      RtEvent manager_ready = RtEvent::NO_RT_EVENT;
+      PhysicalManager *manager = 
+        runtime->find_or_request_physical_manager(did, manager_ready);
+      // If the manager isn't ready yet, then we need to wait for it
+      if (manager_ready.exists())
+        manager_ready.wait();
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -14488,7 +14482,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_REQUEST,
-                                        MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14496,7 +14490,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_RESPONSE,
-                                        MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
