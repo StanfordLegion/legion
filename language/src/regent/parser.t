@@ -124,9 +124,26 @@ function parser.reduction_op(p, optional)
   end
 end
 
+function parser.field_names(p)
+  local start = ast.save(p)
+  local names_expr
+  if p:nextif("[") then
+    names_expr = p:luaexpr()
+    p:expect("]")
+  elseif p:nextif("ispace") then
+    names_expr = "ispace"
+  else
+    names_expr = p:expect(p.name).value
+  end
+  return ast.unspecialized.FieldNames {
+    names_expr = names_expr,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.region_field(p)
   local start = ast.save(p)
-  local field_name = p:expect(p.name).value
+  local field_name = p:field_names()
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -1091,16 +1108,14 @@ function parser.expr_primary_continuation(p, expr)
     if p:nextif(".") then
       local field_names = terralib.newlist()
       if p:nextif("{") then
-        repeat
-          if p:matches("}") then break end
-          local field_name = p:expect(p.name).value
-          field_names:insert(field_name)
-        until not p:sep()
+        if not p:matches("}") then
+          repeat
+            field_names:insert(p:field_names())
+          until not p:sep()
+        end
         p:expect("}")
-      elseif p:nextif("ispace") then
-        field_names:insert("ispace")
       else
-        field_names:insert(p:expect(p.name).value)
+        field_names:insert(p:field_names())
       end
       expr = ast.unspecialized.expr.FieldAccess {
         value = expr,

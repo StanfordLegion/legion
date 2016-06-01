@@ -411,6 +411,8 @@ end
 
 ast:inner("unspecialized", {"span"})
 
+ast.unspecialized:leaf("FieldNames", {"names_expr"})
+
 ast.unspecialized:inner("region")
 ast.unspecialized.region:leaf("Bare", {"region_name"})
 ast.unspecialized.region:leaf("Root", {"region_name", "fields"})

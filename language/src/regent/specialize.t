@@ -401,17 +401,39 @@ local function has_all_valid_field_accesses(node)
   end
 end
 
+function specialize.field_names(cx, node)
+  if type(node.names_expr) == "string" then
+    return terralib.newlist({node.names_expr})
+  else
+    local value = node.names_expr(cx.env:env())
+    if type(value) == "string" then
+      return terralib.newlist({value})
+    elseif terralib.islist(value) and
+      data.all(value:map(function(v) return type(v) == "string" end))
+    then
+      return value
+    else
+      log.error(node, "unable to specialize value of type " .. tostring(type(value)))
+    end
+  end
+end
+
 function specialize.region_field(cx, node)
-  return ast.specialized.region.Field {
-    field_name = node.field_name,
-    fields = specialize.region_fields(cx, node.fields),
-    span = node.span,
-  }
+  local field_names = specialize.field_names(cx, node.field_name)
+  return field_names:map(
+    function(field_name)
+      return ast.specialized.region.Field {
+        field_name = field_name,
+        fields = specialize.region_fields(cx, node.fields),
+        span = node.span,
+      }
+    end)
 end
 
 function specialize.region_fields(cx, node)
-  return node and node:map(
-    function(field) return specialize.region_field(cx, field) end)
+  return node and data.flatmap(
+    function(field) return specialize.region_field(cx, field) end,
+    node)
 end
 
 function specialize.region_root(cx, node)
@@ -646,12 +668,19 @@ function specialize.expr_field_access(cx, node)
     log.error(node, "illegal use of multi-field access")
   end
   local value = specialize.expr(cx, node.value)
+
+  local field_names = specialize.field_names(cx, node.field_names[1])
+  if #field_names ~= 1 then
+    log.error(node, "FIXME: handle specialization of multiple fields")
+  end
+  local field_name = field_names[1]
+
   if value:is(ast.specialized.expr.LuaTable) then
-    return convert_lua_value(cx, node, value.value[node.field_names[1]])
+    return convert_lua_value(cx, node, value.value[field_name])
   else
     return ast.specialized.expr.FieldAccess {
       value = value,
-      field_name = node.field_names[1],
+      field_name = field_name,
       options = node.options,
       span = node.span,
     }
@@ -1566,21 +1595,36 @@ function specialize.stat_expr(cx, node)
   }
 end
 
-function specialize.stat_escape(cx, node)
-  local expr = node.expr(cx.env:env())
-  if std.is_rquote(expr) then
-    local value = expr:getast()
-    if value:is(ast.typed.top.QuoteExpr) then
-      assert(value.expr:is(ast.specialized.expr))
-      return ast.specialized.stat.Expr {
+local function get_quote_contents(expr)
+  assert(std.is_rquote(expr))
+
+  local value = expr:getast()
+  if value:is(ast.typed.top.QuoteExpr) then
+    assert(value.expr:is(ast.specialized.expr))
+    return terralib.newlist({
+      ast.specialized.stat.Expr {
         expr = value.expr,
         options = node.options,
         span = node.span,
-      }
-    elseif value:is(ast.typed.top.QuoteStat) then
-      assert(value.block:is(ast.specialized.Block))
-      return value.block.stats
+      },
+    })
+  elseif value:is(ast.typed.top.QuoteStat) then
+    assert(value.block:is(ast.specialized.Block))
+    return value.block.stats
+  else
+    assert(false)
+  end
+end
+
+function specialize.stat_escape(cx, node)
+  local expr = node.expr(cx.env:env())
+  if std.is_rquote(expr) then
+    return get_quote_contents(expr)
+  elseif terralib.islist(expr) then
+    if not data.all(expr:map(function(v) return std.is_rquote(v) end)) then
+      log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
     end
+    return data.flatmap(get_quote_contents, expr)
   else
     log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
   end
