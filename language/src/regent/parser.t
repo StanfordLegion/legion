@@ -1108,11 +1108,10 @@ function parser.expr_primary_continuation(p, expr)
     if p:nextif(".") then
       local field_names = terralib.newlist()
       if p:nextif("{") then
-        if not p:matches("}") then
-          repeat
-            field_names:insert(p:field_names())
-          until not p:sep()
-        end
+        repeat
+          if p:matches("}") then break end
+          field_names:insert(p:field_names())
+        until not p:sep()
         p:expect("}")
       else
         field_names:insert(p:field_names())
