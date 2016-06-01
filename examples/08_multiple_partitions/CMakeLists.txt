@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(08_multiple_partitions multiple_partitions.cc)
-target_link_libraries(08_multiple_partitions Legion)
+target_link_libraries(08_multiple_partitions Legion::Legion)

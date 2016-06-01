@@ -34,4 +34,4 @@ else()
   add_executable(dependent_circuit ${CPU_SOURCES})
 endif()
 
-target_link_libraries(dependent_circuit Legion)
+target_link_libraries(dependent_circuit Legion::Legion)

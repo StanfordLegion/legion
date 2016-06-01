@@ -27,4 +27,4 @@ if(NOT Legion_USE_HDF)
 endif()
 
 add_executable(attach_file multiple_partitions.cc)
-target_link_libraries(attach_file Legion)
+target_link_libraries(attach_file Legion::Legion)

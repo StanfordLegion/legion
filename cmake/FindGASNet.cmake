@@ -21,7 +21,7 @@
 # GASNet_CONDUIT   - Communication conduit to use
 # GASNet_THREADING - Threading mode to use
 #
-# GASNet_ROOT      - Prefix to use when searching for GASNet.  If specified
+# GASNet_ROOT_DIR      - Prefix to use when searching for GASNet.  If specified
 #                    then this search path will be used exclusively and all
 #                    others ignored.
 # Valid options for these are dependenent on the specific GASNet installation
@@ -96,6 +96,9 @@ macro(_GASNet_parse_flags INVAR FLAG OUTVAR)
   string(REGEX MATCHALL "(^| +)${FLAG}([^ ]*)" OUTTMP "${INVAR2}")
   foreach(OPT IN LISTS OUTTMP)
     string(REGEX REPLACE "(^| +)${FLAG}([^ ]*)" "\\2" OPT "${OPT}")
+    if(OPT STREQUAL "NDEBUG") # NDEBUG should get propogated
+      continue()
+    endif()
     list(FIND ${OUTVAR} "${OPT}" _I)
     if(_I EQUAL -1)
       list(APPEND ${OUTVAR} "${OPT}")
@@ -127,37 +130,30 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     endif()
     mark_as_advanced(GASNet_${L}_LIBRARY)
   endforeach()
-  get_filename_component(LIBEXT ${COMPONENT_LIB} EXT)
-  list(FIND CMAKE_SHARED_LIBRARY_SUFFIX ${LIBEXT} _I)
-  if(_I EQUAL -1)
-    set(LIBTYPE STATIC)
-  else()
-    set(LIBTYPE SHARED)
-  endif()
-  add_library(gasnet-${COMPONENT_NAME} ${LIBTYPE} IMPORTED)
-  set_target_properties(gasnet-${COMPONENT_NAME} PROPERTIES
+  add_library(GASNet::${COMPONENT_NAME} UNKNOWN IMPORTED)
+  set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
     IMPORTED_LOCATION "${COMPONENT_LIB}"
   )
   if(DEFS)
-    set_target_properties(gasnet-${COMPONENT_NAME} PROPERTIES
+    set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
       INTERFACE_COMPILE_DEFINITIONS "${DEFS}"
     )
   endif()
   if(IDIRS)
-    set_target_properties(gasnet-${COMPONENT_NAME} PROPERTIES
+    set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
       INTERFACE_INCLUDE_DIRECTORIES "${IDIRS}"
     )
   endif()
   if(COMPONENT_DEPS)
-    set_target_properties(gasnet-${COMPONENT_NAME} PROPERTIES
+    set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
       INTERFACE_LINK_LIBRARIES "${COMPONENT_DEPS}"
     )
   endif()
 endfunction()
 
-if(NOT GASNet_FOUND AND NOT TARGET GASNet)
-  if(GASNet_ROOT)
-    set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT}/include NO_DEFAULT_PATH)
+if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
+  if(GASNet_ROOT_DIR)
+    set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT_DIR}/include NO_DEFAULT_PATH)
   endif()
   find_path(GASNet_INCLUDE_DIR gasnet.h ${_GASNet_FIND_INCLUDE_OPTS})
 
@@ -170,6 +166,7 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet)
     # Set new restrictive search paths
     get_filename_component(CMAKE_PREFIX_PATH "${GASNet_INCLUDE_DIR}" DIRECTORY)
     unset(CMAKE_LIBRARY_PATH)
+    set(GASNet_ROOT_DIR ${CMAKE_PREFIX_PATH} CACHE STRING "Root directory for GASNet")
 
     # Limit the search to the discovered prefix path
     set(_GASNet_LIBRARY_FIND_OPTS
@@ -224,7 +221,7 @@ endif()
 
 # If found, use the CONDUIT and THREADING options to determine which target to
 # use
-if(GASNet_FOUND AND NOT TARGET GASNet)
+if(GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   if(NOT GASNet_CONDUIT)
     list(GET GASNet_CONDUITS 0 GASNet_CONDUIT)
     set(GASNet_CONDUIT "${GASNet_CONDUIT}")
@@ -244,9 +241,9 @@ if(GASNet_FOUND AND NOT TARGET GASNet)
   endif()
 
   message(STATUS "GASNet: Using ${GASNet_CONDUIT}-${GASNet_THREADING}")
-  add_library(GASNet INTERFACE IMPORTED)
-  set_target_properties(GASNet PROPERTIES
+  add_library(GASNet::GASNet INTERFACE IMPORTED)
+  set_target_properties(GASNet::GASNet PROPERTIES
     INTERFACE_COMPILE_DEFINITIONS GASNETI_BUG1389_WORKAROUND=1
-    INTERFACE_LINK_LIBRARIES gasnet-${GASNet_CONDUIT}-${GASNet_THREADING}
+    INTERFACE_LINK_LIBRARIES GASNet::${GASNet_CONDUIT}-${GASNet_THREADING}
   )
 endif()

@@ -37,7 +37,6 @@ endif()
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
 endif()
-string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
@@ -52,6 +51,9 @@ set_property(CACHE Legion_OUTPUT_LEVEL PROPERTY STRINGS SPEW DEBUG INFO PRINT WA
 option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
 if(Legion_USE_HWLOC)
   find_package(HWLOC REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
+    DESTINATION lib/cmake/Legion
+  )
 endif()
 
 #------------------------------------------------------------------------------#
@@ -68,6 +70,9 @@ if(Legion_USE_GASNet)
   set(GASNet_CONDUIT "" CACHE STRING "GASNet communication conduit to use")
   mark_as_advanced(GASNet_CONDUIT)
   find_package(GASNet REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
+    DESTINATION lib/cmake/Legion
+  )
 endif()
 
 #------------------------------------------------------------------------------#
@@ -77,6 +82,9 @@ option(Legion_USE_LLVM "Use LLVM JIT oerations" OFF)
 if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindLLVM.cmake
+    DESTINATION lib/cmake/Legion
+  )
 endif()
 
 #------------------------------------------------------------------------------#
@@ -90,6 +98,12 @@ if(Legion_USE_CUDA)
     set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   endif()
   find_package(CUDA REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
+    DESTINATION lib/cmake/Legion
+  )
+  install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
+    DESTINATION lib/cmake/Legion/newcmake
+  )
 endif()
 
 #------------------------------------------------------------------------------#
@@ -102,30 +116,37 @@ option(Legion_USE_SHARED_LOWLEVEL     "Use shared-memory runtime" OFF)
 #------------------------------------------------------------------------------#
 add_subdirectory(runtime)
 
+#------------------------------------------------------------------------------#
+# Build-tree package generation
+#------------------------------------------------------------------------------#
 export(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE ${Legion_BINARY_DIR}/LegionTargets.cmake
-)
-configure_file(
-  cmake/LegionConfig.cmake.in
-  ${Legion_BINARY_DIR}/LegionConfig.cmake.pregen
-  @ONLY
-)
-file(GENERATE
-  OUTPUT ${Legion_BINARY_DIR}/LegionConfig.cmake
-  INPUT ${Legion_BINARY_DIR}/LegionConfig.cmake.pregen
 )
 install(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE LegionTargets.cmake
   DESTINATION lib/cmake/Legion
 )
-install(FILES ${Legion_BINARY_DIR}/LegionConfig.cmake
+
+configure_file(
+  cmake/LegionConfigCommon.cmake.in
+  ${Legion_BINARY_DIR}/LegionConfigCommon.cmake
+  @ONLY
+)
+install(FILES ${Legion_BINARY_DIR}/LegionConfigCommon.cmake
   DESTINATION lib/cmake/Legion
 )
-add_library(Legion INTERFACE)
-set_target_properties(Legion PROPERTIES
-  INTERFACE_LINK_LIBRARIES HighLevelRuntime
+
+configure_file(
+  cmake/LegionConfig-build.cmake.in
+  ${Legion_BINARY_DIR}/LegionConfig.cmake
+  @ONLY
+)
+
+install(FILES cmake/LegionConfig-install.cmake
+  DESTINATION lib/cmake/Legion
+  RENAME LegionConfig.cmake
 )
 
 #------------------------------------------------------------------------------#
@@ -133,19 +154,22 @@ set_target_properties(Legion PROPERTIES
 #------------------------------------------------------------------------------#
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 if(Legion_BUILD_EXAMPLES)
+  # Make a namespaced alias so in-build examples can use it the same way as if
+  # it were imported
+  add_library(Legion::Legion ALIAS Legion)
+
   if(Legion_USE_CUDA)
-    # CUDA has some issues propogating target interface flags properties so we
+    # CUDA has some issues propogating target interface properties so we
     # have to extract them from the target and manually add them to the nvcc
     # flags
-    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,COMPILE_OPTIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:${PROP}>")
-    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,COMPILE_DEFINITIONS>)
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-    set(PROP $<TARGET_PROPERTY:HighLevelRuntime,INCLUDE_DIRECTORIES>)
+    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
   endif()
 
-  set(Legion_DIR ${Legion_BINARY_DIR})
   add_subdirectory(examples)
 endif()
 

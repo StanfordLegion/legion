@@ -15,9 +15,13 @@
 #------------------------------------------------------------------------------#
 
 # Install headers
-install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
   DESTINATION include
   FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+  DESTINATION include
+  FILES_MATCHING PATTERN "*.inl"
 )
 
 # Lowlevel runtime
@@ -125,26 +129,26 @@ target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
 set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
-  target_compile_definitions(LowLevelRuntime PUBLIC DEBUG_LOW_LEVEL)
-endif()
 target_compile_definitions(LowLevelRuntime
-  PUBLIC -DCOMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
+  PRIVATE
+    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_LOW_LEVEL>
+  PUBLIC
+    COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
 
 if(Legion_USE_HWLOC)
   target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_HWLOC)
-  target_link_libraries(LowLevelRuntime PRIVATE HWLOC)
+  target_link_libraries(LowLevelRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
   target_compile_definitions(LowLevelRuntime PUBLIC USE_GASNET)
-  target_link_libraries(LowLevelRuntime PUBLIC GASNet)
+  target_link_libraries(LowLevelRuntime PUBLIC GASNet::GASNet)
 endif()
 
 if(Legion_USE_LLVM)
   target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_LLVM)
-  target_link_libraries(LowLevelRuntime PRIVATE LLVM)
+  target_link_libraries(LowLevelRuntime PRIVATE LLVM::LLVM)
 endif()
 
 if(Legion_USE_CUDA)
@@ -160,7 +164,13 @@ else()
 endif()
 
 target_include_directories(LowLevelRuntime
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
+    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/legion>
+    $<INSTALL_INTERFACE:include/realm>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
 )
 
@@ -213,23 +223,30 @@ list(APPEND HIGH_RUNTIME_SRC
 add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
 target_link_libraries(HighLevelRuntime LowLevelRuntime)
 set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(CMAKE_BUILD_TYPE MATCHES "DEBUG")
-  target_compile_definitions(HighLevelRuntime PUBLIC -DDEBUG_HIGH_LEVEL)
-endif()
+set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
 target_compile_definitions(HighLevelRuntime
-  PUBLIC COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
+  PRIVATE
+    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_HIGH_LEVEL>
 )
 target_include_directories(HighLevelRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mappers>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm mappers
+    $<INSTALL_INTERFACE:include/legion>
+    $<INSTALL_INTERFACE:include/realm>
+    $<INSTALL_INTERFACE:include/mappers>
+  PRIVATE legion realm mappers
 )
 
 install(TARGETS HighLevelRuntime EXPORT LegionTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
-  INCLUDES DESTINATION include/legion
 )
+
+add_library(Legion INTERFACE)
+set_target_properties(Legion PROPERTIES
+  INTERFACE_LINK_LIBRARIES HighLevelRuntime
+)
+install(TARGETS Legion EXPORT LegionTargets)

@@ -15,18 +15,20 @@
 #=============================================================================
 
 # This module produces the "HWLOC" link target which carries with it all the
-# necessary interface properties.  If the HWLOC_ROOT CMake or HWLOC wnvironment
+# necessary interface properties.  If the HWLOC_ROOT_DIR CMake or HWLOC wnvironment
 # variable are present then they are used to guide the search
 #
 if(NOT HWLOC_FOUND AND NOT TARGET HWLOC)
-  if(NOT HWLOC_ROOT AND ENV{HWLOC})
-    set(HWLOC_ROOT $ENV{HWLOC})
+  if(NOT HWLOC_ROOT_DIR AND ENV{HWLOC})
+    set(HWLOC_ROOT_DIR $ENV{HWLOC})
   endif()
-  if(HWLOC_ROOT)
+  if(HWLOC_ROOT_DIR)
+    set(HWLOC_ROOT_DIR ${HWLOC_ROOT_DIR} CACHE STRING "Root directory for HWLOC")
+
     # Save the existing prefix options
     set(_CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH})
     set(_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
-    set(CMAKE_PREFIX_PATH ${HWLOC_ROOT}
+    set(CMAKE_PREFIX_PATH ${HWLOC_ROOT_DIR}
     unset(CMAKE_LIBRARY_PATH)
     set(_HWLOC_FIND_OPTS
       NO_CMAKE_ENVIRONMENT_PATH
@@ -39,7 +41,7 @@ if(NOT HWLOC_FOUND AND NOT TARGET HWLOC)
   find_path(HWLOC_INCLUDE_DIR hwloc.h ${_HWLOC_FIND_OPTS})
   find_library(HWLOC_LIBRARY hwloc ${_HWLOC_FIND_OPTS})
 
-  if(HWLOC_ROOT)
+  if(HWLOC_ROOT_DIR)
     # Restore the existing prefix options
     set(CMAKE_PREFIX_PATH ${_CMAKE_PREFIX_PATH})
     set(CMAKE_LIBRARY_PATH ${_CMAKE_LIBRARY_PATH})
@@ -53,13 +55,8 @@ if(NOT HWLOC_FOUND AND NOT TARGET HWLOC)
 endif()
 
 if(HWLOC_FOUND AND NOT TARGET HWLOC)
-  if(HWLOC_LIBRARY MATCHES ".*${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(HWLOC_LIBTYPE SHARED)
-  else()
-    set(HWLOC_LIBTYPE STATIC)
-  endif()
-  add_library(HWLOC ${HWLOC_LIBTYPE} IMPORTED)
-  set_target_properties(HWLOC PROPERTIES
+  add_library(HWLOC::HWLOC UNKNOWN IMPORTED)
+  set_target_properties(HWLOC::HWLOC PROPERTIES
     IMPORTED_LOCATION ${HWLOC_LIBRARY}
     INTERFACE_INCLUDE_DIRECTORIES ${HWLOC_INCLUDE_DIR}
   )

@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(02_index_tasks index_tasks.cc)
-target_link_libraries(02_index_tasks Legion)
+target_link_libraries(02_index_tasks Legion::Legion)

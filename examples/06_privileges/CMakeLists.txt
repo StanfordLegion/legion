@@ -23,4 +23,4 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_executable(06_privileges privileges.cc)
-target_link_libraries(06_privileges Legion)
+target_link_libraries(06_privileges Legion::Legion)
