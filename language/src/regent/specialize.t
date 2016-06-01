@@ -1464,7 +1464,7 @@ end
 
 local function make_symbol(cx, node, var_name, var_type)
   if type(var_name) == "string" then
-    return std.newsymbol(var_type, var_name)
+    return std.newsymbol(var_type or nil, var_name)
   end
 
   var_name = var_name(cx.env:env())

@@ -1496,14 +1496,14 @@ function parser.stat_var(p, options)
   repeat
     if p:nextif("[") then
       names:insert(p:luaexpr())
-      type_exprs:insert(nil)
+      type_exprs:insert(false)
       p:expect("]")
     else
       names:insert(p:expect(p.name).value)
       if p:nextif(":") then
         type_exprs:insert(p:luaexpr())
       else
-        type_exprs:insert(nil)
+        type_exprs:insert(false)
       end
     end
   until not p:nextif(",")
