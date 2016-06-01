@@ -6239,9 +6239,9 @@ class CompositeInstance(object):
                     if region.intersects(reduction_region):
                         # Make a reduction copy 
                         reduction = self.state.create_copy(op)
+                        reduction.set_region(region)
                         reduction.add_field(self.field.fid, reduction_inst, 
                                             dst_field.fid, dst, reduction_inst.redop)
-                        reduction.set_region(region)
                         if reduction_region is not region:
                             reduction.set_intersection(reduction_region)
                             src_preconditions = reduction_inst.find_copy_dependences(
