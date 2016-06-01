@@ -50,6 +50,8 @@ local function guess_type_for_literal(value)
     end
   elseif type(value) == "boolean" then
     return bool
+  elseif type(value) == "string" then
+    return rawstring
   elseif type(value) == "cdata" then
     return (`value):gettype()
   else
@@ -58,7 +60,7 @@ local function guess_type_for_literal(value)
 end
 
 local function convert_lua_value(cx, node, value)
-  if type(value) == "number" or type(value) == "boolean" then
+  if type(value) == "number" or type(value) == "boolean" or type(value) == "string" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
       value = value,
