@@ -276,6 +276,10 @@ function base.task:getname()
   return self.name
 end
 
+function base.task:setname(name)
+  self.name = name
+end
+
 function base.task:getdefinition()
   self:complete()
   assert(self.definition)
