@@ -4768,9 +4768,9 @@ class Operation(object):
             dst_req.priv = REDUCE
         else:
             # Normal copy case
-            if dst_inst.is_virtual():
+            if src_inst.is_virtual():
                 error_str = "source field "+str(src_field)+" and destination field "+\
-                            str(dst_field)+" of region requirements "+src(src_index)+\
+                            str(dst_field)+" of region requirements "+str(src_index)+\
                             " and "+str(dst_index)+" of "+str(self)
                 return src_inst.issue_copies_across(dst_inst, depth, dst_field, 
                               dst_region.logical_node, self, perform_checks, error_str)

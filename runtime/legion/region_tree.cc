@@ -1500,9 +1500,7 @@ namespace Legion {
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
       // Check to see if we need to do any restricted tests
       if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
-      {
         restrict_info.set_check();
-      }
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_LEGION
