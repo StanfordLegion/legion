@@ -1811,15 +1811,29 @@ function parser.top_fspace_fields(p)
     if p:matches("}") then break end
 
     local start = ast.save(p)
-    local field_name = p:expect(p.name).value
+    local field_names = terralib.newlist()
+    if p:nextif("{") then
+      repeat
+        if p:matches("}") then break end
+        field_names:insert(p:expect(p.name).value)
+      until not p:nextif(",")
+      p:expect("}")
+    else
+      field_names:insert(p:expect(p.name).value)
+    end
     p:expect(":")
     local field_type = p:luaexpr()
-    fields:insert(ast.unspecialized.top.FspaceField {
-      field_name = field_name,
-      type_expr = field_type,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    })
+
+    fields:insertall(
+      field_names:map(
+        function(field_name)
+          return ast.unspecialized.top.FspaceField {
+            field_name = field_name,
+            type_expr = field_type,
+            options = ast.default_options(),
+            span = ast.span(start, p),
+          }
+        end))
   until not p:sep()
   p:expect("}")
   return fields
