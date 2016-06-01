@@ -1938,30 +1938,7 @@ namespace Legion {
         else
           it = field_states.erase(it);
       }
-      for (LegionList<LogicalUser>::aligned::iterator it = 
-            curr_epoch_users.begin(); it != curr_epoch_users.end(); /*nothing*/)
-      {
-        it->field_mask -= deleted_mask;  
-        if (!it->field_mask)
-        {
-          it->op->remove_mapping_reference(it->gen);
-          it = curr_epoch_users.erase(it);
-        }
-        else
-          it++;
-      }
-      for (LegionList<LogicalUser>::aligned::iterator it = 
-            prev_epoch_users.begin(); it != prev_epoch_users.end(); /*nothing*/)
-      {
-        it->field_mask -= deleted_mask;  
-        if (!it->field_mask)
-        {
-          it->op->remove_mapping_reference(it->gen);
-          it = prev_epoch_users.erase(it);
-        }
-        else
-          it++;
-      }     
+      // Don't invalidate users so later deletions can see dependences too
       if (!current_version_infos.empty())
       {
         std::vector<VersionID> versions_to_delete;

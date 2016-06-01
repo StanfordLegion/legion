@@ -4302,6 +4302,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = deletion_requirements[idx];
+          if (req.handle_type != PART_PROJECTION)
+            LegionSpy::log_logical_requirement(unique_op_id, idx,true/*region*/,
+                                               req.region.index_space.id,
+                                               req.region.field_space.id,
+                                               req.region.tree_id,
+                                               req.privilege,
+                                               req.prop, req.redop,
+                                               req.parent.index_space.id);
+          else
+            LegionSpy::log_logical_requirement(unique_op_id,idx,false/*region*/,
+                                               req.partition.index_partition.id,
+                                               req.partition.field_space.id,
+                                               req.partition.tree_id,
+                                               req.privilege,
+                                               req.prop, req.redop,
+                                               req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                            req.privilege_fields);
+        }
+      }
       begin_dependence_analysis();
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {

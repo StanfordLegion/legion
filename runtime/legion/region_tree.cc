@@ -12063,6 +12063,15 @@ namespace Legion {
       }
       else
       {
+        // Register dependences on any users in the sub-tree
+        if (!!check_mask)
+        {
+          // Don't dominate so later deletions with overlapping region
+          // requirements can catch the same dependences
+          LogicalRegistrar registrar(ctx, user.op, 
+                                     check_mask, false/*dominate*/);
+          visit_node(&registrar);
+        }
         // We've arrived, so clear out the current state here and anywhere below
         DeletionInvalidator invalidator(ctx, user.field_mask);
         visit_node(&invalidator);
