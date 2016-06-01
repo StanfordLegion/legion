@@ -23,46 +23,46 @@ extern "C" {
 
 using namespace std;
 
-LegionRuntime::Logger::Category log_bishop("bishop");
+namespace Legion {
 
-namespace LegionRuntime {
+  namespace Mapping {
 
-  namespace HighLevel {
+    LegionRuntime::Logger::Category log_bishop("bishop");
 
-#define RUN_ALL_TASK_RULES(CALLBACK) \
-    for (unsigned i = 0; i < task_rules.size(); ++i)       \
-    {                                                      \
-      bishop_task_rule_t& rule = task_rules[i];            \
-      if (rule.CALLBACK)                                   \
-      {                                                    \
-        legion_task_t task_ = CObjectWrapper::wrap(task);  \
-        rule.CALLBACK(mapper_state, task_);                \
-      }                                                    \
-    }                                                      \
-
-#define RUN_ALL_REGION_RULES(CALLBACK)                               \
-    for (unsigned i = 0; i < region_rules.size(); ++i)               \
-    {                                                                \
-      bishop_region_rule_t& rule = region_rules[i];                  \
-      if (rule.CALLBACK)                                             \
-      {                                                              \
-        legion_task_t task_ = CObjectWrapper::wrap(task);            \
-        for (unsigned idx = 0; idx < task->regions.size(); ++idx)    \
-        {                                                            \
-          legion_region_requirement_t req_ =                         \
-            CObjectWrapper::wrap(&task->regions[idx]);               \
-          rule.CALLBACK(mapper_state, task_, req_, idx);             \
-        }                                                            \
-      }                                                              \
-    }                                                                \
+//#define RUN_ALL_TASK_RULES(CALLBACK) \
+//    for (unsigned i = 0; i < task_rules.size(); ++i)       \
+//    {                                                      \
+//      bishop_task_rule_t& rule = task_rules[i];            \
+//      if (rule.CALLBACK)                                   \
+//      {                                                    \
+//        legion_task_t task_ = CObjectWrapper::wrap(task);  \
+//        rule.CALLBACK(mapper_state, task_);                \
+//      }                                                    \
+//    }                                                      \
+//
+//#define RUN_ALL_REGION_RULES(CALLBACK)                               \
+//    for (unsigned i = 0; i < region_rules.size(); ++i)               \
+//    {                                                                \
+//      bishop_region_rule_t& rule = region_rules[i];                  \
+//      if (rule.CALLBACK)                                             \
+//      {                                                              \
+//        legion_task_t task_ = CObjectWrapper::wrap(task);            \
+//        for (unsigned idx = 0; idx < task->regions.size(); ++idx)    \
+//        {                                                            \
+//          legion_region_requirement_t req_ =                         \
+//            CObjectWrapper::wrap(&task->regions[idx]);               \
+//          rule.CALLBACK(mapper_state, task_, req_, idx);             \
+//        }                                                            \
+//      }                                                              \
+//    }                                                                \
 
     //--------------------------------------------------------------------------
     BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
                                const std::vector<bishop_region_rule_t>& rrules,
                                bishop_mapper_state_init_fn_t init_fn,
-                               Machine machine, HighLevelRuntime *runtime,
+                               MapperRuntime* rt, Machine machine,
                                Processor local_proc)
-      : DefaultMapper(machine, runtime, local_proc),
+      : DefaultMapper(rt, machine, local_proc, "bishop"),
         task_rules(trules), region_rules(rrules), mapper_init(init_fn)
     //--------------------------------------------------------------------------
     {
@@ -77,104 +77,104 @@ namespace LegionRuntime {
       log_bishop.info("bishop mapper destroyed");
     }
 
-    //--------------------------------------------------------------------------
-    void BishopMapper::select_task_options(Task *task)
-    //--------------------------------------------------------------------------
-    {
-      DefaultMapper::select_task_options(task);
-      RUN_ALL_TASK_RULES(select_task_options);
-    }
+    ////--------------------------------------------------------------------------
+    //void BishopMapper::select_task_options(Task *task)
+    ////--------------------------------------------------------------------------
+    //{
+    //  DefaultMapper::select_task_options(task);
+    //  RUN_ALL_TASK_RULES(select_task_options);
+    //}
 
-    //--------------------------------------------------------------------------
-    void BishopMapper::slice_domain(const Task *task, const Domain &domain,
-        std::vector<DomainSplit> &slices)
-    //--------------------------------------------------------------------------
-    {
-      using namespace LegionRuntime::Arrays;
-      log_bishop.info("[slice_domain] task %s", task->variants->name);
-      DefaultMapper::slice_domain(task, domain, slices);
-      for (unsigned i = 0; i < task_rules.size(); ++i)
-      {
-        bishop_task_rule_t& rule = task_rules[i];
-        if (rule.select_target_for_point)
-        {
-          legion_task_t task_ = CObjectWrapper::wrap(const_cast<Task*>(task));
-          // TODO: only supports 1D indexspace launch at the moment
-          if (rule.matches(mapper_state, task_) && domain.get_dim() == 1)
-          {
-            bool success = true;
-            std::vector<DomainSplit> new_slices;
-            Arrays::Rect<1> r = domain.get_rect<1>();
-            for(Arrays::GenericPointInRectIterator<1> pir(r); pir; pir++)
-            {
-              legion_domain_point_t dp_ =
-                CObjectWrapper::wrap(DomainPoint::from_point<1>(pir.p));
-              Processor target =
-                CObjectWrapper::unwrap(
-                    rule.select_target_for_point(mapper_state, task_, dp_));
-              success = success && target != Processor::NO_PROC;
-              Arrays::Rect<1> subrect(pir.p, pir.p);
-              Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,
-                  false, false);
-              new_slices.push_back(ds);
-            }
-            if (success)
-            {
-              slices.clear();
-              slices = new_slices;
-            }
-            else
-            {
-              log_bishop.warning("[slice_domain] launch domain is not covered "
-                  "entirely for task %s. mapping rule would not apply.",
-                  task->variants->name);
-            }
-          }
-        }
-      }
-    }
+    ////--------------------------------------------------------------------------
+    //void BishopMapper::slice_domain(const Task *task, const Domain &domain,
+    //    std::vector<DomainSplit> &slices)
+    ////--------------------------------------------------------------------------
+    //{
+    //  using namespace LegionRuntime::Arrays;
+    //  log_bishop.info("[slice_domain] task %s", task->variants->name);
+    //  DefaultMapper::slice_domain(task, domain, slices);
+    //  for (unsigned i = 0; i < task_rules.size(); ++i)
+    //  {
+    //    bishop_task_rule_t& rule = task_rules[i];
+    //    if (rule.select_target_for_point)
+    //    {
+    //      legion_task_t task_ = CObjectWrapper::wrap(const_cast<Task*>(task));
+    //      // TODO: only supports 1D indexspace launch at the moment
+    //      if (rule.matches(mapper_state, task_) && domain.get_dim() == 1)
+    //      {
+    //        bool success = true;
+    //        std::vector<DomainSplit> new_slices;
+    //        Arrays::Rect<1> r = domain.get_rect<1>();
+    //        for(Arrays::GenericPointInRectIterator<1> pir(r); pir; pir++)
+    //        {
+    //          legion_domain_point_t dp_ =
+    //            CObjectWrapper::wrap(DomainPoint::from_point<1>(pir.p));
+    //          Processor target =
+    //            CObjectWrapper::unwrap(
+    //                rule.select_target_for_point(mapper_state, task_, dp_));
+    //          success = success && target != Processor::NO_PROC;
+    //          Arrays::Rect<1> subrect(pir.p, pir.p);
+    //          Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,
+    //              false, false);
+    //          new_slices.push_back(ds);
+    //        }
+    //        if (success)
+    //        {
+    //          slices.clear();
+    //          slices = new_slices;
+    //        }
+    //        else
+    //        {
+    //          log_bishop.warning("[slice_domain] launch domain is not covered "
+    //              "entirely for task %s. mapping rule would not apply.",
+    //              task->variants->name);
+    //        }
+    //      }
+    //    }
+    //  }
+    //}
 
-    //--------------------------------------------------------------------------
-    bool BishopMapper::pre_map_task(Task *task)
-    //--------------------------------------------------------------------------
-    {
-      log_bishop.info("[pre_map_task] task %s", task->variants->name);
-      bool result = DefaultMapper::pre_map_task(task);
-      RUN_ALL_REGION_RULES(pre_map_task);
-      return result;
-    }
+    ////--------------------------------------------------------------------------
+    //bool BishopMapper::pre_map_task(Task *task)
+    ////--------------------------------------------------------------------------
+    //{
+    //  log_bishop.info("[pre_map_task] task %s", task->variants->name);
+    //  bool result = DefaultMapper::pre_map_task(task);
+    //  RUN_ALL_REGION_RULES(pre_map_task);
+    //  return result;
+    //}
 
-    //--------------------------------------------------------------------------
-    void BishopMapper::select_task_variant(Task *task)
-    //--------------------------------------------------------------------------
-    {
-      log_bishop.info("[select_task_variant] task %s", task->variants->name);
-      DefaultMapper::select_task_variant(task);
-      RUN_ALL_TASK_RULES(select_task_variant);
-    }
+    ////--------------------------------------------------------------------------
+    //void BishopMapper::select_task_variant(Task *task)
+    ////--------------------------------------------------------------------------
+    //{
+    //  log_bishop.info("[select_task_variant] task %s", task->variants->name);
+    //  DefaultMapper::select_task_variant(task);
+    //  RUN_ALL_TASK_RULES(select_task_variant);
+    //}
 
-    //--------------------------------------------------------------------------
-    bool BishopMapper::map_task(Task *task)
-    //--------------------------------------------------------------------------
-    {
-      log_bishop.info("[map_task] task %s", task->variants->name);
-      bool result = DefaultMapper::map_task(task);
-      RUN_ALL_REGION_RULES(map_task);
-      return result;
-    }
+    ////--------------------------------------------------------------------------
+    //bool BishopMapper::map_task(Task *task)
+    ////--------------------------------------------------------------------------
+    //{
+    //  log_bishop.info("[map_task] task %s", task->variants->name);
+    //  bool result = DefaultMapper::map_task(task);
+    //  RUN_ALL_REGION_RULES(map_task);
+    //  return result;
+    //}
 
-    //--------------------------------------------------------------------------
-    void BishopMapper::notify_mapping_result(const Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-      DefaultMapper::notify_mapping_result(mappable);
-    }
+    ////--------------------------------------------------------------------------
+    //void BishopMapper::notify_mapping_result(const Mappable *mappable)
+    ////--------------------------------------------------------------------------
+    //{
+    //  DefaultMapper::notify_mapping_result(mappable);
+    //}
 
-    //--------------------------------------------------------------------------
-    void BishopMapper::notify_mapping_failed(const Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-      DefaultMapper::notify_mapping_failed(mappable);
-    }
+    ////--------------------------------------------------------------------------
+    //void BishopMapper::notify_mapping_failed(const Mappable *mappable)
+    ////--------------------------------------------------------------------------
+    //{
+    //  DefaultMapper::notify_mapping_failed(mappable);
+    //}
   };
 };
