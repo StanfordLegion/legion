@@ -2581,6 +2581,31 @@ class LogicalRegion(object):
                 return False
         return True
 
+    def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
+        assert self is path[depth]
+        if field not in self.logical_state:
+            return True
+        arrived = (depth+1) == len(path)
+        force_close = (depth+1) < len(path)
+        next_child = path[depth+1] if not arrived else None
+        if not self.logical_state[field].perform_logical_deletion(op, req, next_child, 
+                                                            prev, checks, force_close):
+            return False
+        if not arrived:
+            return path[depth+1].perform_logical_deletion(depth+1, path, op, req, field,
+                                                          prev, checks)
+        elif not checks:
+            # Do all the invalidations and record any dependences
+            self.perform_deletion_invalidation(op, req, field)
+        return True
+
+    def perform_deletion_invalidation(self, op, req, field):
+        if field not in self.logical_state:
+            return
+        self.logical_state[field].perform_deletion_invalidation(op, req)
+        for child in self.children.itervalues():
+            child.perform_deletion_invalidation(op, req, field)
+
     def close_logical_tree(self, field, closed_users, permit_leave_open):
         if field not in self.logical_state:
             return
@@ -2815,6 +2840,31 @@ class LogicalPartition(object):
                 return False
         return True
 
+    def perform_logical_deletion(self, depth, path, op, req, field, prev, checks):
+        assert self is path[depth]
+        if field not in self.logical_state:
+            return True
+        arrived = (depth+1) == len(path)
+        force_close = (depth+1) < len(path) 
+        next_child = path[depth+1] if not arrived else None
+        if not self.logical_state[field].perform_logical_deletion(op, req, next_child, 
+                                                            prev, checks, force_close):
+            return False
+        if not arrived:
+            return path[depth+1].perform_logical_deletion(depth+1, path, op, req, field,
+                                                          prev, checks)
+        elif not checks:
+            # Do all the invalidations and record and dependences
+            self.perform_deletion_invalidations(op, req, field)
+        return True
+
+    def perform_deletion_invalidation(self, op, req, field):
+        if field not in self.logical_state:
+            return
+        self.logical_state[field].perform_deletion_invalidation(op, req)
+        for child in self.children.itervalues():
+            child.perform_deletion_invalidation(op, req, field)
+
     def close_logical_tree(self, field, closed_users, permit_leave_open):
         if field not in self.logical_state:
             return
@@ -3003,6 +3053,25 @@ class LogicalState(object):
         self.previous_epoch_users = list()
         return True
 
+    def perform_logical_deletion(self, op, req, next_child, 
+                                 previous_deps, perform_checks, force_close):
+        arrived = next_child is None
+        if not arrived:
+            if not self.siphon_logical_deletion(op, req, next_child, previous_deps, 
+                                                perform_checks, force_close): 
+                return False
+            if not self.perform_epoch_analysis(op, req, perform_checks, 
+                                               arrived, previous_deps):  
+                return False
+        return True
+
+    def perform_deletion_invalidation(self, op, req):
+        dummy_previous = list()
+        self.perform_epoch_analysis(op, req, False, False, dummy_previous)
+        self.open_children = dict()
+        self.open_redop = dict()
+        self.current_redop = 0
+
     # Maybe not the most intuitive name for a method but it aligns with the runtime
     def siphon_logical_children(self, op, req, next_child, 
                                 previous_deps, perform_checks):
@@ -3130,6 +3199,37 @@ class LogicalState(object):
             else:
                 # Normal read-write case is easy
                 self.open_children[next_child] = OPEN_READ_WRITE 
+        return True
+
+    def siphon_logical_deletion(self, op, req, next_child, 
+                                previous_deps, perform_checks, force_close):
+        # If our child is not open, then we are done
+        if next_child not in self.open_children:
+            return True
+        # See which mode it is open in 
+        open_mode = self.open_children[next_child]
+        del self.open_children[next_child]
+        if open_mode == OPEN_READ_ONLY:
+            # If it is open read-only, there is nothing to do
+            pass
+        elif open_mode == OPEN_READ_WRITE:
+            if force_close and not self.perform_close_operation(self, child_to_close, 
+                                        False, op, req, previous_deps, perform_checks): 
+                return False
+        elif open_mode == OPEN_SINGLE_REDUCE:
+            if force_close: 
+                if not self.perform_close_operation(self, child_to_close,
+                            False, op, req, previous_deps, perform_checks):
+                    return False
+            else:
+                # Update the state to read-write
+                self.open_children[next_child] = OPEN_READ_WRITE
+        elif open_mode == OPEN_MULTI_REDUCE:
+            if not self.perform_close_operation(self, child_to_close,
+                              False, op, req, previous_deps, perform_checks):
+                return False
+        else:
+            assert False # should never get here
         return True
 
     def find_close_operation(self, op, req, perform_checks, error_str):
@@ -4272,9 +4372,9 @@ class Operation(object):
 
     def analyze_logical_requirement(self, index, projecting, 
                                     perform_checks, exact_field=None):
-        # Special out for no access
         assert index in self.reqs
         req = self.reqs[index]
+        # Special out for no access
         if req.priv is NO_ACCESS:
             return True
         # Destination requirements for copies are a little weird because
@@ -4352,12 +4452,20 @@ class Operation(object):
                     return False
         return True
 
+    def analyze_logical_deletion(self, index, perform_checks):
+        assert index in self.reqs
+        req = self.reqs[index]
+        path = list()
+        req.logical_node.compute_path(path, req.parent)
+        assert not not path
+        for field in req.fields:
+            previous_deps = list()
+            if not req.parent.perform_logical_deletion(0, path, self, req, field, 
+                                                       previous_deps, perform_checks):
+                return False
+        return True
+
     def perform_logical_analysis(self, perform_checks):
-        if self.kind == DELETION_OP_KIND and not perform_checks:
-            # TODO: fix this
-            print "WARNING: Legion Spy doesn't really know how to do logical "+\
-                  "analysis for deletion operations at the moment. They might "+\
-                  "look a little weird in the dataflow graphs. Try to ignore them."
         # We need a context to do this
         assert self.context is not None
         # See if there is a fence in place for this context
@@ -4383,6 +4491,12 @@ class Operation(object):
                     return False
                 # Finally record ourselves as the next fence
                 self.context.current_fence = self
+            return True
+        if self.kind == DELETION_OP_KIND:
+            # Perform dependence analysis on the deletion region requirements
+            for idx in self.reqs.iterkeys():
+                if not self.analyze_logical_deletion(idx, perform_checks):
+                    return False
             return True
         assert not self.need_logical_replay
         projecting = self.kind is INDEX_TASK_KIND
@@ -4784,6 +4898,9 @@ class Operation(object):
                 if not self.analyze_fill_requirement(depth, index, req,
                                                      perform_checks):
                     return False
+        elif self.kind == DELETION_OP_KIND:
+            # Skip deletions, they only impact logical analysis
+            pass
         else:
             for index,req in self.reqs.iteritems():
                 if not self.analyze_physical_requirement(depth, index, req, 
