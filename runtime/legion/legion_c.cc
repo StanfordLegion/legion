@@ -3957,7 +3957,7 @@ legion_task_get_target_pro(legion_task_t task_)
 }
 
 const char *
-legion_task_get_task_name(legion_task_t task_)
+legion_task_get_name(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
