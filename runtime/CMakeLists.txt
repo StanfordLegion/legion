@@ -226,6 +226,7 @@ set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
 target_compile_definitions(HighLevelRuntime
   PRIVATE
+    ASSUME_UNALLOCABLE
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_HIGH_LEVEL>
 )
 target_include_directories(HighLevelRuntime
