@@ -3063,6 +3063,7 @@ namespace Legion {
           // as a virtual region
           if (src_composite >= 0)
           {
+            // No need to do the registration here
             runtime->forest->map_virtual_region(src_contexts[idx],
                                                 src_requirements[idx],
                                                 src_targets[src_composite],
@@ -3074,23 +3075,24 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-            // No need to do the registration here
-            continue;
           }
-          // Now do the registration
-          set_mapping_state(idx, true/*src*/);
-          runtime->forest->physical_register_only(src_contexts[idx],
-                                                  src_requirements[idx],
-                                                  src_versions[idx],
-                                                  this, idx, local_completion,
-                                                  false/*defer add users*/,
-                                                  map_applied_conditions,
-                                                  src_targets
+          else
+          {
+            // Now do the registration
+            set_mapping_state(idx, true/*src*/);
+            runtime->forest->physical_register_only(src_contexts[idx],
+                                                    src_requirements[idx],
+                                                    src_versions[idx],
+                                                    this, idx, local_completion,
+                                                    false/*defer add users*/,
+                                                    map_applied_conditions,
+                                                    src_targets
 #ifdef DEBUG_LEGION
-                                                  , get_logging_name()
-                                                  , unique_op_id
+                                                    , get_logging_name()
+                                                    , unique_op_id
 #endif
-                                                  );
+                                                    );
+          }
         }
         else
         {
