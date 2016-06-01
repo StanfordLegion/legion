@@ -3059,6 +3059,10 @@ namespace Legion {
                                             output.src_instances[idx],
                                             src_targets,
                                             IS_REDUCE(dst_requirements[idx]));
+          if (Runtime::legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, idx, 
+                                                  src_requirements[idx],
+                                                  src_targets);
           // If we have a compsite reference, we need to map it
           // as a virtual region
           if (src_composite >= 0)
@@ -3099,6 +3103,10 @@ namespace Legion {
           // Restricted case, get the instances from the parent
           parent_ctx->get_physical_references(src_parent_indexes[idx],
                                               src_targets);
+          if (Runtime::legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, idx, 
+                                                  src_requirements[idx],
+                                                  src_targets);
           set_mapping_state(idx, true/*src*/);
           runtime->forest->traverse_and_register(src_contexts[idx],
                                                  src_privilege_paths[idx],
@@ -3114,10 +3122,6 @@ namespace Legion {
 #endif
                                                  );
         }
-        if (Runtime::legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, idx, 
-                                                src_requirements[idx],
-                                                src_targets);
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
         // the registration since we know we are using normal instances
