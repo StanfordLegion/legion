@@ -965,6 +965,14 @@ function pretty.top_task_constraints(cx, node)
     function(constraint) return text.Line { value = tostring(constraint) } end)
 end
 
+function pretty.task_config_options(cx, node)
+  return terralib.newlist({
+      join({"leaf (", tostring(node.leaf), ")"}),
+      join({"inner (", tostring(node.inner), ")"}),
+      join({"idempotent (", tostring(node.idempotent), ")"}),
+  })
+end
+
 function pretty.top_task(cx, node)
   local name = node.name:concat(".")
   local params = commas(node.params:map(
@@ -979,9 +987,11 @@ function pretty.top_task(cx, node)
   meta:insertall(pretty.top_task_flags(cx, node.flags))
   meta:insertall(pretty.top_task_conditions(cx, node.conditions))
   meta:insertall(pretty.top_task_constraints(cx, node.constraints))
+  local config_options = pretty.task_config_options(cx, node.config_options)
 
   local lines = terralib.newlist()
   lines:insert(join({"task " .. name, "(", params, ")", return_type }))
+  lines:insert(join({"-- ", commas(config_options) }))
   if #meta > 0 then
     lines:insert(text.Line { value = "where" })
     lines:insert(text.Indent { value = commas(meta) })
