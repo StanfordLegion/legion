@@ -1694,12 +1694,12 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     return a + b
   end
 
-  function st:to_point(expr)
-    return self.index_type:to_point(`([index_type] { __ptr = [expr].__ptr }))
+  terra st:to_point()
+    return ([index_type](@self)):to_point()
   end
 
-  function st:to_domain_point(expr)
-    return self.index_type:to_domain_point(`([index_type] { __ptr = [expr].__ptr }))
+  terra st:to_domain_point()
+    return ([index_type](@self)):to_domain_point()
   end
 
   function st:force_cast(from, to, expr)
@@ -1834,10 +1834,10 @@ function std.index_type(base_type, displayname)
     end
   end
 
-  function st:to_point(expr)
-    assert(self.dim >= 1)
-    local fields = self.fields
-    local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
+  local function make_point(expr)
+    local dim = data.max(st.dim, 1)
+    local fields = st.fields
+    local pt = c["legion_point_" .. tostring(dim) .. "d_t"]
 
     if fields then
       return quote
@@ -1850,12 +1850,16 @@ function std.index_type(base_type, displayname)
     end
   end
 
-  function st:to_domain_point(expr)
-    local index = terralib.newsymbol(self.impl_type)
+  terra st:to_point()
+    return [make_point(self)]
+  end
+
+  local function make_domain_point(expr)
+    local index = terralib.newsymbol(st.impl_type)
 
     local values
-    if self.fields then
-      values = self.fields:map(function(field) return `(index.[field]) end)
+    if st.fields then
+      values = st.fields:map(function(field) return `(index.[field]) end)
     else
       values = terralib.newlist({index})
     end
@@ -1867,10 +1871,14 @@ function std.index_type(base_type, displayname)
       var [index] = [expr].__ptr
     in
       c.legion_domain_point_t {
-        dim = [data.max(self.dim, 1)],
+        dim = [data.max(st.dim, 1)],
         point_data = arrayof(c.coord_t, [values]),
       }
     end
+  end
+
+  terra st:to_domain_point()
+    return [make_domain_point(self)]
   end
 
   return setmetatable(st, index_type)

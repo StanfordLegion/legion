@@ -771,7 +771,7 @@ local function get_element_pointer(cx, region_types, index_type, field_type,
                       region : c.legion_logical_region_t,
                       region_index : uint32)
       if region_index == pointer_index then
-        var check = c.legion_domain_point_safe_cast(runtime, ctx, [index_type:to_domain_point(pointer)], region)
+        var check = c.legion_domain_point_safe_cast(runtime, ctx, pointer:to_domain_point(), region)
         if c.legion_domain_point_is_null(check) then
           std.assert(false, ["pointer " .. tostring(index_type) .. " is out-of-bounds"])
         end
@@ -1644,7 +1644,7 @@ function codegen.expr_index_access(cx, node)
 
     actions = quote
       [actions]
-      var dp = [color_type:to_domain_point(color)]
+      var dp = color:to_domain_point()
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
         [cx.runtime], [cx.context],
         [value.value].impl, dp)
@@ -3081,8 +3081,8 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var domain = [domain_from_bounds](
-        [index_type:to_point(`([index_type](start_value)))],
-        [index_type:to_point(`([index_type](extent_value)))])
+        ([index_type](start_value)):to_point(),
+        ([index_type](extent_value)):to_point())
       var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context], domain)
     end
   end
