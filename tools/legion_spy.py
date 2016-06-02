@@ -2659,16 +2659,23 @@ class LogicalRegion(object):
         return physical_state.perform_physical_close(op, req, inst,
                                                      perform_checks)
 
-    def close_physical_tree(self, depth, field, target, op, req, perform_checks):
+    def capture_composite_instance(self, depth, field, op, req):
+        physical_state = self.get_physical_state(depth, field)
+        return physical_state.capture_composite_instance(op, req)
+
+    def close_physical_tree(self, depth, field, target, op, req, 
+                            perform_checks, clear_state):
         for child in self.children.itervalues():
             if not child.perform_close_physical_tree(depth, field, target, 
-                                                     op, req, perform_checks):
+                                                     op, req, perform_checks, clear_state):
                 return False
         return True
 
-    def perform_close_physical_tree(self, depth, field, target, op, req, perform_checks):
+    def perform_close_physical_tree(self, depth, field, target, op, req, 
+                                    perform_checks, clear_state):
         physical_state = self.get_physical_state(depth, field)
-        return physical_state.close_physical_tree(target, op, req, perform_checks)
+        return physical_state.close_physical_tree(target, op, req, 
+                                                  perform_checks, clear_state)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -2893,16 +2900,23 @@ class LogicalPartition(object):
         return physical_state.perform_physical_close(op, req, inst,
                                                      perform_checks)
 
-    def close_physical_tree(self, depth, field, target, op, req, perform_checks):
+    def capture_composite_instance(self, depth, field, op, req):
+        physical_state = self.get_physical_state(depth, field)
+        return physical_state.capture_composite_instance(op, req)
+
+    def close_physical_tree(self, depth, field, target, op, req, 
+                            perform_checks, clear_state):
         for child in self.children.itervalues():
             if not child.perform_close_physical_tree(depth, field, target, 
-                                                     op, req, perform_checks):
+                                                     op, req, perform_checks, clear_state):
                 return False
         return True
 
-    def perform_close_physical_tree(self, depth, field, target, op, req, perform_checks):
+    def perform_close_physical_tree(self, depth, field, target, op, req, 
+                                    perform_checks, clear_state):
         physical_state = self.get_physical_state(depth, field)
-        return physical_state.close_physical_tree(target, op, req, perform_checks)
+        return physical_state.close_physical_tree(target, op, req, 
+                                                  perform_checks, clear_state)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -3501,7 +3515,7 @@ class PhysicalState(object):
             assert not self.reduction_instances
             # If we are write only, we just need to close up any open children
             if not self.node.close_physical_tree(self.depth, self.field, 
-                                                 None, op, req, perform_checks):
+                                                 None, op, req, perform_checks, True):
                 return False
             # Clear out all previous valid instances make this the only one
             self.valid_instances = set()
@@ -3520,8 +3534,8 @@ class PhysicalState(object):
             # If we are writing, close up any open children
             if req.is_write():
                 # Close up the tree to our instance
-                if not self.node.close_physical_tree(self.depth, self.field, 
-                                                     inst, op, req, perform_checks):
+                if not self.node.close_physical_tree(self.depth, self.field, inst, 
+                                                     op, req, perform_checks, True):
                     return False
                 # Issue any reduction updates too
                 if self.redop <> 0:
@@ -3570,7 +3584,7 @@ class PhysicalState(object):
         assert req.logical_node is self.node
         # Clean out our state and all our child states
         if not self.node.close_physical_tree(self.depth, self.field, 
-                                             None, op, req, perform_checks):
+                                             None, op, req, perform_checks, True):
             return False
         # Mark that we are dirty since we are writing
         self.dirty = True  
@@ -3588,12 +3602,12 @@ class PhysicalState(object):
             # invalidate all the stuff in the sub tree, no need to 
             # invalidate anything at this node
             return self.node.close_physical_tree(self.depth, self.field,
-                                                 None, op, req, perform_checks)
+                                                 None, op, req, perform_checks, True)
         elif inst.is_virtual():
             target = CompositeInstance(op.state, self.node, self.depth, self.field)
             # Capture down the tree first
             if not self.node.close_physical_tree(self.depth, self.field,
-                                                 target, op, req, perform_checks):
+                                                 target, op, req, perform_checks, True):
                 return False
             # Now capture locally
             already_captured = set()
@@ -3609,7 +3623,7 @@ class PhysicalState(object):
                         return False
             # close sub-tree
             if not self.node.close_physical_tree(self.depth, self.field,
-                                                 inst, op, req, perform_checks):
+                                                 inst, op, req, perform_checks, True):
                 return False
             # Finally flush any outstanding reductions
             if self.reduction_instances:
@@ -3626,7 +3640,18 @@ class PhysicalState(object):
         self.valid_instances.add(target)
         return True
 
-    def close_physical_tree(self, target, op, req, perform_checks):
+    def capture_composite_instance(self, op, req):
+        target = CompositeInstance(op.state, self.node, self.depth, self.field)
+        # Capture down the tree first
+        result = self.node.close_physical_tree(self.depth, self.field, 
+                                               target, op, req, False, False)
+        assert result # Better have succeeded
+        # Now capture locally
+        already_captured = set()
+        target.capture(self, already_captured)
+        return target
+
+    def close_physical_tree(self, target, op, req, perform_checks, clear_state):
         # Issue any updates from our instances
         if target is not None and not target.is_virtual() and \
                   self.dirty and target not in self.valid_instances:
@@ -3635,7 +3660,7 @@ class PhysicalState(object):
                 return False
         # Continue down the tree 
         if not self.node.close_physical_tree(self.depth, self.field, 
-                                             target, op, req, perform_checks):
+                                             target, op, req, perform_checks, clear_state):
             return False
         # If the target is a composite instance do the capture
         # otherwise flush any reductions
@@ -3650,10 +3675,11 @@ class PhysicalState(object):
                                             op, req.index, perform_checks, error_str):
                     return False
         # Now we can reset everything since we are closed
-        self.dirty = False
-        self.redop = 0
-        self.valid_instances = set()
-        self.reduction_instances = set()
+        if clear_state:
+            self.dirty = False
+            self.redop = 0
+            self.valid_instances = set()
+            self.reduction_instances = set()
         return True
 
     def find_valid_instances(self):
@@ -4772,8 +4798,12 @@ class Operation(object):
                 error_str = "source field "+str(src_field)+" and destination field "+\
                             str(dst_field)+" of region requirements "+str(src_index)+\
                             " and "+str(dst_index)+" of "+str(self)
-                return src_inst.issue_copies_across(dst_inst, depth, dst_field, 
-                              dst_region.logical_node, self, perform_checks, error_str)
+                comp_inst = src_req.logical_node.capture_composite_instance(depth, 
+                                                              src_field, self, src_req)
+                return comp_inst.issue_copies_across(dst=dst_inst, dst_depth=depth, 
+                        dst_field=dst_field, region=dst_req.logical_node, 
+                        op=self, index=dst_index, perform_checks=perform_checks, 
+                        error_str=error_str)
             else:
                 # Normal copy
                 src_preconditions = src_inst.find_use_dependences(depth=depth, 
@@ -6243,7 +6273,7 @@ class CompositeInstance(object):
                         reduction.add_field(self.field.fid, reduction_inst, 
                                             dst_field.fid, dst, reduction_inst.redop)
                         if reduction_region is not region:
-                            reduction.set_intersection(reduction_region)
+                            reduction.set_intersect(reduction_region)
                             src_preconditions = reduction_inst.find_copy_dependences(
                                 depth=self.depth, field=self.field, op=op, index=index,
                                 region=region, reading=True, redop=0,
