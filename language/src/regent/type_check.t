@@ -3052,9 +3052,19 @@ function type_check.stat(cx, node)
   end
 end
 
-function type_check.top_task_param(cx, node)
+function type_check.top_task_param(cx, node, mapping)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
+
+  -- Check for parameters with duplicate types.
+  if std.type_supports_constraints(param_type) then
+    if mapping[param_type] then
+      log.error(node, "parameters " .. tostring(node.symbol) .. " and " ..
+                  tostring(mapping[param_type]) ..
+                  " have the same type, but are required to be distinct")
+    end
+    mapping[param_type] = node.symbol
+  end
 
   return ast.typed.top.TaskParam {
     symbol = node.symbol,
@@ -3068,8 +3078,9 @@ function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
 
+  local mapping = {}
   local params = node.params:map(
-    function(param) return type_check.top_task_param(cx, param) end)
+    function(param) return type_check.top_task_param(cx, param, mapping) end)
   local prototype = node.prototype
   prototype:set_param_symbols(
     params:map(function(param) return param.symbol end))

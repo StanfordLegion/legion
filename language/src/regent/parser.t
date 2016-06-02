@@ -1824,13 +1824,16 @@ function parser.top_fspace_fields(p)
     p:expect(":")
     local field_type = p:luaexpr()
 
-    fields:insert(
-      ast.unspecialized.top.FspaceFields {
-        field_names = field_names,
-        type_expr = field_type,
-        options = ast.default_options(),
-        span = ast.span(start, p),
-      })
+    fields:insertall(
+      field_names:map(
+        function(field_name)
+          return ast.unspecialized.top.FspaceField {
+            field_name = field_name,
+            type_expr = field_type,
+            options = ast.default_options(),
+            span = ast.span(start, p),
+          }
+        end))
   until not p:sep()
   p:expect("}")
   return fields

@@ -50,6 +50,8 @@ local function guess_type_for_literal(value)
     end
   elseif type(value) == "boolean" then
     return bool
+  elseif type(value) == "string" then
+    return rawstring
   elseif type(value) == "cdata" then
     return (`value):gettype()
   else
@@ -58,7 +60,7 @@ local function guess_type_for_literal(value)
 end
 
 local function convert_lua_value(cx, node, value)
-  if type(value) == "number" or type(value) == "boolean" then
+  if type(value) == "number" or type(value) == "boolean" or type(value) == "string" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
       value = value,
@@ -1747,7 +1749,7 @@ function specialize.top_task(cx, node)
   }
 end
 
-function specialize.top_fspace_param(cx, node)
+function specialize.top_fspace_param(cx, node, mapping)
   -- Insert symbol into environment first to allow circular types.
   local symbol = std.newsymbol(node.param_name)
   cx.env:insert(node, node.param_name, symbol)
@@ -1755,32 +1757,44 @@ function specialize.top_fspace_param(cx, node)
   local param_type = node.type_expr(cx.env:env())
   symbol:settype(param_type)
 
+  -- Check for fields with duplicate types.
+  if std.type_supports_constraints(param_type) then
+    if mapping[param_type] then
+      log.error(node, "parameters " .. tostring(symbol) .. " and " ..
+                  tostring(mapping[param_type]) ..
+                  " have the same type, but are required to be distinct")
+    end
+    mapping[param_type] = symbol
+  end
+
   return symbol
 end
 
-function specialize.top_fspace_fields(cx, node)
+function specialize.top_fspace_field(cx, node, mapping)
   -- Insert symbol into environment first to allow circular types.
-  local symbols = node.field_names:map(
-    function(field_name)
-      local symbol = std.newsymbol(field_name)
-      cx.env:insert(node, field_name, symbol)
-      return symbol
-    end)
+  local symbol = std.newsymbol(node.field_name)
+  cx.env:insert(node, node.field_name, symbol)
 
   local field_type = node.type_expr(cx.env:env())
   if not field_type then
     log.error(node, "field type is undefined or nil")
   end
+  symbol:settype(field_type)
 
-  symbols:map(function(symbol) symbol:settype(field_type) end)
+  -- Check for fields with duplicate types.
+  if std.type_supports_constraints(field_type) then
+    if mapping[field_type] then
+      log.error(node, "fields " .. tostring(symbol) .. " and " ..
+                  tostring(mapping[field_type]) ..
+                  " have the same type, but are required to be distinct")
+    end
+    mapping[field_type] = symbol
+  end
 
-  return symbols:map(
-    function(symbol)
-      return {
-        field = symbol,
-        type = field_type,
-      }
-    end)
+  return  {
+    field = symbol,
+    type = field_type,
+  }
 end
 
 function specialize.top_fspace(cx, node)
@@ -1788,11 +1802,11 @@ function specialize.top_fspace(cx, node)
   local fs = std.newfspace(node, node.name, #node.params > 0)
   cx.env:insert(node, node.name, fs)
 
+  local mapping = {}
   fs.params = node.params:map(
-    function(param) return specialize.top_fspace_param(cx, param) end)
-  fs.fields = data.flatmap(
-    function(field) return specialize.top_fspace_fields(cx, field) end,
-    node.fields)
+      function(param) return specialize.top_fspace_param(cx, param, mapping) end)
+  fs.fields = node.fields:map(
+      function(field) return specialize.top_fspace_field(cx, field, mapping) end)
   local constraints = specialize.constraints(cx, node.constraints)
 
   return ast.specialized.top.Fspace {
