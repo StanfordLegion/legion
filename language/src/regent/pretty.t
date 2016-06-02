@@ -731,7 +731,9 @@ end
 
 function pretty.stat_for_num(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "=", pretty.expr_list(cx, node.values), "do"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "=", pretty.expr_list(cx, node.values), "do"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -739,7 +741,9 @@ end
 
 function pretty.stat_for_list(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "in", pretty.expr(cx, node.value), "do"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "in", pretty.expr(cx, node.value), "do"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -747,7 +751,9 @@ end
 
 function pretty.stat_for_list_vectorized(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "in", pretty.expr(cx, node.value), "do -- vectorized"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "in", pretty.expr(cx, node.value), "do -- vectorized"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
