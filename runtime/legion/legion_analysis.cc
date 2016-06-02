@@ -6700,7 +6700,7 @@ namespace Legion {
         LogicalView *view = runtime->find_or_request_logical_view(did, ready);
         if (ready.exists() && !ready.has_triggered())
         {
-          // Otherwise we need to defer adding the handle until 
+          // Otherwise we need to defer adding the handle reference until 
           // the view is actually ready
           // Have to static cast this to avoid touching it
           ptr.view = static_cast<CompositeView*>(view);

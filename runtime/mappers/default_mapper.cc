@@ -1732,7 +1732,7 @@ namespace Legion {
       {
         // Make reduction fold instances
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, req.redop))
+                            REDUCTION_FOLD_SPECIALIZE, req.redop))
           .add_constraint(MemoryConstraint(target_memory.kind()));
       }
       else

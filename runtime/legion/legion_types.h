@@ -55,6 +55,14 @@ namespace Legion {
   typedef ::legion_dependence_type_t DependenceType;
   typedef ::legion_index_space_kind_t IndexSpaceKind;
   typedef ::legion_file_mode_t LegionFileMode;
+  typedef ::legion_execution_constraint_t ExecutionConstraintKind;
+  typedef ::legion_layout_constraint_t LayoutConstraintKind;
+  typedef ::legion_equality_kind_t EqualityKind;
+  typedef ::legion_dimension_kind_t DimensionKind;
+  typedef ::legion_isa_kind_t ISAKind;
+  typedef ::legion_resource_constraint_t ResourceKind;
+  typedef ::legion_launch_constraint_t LaunchKind;
+  typedef ::legion_specialized_constraint_t SpecializedKind;
 
   // Forward declarations for user level objects
   // legion.h

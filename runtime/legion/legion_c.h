@@ -2825,10 +2825,95 @@ typedef long long int coord_t;
   /**
    * @see Legion::LayoutConstraintSet
    */
+  void
+  legion_runtime_release_layout(legion_runtime_t runtime_,
+                                legion_layout_constraint_id_t handle_);
+
+  /**
+   * @see Legion::LayoutConstraintSet
+   */
   legion_layout_constraint_id_t
   legion_runtime_preregister_layout_constraint_set(
                                        legion_layout_constraint_set_t handle_,
                                                    const char *set_name);
+
+  /**
+   * @see Legion::SpecializedConstraint
+   */
+  void
+  legion_add_specialized_constraint(legion_layout_constraint_set_t handle,
+                                    legion_specialized_constraint_t specialized,
+                                    legion_reduction_op_id_t redop);
+
+  /**
+   * @see Legion::MemoryConstraint
+   */
+  void
+  legion_add_memory_constraint(legion_layout_constraint_set_t handle,
+                               legion_memory_kind_t kind); 
+
+  /**
+   * @see Legion::FieldConstraint
+   */
+  void
+  legion_add_field_constraint(legion_layout_constraint_set_t handle,
+                              const legion_field_id_t *fields, size_t num_fields,
+                              bool contiguous, bool inorder);
+
+  /**
+   * @see Legion::OrderingConstraint
+   */
+  void
+  legion_add_ordering_constraint(legion_layout_constraint_set_t handle,
+                                 const legion_dimension_kind_t *dims, size_t num_dims,
+                                 bool contiguous);
+
+  /**
+   * @see Legion::SplittingConstraint
+   */
+  void
+  legion_add_splitting_constraint(legion_layout_constraint_set_t handle,
+                                  legion_dimension_kind_t dim);
+
+  /**
+   * @see Legion::SplittingConstraint
+   */
+  void
+  legion_add_full_splitting_constraint(legion_layout_constraint_set_t handle,
+                                       legion_dimension_kind_t dim, 
+                                       size_t value);
+
+  /**
+   * @see Legion::DimensionConstraint
+   */
+  void
+  legion_add_dimension_constraint(legion_layout_constraint_set_t handle,
+                                  legion_dimension_kind_t dim, 
+                                  legion_equality_kind_t eq, size_t value);
+
+  /**
+   * @see Legion::AlignmentConstraint
+   */
+  void
+  legion_add_alignement_constraint(legion_layout_constraint_set_t handle,
+                                   legion_field_id_t field,
+                                   legion_equality_kind_t eq,
+                                   size_t byte_boundary);
+
+  /**
+   * @see Legion::OffsetConstraint
+   */
+  void
+  legion_add_offset_constraint(legion_layout_constraint_set_t handle,
+                               legion_field_id_t field, size_t offset);
+
+  /**
+   * @see Legion::PointerConstraint
+   */
+  void
+  legion_add_pointer_constraint(legion_layout_constraint_set_t handle,
+                                legion_memory_t memory,
+                                uintptr_t ptr);
 
   /**
    * @return Caller takes ownership of return value
@@ -2846,6 +2931,54 @@ typedef long long int coord_t;
   void
   legion_execution_constraint_set_destroy(
                                   legion_execution_constraint_set_t handle);
+
+  /**
+   * @see Legion::ISAConstraint
+   */
+  void
+  legion_add_isa_constraint(legion_execution_constraint_set_t handle_,
+                            uint64_t prop);
+
+  /**
+   * @see Legion::ProcessorConstraint
+   */
+  void
+  legion_add_processor_constraint(legion_execution_constraint_set_t handle_,
+                                  legion_processor_kind_t proc_kind_); 
+
+  /**
+   * @see Legion::ResourceConstraint
+   */
+  void
+  legion_add_resource_constraint(legion_execution_constraint_set_t handle_,
+                                 legion_resource_constraint_t resource,
+                                 legion_equality_kind_t eq, size_t value);
+
+  /**
+   * @see Legion::LaunchConstraint
+   */
+  void
+  legion_add_launch_constraint(legion_execution_constraint_set_t handle_,
+                               legion_launch_constraint_t kind, size_t value);
+
+  /**
+   * @see Legion::LaunchConstraint
+   */
+  void
+  legion_add_launch_constraint_multi_dim(
+                              legion_execution_constraint_set_t handle_,
+                              legion_launch_constraint_t kind,
+                              const size_t *values, int dims);
+
+  /**
+   * @see Legion::ColocationConstraint
+   */
+  void
+  legion_add_colocation_constraint(legion_execution_constraint_set_t handle_,
+                                   const unsigned *indexes, 
+                                   size_t num_indexes,
+                                   const legion_field_id_t *fields, 
+                                   size_t num_fields);
 
   // -----------------------------------------------------------------------
   // Start-up Operations

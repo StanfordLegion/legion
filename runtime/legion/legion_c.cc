@@ -4021,6 +4021,15 @@ legion_runtime_register_layout_constraint_set(legion_runtime_t runtime_,
   return runtime->register_layout(registrar);
 }
 
+void
+legion_runtime_release_layout(legion_runtime_t runtime_,
+                              legion_layout_constraint_id_t handle)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  runtime->release_layout(handle);
+}
+
 legion_layout_constraint_id_t
 legion_runtime_preregister_layout_constraint_set(
                                    legion_layout_constraint_set_t handle_,
@@ -4032,6 +4041,111 @@ legion_runtime_preregister_layout_constraint_set(
   registrar.layout_constraints = *constraints;
 
   return Runtime::preregister_layout(registrar);
+}
+
+void
+legion_add_specialized_constraint(legion_layout_constraint_set_t handle_,
+                                  legion_specialized_constraint_t specialized,
+                                  legion_reduction_op_id_t redop)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SpecializedConstraint(specialized, redop));
+}
+
+void
+legion_add_memory_constraint(legion_layout_constraint_set_t handle_,
+                             legion_memory_kind_t kind_)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  constraints->add_constraint(MemoryConstraint(kind));
+}
+
+void
+legion_add_field_constraint(legion_layout_constraint_set_t handle_,
+                            const legion_field_id_t *fields, size_t num_fields,
+                            bool contiguous, bool inorder)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> field_ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = fields[idx];
+  
+  constraints->add_constraint(FieldConstraint(field_ids, contiguous, inorder));
+}
+
+void
+legion_add_ordering_constraint(legion_layout_constraint_set_t handle_,
+                               const legion_dimension_kind_t *dims, 
+                               size_t num_dims, bool contiguous)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<DimensionKind> ordering(num_dims);
+  for (unsigned idx = 0; idx < num_dims; idx++)
+    ordering[idx] = dims[idx];
+
+  constraints->add_constraint(OrderingConstraint(ordering, contiguous));
+}
+
+void
+legion_add_splitting_constraint(legion_layout_constraint_set_t handle_,
+                                legion_dimension_kind_t dim)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SplittingConstraint(dim));
+}
+
+void
+legion_add_full_splitting_constraint(legion_layout_constraint_set_t handle_,
+                                     legion_dimension_kind_t dim, size_t value)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SplittingConstraint(dim, value));
+}
+
+void
+legion_add_dimension_constraint(legion_layout_constraint_set_t handle_,
+                                legion_dimension_kind_t dim,
+                                legion_equality_kind_t eq, size_t value)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(DimensionConstraint(dim, eq, value));
+}
+
+void
+legion_add_alignment_constraint(legion_layout_constraint_set_t handle_,
+                                legion_field_id_t field,
+                                legion_equality_kind_t eq,
+                                size_t byte_boundary)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(AlignmentConstraint(field, eq, byte_boundary));
+}
+
+void
+legion_add_offset_constraint(legion_layout_constraint_set_t handle_,
+                             legion_field_id_t field, size_t offset)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(OffsetConstraint(field, offset));
+}
+
+void
+legion_add_pointer_constraint(legion_layout_constraint_set_t handle_,
+                              legion_memory_t mem_,
+                              uintptr_t ptr)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  constraints->add_constraint(PointerConstraint(mem, ptr)); 
 }
 
 legion_execution_constraint_set_t
@@ -4049,6 +4163,72 @@ legion_execution_constraint_set_destroy(
   ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
 
   delete constraints;
+}
+
+void
+legion_add_isa_constraint(legion_execution_constraint_set_t handle_,
+                          uint64_t prop)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(ISAConstraint(prop));
+}
+
+void
+legion_add_processor_constraint(legion_execution_constraint_set_t handle_,
+                                legion_processor_kind_t proc_kind_)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+
+  constraints->add_constraint(ProcessorConstraint(proc_kind));
+}
+
+void
+legion_add_resource_constraint(legion_execution_constraint_set_t handle_,
+                               legion_resource_constraint_t resource,
+                               legion_equality_kind_t eq, size_t value)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(ResourceConstraint(resource, eq, value));
+}
+
+void
+legion_add_launch_constraint(legion_execution_constraint_set_t handle_,
+                             legion_launch_constraint_t kind, size_t value)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(LaunchConstraint(kind, value));
+}
+
+void
+legion_add_launch_constraint_multi_dim(
+                              legion_execution_constraint_set_t handle_,
+                              legion_launch_constraint_t kind,
+                              const size_t *values, int dims)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(LaunchConstraint(kind, values, dims));
+}
+
+void
+legion_add_colocation_constraints(legion_execution_constraint_set_t handle_,
+                                  const unsigned *indexes, size_t num_indexes,
+                                  const legion_field_id_t *fields, 
+                                  size_t num_fields)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<unsigned> actual_indexes(num_indexes);
+  for (unsigned idx = 0; idx < num_indexes; idx++)
+    actual_indexes[idx] = indexes[idx];
+  std::set<FieldID> all_fields;
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    all_fields.insert(fields[idx]);
+
+  constraints->add_constraint(ColocationConstraint(actual_indexes, all_fields));
 }
 
 //------------------------------------------------------------------------

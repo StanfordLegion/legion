@@ -1918,7 +1918,7 @@ namespace Legion {
       // make a layout constraints
       LayoutConstraintSet constraint_set;
       constraint_set.add_constraint(
-          SpecializedConstraint(SpecializedConstraint::VIRTUAL_SPECIALIZE));
+          SpecializedConstraint(VIRTUAL_SPECIALIZE));
       LayoutConstraints *constraints = 
         rt->register_layout(FieldSpace::NO_SPACE, constraint_set);
       FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
@@ -2003,7 +2003,7 @@ namespace Legion {
       }
       switch (constraints.specialized_constraint.get_kind())
       {
-        case SpecializedConstraint::NORMAL_SPECIALIZE:
+        case NORMAL_SPECIALIZE:
           {
             
             // Now we can make the manager
@@ -2016,7 +2016,7 @@ namespace Legion {
                                                  true/*register now*/, ready);
             break;
           }
-        case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
+        case REDUCTION_FOLD_SPECIALIZE:
           {
             if (field_sizes.size() > 1)
             {
@@ -2057,7 +2057,7 @@ namespace Legion {
                                               true/*register now*/); 
             break;
           }
-        case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:
+        case REDUCTION_LIST_SPECIALIZE:
           {
             // TODO: implement this
             assert(false);
@@ -2271,7 +2271,7 @@ namespace Legion {
       // the constraints and see if we recognize any of them
       switch (constraints.specialized_constraint.get_kind())
       {
-        case SpecializedConstraint::NORMAL_SPECIALIZE:
+        case NORMAL_SPECIALIZE:
           {
             const std::vector<DimensionKind> &ordering = 
                                       constraints.ordering_constraint.ordering;
@@ -2305,14 +2305,14 @@ namespace Legion {
             // redop id is already zero
             break;
           }
-        case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
+        case REDUCTION_FOLD_SPECIALIZE:
           {
             block_size = 1;
             redop_id = constraints.specialized_constraint.get_reduction_op();
             reduction_op = Runtime::get_reduction_op(redop_id);
             break;
           }
-        case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:
+        case REDUCTION_LIST_SPECIALIZE:
           {
             // TODO: implement list reduction instances
             assert(false);
@@ -2320,7 +2320,7 @@ namespace Legion {
             reduction_op = Runtime::get_reduction_op(redop_id);
             break;
           }
-        case SpecializedConstraint::VIRTUAL_SPECIALIZE:
+        case VIRTUAL_SPECIALIZE:
           {
             log_run.error("Illegal request to create a virtual instance");
             assert(false);

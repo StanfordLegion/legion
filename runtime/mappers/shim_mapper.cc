@@ -1242,7 +1242,7 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop))
+                                      REDUCTION_FOLD_SPECIALIZE, redop))
           .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                           true/*inorder*/));
       }
@@ -1273,7 +1273,7 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop)).
+                                    REDUCTION_FOLD_SPECIALIZE, redop)).
           add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                          true/*inorder*/));
       }
