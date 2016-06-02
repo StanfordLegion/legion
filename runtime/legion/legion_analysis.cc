@@ -6684,7 +6684,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::unpack_reference(Runtime *runtime, 
+    void InstanceRef::unpack_reference(Runtime *runtime, TaskOp *task, 
                                        Deserializer &derez, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
@@ -6697,14 +6697,39 @@ namespace Legion {
         return;
       if (composite)
       {
-        ptr.view = 
-         runtime->find_or_request_logical_view(did, ready)->as_composite_view();
-        ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Otherwise we need to defer adding the handle until 
+          // the view is actually ready
+          // Have to static cast this to avoid touching it
+          ptr.view = static_cast<CompositeView*>(view);
+          DeferCompositeHandleArgs args;
+          args.hlr_id = HLR_DEFER_COMPOSITE_HANDLE_TASK_ID;
+          args.view = ptr.view;
+          ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                        HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,HLR_LATENCY_PRIORITY,
+                        task, ready);
+        }
+        else
+        {
+          // No need to wait, we are done now
+          ptr.view = view->as_composite_view();
+          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+        }
       }
       else
         ptr.manager = runtime->find_or_request_physical_manager(did, ready);
       local = false;
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceRef::handle_deferred_composite_handle(const void *a)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeHandleArgs *args = (const DeferCompositeHandleArgs*)a;
+      args->view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+    }
 
     /////////////////////////////////////////////////////////////
     // InstanceSet 
@@ -7156,8 +7181,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez,
-                                        std::set<RtEvent> &ready_events)
+    void InstanceSet::unpack_references(Runtime *runtime, TaskOp *task,
+                           Deserializer &derez, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       size_t num_refs;
@@ -7195,7 +7220,7 @@ namespace Legion {
           refs.single->add_reference();
         }
         RtEvent ready;
-        refs.single->unpack_reference(runtime, derez, ready);
+        refs.single->unpack_reference(runtime, task, derez, ready);
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -7217,7 +7242,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_refs; idx++)
         {
           RtEvent ready;
-          refs.multi->vector[idx].unpack_reference(runtime, derez, ready);
+          refs.multi->vector[idx].unpack_reference(runtime, task, derez, ready);
           if (ready.exists())
             ready_events.insert(ready);
         }

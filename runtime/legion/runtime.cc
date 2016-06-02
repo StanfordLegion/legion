@@ -20159,6 +20159,11 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
+        case HLR_DEFER_COMPOSITE_HANDLE_TASK_ID:
+          {
+            InstanceRef::handle_deferred_composite_handle(args);
+            break;
+          }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
           {
             Runtime::get_runtime(p)->attempt_runtime_shutdown();

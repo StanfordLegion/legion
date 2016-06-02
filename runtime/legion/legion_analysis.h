@@ -1102,6 +1102,12 @@ namespace Legion {
      */
     class InstanceRef {
     public:
+      struct DeferCompositeHandleArgs {
+      public:
+        HLRTaskID hlr_id;
+        CompositeView *view;
+      };
+    public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
       InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
@@ -1154,7 +1160,9 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez, RtEvent &ready);
+      void unpack_reference(Runtime *rt, TaskOp *task,
+                            Deserializer &derez, RtEvent &ready);
+      static void handle_deferred_composite_handle(const void *args);
     private:
       FieldMask valid_fields; 
       ApEvent ready_event;
@@ -1216,8 +1224,8 @@ namespace Legion {
       const InstanceRef& get_composite_ref(void) const;
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
-      void unpack_references(Runtime *runtime, Deserializer &derez,
-                             std::set<RtEvent> &ready_events);
+      void unpack_references(Runtime *runtime, TaskOp *task,
+          Deserializer &derez, std::set<RtEvent> &ready_events);
     public:
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;

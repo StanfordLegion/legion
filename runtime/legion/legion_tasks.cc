@@ -235,7 +235,7 @@ namespace Legion {
       {
         unsigned index;
         derez.deserialize(index);
-        early_mapped_regions[index].unpack_references(runtime, derez, 
+        early_mapped_regions[index].unpack_references(runtime, this, derez, 
                                                       ready_events);
       }
     }
@@ -2998,7 +2998,8 @@ namespace Legion {
       derez.deserialize(num_phy);
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
-        physical_instances[idx].unpack_references(runtime, derez, ready_events);
+        physical_instances[idx].unpack_references(runtime, this,
+                                                  derez, ready_events);
       virtual_mapped.resize(regions.size());
       for (unsigned idx = 0; idx < num_phy; idx++)
         virtual_mapped[idx] = physical_instances[idx].has_composite_ref();
