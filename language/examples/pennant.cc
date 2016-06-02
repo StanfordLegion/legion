@@ -985,8 +985,6 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
-  virtual bool default_policy_select_close_virtual(const MapperContext,
-                                                   const Close &);
 private:
   // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
@@ -1039,12 +1037,6 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
-}
-
-bool PennantMapper::default_policy_select_close_virtual(const MapperContext ctx,
-                                                        const Close &close)
-{
-  return false;
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
