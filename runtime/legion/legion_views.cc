@@ -4602,7 +4602,7 @@ namespace Legion {
           continue;
         // Perform the reduction
         ApEvent reduce_event = it->first->perform_deferred_reduction(dst,
-            reduce_mask, src_version_info, local_preconditions, info.op,
+            overlap, src_version_info, local_preconditions, info.op,
             info.index, across_helper, 
             (dst->logical_node == it->first->logical_node) ?
               NULL : it->first->logical_node, info.map_applied_events);
