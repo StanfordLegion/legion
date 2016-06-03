@@ -891,6 +891,7 @@ function type_check.expr_cast(cx, node)
     for i, param in ipairs(to_params) do
       local arg = to_args[i]
       mapping[param] = arg
+      mapping[param:gettype()] = arg:gettype()
     end
 
     std.validate_args(node, to_fields, from_fields, false, terralib.types.unit, mapping, false)
