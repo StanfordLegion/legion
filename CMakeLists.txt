@@ -163,10 +163,11 @@ endif()
 export(PACKAGE Legion)
 
 #------------------------------------------------------------------------------#
-# Examples
+# Examples and Applications
 #------------------------------------------------------------------------------#
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
-if(Legion_BUILD_EXAMPLES)
+option(Legion_BUILD_EXAMPLE_APPS "Build Legion example applications" OFF)
+if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
@@ -183,7 +184,12 @@ if(Legion_BUILD_EXAMPLES)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
   endif()
 
-  add_subdirectory(examples)
+  if(Legion_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+  endif()
+  if(Legion_BUILD_EXAMPLE_APPS)
+    add_subdirectory(apps)
+  endif()
 endif()
 
 #------------------------------------------------------------------------------#
