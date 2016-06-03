@@ -1897,6 +1897,7 @@ std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
+local next_ispace_id = 1
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
          "Ispace type requires index type")
@@ -1919,8 +1920,16 @@ function std.ispace(index_type)
     return `([to] { impl = [expr].impl })
   end
 
-  function st.metamethods.__typename(st)
-    return "ispace(" .. tostring(st.index_type) .. ")"
+  if std.config["debug"] then
+    local id = next_ispace_id
+    next_ispace_id = next_ispace_id + 1
+    function st.metamethods.__typename(st)
+      return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "ispace(" .. tostring(st.index_type) .. ")"
+    end
   end
 
   return st

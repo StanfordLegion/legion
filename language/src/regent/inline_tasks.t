@@ -155,16 +155,6 @@ local function find_self_recursion(prototype, node)
 end
 
 local function check_valid_inline_task(task)
-  --task.params:map(function(param)
-  --  local ty = param.param_type
-  --  if std.is_ispace(ty) or std.is_region(ty) or
-  --    std.is_partition(ty) or std.is_cross_product(ty) or
-  --    std.is_bounded_type(ty) or std.is_ref(ty) or std.is_rawref(ty) or
-  --    std.is_future(ty) or std.is_unpack_result(ty) then
-  --    log.error(param, "inline tasks cannot have a parameter of type " .. tostring(ty))
-  --  end
-  --end)
-
   local body = task.body
   local num_returns = count_returns(body)
   if num_returns > 1 then
@@ -248,6 +238,10 @@ function inline_tasks.expr(cx, node)
           if std.is_region(param_type) then
             type_mapping[param_type] = std.as_read(arg.expr_type)
             type_mapping[param] = get_root_subregion(arg)
+            type_mapping[param_type.ispace_symbol] =
+              type_mapping[param_type].ispace_symbol
+            type_mapping[param_type:ispace()] =
+              type_mapping[param_type]:ispace()
           end
         else
           local new_var = std.newsymbol(std.as_read(arg.expr_type))
@@ -258,6 +252,10 @@ function inline_tasks.expr(cx, node)
           if std.is_region(param_type) then
             type_mapping[param] = new_var
             type_mapping[param_type] = new_var:gettype()
+            type_mapping[param_type.ispace_symbol] =
+              type_mapping[param_type].ispace_symbol
+            type_mapping[param_type:ispace()] =
+              type_mapping[param_type]:ispace()
           end
         end
       end)
@@ -277,8 +275,44 @@ function inline_tasks.expr(cx, node)
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
             else node = node { value = tgt } end
+          elseif node:is(ast.typed.expr.Ispace) then
+            local ispace = std.as_read(node.expr_type)
+            local new_ispace = std.ispace(ispace.index_type)
+            type_mapping[ispace] = new_ispace
+          elseif node:is(ast.typed.expr.Region) then
+            local region = std.as_read(node.expr_type)
+            local ispace =
+              std.type_sub(std.as_read(region:ispace()), type_mapping)
+            local fspace =
+              std.type_sub(std.as_read(region:fspace()), type_mapping)
+            local new_region = std.region(ispace, fspace)
+            type_mapping[region] = new_region
           end
           return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
+        elseif node:is(ast.typed.stat.Var) then
+          local new_symbols = terralib.newlist()
+          local new_types = terralib.newlist()
+
+          for i = 1, #node.symbols do
+            local new_ty = std.type_sub(node.types[i], type_mapping)
+            if new_ty ~= node.types[i] then
+              local sym = node.symbols[i]
+              local new_sym = std.newsymbol(new_ty)
+              new_symbols:insert(new_sym)
+              new_types:insert(new_ty)
+              if std.is_region(new_ty) then
+                expr_mapping[sym] = new_sym
+                type_mapping[sym] = new_sym
+              end
+            else
+              new_symbols:insert(node.symbols[i])
+              new_types:insert(node.types[i])
+            end
+          end
+          return node {
+            symbols = new_symbols,
+            types = new_types,
+          }
         else
           return node
         end
