@@ -34,10 +34,8 @@ endif()
 #------------------------------------------------------------------------------#
 # More boilerplate to deal with build type and lib type
 #------------------------------------------------------------------------------#
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
-endif()
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Whether or not to build shared libraries instead of static")
+set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
+set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
 #------------------------------------------------------------------------------#
 # Minimum log level
@@ -148,6 +146,17 @@ install(FILES cmake/LegionConfig-install.cmake
   DESTINATION lib/cmake/Legion
   RENAME LegionConfig.cmake
 )
+
+#------------------------------------------------------------------------------#
+# Install into the CMake pacakge registry if explicitly selected to do so
+#------------------------------------------------------------------------------#
+set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY ON CACHE INTERNAL "Disable the export(PACKAGE) command.")
+option(Legion_USE_PACKAGE_REGISTRY "Register the build tree with the CMake package registry" OFF)
+mark_as_advanced(Legion_USE_PACKAGE_REGISTRY)
+if(Legion_USE_PACKAGE_REGISTRY)
+  set(CMAKE_EXPORT_NO_PACKAGE_REGISTRY OFF)
+endif()
+export(PACKAGE Legion)
 
 #------------------------------------------------------------------------------#
 # Examples
