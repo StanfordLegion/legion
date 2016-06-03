@@ -24,7 +24,6 @@ __demand(__inline)
 task foo(x : region(ispace(int1d), int), k : int)
   var size = 5
   var rtmp = region(ispace(int1d, size), int)
-  __forbid(__vectorize)
   for i in rtmp.ispace do
     rtmp[i] = [int](i) + k
   end

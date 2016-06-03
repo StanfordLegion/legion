@@ -12,30 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- vectorize_loops13.rg:27: vectorization failed: loop body has a corner case statement not supported for the moment
+--     r[p] = [int](p)
+--                 ^
+
 import "regent"
 
-__demand(__inline)
-task foo(x : region(ispace(int1d), int), k : int)
-  var rtmp = region(x.ispace, int)
-  for i in rtmp.ispace do
-    rtmp[i] = [int](i) + k
+task toplevel()
+  var is = ispace(int1d, 5)
+  var r = region(is, int)
+  __demand(__vectorize)
+  for p in is do
+    r[p] = [int](p)
   end
   var sum = 0
-  for e in rtmp do
+  for e in r do
     sum += @e
   end
-  return sum
+  regentlib.assert(sum == 10, "test failed")
 end
 
-task main()
-  var size : int1d = 4
-  var is = ispace(int1d, size)
-  var r = region(is, int)
-
-  var x = 0
-  x += foo(r, 10)
-  x += foo(r, 20)
-  regentlib.assert(x == 132, "test failed")
-end
-
-regentlib.start(main)
+regentlib.start(toplevel)

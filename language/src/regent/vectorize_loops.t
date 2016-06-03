@@ -787,6 +787,12 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
+    if std.is_bounded_type(node.arg.expr_type) and
+       node.arg.expr_type.dim >= 1 then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a corner case statement not supported for the moment")
+      return false
+    end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
