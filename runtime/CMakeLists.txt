@@ -228,6 +228,8 @@ target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_HIGH_LEVEL>
+  PUBLIC
+    MAX_FIELDS=${Legion_MAX_FIELDS}
 )
 target_include_directories(HighLevelRuntime
   INTERFACE
