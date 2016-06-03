@@ -976,25 +976,53 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
   return reconstruct_return_as_arg_type(return_type, mapping)
 end
 
+local function unpack_type(old_type, mapping)
+  if std.is_ispace(old_type) then
+    local index_type = std.type_sub(old_type.index_type, mapping)
+    return std.ispace(index_type), true
+  elseif std.is_region(old_type) then
+    local ispace_type
+    if not mapping[old_type:ispace()] then
+      ispace_type = unpack_type(old_type:ispace(), mapping)
+    else
+      ispace_type = std.type_sub(old_type:ispace(), mapping)
+    end
+    local fspace_type = std.type_sub(old_type.fspace_type, mapping)
+    return std.region(std.newsymbol(ispace_type, old_type.ispace_symbol:hasname()), fspace_type), true
+  elseif std.is_partition(old_type) then
+    local parent_region_type = std.type_sub(old_type:parent_region(), mapping)
+    local colors_type = std.type_sub(old_type:colors(), mapping)
+    return std.partition(
+      old_type.disjointness,
+      std.newsymbol(parent_region_type, old_type.parent_region_symbol:hasname()),
+      std.newsymbol(colors_type, old_type.colors_symbol:hasname())), true
+  elseif std.is_cross_product(old_type) then
+    local partition_types = old_type:partitions():map(
+      function(partition_type)
+        return std.type_sub(partition_type, mapping)
+    end)
+    return std.cross_product(unpack(partition_types)), true
+  elseif std.is_list_of_regions(old_type) then
+    return std.list(unpack_type(old_type.element_type, mapping)), true
+  else
+    return std.type_sub(old_type, mapping), false
+  end
+end
+
 function std.validate_fields(fields, constraints, params, args)
   local mapping = {}
   for i, param in ipairs(params) do
     local arg = args[i]
     mapping[param] = arg
+    mapping[param:gettype()] = arg:gettype()
   end
 
   local new_fields = terralib.newlist()
   for _, old_field in ipairs(fields) do
     local old_symbol, old_type = old_field.field, old_field.type
     local new_symbol = std.newsymbol(old_symbol:getname())
-    local new_type
-    if std.is_region(old_type) then
-      mapping[old_symbol] = new_symbol
-      local new_fspace_type = std.type_sub(old_type.fspace_type, mapping)
-      new_type = std.region(new_fspace_type)
-    else
-      new_type = std.type_sub(old_type, mapping)
-    end
+    mapping[old_symbol] = new_symbol
+    local new_type = unpack_type(old_type, mapping)
     new_symbol:settype(new_type)
     new_fields:insert({
         field = new_symbol:getname(),
@@ -1066,6 +1094,7 @@ function std.unpack_fields(fs, symbols)
 
   local mapping = {}
   local new_fields = terralib.newlist()
+  local new_constraints = terralib.newlist()
   local needs_unpack = false
   for i, old_field in ipairs(fs:getentries()) do
     local old_symbol, old_type = old_symbols[i], old_field.type
@@ -1076,18 +1105,17 @@ function std.unpack_fields(fs, symbols)
     else
       new_symbol = std.newsymbol(old_symbol:getname())
     end
-    local new_type
-    if std.is_region(old_type) then
-      mapping[old_symbol] = new_symbol
-      local fspace_type = std.type_sub(old_type.fspace_type, mapping)
-      new_type = std.region(fspace_type)
-      needs_unpack = true
-    else
-      new_type = std.type_sub(old_type, mapping)
-      if std.is_fspace_instance(new_type) then
-        new_type = std.unpack_fields(new_type)
-      end
+
+    mapping[old_symbol] = new_symbol
+    local new_type, is_unpack = unpack_type(old_type, mapping)
+    needs_unpack = needs_unpack or is_unpack
+
+    if std.is_fspace_instance(new_type) then
+      local sub_type, sub_constraints = std.unpack_fields(new_type)
+      new_type = sub_type
+      new_constraints:insertall(sub_constraints)
     end
+
     new_symbol:settype(new_type)
     new_fields:insert({
         field = new_symbol:getname(),
@@ -1100,7 +1128,6 @@ function std.unpack_fields(fs, symbols)
   end
 
   local constraints = fs:getconstraints()
-  local new_constraints = terralib.newlist()
   for _, constraint in ipairs(constraints) do
     local lhs = mapping[constraint.lhs] or constraint.lhs
     local rhs = mapping[constraint.rhs] or constraint.rhs
