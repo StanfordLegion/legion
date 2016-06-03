@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- undefined_task_param_type.rg:25: param type is undefined or nil
+-- undefined_task_param_type.rg:22: param type is undefined or nil
 -- task f(x : this_type_is_undefined)
 --        ^
 
