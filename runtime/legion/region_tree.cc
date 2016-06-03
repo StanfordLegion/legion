@@ -11414,6 +11414,18 @@ namespace Legion {
               }
               break;
             }
+          case OPEN_READ_ONLY_PROJ:
+            {
+              // Can easily mark this closed without doing anything
+            }
+          case OPEN_READ_WRITE_PROJ:
+            {
+              // Need to issue a close operation on all children
+            }
+          case OPEN_REDUCE_PROJ:
+            {
+              // need to issue a close operation on all children
+            }
           default:
             assert(false); // should never get here
         }

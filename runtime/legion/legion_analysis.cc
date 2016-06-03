@@ -2699,7 +2699,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
-      : open_state(NOT_OPEN), redop(0), rebuild_timeout(1)
+      : open_state(NOT_OPEN), redop(0), projection(0), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
     }
@@ -2707,7 +2707,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            const ColorPoint &c)
-      : ChildState(m), redop(0), rebuild_timeout(1)
+      : ChildState(m), redop(0), projection(0), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2727,6 +2727,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (redop != rhs.redop)
+        return false;
+      if (projection != rhs.projection)
         return false;
       if (redop == 0)
         return (open_state == rhs.open_state);
@@ -2761,6 +2763,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
+      assert(projection == rhs.projection);
 #endif
       if (redop > 0)
       {
@@ -2820,6 +2823,24 @@ namespace Legion {
           {
             logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
                         redop, open_children.size());
+            break;
+          }
+        case OPEN_READ_ONLY_PROJ:
+          {
+            logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
+                        projection);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION %d",
+                        projection);
+            break;
+          }
+        case OPEN_REDUCE_PROJ:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
+                        projection, redop);
             break;
           }
         default:

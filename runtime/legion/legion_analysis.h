@@ -365,6 +365,7 @@ namespace Legion {
     public:
       OpenState open_state;
       ReductionOpID redop;
+      ProjecitonID projection;
       unsigned rebuild_timeout;
     }; 
 
@@ -443,11 +444,14 @@ namespace Legion {
                                                             curr_epoch_users;
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
+    public:
       LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
       LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
+    public:
       // Fields for which we have outstanding local reductions
       FieldMask outstanding_reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
+    public:
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
       // Fields that have already undergone at least a partial close
