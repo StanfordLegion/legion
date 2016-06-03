@@ -144,7 +144,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
 
     for i = 1, #node.symbols do
       types:insert(flip_types.type(simd_width, node.types[i]))
-      symbols:insert(std.newsymbol(types[i], node.symbols[i]:getname() .. "_vectorized"))
+      symbols:insert(std.newsymbol(types[i], node.symbols[i]:hasname() and node.symbols[i]:getname() .. "_vectorized"))
       cx:add_substitution(node.symbols[i], symbols[i])
       if i <= #node.values then
         values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
