@@ -1262,7 +1262,7 @@ function std.implicit_cast(from, to, expr)
   elseif std.is_index_type(to) then
     return `([to]([expr]))
   else
-    return quote var v : to = [expr] in v end
+    return `([to](expr))
   end
 end
 
