@@ -1570,7 +1570,7 @@ namespace Legion {
     public:
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
-      ArgumentMap create_argument_map(Context ctx);
+      ArgumentMap create_argument_map(void);
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
       FutureMap execute_index_space(Context ctx, 

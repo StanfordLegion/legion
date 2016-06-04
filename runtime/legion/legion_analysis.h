@@ -365,7 +365,7 @@ namespace Legion {
     public:
       OpenState open_state;
       ReductionOpID redop;
-      ProjecitonID projection;
+      ProjectionID projection;
       unsigned rebuild_timeout;
     }; 
 
@@ -874,28 +874,6 @@ namespace Legion {
       std::vector<ColorPoint> path;
       unsigned min_depth;
       unsigned max_depth;
-    };
-
-    /**
-     * \class FatTreePath
-     * A data structure for representing many different
-     * paths through a region tree.
-     */
-    class FatTreePath {
-    public:
-      FatTreePath(void);
-      FatTreePath(const FatTreePath &rhs);
-      ~FatTreePath(void);
-    public:
-      FatTreePath& operator=(const FatTreePath &rhs);
-    public:
-      inline const std::map<ColorPoint,FatTreePath*>& get_children(void) const
-        { return children; }
-      void add_child(const ColorPoint &child_color, FatTreePath *child);
-      bool add_child(const ColorPoint &child_color, FatTreePath *child,
-                     IndexTreeNode *index_tree_node);
-    protected:
-      std::map<ColorPoint,FatTreePath*> children;
     };
 
     /**

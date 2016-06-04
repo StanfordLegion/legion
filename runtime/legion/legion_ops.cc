@@ -381,15 +381,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FatTreePath* Operation::compute_fat_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called for inherited types
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::select_sources(const InstanceRef &target,
                                    const InstanceSet &sources,
                                    std::vector<unsigned> &ranking)
@@ -9087,25 +9078,6 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
-    }
-
-    //--------------------------------------------------------------------------
-    FatTreePath* DependentPartitionOp::compute_fat_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx == 0);
-#endif
-      if (requirement.handle_type == PART_PROJECTION)
-      {
-        IndexPartition handle = requirement.partition.get_index_partition();
-        return runtime->forest->compute_full_fat_path(handle);
-      }
-      else
-      {
-        IndexSpace handle = requirement.region.get_index_space();
-        return runtime->forest->compute_full_fat_path(handle);
-      }
     }
 
     //--------------------------------------------------------------------------

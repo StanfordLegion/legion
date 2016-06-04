@@ -731,7 +731,6 @@ namespace Legion {
       INDEX_PERFORM_INLINING_CALL,
       INDEX_CLONE_AS_SLICE_CALL,
       INDEX_HANDLE_FUTURE,
-      INDEX_ENUMERATE_POINTS_CALL,
       INDEX_RETURN_SLICE_MAPPED_CALL,
       INDEX_RETURN_SLICE_COMPLETE_CALL,
       INDEX_RETURN_SLICE_COMMIT_CALL,
@@ -780,8 +779,6 @@ namespace Legion {
       REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
       REGION_NODE_REGISTER_LOGICAL_USER_CALL,
       REGION_NODE_OPEN_LOGICAL_NODE_CALL,
-      REGION_NODE_REGISTER_LOGICAL_FAT_PATH_CALL,
-      REGION_NODE_OPEN_LOGICAL_FAT_PATH_CALL,
       REGION_NODE_CLOSE_LOGICAL_NODE_CALL,
       REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
       REGION_NODE_PERFORM_LOGICAL_CLOSES_CALL,
@@ -914,7 +911,6 @@ namespace Legion {
       "Index Perform Inlining",                                       \
       "Index Clone As Slice",                                         \
       "Index Handle Future",                                          \
-      "Index Enumerate Points",                                       \
       "Index Return Slice Mapped",                                    \
       "Index Return Slice Complete",                                  \
       "Index Return Slice Commit",                                    \
@@ -963,8 +959,6 @@ namespace Legion {
       "Region Tree Physical Detach File",                             \
       "Region Node Register Logical User",                            \
       "Region Node Open Logical Node",                                \
-      "Region Node Register Logical Fat Path",                        \
-      "Region Node Open Logical Fat Path",                            \
       "Region Node Close Logical Node",                               \
       "Region Node Siphon Logical Node",                              \
       "Region Node Perform Logical Closes",                           \
@@ -1113,7 +1107,6 @@ namespace Legion {
 
     class RegionTreeContext;
     class RegionTreePath;
-    class FatTreePath;
     class PathTraverser;
     class NodeTraverser;
     class PhysicalTraverser;

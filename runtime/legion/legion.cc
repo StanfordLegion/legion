@@ -2803,7 +2803,7 @@ namespace Legion {
     ArgumentMap Runtime::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_argument_map(ctx);
+      return runtime->create_argument_map();
     }
 
     //--------------------------------------------------------------------------

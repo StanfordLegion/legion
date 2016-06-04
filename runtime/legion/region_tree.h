@@ -519,22 +519,6 @@ namespace Legion {
       void initialize_path(IndexPartition child, IndexPartition parent,
                            RegionTreePath &path);
     public:
-      FatTreePath* compute_fat_path(IndexSpace child, IndexSpace parent,
-                               std::map<IndexTreeNode*,FatTreePath*> &storage,
-                               bool test_overlap, bool &overlap);
-      FatTreePath* compute_fat_path(IndexSpace child, 
-                                    IndexPartition parent,
-                               std::map<IndexTreeNode*,FatTreePath*> &storage,
-                               bool test_overlap, bool &overlap);
-      FatTreePath* compute_full_fat_path(IndexSpace handle);
-      FatTreePath* compute_full_fat_path(IndexPartition handle);
-    protected:
-      FatTreePath* compute_fat_path(IndexTreeNode *child, IndexTreeNode *parent,
-                                 std::map<IndexTreeNode*,FatTreePath*> &storage,
-                                 bool test_overlap, bool &overlap);
-      FatTreePath* compute_full_fat_path(IndexSpaceNode *node);
-      FatTreePath* compute_full_fat_path(IndexPartNode *node);
-    public:
 #ifdef NEW_INSTANCE_CREATION
       ApEvent create_instance(const Domain &dom, Memory target,
                             const std::vector<std::pair<FieldID,size_t> > &fids,
@@ -1374,18 +1358,6 @@ namespace Legion {
                              RestrictInfo &restrict_info,
                              const bool already_traced,
                              const bool projecting);
-      void register_logical_fat_path(ContextID ctx,
-                                     const LogicalUser &user,
-                                     FatTreePath *fat_path,
-                                     VersionInfo &version_info,
-                                     RestrictInfo &restrict_info,
-                                     const TraceInfo &trace_info,
-                                     const bool report_uninitialized = false);
-      void open_logical_fat_path(ContextID ctx,
-                                 const LogicalUser &user,
-                                 FatTreePath *fat_path,
-                                 VersionInfo &version_info,
-                                 RestrictInfo &restrict_info);
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user,
                                     VersionInfo &version_info);

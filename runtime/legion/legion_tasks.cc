@@ -7218,7 +7218,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
       sliced = false;
-      minimal_points_assigned = 0;
       redop = 0;
       reduction_op = NULL;
       serdez_redop_fns = NULL;
@@ -7240,15 +7239,8 @@ namespace Legion {
         reduction_state = NULL;
         reduction_state_size = 0;
       }
-      for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-            minimal_points.begin(); it != minimal_points.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->second != NULL);
-#endif
-        delete it->second;
-      }
-      minimal_points.clear(); 
+      // Remove our reference to the argument map
+      argument_map = ArgumentMap();
       slices.clear(); 
       version_infos.clear();
       restrict_infos.clear();
@@ -7291,7 +7283,7 @@ namespace Legion {
       }
 
 #ifdef DEBUG_LEGION
-      assert(minimal_points_assigned == 0);
+      size_t total_points = 0;
 #endif
       for (unsigned idx = 0; idx < output.slices.size(); idx++)
       {
@@ -7316,29 +7308,41 @@ namespace Legion {
         {
           case 0:
             {
-              if (d.get_volume() <= 0)
+              size_t volume = d.get_volume();
+              if (volume == 0)
                 empty = true;
+              else
+                total_points += volume;
               break;
             }
           case 1:
             {
               Rect<1> rec = d.get_rect<1>();
-              if (rec.volume() <= 0)
+              size_t volume = rec.volume();
+              if (volume == 0)
                 empty = true;
+              else
+                total_points += volume;
               break;
             }
           case 2:
             {
               Rect<2> rec = d.get_rect<2>();
-              if (rec.volume() <= 0)
+              size_t volume = rec.volume();
+              if (volume == 0)
                 empty = true;
+              else
+                total_points += volume;
               break;
             }
           case 3:
             {
               Rect<3> rec = d.get_rect<3>();
-              if (rec.volume() <= 0)
+              size_t volume = rec.volume();
+              if (volume == 0)
                 empty = true;
+              else
+                total_points += volume;
               break;
             }
           default:
@@ -7361,23 +7365,21 @@ namespace Legion {
                                                          output.slices.size());
         slices.push_back(new_slice);
       }
+#if DEBUG_LEGION
       // If the volumes don't match, then something bad happend in the mapper
-      if (minimal_points_assigned != minimal_points.size())
+      if (total_points != index_domain.get_volume())
       {
         log_run.error("Invalid mapper output from invocation of 'slice_task' "
                       "on mapper %s. Mapper returned slices with a total "
-                      "volume %d that does not match the expected volume of "
+                      "volume %ld that does not match the expected volume of "
                       "%ld when slicing task %s (ID %lld).", 
-                      mapper->get_mapper_name(), minimal_points_assigned,
+                      mapper->get_mapper_name(), total_points,
                       index_domain.get_volume(), 
                       get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
         assert(false);
-#endif
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
-      else
-        minimal_points.clear();
+#endif
       bool success = trigger_slices(); 
       // If we succeeded and this is an intermediate slice task
       // then we can reclaim it, otherwise, if it is the original
@@ -7408,14 +7410,13 @@ namespace Legion {
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
+      this->argument_map = rhs->argument_map;
       if (this->redop != 0)
       {
         this->reduction_op = rhs->reduction_op;
         this->serdez_redop_fns = rhs->serdez_redop_fns;
         initialize_reduction_state();
       }
-      // Take ownership of all the points
-      rhs->assign_points(this, d);
       this->restrict_infos = rhs->restrict_infos;
       // Copy over the version infos that we need, we can skip this if
       // we are remote and locally mapped
@@ -7426,69 +7427,9 @@ namespace Legion {
         {
           if (IS_NO_ACCESS(regions[idx]))
             continue;
-          if (regions[idx].handle_type != SINGULAR)
-          {
-            VersionInfo &local_info = this->version_infos[idx];
-            const VersionInfo &rhs_info = rhs->version_infos[idx];
-            for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                  minimal_points.begin(); it != minimal_points.end(); it++)
-            {
-              local_info.clone_version_info(runtime->forest, 
-                  it->second->find_logical_region(idx), rhs_info,
-                  IS_WRITE(regions[idx]));
-            }
-          }
-          else // non-projection we can copy over the normal way
-            this->version_infos[idx] = rhs->version_infos[idx];
+          this->version_infos[idx] = rhs->version_infos[idx];
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::assign_points(MultiTask *target, const Domain &d)
-    //--------------------------------------------------------------------------
-    {
-      for (Domain::DomainPointIterator itr(d); itr; itr++)
-      {
-        std::map<DomainPoint,MinimalPoint*>::iterator finder = 
-          minimal_points.find(itr.p);
-        if (finder == minimal_points.end())
-        {
-          log_run.error("Invalid mapper domain slice result for mapper %d "
-                        "on processor " IDFMT " for task %s (ID %lld). "
-                        "Mapper returned slices with additional points "
-                        "beyond the original index space.", map_id,
-                        current_proc.id, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-        }
-        if (finder->second == NULL)
-        {
-          log_run.error("Invalid mapper domain slice result for mapper %d "
-                        "on processor " IDFMT " for task %s (ID %lld). "
-                        "Mapper returned overlapping slices.", map_id,
-                        current_proc.id, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-        }
-        target->add_point(itr.p, finder->second);
-        finder->second = NULL; // mark null to avoid duplicate gives
-        minimal_points_assigned++;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::add_point(const DomainPoint &p, MinimalPoint *point)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(minimal_points.find(p) == minimal_points.end());
-#endif
-      minimal_points[p] = point;
     }
 
     //--------------------------------------------------------------------------
@@ -7613,13 +7554,6 @@ namespace Legion {
       pack_base_task(rez, target);
       rez.serialize(sliced);
       rez.serialize(redop);
-      rez.serialize<size_t>(minimal_points.size());
-      for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-            minimal_points.begin(); it != minimal_points.end(); it++)
-      {
-        pack_point(rez, it->first);
-        it->second->pack(rez);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7637,16 +7571,6 @@ namespace Legion {
         reduction_op = Runtime::get_reduction_op(redop);
         serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
         initialize_reduction_state();
-      }
-      size_t num_points;
-      derez.deserialize(num_points);
-      for (unsigned idx = 0; idx < num_points; idx++)
-      {
-        DomainPoint p;
-        unpack_point(derez, p);
-        MinimalPoint *point = new MinimalPoint();
-        point->unpack(derez);
-        minimal_points[p] = point;
       }
     }
 
@@ -9443,14 +9367,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::initialize_point(SliceTask *owner, MinimalPoint *mp)
+    void PointTask::initialize_point(SliceTask *owner, MinimalPoint &mp)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
-      compute_point_region_requirements(mp);
+      compute_point_region_requirements(&mp);
       update_no_access_regions();
+      // Get our point
+      index_point = mp.get_domain_point();
       // Get our argument
-      mp->assign_argument(local_args, local_arglen);
+      mp.assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
       point_termination = Runtime::create_ap_user_event();
     }  
@@ -10224,9 +10150,7 @@ namespace Legion {
           (*it)->deactivate();
         }
         locally_mapped_slices.clear();
-      }
-      // Remove our reference to the argument map
-      argument_map = ArgumentMap();
+      } 
       // Remove our reference to the future map
       future_map = FutureMap();
       if (predicate_false_result != NULL)
@@ -10603,8 +10527,6 @@ namespace Legion {
 #endif
       // First compute the parent indexes
       compute_parent_indexes();
-      // Enumerate our points
-      enumerate_points();
       begin_dependence_analysis();
       // If we are tracing we need to record any aliased region requirements
       if (is_tracing())
@@ -10738,92 +10660,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rerun_analysis_requirements.insert(idx);
-    }
-
-    //--------------------------------------------------------------------------
-    FatTreePath* IndexTask::compute_fat_path(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDEX_COMPUTE_FAT_PATH_CALL);
-#ifdef DEBUG_LEGION
-      assert(idx < regions.size());
-      assert(regions[idx].handle_type != SINGULAR);
-#endif
-      FatTreePath *result = NULL; 
-      std::map<IndexTreeNode*,FatTreePath*> storage;
-      bool overlap = false;
-      const bool overlap_is_bad = IS_WRITE(regions[idx]);
-      if (regions[idx].handle_type == REG_PROJECTION)
-      {
-        IndexSpace parent_space = regions[idx].region.get_index_space();
-        if (overlap_is_bad)
-        {
-          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
-          {
-            LogicalRegion dst = it->second->find_logical_region(idx);
-            result = runtime->forest->compute_fat_path(dst.get_index_space(),
-                               parent_space, storage, true/*test*/, overlap);
-            if (overlap)
-              break;
-          }
-        }
-        else
-        {
-          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
-          {
-            LogicalRegion dst = it->second->find_logical_region(idx);
-            result = runtime->forest->compute_fat_path(dst.get_index_space(),
-                               parent_space, storage, false/*test*/, overlap);
-          }
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(regions[idx].handle_type == PART_PROJECTION);
-#endif
-        IndexPartition parent_partition = 
-                        regions[idx].partition.get_index_partition();
-        if (overlap_is_bad)
-        {
-          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
-          {
-            LogicalRegion dst = it->second->find_logical_region(idx);
-            result = runtime->forest->compute_fat_path(dst.get_index_space(),
-                            parent_partition, storage, true/*test*/, overlap);
-            if (overlap)
-              break;
-          }
-        }
-        else
-        {
-          for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
-          {
-            LogicalRegion dst = it->second->find_logical_region(idx);
-            result = runtime->forest->compute_fat_path(dst.get_index_space(),
-                            parent_partition, storage, false/*test*/, overlap);
-          }
-        }
-      }
-      if (overlap_is_bad && overlap)
-      {
-        log_task.error("Index Space Task %s (ID %lld) violated the disjoint "
-                       "projection region requirement assumption for region "
-                       "requirement %d!", get_task_name(), 
-                       get_unique_id(), idx);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_BAD_PROJECTION_USE);
-      }
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10980,17 +10816,10 @@ namespace Legion {
         if (!is_sliced() && target_proc.exists() && 
             (target_proc != current_proc))
         {
-#ifdef DEBUG_LEGION
-          assert(minimal_points_assigned == 0);
-#endif
           // Make a slice copy and send it away
           SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
-#ifdef DEBUG_LEGION
-          assert(minimal_points_assigned == minimal_points.size());
-#endif
-          minimal_points.clear();
           runtime->send_task(clone);
           return false; // We have now been sent away
         }
@@ -11316,124 +11145,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::enumerate_points(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDEX_ENUMERATE_POINTS_CALL);
-      for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
-      {
-        MinimalPoint *point = new MinimalPoint();
-        // Find the argument for this point if it exists
-        TaskArgument arg = argument_map.impl->get_point(itr.p);
-        point->add_argument(arg, false/*own*/);
-        minimal_points[itr.p] = point;
-      }
-      // Figure out which requirements are projection and update them
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].handle_type == SINGULAR)
-          continue;
-        else if (regions[idx].handle_type == PART_PROJECTION)
-        {
-          // Check to see if we're doing default projection
-          if (regions[idx].projection == 0)
-          {
-            for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                  minimal_points.begin(); it != minimal_points.end(); it++)
-            {
-              if (it->first.get_dim() > 3)
-              {
-                log_task.error("Projection ID 0 is invalid for tasks whose "
-                               "points are larger than three dimensional "
-                               "unsigned integers.  Points for task %s "
-                               "have elements of %d dimensions",
-                               get_task_name(), it->first.get_dim());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
-              }
-              it->second->add_projection_region(idx, 
-                runtime->forest->get_logical_subregion_by_color(
-                    regions[idx].partition, ColorPoint(it->first)));
-            }
-          }
-          else
-          {
-            ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
-            {
-              PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
-                      regions[idx].projection);
-              for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->second->add_projection_region(idx,  
-                    (*projfn)(regions[idx].partition,
-                              it->first,runtime->external));
-              }
-            }
-            else
-            {
-              for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->second->add_projection_region(idx,
-                    functor->project(DUMMY_CONTEXT, this, idx,
-                                     regions[idx].partition, it->first));
-              }
-            }
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(regions[idx].handle_type == REG_PROJECTION);
-#endif
-          if (regions[idx].projection != 0)
-          {
-            ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
-            {
-              RegionProjectionFnptr projfn = 
-                Runtime::find_region_projection_function(
-                    regions[idx].projection);
-              for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->second->add_projection_region(idx, 
-                  (*projfn)(regions[idx].region,
-                            it->first, runtime->external));
-              }
-            }
-            else
-            {
-              for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->second->add_projection_region(idx, 
-                  functor->project(DUMMY_CONTEXT, this, idx, 
-                                   regions[idx].region, it->first));
-              }
-            }
-          }
-          else
-          {
-            // Otherwise we are the default case in which 
-            // case we don't need to do anything
-            // Update the region requirement kind
-            // to be singular since all points will use 
-            // the same logical region
-            regions[idx].handle_type = SINGULAR;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::record_locally_mapped_slice(SliceTask *local_slice)
     //--------------------------------------------------------------------------
     {
@@ -11737,7 +11448,7 @@ namespace Legion {
       }
       deactivate_multi();
       // Deactivate all our points 
-      for (std::deque<PointTask*>::const_iterator it = points.begin();
+      for (std::vector<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
       {
         (*it)->deactivate(); 
@@ -12067,6 +11778,26 @@ namespace Legion {
       {
         points[idx]->pack_task(rez, target);
       }
+      // If we don't have any points, we have to pack the arguments
+      if (points.empty())
+      {
+        std::map<DomainPoint,TaskArgument> non_empty_args;
+        for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+        {
+          TaskArgument arg = argument_map.impl->get_point(itr.p);
+          if (arg.get_size() > 0)
+            non_empty_args[itr.p] = arg;
+        }
+        rez.serialize<size_t>(non_empty_args.size());
+        for (std::map<DomainPoint,TaskArgument>::const_iterator it = 
+              non_empty_args.begin(); it != non_empty_args.end(); it++)
+        {
+          pack_point(rez, it->first);
+          size_t arg_size = it->second.get_size();
+          rez.serialize(arg_size);
+          rez.serialize(it->second.get_ptr(), arg_size);
+        }
+      }
       bool deactivate_now = true;
       if (!is_remote() && is_locally_mapped())
       {
@@ -12133,6 +11864,26 @@ namespace Legion {
           LegionSpy::log_slice_point(get_unique_id(), 
                                      point->get_unique_id(),
                                      point->index_point);
+      }
+      if (num_points == 0)
+      {
+        size_t num_local_args;
+        derez.deserialize(num_local_args);
+        if (num_local_args > 0)
+        {
+          // We also have to unpack our point arguments
+          argument_map = runtime->create_argument_map();
+          for (unsigned idx = 0; idx < num_local_args; idx++)
+          {
+            DomainPoint dp;
+            unpack_point(derez, dp);
+            size_t arg_size;
+            derez.deserialize(arg_size);
+            argument_map.set_point(dp, 
+                TaskArgument(derez.get_current_pointer(), arg_size));
+            derez.advance_pointer(arg_size);
+          }
+        }
       }
       // Return true to add this to the ready queue
       return true;
@@ -12230,8 +11981,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PointTask* SliceTask::clone_as_point_task(const DomainPoint &p,
-                                              MinimalPoint *mp)
+    PointTask* SliceTask::clone_as_point_task(MinimalPoint &mp)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
@@ -12244,7 +11994,6 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
-      result->index_point = p;
       // Now figure out our local point information
       result->initialize_point(this, mp);
       if (Runtime::legion_spy_enabled)
@@ -12259,28 +12008,146 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
+      size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
-      assert(index_domain.get_volume() > 0);
+      assert(num_points > 0);
 #endif
-      // Enumerate all the points
-      for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
-            minimal_points.begin(); it != minimal_points.end(); it++)
+      unsigned point_idx = 0;
+      std::vector<MinimalPoint> minimal_points(num_points);
+      // Enumerate all the points in our slice and make point tasks
+      for (Domain::DomainPointIterator itr(index_domain); 
+            itr; itr++, point_idx++)
       {
-        PointTask *next_point = clone_as_point_task(it->first, it->second);
-        points.push_back(next_point);
-        // We can now delete our old minimal points
-        delete it->second;
+        MinimalPoint &mp = minimal_points[point_idx];
+        mp.add_domain_point(itr.p);
+        // Find the argument for this point if it exists
+        TaskArgument arg = argument_map.impl->get_point(itr.p);
+        mp.add_argument(arg, false/*own*/);
       }
-      minimal_points.clear();
-#ifdef DEBUG_LEGION
-      assert(index_domain.get_volume() == points.size());
-#endif
+      // Compute any projection region requirements
+      project_region_requirements(minimal_points);  
+      // Then create all the point tasks
+      points.resize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+        points[idx] = clone_as_point_task(minimal_points[idx]);
+      // Initialize the mapping index
       mapping_index = 0;
       // Mark how many points we have
       num_unmapped_points = points.size();
       num_uncomplete_points = points.size();
       num_uncommitted_points = points.size();
     } 
+
+    //--------------------------------------------------------------------------
+    void SliceTask::project_region_requirements(
+                                      std::vector<MinimalPoint> &minimal_points)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which requirements are projection and update them
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].handle_type == SINGULAR)
+          continue;
+        else if (regions[idx].handle_type == PART_PROJECTION)
+        {
+          // Check to see if we're doing default projection
+          if (regions[idx].projection == 0)
+          {
+            for (std::vector<MinimalPoint>::iterator it = 
+                  minimal_points.begin(); it != minimal_points.end(); it++)
+            {
+              const DomainPoint &point = it->get_domain_point();
+              if (point.get_dim() > 3)
+              {
+                log_task.error("Projection ID 0 is invalid for tasks whose "
+                               "points are larger than three dimensional "
+                               "unsigned integers.  Points for task %s "
+                               "have elements of %d dimensions",
+                               get_task_name(), point.get_dim());
+#ifdef DEBUG_LEGION
+                assert(false);
+#endif
+                exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
+              }
+              it->add_projection_region(idx, 
+                  runtime->forest->get_logical_subregion_by_color(
+                    regions[idx].partition, ColorPoint(point)));
+            }
+          }
+          else
+          {
+            ProjectionFunctor *functor = 
+              runtime->find_projection_functor(regions[idx].projection);
+            if (functor == NULL)
+            {
+              PartitionProjectionFnptr projfn = 
+                  Runtime::find_partition_projection_function(
+                      regions[idx].projection);
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx,
+                    (*projfn)(regions[idx].partition, 
+                              it->get_domain_point(), runtime->external));
+              }
+            }
+            else
+            {
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx,
+                    functor->project(DUMMY_CONTEXT, this, idx, 
+                             regions[idx].partition, it->get_domain_point()));
+              }
+            }
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(regions[idx].handle_type == REG_PROJECTION);
+#endif
+          if (regions[idx].projection != 0)
+          {
+            ProjectionFunctor *functor = 
+              runtime->find_projection_functor(regions[idx].projection);
+            if (functor == NULL)
+            {
+              RegionProjectionFnptr projfn = 
+                Runtime::find_region_projection_function(
+                    regions[idx].projection);
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx,
+                    (*projfn)(regions[idx].region,
+                              it->get_domain_point(), runtime->external));
+              }
+            }
+            else
+            {
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx, 
+                    functor->project(DUMMY_CONTEXT, this, idx,
+                           regions[idx].region, it->get_domain_point()));
+              }
+            }
+          }
+          else
+          {
+            // Otherwise we are the default case in which 
+            // case we don't need to do anything
+            // Update the region requirement kind
+            // to be singular since all points will use 
+            // the same logical region
+            regions[idx].handle_type = SINGULAR;
+          }
+        }
+      }
+    }
 
     //--------------------------------------------------------------------------
     void SliceTask::trigger_task_complete(void)
@@ -12546,7 +12413,7 @@ namespace Legion {
     {
       // Send back any created state that our point tasks made
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      for (std::deque<PointTask*>::const_iterator it = points.begin();
+      for (std::vector<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
       {
         (*it)->send_back_created_state(target, regions.size(),
@@ -12806,7 +12673,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion MinimalPoint::find_logical_region(unsigned index)
+    LogicalRegion MinimalPoint::find_logical_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
       std::map<unsigned,LogicalRegion>::const_iterator finder = 

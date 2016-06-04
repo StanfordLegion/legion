@@ -710,8 +710,6 @@ namespace Legion {
       bool trigger_slices(void);
       void clone_multi_from(MultiTask *task, const Domain &d, Processor p,
                             bool recurse, bool stealable);
-      void assign_points(MultiTask *target, const Domain &d);
-      void add_point(const DomainPoint &p, MinimalPoint *point);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -764,12 +762,11 @@ namespace Legion {
       std::list<SliceTask*> slices;
       std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
-      std::map<DomainPoint,MinimalPoint*> minimal_points;
-      unsigned minimal_points_assigned;
       bool sliced;
     protected:
       ReductionOpID redop;
       const ReductionOp *reduction_op;
+      ArgumentMap argument_map;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
@@ -966,7 +963,7 @@ namespace Legion {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     public:
-      void initialize_point(SliceTask *owner, MinimalPoint *mp);
+      void initialize_point(SliceTask *owner, MinimalPoint &mp);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -1212,7 +1209,6 @@ namespace Legion {
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
-      virtual FatTreePath* compute_fat_path(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void resolve_false(void);
@@ -1250,7 +1246,6 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
     public:
-      void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points, long long denom,
@@ -1268,7 +1263,6 @@ namespace Legion {
       static void process_slice_commit(Deserializer &derez);
     protected:
       friend class SliceTask;
-      ArgumentMap argument_map;
       FutureMap future_map;
       Future reduction_future;
       // The fraction used to keep track of what part of
@@ -1341,9 +1335,10 @@ namespace Legion {
                                  size_t result_size, bool owner);
     public:
       virtual void register_must_epoch(void);
-      PointTask* clone_as_point_task(const DomainPoint &p,
-                                     MinimalPoint *mp);
+      PointTask* clone_as_point_task(MinimalPoint &mp);
       void enumerate_points(void);
+      void project_region_requirements(
+                             std::vector<MinimalPoint> &minimal_points);
       void prewalk_slice(void);
       void apply_local_version_infos(std::set<RtEvent> &map_conditions);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
@@ -1371,7 +1366,7 @@ namespace Legion {
     protected:
       friend class IndexTask;
       bool reclaim; // used for reclaiming intermediate slices
-      std::deque<PointTask*> points;
+      std::vector<PointTask*> points;
     protected:
       unsigned mapping_index;
       unsigned num_unmapped_points;
@@ -1438,15 +1433,18 @@ namespace Legion {
     public:
       MinimalPoint& operator=(const MinimalPoint &rhs);
     public:
+      inline void add_domain_point(const DomainPoint &p) { dp = p; }
       void add_projection_region(unsigned index, LogicalRegion handle);
       void add_argument(const TaskArgument &arg, bool own);
     public:
+      inline const DomainPoint& get_domain_point(void) const { return dp; }
       void assign_argument(void *&local_arg, size_t &local_arglen);
-      LogicalRegion find_logical_region(unsigned index);
+      LogicalRegion find_logical_region(unsigned index) const;
     public:
       void pack(Serializer &rez);
       void unpack(Deserializer &derez);
     protected:
+      DomainPoint dp;
       std::map<unsigned,LogicalRegion> projections;
       void *arg;
       size_t arglen;

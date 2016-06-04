@@ -10604,7 +10604,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap Runtime::create_argument_map(Context ctx)
+    ArgumentMap Runtime::create_argument_map(void)
     //--------------------------------------------------------------------------
     {
       ArgumentMapImpl *impl = legion_new<ArgumentMapImpl>(
