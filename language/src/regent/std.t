@@ -626,6 +626,15 @@ function std.type_sub(t, mapping)
     return std.ref(std.type_sub(t.pointer_type, mapping), unpack(t.field_path))
   elseif terralib.types.istype(t) and t:ispointer() then
     return &std.type_sub(t.type, mapping)
+  elseif std.is_partition(t) then
+    local parent_region_symbol = mapping[t.parent_region_symbol] or t.parent_region_symbol
+    local colors_symbol = mapping[t.colors_symbol] or t.colors_symbol
+    if parent_region_symbol == t.parent_region_symbol and
+       colors_symbol == t.colors_symbol then
+       return t
+    else
+      return std.partition(t.disjointness, parent_region_symbol, colors_symbol)
+    end
   else
     return t
   end
@@ -992,10 +1001,18 @@ local function unpack_type(old_type, mapping)
   elseif std.is_partition(old_type) then
     local parent_region_type = std.type_sub(old_type:parent_region(), mapping)
     local colors_type = std.type_sub(old_type:colors(), mapping)
+    local parent_region_symbol = old_type.parent_region_symbol
+    local colors_symbol = old_type.colors_symbol
+    assert(not mapping[parent_region_symbol] or
+           mapping[parent_region_symbol]:gettype() == parent_region_type)
+    assert(not mapping[colors_symbol] or
+           mapping[colors_symbol]:gettype() == colors_type)
     return std.partition(
       old_type.disjointness,
-      std.newsymbol(parent_region_type, old_type.parent_region_symbol:hasname()),
-      std.newsymbol(colors_type, old_type.colors_symbol:hasname())), true
+      mapping[parent_region_symbol] or
+      std.newsymbol(parent_region_type, parent_region_symbol:hasname()),
+      mapping[colors_symbol] or
+      std.newsymbol(colors_type, colors_symbol:hasname())), true
   elseif std.is_cross_product(old_type) then
     local partitions = data.zip(old_type:partitions(), old_type.partition_symbols):map(
       function(pair)
@@ -1096,7 +1113,15 @@ function std.unpack_fields(fs, symbols)
   fs:complete() -- Need fields
   local old_symbols = std.struct_entries_symbols(fs)
 
+  -- give an identity mapping for field space arguments
+  -- to avoid having two different symbols of the same name
+  -- (which can later seriously confuse type substitution)
   local mapping = {}
+  for i, arg in ipairs(fs.args) do
+    mapping[arg] = arg
+    mapping[arg:gettype()] = arg:gettype()
+  end
+
   local new_fields = terralib.newlist()
   local new_constraints = terralib.newlist()
   local needs_unpack = false
