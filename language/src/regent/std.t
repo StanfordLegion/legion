@@ -851,7 +851,7 @@ end
 local function reconstruct_param_as_arg_symbol(param_type, mapping)
   local param_as_arg_symbol = mapping[param_type]
   for k, v in pairs(mapping) do
-    if std.is_symbol(v) and v:gettype() == mapping[param_type] then
+    if std.is_symbol(v) and (v:gettype() == param_type or v:gettype() == mapping[param_type]) then
       param_as_arg_symbol = v
     end
   end
@@ -997,11 +997,14 @@ local function unpack_type(old_type, mapping)
       std.newsymbol(parent_region_type, old_type.parent_region_symbol:hasname()),
       std.newsymbol(colors_type, old_type.colors_symbol:hasname())), true
   elseif std.is_cross_product(old_type) then
-    local partition_types = old_type:partitions():map(
-      function(partition_type)
-        return std.type_sub(partition_type, mapping)
+    local partitions = data.zip(old_type:partitions(), old_type.partition_symbols):map(
+      function(pair)
+        local old_partition_type, old_partition_symbol = unpack(pair)
+        return std.newsymbol(
+          std.type_sub(old_partition_type, mapping),
+          old_partition_symbol:getname())
     end)
-    return std.cross_product(unpack(partition_types)), true
+    return std.cross_product(unpack(partitions)), true
   elseif std.is_list_of_regions(old_type) then
     return std.list(unpack_type(old_type.element_type, mapping)), true
   else
@@ -1023,6 +1026,7 @@ function std.validate_fields(fields, constraints, params, args)
     local new_symbol = std.newsymbol(old_symbol:getname())
     mapping[old_symbol] = new_symbol
     local new_type = unpack_type(old_type, mapping)
+    mapping[old_type] = new_type
     new_symbol:settype(new_type)
     new_fields:insert({
         field = new_symbol:getname(),
@@ -1108,6 +1112,7 @@ function std.unpack_fields(fs, symbols)
 
     mapping[old_symbol] = new_symbol
     local new_type, is_unpack = unpack_type(old_type, mapping)
+    mapping[old_type] = new_type
     needs_unpack = needs_unpack or is_unpack
 
     if std.is_fspace_instance(new_type) then
