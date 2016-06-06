@@ -68,29 +68,33 @@ gasnet-ldflags:
 gasnet-libs:
 	@echo $(GASNET_LIBS) $(GASNETTOOLS_LIBS)"
   )
-  find_program(GASNet_MAKE_PROGRAM gmake make smake)
-  mark_as_advanced(GASNet_MAKE_PROGRAM)
-  execute_process(
-    COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-cflags
-    OUTPUT_VARIABLE _GASNet_CFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
-  )
-  execute_process(
-    COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-cxxflags
-    OUTPUT_VARIABLE _GASNet_CXXFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
-  )
-  execute_process(
-    COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ldflags
-    OUTPUT_VARIABLE _GASNet_LDFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
-  )
-  execute_process(
-    COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-libs
-    OUTPUT_VARIABLE _GASNet_LIBS
-    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
-  )
-  file(REMOVE ${_TEMP_MAKEFILE})
+  find_program(GASNet_MAKE_PROGRAM NAMES gmake make smake)
+  if(NOT GASNet_MAKE_PROGRAM)
+    message(WARNING "Unable to locate compatible make for parsing GASNet makefile options")
+  else()
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-cflags
+      OUTPUT_VARIABLE _GASNet_CFLAGS
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-cxxflags
+      OUTPUT_VARIABLE _GASNet_CXXFLAGS
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ldflags
+      OUTPUT_VARIABLE _GASNet_LDFLAGS
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-libs
+      OUTPUT_VARIABLE _GASNet_LIBS
+      ERROR_VARIABLE _GASNet_LIBS_ERROR
+      OUTPUT_STRIP_TRAILING_WHITESPACE 
+    )
+    file(REMOVE ${_TEMP_MAKEFILE})
+  endif()
 endmacro()
 
 macro(_GASNet_parse_flags INVAR FLAG OUTVAR)
@@ -99,7 +103,7 @@ macro(_GASNet_parse_flags INVAR FLAG OUTVAR)
   string(REGEX MATCHALL "(^| +)${FLAG}([^ ]*)" OUTTMP "${INVAR2}")
   foreach(OPT IN LISTS OUTTMP)
     string(REGEX REPLACE "(^| +)${FLAG}([^ ]*)" "\\2" OPT "${OPT}")
-    if(OPT STREQUAL "NDEBUG") # NDEBUG should get propogated
+    if(OPT STREQUAL "NDEBUG") # NDEBUG should not get propogated
       continue()
     endif()
     list(FIND ${OUTVAR} "${OPT}" _I)
@@ -120,6 +124,10 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     _GASNet_parse_flags(${V} "-L" LDIRS)
     _GASNet_parse_flags(${V} "-l" LIBS)
   endforeach()
+  if(NOT LIBS)
+    message(WARNING "Unable to find link libraries for gasnet-${COMPONENT_NAME}")
+    return()
+  endif()
   list(REMOVE_ITEM LIBS gasnet-${COMPONENT_NAME})
 
   foreach(L IN LISTS LIBS)
@@ -203,6 +211,9 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
       _GASNet_create_component_target("${CMF}" ${_COMPONENT}
         "${GASNet_${_COMPONENT}_LIBRARY}"
       )
+      if(NOT TARGET GASNet::${_COMPONENT})
+        message(WARNING "Unable to create GASNet::${_COMPONENT} target")
+      endif()
     endforeach()
 
     # Restore the existing prefix options
@@ -244,6 +255,9 @@ if(GASNet_FOUND AND NOT TARGET GASNet::GASNet)
     message(FATAL_ERROR "Invalid GASNet_THREADING setting.  Valid options are: ${GASNet_THREADINGS}")
   endif()
 
+  if(NOT TARGET GASNet::${GASNet_CONDUIT}-${GASNet_THREADING})
+    message(FATAL_ERROR "Unable to use selected CONDUIT-THREADING combination: ${GASNet_CONDUIT}-${GASNet_THREADING}")
+  endif()
   message(STATUS "GASNet: Using ${GASNet_CONDUIT}-${GASNet_THREADING}")
   add_library(GASNet::GASNet INTERFACE IMPORTED)
   set_target_properties(GASNet::GASNet PROPERTIES
