@@ -9404,6 +9404,8 @@ namespace Legion {
     void FillOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
+      if (!Runtime::legion_spy_enabled)
+	return;
       LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                     unique_op_id);
       LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
