@@ -1309,25 +1309,28 @@ function std.get_field_path(value_type, field_path)
   return field_type
 end
 
+local function type_requires_force_cast(a, b)
+  return (std.is_ispace(a) and std.is_ispace(b)) or
+    (std.is_region(a) and std.is_region(b)) or
+    (std.is_partition(a) and std.is_partition(b)) or
+    (std.is_cross_product(a) and std.is_cross_product(b)) or
+    (std.is_list_of_regions(a) and std.is_list_of_regions(b)) or
+    (std.is_bounded_type(a) and std.is_bounded_type(b)) or
+    (std.is_fspace_instance(a) and std.is_fspace_instance(b))
+end
+
 function std.implicit_cast(from, to, expr)
-   assert(not (std.is_ref(from) or std.is_rawref(from)))
-   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_list_of_regions(to) or
-     std.is_bounded_type(to) or std.is_fspace_instance(to)
-  then
+  assert(not (std.is_ref(from) or std.is_rawref(from)))
+  if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
-  elseif std.is_index_type(to) then
-    return `([to]([expr]))
   else
     return `([to](expr))
   end
 end
 
 function std.explicit_cast(from, to, expr)
-   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_list_of_regions(to) or
-     std.is_bounded_type(to) or std.is_fspace_instance(to)
-   then
+  assert(not (std.is_ref(from) or std.is_rawref(from)))
+  if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
     return `([to](expr))
