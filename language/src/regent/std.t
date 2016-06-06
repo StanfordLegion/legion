@@ -32,6 +32,16 @@ std.c = c
 -- ## Utilities
 -- #################
 
+terra std.assert_error(x : bool, message : rawstring)
+  if not x then
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, "Errors reported during runtime.\n%s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    c.fflush(stderr)
+    c.abort()
+  end
+end
+
 terra std.assert(x : bool, message : rawstring)
   if not x then
     var stderr = c.fdopen(2, "w")
