@@ -3788,6 +3788,8 @@ class PhysicalState(object):
         if perform_checks:
             for src in reductions:
                 assert src.redop <> 0
+                if src is dst:
+                    continue
                 reduction = op.find_generated_copy(self.field, self.node, dst, src.redop)
                 if reduction is None:
                     print "ERROR: Missing reduction copy operation to update "+str(dst)+\
