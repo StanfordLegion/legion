@@ -152,11 +152,13 @@ protected:
                               RegionAccessor<AccessorType::Generic, float> *fa_current,
                               RegionAccessor<AccessorType::Generic, float> *fa_voltage);
 public:
-  static void cpu_base_impl(HighLevelRuntime *runtime, Context ctx,
-                            const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+  static void cpu_base_impl(const CircuitPiece &piece,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
+#ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
+#endif
 };
 
 class DistributeChargeTask : public IndexLauncher {
@@ -178,11 +180,13 @@ public:
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
 public:
-  static void cpu_base_impl(HighLevelRuntime *runtime, Context ctx,
-                            const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+  static void cpu_base_impl(const CircuitPiece &piece,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
+#ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
+#endif
 };
 
 class UpdateVoltagesTask : public IndexLauncher {
@@ -203,11 +207,13 @@ public:
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
 public:
-  static void cpu_base_impl(HighLevelRuntime *runtime, Context ctx,
-                            const CircuitPiece &piece,
-                            const std::vector<PhysicalRegion> &regions);
+  static void cpu_base_impl(const CircuitPiece &piece,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, HighLevelRuntime* rt);
+#ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
+#endif
 };
 
 class CheckTask : public IndexLauncher {
@@ -254,9 +260,10 @@ namespace TaskHelper {
                         Context ctx, HighLevelRuntime *runtime)
   {
     const CircuitPiece *p = (CircuitPiece*)task->local_args;
-    T::cpu_base_impl(runtime, ctx, *p, regions);
+    T::cpu_base_impl(*p, regions, ctx, runtime);
   }
 
+#ifdef USE_CUDA
   template<typename T>
   void base_gpu_wrapper(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
@@ -265,6 +272,7 @@ namespace TaskHelper {
     const CircuitPiece *p = (CircuitPiece*)task->local_args;
     T::gpu_base_impl(*p, regions); 
   }
+#endif
 
   template<typename T>
   void register_cpu_variants(void)
@@ -284,11 +292,13 @@ namespace TaskHelper {
                                                                  CIRCUIT_CPU_LEAF_VARIANT,
                                                                  TaskConfigOptions(T::CPU_BASE_LEAF),
                                                                  T::TASK_NAME);
+#ifdef USE_CUDA
     HighLevelRuntime::register_legion_task<base_gpu_wrapper<T> >(T::TASK_ID, Processor::TOC_PROC,
                                                                  false/*single*/, true/*index*/,
                                                                  CIRCUIT_GPU_LEAF_VARIANT,
                                                                  TaskConfigOptions(T::GPU_BASE_LEAF),
                                                                  T::TASK_NAME);
+#endif
   }
 };
 
