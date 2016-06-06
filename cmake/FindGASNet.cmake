@@ -21,10 +21,13 @@
 # GASNet_CONDUIT   - Communication conduit to use
 # GASNet_THREADING - Threading mode to use
 #
-# GASNet_ROOT_DIR      - Prefix to use when searching for GASNet.  If specified
+# Valid options for these are dependenent on the specific GASNet installation
+#
+# GASNet_ROOT_DIR  - Prefix to use when searching for GASNet.  If specified
 #                    then this search path will be used exclusively and all
 #                    others ignored.
-# Valid options for these are dependenent on the specific GASNet installation
+# ENV{GASNET_ROOT} - Environment variable used to initialize the value of
+#                    GASNet_ROOT_DIR if not already specified
 #
 
 macro(_GASNet_parse_conduit_and_threading_names
@@ -152,6 +155,7 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
 endfunction()
 
 if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
+  set(GASNet_ROOT_DIR "$ENV{GASNET_ROOT}" CACHE STRING "Root directory for GASNet")
   if(GASNet_ROOT_DIR)
     set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT_DIR}/include NO_DEFAULT_PATH)
   endif()
