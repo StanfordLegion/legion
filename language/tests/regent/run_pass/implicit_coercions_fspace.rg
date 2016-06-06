@@ -12,15 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- bounds_check_fail_unsafe_cast1.rg:24: pointer ptr(int32, $t) is out-of-bounds
-
 import "regent"
 
-local c = regentlib.c
+fspace f {
+  x : int,
+}
 
 task main()
-  var t = region(ispace(ptr, 5), int)
-  var y = unsafe_cast(ptr(int, t), 0)
+  var s : f = { x = 123 }
+  regentlib.assert(s.x == 123, "test failed")
 end
 regentlib.start(main)

@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: list access to list(int32) is out-of-bounds
+-- bounds_check_fail_list2.rg:24: list access to list(int32) is out-of-bounds
 
 import "regent"
 
