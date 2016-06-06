@@ -1254,7 +1254,6 @@ namespace Legion {
     extern LegionRuntime::Logger::Category log_field;            \
     extern LegionRuntime::Logger::Category log_region;           \
     extern LegionRuntime::Logger::Category log_inst;             \
-    extern LegionRuntime::Logger::Category log_leak;             \
     extern LegionRuntime::Logger::Category log_variant;          \
     extern LegionRuntime::Logger::Category log_allocation;       \
     extern LegionRuntime::Logger::Category log_prof;             \

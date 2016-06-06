@@ -562,11 +562,6 @@ namespace Legion {
       }
       else
         memory_manager->unregister_remote_instance(this);
-      if (is_owner() && instance.exists())
-      {
-        log_leak.warning("Leaking physical instance " IDFMT " in memory"
-                               IDFMT "", instance.id, get_memory().id);
-      }
       // If we own our domain, then we need to delete it now
       if (own_domain)
       {

@@ -77,7 +77,6 @@ namespace Legion {
     LegionRuntime::Logger::Category log_field("field_spaces");
     LegionRuntime::Logger::Category log_region("regions");
     LegionRuntime::Logger::Category log_inst("instances");
-    LegionRuntime::Logger::Category log_leak("leaks");
     LegionRuntime::Logger::Category log_variant("variants");
     LegionRuntime::Logger::Category log_allocation("allocation");
     LegionRuntime::Logger::Category log_prof("legion_prof");
