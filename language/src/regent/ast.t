@@ -267,6 +267,27 @@ end
 
 -- Traversal
 
+function ast.traverse_node_continuation(fn, node)
+  local function continuation(node, continuing)
+    if ast.is_node(node) then
+      if continuing == nil then
+        continuing = fn(node, continuation)
+      end
+      if continuing then
+        for _, child in pairs(node) do
+          continuation(child)
+        end
+      else
+      end
+    elseif terralib.islist(node) then
+      for _, child in ipairs(node) do
+        continuation(child)
+      end
+    end
+  end
+  continuation(node)
+end
+
 function ast.traverse_node_postorder(fn, node)
   if ast.is_node(node) then
     for _, child in pairs(node) do

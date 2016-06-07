@@ -31,6 +31,7 @@ local default_options = {
   ["leaf"] = true,
   ["trace"] = true,
   ["vectorize"] = true,
+  ["validate"] = false,
   ["task-inlines"] = true,
   ["flow"] = true,
   ["flow-spmd"] = true,
