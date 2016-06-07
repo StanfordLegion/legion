@@ -2417,11 +2417,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(IndexSpace parent,
+                                                const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->has_index_partition(ctx, parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_partition(IndexSpace parent,
+                                      const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2441,11 +2464,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, 
+                                           const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(p, color);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_index_subspace(Context ctx, 
                                      IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->has_index_subspace(ctx, p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace(IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_index_subspace(p, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2456,11 +2501,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(Context ctx, 
-                                                    IndexSpace handle)
+    bool Runtime::has_multiple_domains(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_domain(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_space_domain(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2472,11 +2530,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::get_index_space_domains(IndexSpace handle,
+                                          std::vector<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_domains(handle, domains);
+    }
+
+    //--------------------------------------------------------------------------
     Domain Runtime::get_index_partition_color_space(Context ctx, 
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_space(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_partition_color_space(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color_space(p);
     }
 
     //--------------------------------------------------------------------------
@@ -2496,6 +2569,22 @@ namespace Legion {
     {
       runtime->get_index_space_partition_colors(ctx, sp, colors);
     }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(IndexSpace sp,
+                                                   std::set<Color> &colors)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_partition_colors(sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_partition_colors(sp, colors);
+    }
 
     //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
@@ -2505,10 +2594,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_disjoint(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->is_index_partition_complete(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_complete(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_complete(p);
     }
 
     //--------------------------------------------------------------------------
@@ -2520,11 +2623,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Color Runtime::get_index_space_color(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(Context ctx,
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2536,11 +2653,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Color Runtime::get_index_partition_color(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_partition_color_point(Context ctx,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_point(ctx, handle);
+    }
+    
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_partition_color_point(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2552,11 +2683,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_parent_index_space(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_parent_index_partition(Context ctx,
                                                       IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->has_parent_index_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_parent_index_partition(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2568,10 +2713,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_parent_index_partition(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned Runtime::get_index_space_depth(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_space_depth(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_depth(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2580,6 +2739,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Runtime::get_index_partition_depth(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_depth(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2621,11 +2787,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t Runtime::get_field_size(FieldSpace handle, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
                                          std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       runtime->get_field_space_fields(ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_field_space_fields(FieldSpace handle,
+                                         std::vector<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_field_space_fields(handle, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -2635,6 +2816,16 @@ namespace Legion {
     {
       std::vector<FieldID> local;
       runtime->get_field_space_fields(ctx, handle, local);
+      fields.insert(local.begin(), local.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_field_space_fields(FieldSpace handle,
+                                         std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> local;
+      runtime->get_field_space_fields(handle, local);
       fields.insert(local.begin(), local.end());
     }
 
@@ -2671,6 +2862,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition(LogicalRegion parent, 
+                                                    IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition_by_color(
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
@@ -2687,11 +2886,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_color(
+                                                  LogicalRegion parent, Color c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_by_color(parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_color(
+                                     LogicalRegion parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_by_color(parent, c);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_logical_partition_by_color(Context ctx,
                                      LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
       return runtime->has_logical_partition_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_partition_by_color(LogicalRegion parent, 
+                                                 const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_partition_by_color(parent, c);
     }
 
     //--------------------------------------------------------------------------
@@ -2704,11 +2927,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_tree(
+                                            IndexPartition handle, 
+                                            FieldSpace fspace, RegionTreeID tid) 
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_by_tree(handle, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion(Context ctx, 
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion(ctx, parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion(LogicalPartition parent, 
+                                                 IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion(parent, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2728,11 +2968,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_color(
+                                               LogicalPartition parent, Color c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_color(parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_color(
+                                  LogicalPartition parent, const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_color(parent, c);
+    }
+    
+    //--------------------------------------------------------------------------
     bool Runtime::has_logical_subregion_by_color(Context ctx,
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
       return runtime->has_logical_subregion_by_color(ctx, parent, c);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_subregion_by_color(LogicalPartition parent, 
+                                                 const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_logical_subregion_by_color(parent, c);
     }
 
     //--------------------------------------------------------------------------
@@ -2744,11 +3008,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_tree(IndexSpace handle, 
+                                            FieldSpace fspace, RegionTreeID tid)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_tree(handle, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_logical_region_color(Context ctx,
                                                      LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_region_color(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(Context ctx,
+                                                        LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_region_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Runtime::get_logical_region_color(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_region_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_region_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2760,11 +3054,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_partition_color_point(Context ctx,
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_color_point(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Runtime::get_logical_partition_color(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_partition_color_point(
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_color_point(handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_parent_logical_region(Context ctx,
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_region(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_parent_logical_region(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_region(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2776,11 +3100,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_partition(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------
