@@ -8015,6 +8015,14 @@ namespace LegionRuntime {
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
+      return get_index_partition(parent, color);
+      
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Internal::get_index_partition(IndexSpace parent, Color color)
+    //--------------------------------------------------------------------------
+    {
       IndexPartition result = forest->get_index_partition(parent, 
                                                           ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
@@ -8030,15 +8038,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Internal::get_index_partition(IndexSpace parent, Color color)
+    IndexPartition Internal::get_index_partition(Context ctx,
+                                    IndexSpace parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition(parent, ColorPoint(color));
+      return get_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Internal::get_index_partition(Context ctx,
-                                    IndexSpace parent, const DomainPoint &color)
+    IndexPartition Internal::get_index_partition(IndexSpace parent,
+                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       IndexPartition result = forest->get_index_partition(parent, 
@@ -8075,6 +8084,14 @@ namespace LegionRuntime {
                                       const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
+      return has_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_index_partition(IndexSpace parent,
+                                      const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
       IndexPartition result = forest->get_index_partition(parent, 
                                                           ColorPoint(color));
       return result.exists();
@@ -8085,24 +8102,23 @@ namespace LegionRuntime {
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
+      return get_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Internal::get_index_subspace(IndexPartition p, Color color)
+    //--------------------------------------------------------------------------
+    {
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
       {
-        log_index.error("Invalid color %d for get index subspace", 
-                                color);
+        log_index.error("Invalid color %d for get index subspace", color);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_COLOR); 
       }
 #endif
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Internal::get_index_subspace(IndexPartition p, Color c)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_subspace(p, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -8152,6 +8168,13 @@ namespace LegionRuntime {
                                      const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
+      return has_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_index_subspace(IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
       return result.exists();
     }
@@ -8174,6 +8197,13 @@ namespace LegionRuntime {
     Domain Internal::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
+      return get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Internal::get_index_space_domain(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
       Domain result = forest->get_index_space_domain(handle);
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
@@ -8186,13 +8216,6 @@ namespace LegionRuntime {
       }
 #endif
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Internal::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -8216,6 +8239,13 @@ namespace LegionRuntime {
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
+      return get_index_partition_color_space(p); 
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Internal::get_index_partition_color_space(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
       Domain result = forest->get_index_partition_color_space(p);
 #ifdef DEBUG_HIGH_LEVEL
       if (!result.exists())
@@ -8230,24 +8260,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Domain Internal::get_index_partition_color_space(IndexPartition p)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_partition_color_space(p);
-    }
-
-    //--------------------------------------------------------------------------
     void Internal::get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-      std::set<ColorPoint> color_points;
-      forest->get_index_space_partition_colors(sp, color_points);
-      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
-            it != color_points.end(); it++)
-      {
-        colors.insert(it->get_index());
-      }
+      return get_index_space_partition_colors(sp, colors);
     }
 
     //--------------------------------------------------------------------------
@@ -8266,6 +8283,14 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Internal::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      get_index_space_partition_colors(sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::get_index_space_partition_colors(IndexSpace sp,
                                                   std::set<DomainPoint> &colors)
     //--------------------------------------------------------------------------
     {
@@ -8299,6 +8324,12 @@ namespace LegionRuntime {
       return forest->is_index_partition_complete(p);
     }
 
+    bool Internal::is_index_partition_complete(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->is_index_partition_complete(p);
+    }
+
     //--------------------------------------------------------------------------
     Color Internal::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
@@ -8322,6 +8353,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Internal::get_index_space_color_point(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
     Color Internal::get_index_partition_color(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -8339,6 +8377,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     DomainPoint Internal::get_index_partition_color_point(Context ctx,
                                                          IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Internal::get_index_partition_color_point(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color(handle).get_point();
@@ -8708,8 +8753,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Internal::get_logical_partition_by_color(LogicalRegion par,
+                                                           const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     bool Internal::has_logical_partition_by_color(Context ctx, 
                                  LogicalRegion parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_partition_by_color(parent, ColorPoint(color));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_logical_partition_by_color(LogicalRegion parent, 
+                                                 const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return forest->has_logical_partition_by_color(parent, ColorPoint(color));
@@ -8775,8 +8836,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Internal::get_logical_subregion_by_color(LogicalPartition par,
+                                                          const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_subregion_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     bool Internal::has_logical_subregion_by_color(Context ctx,
                               LogicalPartition parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_logical_subregion_by_color(LogicalPartition parent, 
+                                                 const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
@@ -8815,6 +8892,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Internal::get_logical_region_color_point(Context ctx,
+                                                        LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_region_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Internal::get_logical_region_color_point(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_region_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
     Color Internal::get_logical_partition_color(Context ctx,
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
@@ -8827,6 +8919,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_partition_color(handle).get_index();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Internal::get_logical_partition_color_point(Context ctx,
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Internal::get_logical_partition_color_point(
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_color(handle).get_point();
     }
 
     //--------------------------------------------------------------------------

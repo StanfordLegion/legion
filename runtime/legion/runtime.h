@@ -1310,7 +1310,11 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      IndexPartition get_index_partition(IndexSpace parent,
+                                         const DomainPoint &color);
       bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
+      bool has_index_partition(IndexSpace parent, 
                                const DomainPoint &color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
@@ -1319,6 +1323,8 @@ namespace LegionRuntime {
                                     const DomainPoint &color);
       IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
       bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
+      bool has_index_subspace(IndexPartition p, 
                               const DomainPoint &color);
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       bool has_multiple_domains(IndexSpace handle);
@@ -1336,16 +1342,21 @@ namespace LegionRuntime {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
                                             std::set<DomainPoint> &colors);
+      void get_index_space_partition_colors(IndexSpace handle,
+                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(Context ctx, IndexPartition p);
+      bool is_index_partition_complete(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
+      DomainPoint get_index_space_color_point(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(Context ctx, 
                                                   IndexPartition handle);
+      DomainPoint get_index_partition_color_point(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
@@ -1390,7 +1401,11 @@ namespace LegionRuntime {
                                                       const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
+                                                      const DomainPoint &c);
       bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
+                                          const DomainPoint &color);
+      bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
@@ -1411,7 +1426,11 @@ namespace LegionRuntime {
                                                    const DomainPoint &c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
+                                                   const DomainPoint &c);
       bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
+                                          const DomainPoint &color);
+      bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
@@ -1422,8 +1441,14 @@ namespace LegionRuntime {
                                                   RegionTreeID tid);
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
       Color get_logical_region_color(LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(Context ctx, 
+                                                 LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(Context ctx, 
+                                                    LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
