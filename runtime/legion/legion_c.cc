@@ -2620,6 +2620,10 @@ legion_future_get_untyped_pointer(legion_future_t handle_)
   return handle->get_untyped_pointer();
 }
 
+// -----------------------------------------------------------------------
+// Task Result Operations
+// -----------------------------------------------------------------------
+
 legion_task_result_t
 legion_task_result_create(const void *handle, size_t size)
 {
@@ -2635,6 +2639,32 @@ void
 legion_task_result_destroy(legion_task_result_t handle)
 {
   free(handle.value);
+}
+
+size_t
+legion_task_result_serialize(legion_task_result_t handle_,
+                             void *buffer)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_serialize(buffer);
+}
+
+size_t
+legion_task_result_buffer_size(legion_task_result_t handle_)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_buffer_size();
+}
+
+size_t
+legion_task_result_deserialize(legion_task_result_t handle_,
+                               const void *buffer)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_deserialize(buffer);
 }
 
 // -----------------------------------------------------------------------

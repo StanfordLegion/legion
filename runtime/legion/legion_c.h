@@ -1784,6 +1784,10 @@ typedef long long int coord_t;
   const void *
   legion_future_get_untyped_pointer(legion_future_t handle);
 
+  // -----------------------------------------------------------------------
+  // Task Result Operations
+  // -----------------------------------------------------------------------
+
   /**
    * @return Caller takes ownership of return value.
    *
@@ -1799,6 +1803,26 @@ typedef long long int coord_t;
    */
   void
   legion_task_result_destroy(legion_task_result_t handle);
+
+  /**
+   * @see Legion::TaskResult::legion_serialize()
+   */
+  size_t
+  legion_task_result_serialize(legion_task_result_t handle,
+                               void *buffer);
+
+  /**
+   * @see Legion::TaskResult::legion_buffer_size()
+   */
+  size_t
+  legion_task_result_buffer_size(legion_task_result_t handle);
+
+  /**
+   * @see Legion::TaskResult::legion_deserialize()
+   */
+  size_t
+  legion_task_result_deserialize(legion_task_result_t handle,
+                                 const void *buffer);
 
   // -----------------------------------------------------------------------
   // Future Map Operations
