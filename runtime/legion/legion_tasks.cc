@@ -6515,7 +6515,7 @@ namespace Legion {
             rez.serialize(it->second);
             rez.serialize<size_t>(created_requirements.size());
             for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-              rez.serialize(created_requirements[idx]);
+              pack_region_requirement(created_requirements[idx], rez);
             rez.serialize(remote_done); 
           }
           runtime->send_remote_convert_virtual_instances(it->first, rez);
@@ -9916,7 +9916,7 @@ namespace Legion {
       derez.deserialize(num_created);
       created_requirements.resize(num_created);
       for (unsigned idx = 0; idx < num_created; idx++)
-        derez.deserialize(created_requirements[idx]);
+        unpack_region_requirement(created_requirements[idx], derez);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       std::map<AddressSpaceID,RemoteTask*> empty_remote;
