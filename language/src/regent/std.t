@@ -3056,32 +3056,85 @@ do
   end
 end
 
+local function make_task_wrapper(task_body)
+  local return_type = task_body:gettype().returntype
+  local return_type_bucket = std.type_size_bucket_type(return_type)
+  if return_type_bucket == terralib.types.unit then
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, nil, 0)
+    end
+  elseif return_type_bucket == c.legion_task_result_t then
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var return_value = task_body(task, regions, num_regions, ctx, runtime)
+      var buffer_size = c.legion_task_result_buffer_size(return_value)
+      var buffer = c.malloc(buffer_size)
+      std.assert(buffer ~= nil, "malloc failed in task wrapper")
+      c.legion_task_result_serialize(return_value, buffer)
+      c.legion_task_postamble(runtime, ctx, buffer, buffer_size)
+      c.free(buffer)
+      c.legion_task_result_destroy(return_value)
+    end
+  else
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var return_value = task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, [&opaque](&return_value), terralib.sizeof(return_type))
+    end
+  end
+end
+
 function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
   local task_registrations = tasks:map(
     function(task)
-      local return_type = task:getdefinition():gettype().returntype
-      local result_type_bucket = std.type_size_bucket_name(return_type)
-      local register = c["legion_runtime_register_task" .. result_type_bucket]
-
       local options = task:get_config_options()
 
       local proc_type = c.LOC_PROC
       if task:getcuda() then proc_type = c.TOC_PROC end
 
-      return quote [register](
-        [task:gettaskid()],
-        proc_type,
-        true,
-        true,
-        4294967295 --[[ AUTO_GENERATE_ID ]],
-        c.legion_task_config_options_t {
+      local wrapped_task = make_task_wrapper(task:getdefinition())
+
+      return quote
+        var execution_constraints = c.legion_execution_constraint_set_create()
+        c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+        var layout_constraints = c.legion_task_layout_constraint_set_create()
+        var options = c.legion_task_config_options_t {
           leaf = options.leaf,
           inner = options.inner,
           idempotent = options.idempotent,
-        },
-        [task:getname():concat(".")],
-        [task:getdefinition()])
+        }
+
+        c.legion_runtime_preregister_task_variant_fnptr(
+          [task:gettaskid()],
+          [task:getname():concat(".")],
+          execution_constraints, layout_constraints, options,
+          [wrapped_task], nil, 0)
+        c.legion_execution_constraint_set_destroy(execution_constraints)
+        c.legion_task_layout_constraint_set_destroy(layout_constraints)
       end
     end)
   if std.config["cuda"] and cudahelper.check_cuda_available() then
