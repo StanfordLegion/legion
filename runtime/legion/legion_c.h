@@ -3008,7 +3008,7 @@ typedef long long int coord_t;
    *        Legion::AlignmentConstraint)
    */
   void
-  legion_layout_constraint_set_add_alignement_constraint(
+  legion_layout_constraint_set_add_alignment_constraint(
     legion_layout_constraint_set_t handle,
     legion_field_id_t field,
     legion_equality_kind_t eq,
