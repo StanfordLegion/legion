@@ -103,9 +103,9 @@ terra top_level_task(task : c.legion_task_t,
   c.legion_coloring_destroy(coloring)
 
   var r1 = c.legion_logical_partition_get_logical_subregion_by_color(
-    runtime, ctx, lp, 1)
+    runtime, lp, 1)
   var r2 = c.legion_logical_partition_get_logical_subregion_by_color(
-    runtime, ctx, lp, 2)
+    runtime, lp, 2)
 
   var sub_args_buffer = ptr1
   var sub_args = c.legion_task_argument_t {

@@ -48,11 +48,11 @@ fspace grid_parts(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d))
 }
 
 function get_region_bounds(r)
-  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __context(), __raw(r.ispace))) end
+  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __raw(r.ispace))) end
 end
 
 function get_ispace_bounds(is)
-  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __context(), __raw(is))) end
+  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __raw(is))) end
 end
 
 __demand(__inline)
