@@ -1330,7 +1330,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
+      inline PhysicalState* get_physical_state(VersionInfo &info,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state

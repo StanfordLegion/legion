@@ -3801,25 +3801,52 @@ namespace Legion {
       info.unpack_version_info(derez);
       CompositeNode *root = legion_new<CompositeNode>(target_node, 
                                                       (CompositeNode*)NULL);
-      std::set<RtEvent> ready_events;
-      std::map<LogicalView*,unsigned> pending_refs;
-      root->unpack_composite_tree(derez, source, runtime,
-                                  ready_events, pending_refs);
-      // If we have anything to wait for do that now
-      if (!ready_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(ready_events);
-        wait_on.wait();
-      }
+      std::map<LogicalView*,std::pair<RtEvent,unsigned> > pending_refs;
+      root->unpack_composite_tree(derez, source, runtime, pending_refs);
       if (!pending_refs.empty())
       {
-        // Add any resource refs for views that were not ready until now
-        for (std::map<LogicalView*,unsigned>::const_iterator it = 
-              pending_refs.begin(); it != pending_refs.end(); it++)
+        // Defer the adding of the references and the registration
+        // of the view itself until it is actually ready, do not 
+        // wait here to avoid blocking the virtual channel
+        std::set<RtEvent> ready_events;
+        for (std::map<LogicalView*,std::pair<RtEvent,unsigned> >::const_iterator
+              it = pending_refs.begin(); it != pending_refs.end(); it++)
         {
-          it->first->add_base_resource_ref(COMPOSITE_NODE_REF, it->second);
+          if (it->second.first.has_triggered())
+          {
+            // If it's already triggered we can do it now
+            it->first->add_base_resource_ref(COMPOSITE_NODE_REF, 
+                                             it->second.second);
+            continue;
+          }
+          DeferCompositeNodeRefArgs args;
+          args.hlr_id = HLR_DEFER_COMPOSITE_NODE_TASK_ID;
+          args.view = it->first;
+          args.refs = it->second.second;
+          RtEvent ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
+              HLR_DEFER_COMPOSITE_NODE_TASK_ID, HLR_LATENCY_PRIORITY,
+              NULL/*op*/, it->second.first);
+          ready_events.insert(ready);
         }
+        if (!ready_events.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(ready_events);
+          DeferCompositeViewCreationArgs args;
+          args.hlr_id = HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID;
+          args.did = did;
+          args.owner = owner;
+          args.target_node = target_node;
+          args.root = root;
+          args.version_info = version_info;
+          args.destroy_event = destroy_event;
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+              HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID, HLR_LATENCY_PRIORITY,
+              NULL/*op*/, wait_on);
+          return;
+        }
+        // Otherwise fall through and do the normal case
       }
+      // Nothing to wait for so we are good to go
       void *location;
       CompositeView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -3832,6 +3859,39 @@ namespace Legion {
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
                            target_node, runtime->address_space, root, 
                            version_info, destroy_event, 
+                           false/*register now*/);
+      // Register only after construction
+      view->register_with_runtime(false/*send notification*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_deferred_node_refs(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeNodeRefArgs *ref_args = 
+        (const DeferCompositeNodeRefArgs*)args;
+      ref_args->view->add_base_resource_ref(COMPOSITE_NODE_REF, ref_args->refs);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_deferred_view_creation(Runtime *rt,
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeViewCreationArgs *vargs = 
+        (const DeferCompositeViewCreationArgs*)args;
+      void *location;
+      CompositeView *view = NULL;
+      if (rt->find_pending_collectable_location(vargs->did, location))
+        view = legion_new_in_place<CompositeView>(location, rt->forest,
+                           vargs->did, vargs->owner, vargs->target_node,
+                           rt->address_space, vargs->root, vargs->version_info,
+                           vargs->destroy_event, false/*register now*/);
+      else
+        view = legion_new<CompositeView>(rt->forest, vargs->did,
+                           vargs->owner, vargs->target_node, 
+                           rt->address_space, vargs->root,
+                           vargs->version_info, vargs->destroy_event,
                            false/*register now*/);
       // Register only after construction
       view->register_with_runtime(false/*send notification*/);
@@ -4647,8 +4707,8 @@ namespace Legion {
     void CompositeNode::unpack_composite_tree(Deserializer &derez,
                                               AddressSpaceID source,
                                               Runtime *runtime,
-                                              std::set<RtEvent> &ready_events,
-                                  std::map<LogicalView*,unsigned> &pending_refs)
+                                              std::map<LogicalView*,
+                                    std::pair<RtEvent,unsigned> > &pending_refs)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(dirty_mask);
@@ -4665,13 +4725,12 @@ namespace Legion {
         derez.deserialize(valid_views[view]);
         if (ready.exists())
         {
-          ready_events.insert(ready);
-          std::map<LogicalView*,unsigned>::iterator finder = 
+          std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
             pending_refs.find(view);
           if (finder == pending_refs.end())
-            pending_refs[view] = 1;
+            pending_refs[view] = std::pair<RtEvent,unsigned>(ready,1);
           else
-            finder->second++;
+            finder->second.second++;
           continue;
         }
         view->add_base_resource_ref(COMPOSITE_NODE_REF);
@@ -4690,13 +4749,12 @@ namespace Legion {
         derez.deserialize(reduction_views[red_view]);
         if (ready.exists())
         {
-          ready_events.insert(ready);
-          std::map<LogicalView*,unsigned>::iterator finder = 
+          std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
             pending_refs.find(view);
           if (finder == pending_refs.end())
-            pending_refs[view] = 1;
+            pending_refs[view] = std::pair<RtEvent,unsigned>(ready,1);
           else
-            finder->second++;
+            finder->second.second++;
           continue;
         }
         red_view->add_base_resource_ref(COMPOSITE_NODE_REF);
@@ -4710,8 +4768,7 @@ namespace Legion {
         RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
         CompositeNode *child = legion_new<CompositeNode>(child_node, this);
         derez.deserialize(children[child]);
-        child->unpack_composite_tree(derez, source, runtime, 
-                                     ready_events, pending_refs);
+        child->unpack_composite_tree(derez, source, runtime, pending_refs);
       }
     }
 

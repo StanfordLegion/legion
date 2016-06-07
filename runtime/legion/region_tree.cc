@@ -12543,8 +12543,7 @@ namespace Legion {
       
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
       LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
-      PhysicalState *state = 
-        get_physical_state(ctx, closer.info.version_info);
+      PhysicalState *state = get_physical_state(closer.info.version_info);
       FieldMask dirty_fields = state->dirty_mask & closing_mask;
       FieldMask reduc_fields = state->reduction_mask & closing_mask;
       if (is_region())
@@ -12711,7 +12710,7 @@ namespace Legion {
                               VersionInfo &version_info, SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = get_physical_state(ctx_id, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       CompositeCloser closer(ctx_id, version_info, target_ctx);
       // Make the root node before traversing
       CompositeNode *root = closer.get_composite_node(this, true/*root*/);
@@ -12738,7 +12737,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REGION_NODE_CLOSE_COMPOSITE_NODE_CALL);
-      PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
+      PhysicalState *state = get_physical_state(closer.version_info);
       // Close down the tree and then determine if we have to capture locally 
       // We don't need to capture data for any fields that are complete below
       siphon_physical_children(closer, state, closing_mask, complete_below);
@@ -12917,7 +12916,7 @@ namespace Legion {
                                              VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = get_physical_state(ctx_id, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       state->children.valid_fields |= open_mask;
       LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
                           state->children.open_children.find(child_color);
@@ -12949,7 +12948,7 @@ namespace Legion {
     void RegionTreeNode::close_physical_node(ReductionCloser &closer)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
+      PhysicalState *state = get_physical_state(closer.version_info);
       closer.issue_close_reductions(this, state);
       siphon_physical_children(closer, state);
     }
@@ -12978,7 +12977,7 @@ namespace Legion {
           if (!!up_mask || needs_space)
           {
             PhysicalState *parent_state = 
-              parent->get_physical_state(ctx, version_info);
+              parent->get_physical_state(version_info);
             LegionMap<LogicalView*,FieldMask>::aligned local_valid;
             parent->find_valid_instance_views(ctx, parent_state, up_mask, 
                       space_mask, version_info, needs_space, local_valid);
@@ -13052,7 +13051,7 @@ namespace Legion {
           {
             // Acquire the parent state in non-exclusive mode
             PhysicalState *parent_state = 
-              parent->get_physical_state(ctx, version_info);
+              parent->get_physical_state(version_info);
             parent->find_valid_reduction_views(ctx, parent_state, redop, 
                                     up_mask, version_info, valid_views);
           }
@@ -13101,7 +13100,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-      PhysicalState *state = get_physical_state(info.ctx, info.version_info); 
+      PhysicalState *state = get_physical_state(info.version_info); 
       find_valid_instance_views(info.ctx, state, info.traversal_mask,
                                 info.traversal_mask, info.version_info,
                                 false/*needs space*/, valid_views);
@@ -13861,7 +13860,7 @@ namespace Legion {
       FieldMask flush_mask;
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
-      PhysicalState *state = get_physical_state(info.ctx, info.version_info); 
+      PhysicalState *state = get_physical_state(info.version_info); 
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
             state->reduction_views.begin(); it != 
             state->reduction_views.end(); it++)
@@ -15199,7 +15198,7 @@ namespace Legion {
       // Firgure out which, if any, of our fields are going to
       // be completely closed
       PhysicalCloser closer(info, handle);
-      PhysicalState *state = get_physical_state(info.ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // Iterate over all the targets and assign set the right views
       // In the process, issue any copies necessary to bring these 
       std::vector<MaterializedView*> target_views(targets.size());
@@ -15385,7 +15384,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
-      PhysicalState *state = get_physical_state(ctx_id, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // Figure out which children we need to close
       LegionMap<ColorPoint,FieldMask>::aligned targets;
       std::set<ColorPoint> next;
@@ -15412,7 +15411,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
-      PhysicalState *state = get_physical_state(info.ctx, info.version_info);
+      PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
       if (IS_REDUCE(info.req))
       {
@@ -15642,7 +15641,7 @@ namespace Legion {
 #endif
       // Convert the view locally
       CompositeView *view = convert_reference(ref);
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       update_valid_views(state, composite_mask, true/*dirty*/, view);
     }
 
@@ -15667,7 +15666,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
       if (IS_REDUCE(info.req))
       {
-        PhysicalState *state = get_physical_state(info.ctx,info.version_info);
+        PhysicalState *state = get_physical_state(info.version_info);
         // Important trick: switch the user to read-only so it picks
         // up dependences on all the reductions applied to this instance
         usage.privilege = READ_ONLY;
@@ -15721,7 +15720,7 @@ namespace Legion {
                                             std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // First pull down any valid instance views
       pull_valid_instance_views(ctx, state, user_mask, 
                                 false/*need space*/, version_info);
@@ -15796,7 +15795,7 @@ namespace Legion {
                              fill_value, RtUserEvent::NO_RT_USER_EVENT,
                              true/*register now*/);
       // Now update the physical state
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // Invalidate any open children and any reductions
       if (!(fill_mask * state->children.valid_fields))
         state->filter_open_children(fill_mask); 
@@ -15854,7 +15853,7 @@ namespace Legion {
                               local_space, map_applied_events);
       }
       // Finally do the update to the physical state like a normal fill
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // Invalidate any open children and any reductions
       if (!(fill_mask * state->children.valid_fields))
         state->filter_open_children(fill_mask); 
@@ -15886,7 +15885,7 @@ namespace Legion {
 #endif
       ApUserEvent ready_event = Runtime::create_ap_user_event();
       // Update the physical state with the new instance
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       // We need to invalidate all other instances for these fields since
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
@@ -15906,7 +15905,7 @@ namespace Legion {
 #endif
       MaterializedView *detach_view = view->as_materialized_view();
       // First remove this view from the set of valid views
-      PhysicalState *state = get_physical_state(ctx, version_info);
+      PhysicalState *state = get_physical_state(version_info);
       filter_valid_views(state, detach_view);
       return ApEvent::NO_AP_EVENT;
     }
@@ -16954,7 +16953,7 @@ namespace Legion {
             child_views[idx] = 
                 target_views[idx]->get_materialized_subview(it->first);
           PhysicalState *child_state = 
-            child_node->get_physical_state(info.ctx, version_info);
+            child_node->get_physical_state(version_info);
           // Complete fields is empty because we don't know which
           // children we will be closing during the siphon call
           child_closer.initialize_targets(child_node, child_state, child_views,
@@ -16971,7 +16970,7 @@ namespace Legion {
         {
           // Closed up this whole partition for the remaining fields
           PhysicalCloser closer(info, parent->handle);
-          PhysicalState *state = get_physical_state(info.ctx, version_info); 
+          PhysicalState *state = get_physical_state(version_info); 
           closer.initialize_targets(this, state, target_views,
                                     unclosed, targets);
           bool changed = false;
@@ -17010,7 +17009,7 @@ namespace Legion {
         // Otherwise we are trying to close up this whole partition
         // Close it up to our parent region
         PhysicalCloser closer(info, parent->handle);
-        PhysicalState *state = get_physical_state(info.ctx, version_info); 
+        PhysicalState *state = get_physical_state(version_info); 
         closer.initialize_targets(this, state, target_views,
                                   closing_mask, targets);
         bool changed = false;

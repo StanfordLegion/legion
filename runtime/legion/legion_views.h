@@ -860,8 +860,25 @@ namespace Legion {
      * logical region with a bunch of different instances.
      */
     class CompositeView : public DeferredView {
-      public:
+    public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
+    public:
+      struct DeferCompositeNodeRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        LogicalView *view;
+        unsigned refs;
+      };
+      struct DeferCompositeViewCreationArgs {
+      public:
+        HLRTaskID hlr_id;
+        DistributedID did;
+        AddressSpaceID owner;
+        RegionTreeNode *target_node;
+        CompositeNode *root;
+        CompositeVersionInfo *version_info;
+        RtUserEvent destroy_event;
+      };
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
@@ -899,6 +916,9 @@ namespace Legion {
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_deferred_node_refs(const void *args);
+      static void handle_deferred_view_creation(Runtime *runtime,
+                                                const void *args);
     public:
       // The root node for this composite view
       CompositeNode *const root;
@@ -967,8 +987,8 @@ namespace Legion {
     public:
       void pack_composite_tree(Serializer &rez, AddressSpaceID target);
       void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
-                               Runtime *runtime,std::set<RtEvent> &ready_events,
-                               std::map<LogicalView*,unsigned> &pending_refs);
+                               Runtime *runtime, std::map<LogicalView*,
+                                std::pair<RtEvent,unsigned> > &pending_refs);
     public:
       void notify_active(void);
       void notify_inactive(void);

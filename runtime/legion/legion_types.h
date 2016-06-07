@@ -271,6 +271,8 @@ namespace Legion {
       HLR_DEFERRED_ENQUEUE_TASK_ID,
       HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
       HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
+      HLR_DEFER_COMPOSITE_NODE_TASK_ID,
+      HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -333,6 +335,8 @@ namespace Legion {
         "Select Tunable",                                         \
         "Deferred Task Enqueue",                                  \
         "Deferred Composite Handle",                              \
+        "Deferred Composite Node Ref",                            \
+        "Deferred Composite View Creation",                       \
         "Deferred Mapper Message",                                \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \

@@ -8118,16 +8118,31 @@ namespace Legion {
         // If we're remote and locally mapped, we are done
         if (is_locally_mapped())
         {
-          Runtime::trigger_event(ready_event);
-          return;
-        }
-        // Otherwise request state for anything 
-        // that was not early mapped 
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+          if (!has_virtual_instances())
+          {
+            Runtime::trigger_event(ready_event);
+            return;
+          }
+          // Otherwise we need to make local any virtually mapped instances
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          {
+            if (!virtual_mapped[idx])
+              continue;
             version_infos[idx].make_local(preconditions, runtime->forest,
                                           get_parent_context(idx).get_id());
+          }
+        }
+        else
+        {
+          // Otherwise request state for anything 
+          // that was not early mapped or was virtually mapped 
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          {
+            if ((early_mapped_regions.find(idx) == early_mapped_regions.end()) 
+                || virtual_mapped[idx])
+              version_infos[idx].make_local(preconditions, runtime->forest,
+                                            get_parent_context(idx).get_id());
+          }
         }
       }
       else

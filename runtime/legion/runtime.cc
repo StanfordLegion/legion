@@ -20272,6 +20272,17 @@ namespace Legion {
             InstanceRef::handle_deferred_composite_handle(args);
             break;
           }
+        case HLR_DEFER_COMPOSITE_NODE_TASK_ID:
+          {
+            CompositeView::handle_deferred_node_refs(args);
+            break;
+          }
+        case HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID:
+          {
+            CompositeView::handle_deferred_view_creation(
+                            Runtime::get_runtime(p), args);
+            break;
+          }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
           {
             Runtime::get_runtime(p)->attempt_runtime_shutdown();

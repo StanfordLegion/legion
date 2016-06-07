@@ -565,6 +565,9 @@ namespace Legion {
     FieldVersions* VersionInfo::get_versions(RegionTreeNode *node) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!packed);
+#endif
       LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_LEGION
@@ -579,6 +582,9 @@ namespace Legion {
                                                    bool &is_split) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!packed);
+#endif
       LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator finder = 
         node_infos.find(node);
 #ifdef DEBUG_LEGION
@@ -640,7 +646,7 @@ namespace Legion {
         NodeInfo &info = it->second;
         if (info.physical_state == NULL)
         {
-          info.physical_state = it->first->get_physical_state(ctx, *this,
+          info.physical_state = it->first->get_physical_state(*this,
                                                        false/*capture*/);
           info.set_needs_capture();
         }
@@ -918,8 +924,7 @@ namespace Legion {
     {
       rez.serialize(info.bit_mask);
       if (info.physical_state == NULL)
-        info.physical_state = node->get_physical_state(ctx, *this,
-                                                       false/*capture*/);
+        info.physical_state = node->get_physical_state(*this, false/*capture*/);
       PhysicalState *state = info.physical_state;
 #ifdef DEBUG_LEGION
       if (!info.advance_mask)
@@ -1686,8 +1691,7 @@ namespace Legion {
     bool PhysicalTraverser::traverse_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      PhysicalState *state = node->get_physical_state(info->ctx, 
-                                                      info->version_info); 
+      PhysicalState *state = node->get_physical_state(info->version_info); 
       // If we are traversing an intermediary node, we just have to 
       // update the open children
       if (has_child)
