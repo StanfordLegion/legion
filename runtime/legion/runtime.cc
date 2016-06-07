@@ -19692,10 +19692,10 @@ namespace Legion {
         runtime_map[it->local_id()] = local_rt;
       }
       // Do the rest of our initialization
-      local_rt->register_static_variants();
-      local_rt->register_static_constraints();
       if (local_space_id < Runtime::num_profiling_nodes)
         local_rt->initialize_legion_prof();
+      local_rt->register_static_variants();
+      local_rt->register_static_constraints();
       // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
         local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
