@@ -3109,6 +3109,22 @@ end
 
 function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  local layout_registration = quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    -- SOA, Fortran array order
+    var dims : c.legion_dimension_kind_t[4]
+    dims[0] = c.DIM_X
+    dims[1] = c.DIM_Y
+    dims[2] = c.DIM_Z
+    dims[3] = c.DIM_F
+    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "SOA")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+
   local task_registrations = tasks:map(
     function(task)
       local options = task:get_config_options()
@@ -3118,10 +3134,27 @@ function std.setup(main_task, extra_setup_thunk)
 
       local wrapped_task = make_task_wrapper(task:getdefinition())
 
+      local num_regions = 0
+      if std.config["layout-constraints"] then
+        local fn_type = task:gettype()
+        local param_types = fn_type.parameters
+        for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+          local param_type = param_types[i]
+          local privileges =
+            std.find_task_privileges(param_type, task:getprivileges(),
+                                     task:get_coherence_modes(), task:get_flags())
+          num_regions = num_regions + #privileges
+        end
+      end
+
       return quote
         var execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
         var layout_constraints = c.legion_task_layout_constraint_set_create()
+        for i = 0, num_regions do
+          c.legion_task_layout_constraint_set_add_layout_constraint(
+            layout_constraints, i, layout_id)
+        end
         var options = c.legion_task_config_options_t {
           leaf = options.leaf,
           inner = options.inner,
@@ -3173,6 +3206,7 @@ function std.setup(main_task, extra_setup_thunk)
   end
 
   local terra main(argc : int, argv : &rawstring)
+    [layout_registration];
     [task_registrations];
     [reduction_registrations];
     [extra_setup];

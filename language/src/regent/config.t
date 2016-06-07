@@ -28,6 +28,7 @@ local default_options = {
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
+  ["layout-constraints"] = false,
   ["leaf"] = true,
   ["trace"] = true,
   ["vectorize"] = true,
