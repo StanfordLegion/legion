@@ -187,7 +187,7 @@ terra top_level_task(task : c.legion_task_t,
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
-    [&opaque](0), 0)
+    nil, 0)
 
   var x : uint32 = 42
   var sub_args = c.legion_task_argument_t {
@@ -220,7 +220,7 @@ terra main()
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
-    [&opaque](0), 0)
+    nil, 0)
 
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   c.legion_runtime_start(0, [&rawstring](0), false)
