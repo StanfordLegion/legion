@@ -87,14 +87,12 @@ legion_domain_from_rect_3d(legion_rect_3d_t r_)
 
 legion_domain_t
 legion_domain_from_index_space(legion_runtime_t runtime_,
-                               legion_context_t ctx_,
                                legion_index_space_t is_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
-  return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, is));
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(is));
 }
 
 legion_rect_1d_t
@@ -514,14 +512,12 @@ legion_index_space_destroy(legion_runtime_t runtime_,
 
 legion_domain_t
 legion_index_space_get_domain(legion_runtime_t runtime_,
-                              legion_context_t ctx_,
                               legion_index_space_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, handle));
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(handle));
 }
 
 void
@@ -1683,39 +1679,33 @@ legion_index_partition_create_by_preimage(
 
 bool
 legion_index_partition_is_disjoint(legion_runtime_t runtime_,
-                                   legion_context_t ctx_,
                                    legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->is_index_partition_disjoint(ctx, handle);
+  return runtime->is_index_partition_disjoint(handle);
 }
 
 bool
 legion_index_partition_is_complete(legion_runtime_t runtime_, 
-                                   legion_context_t ctx_,
                                    legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->is_index_partition_complete(ctx, handle);
+  return runtime->is_index_partition_complete(handle);
 }
 
 legion_index_space_t
 legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
-                                          legion_context_t ctx_,
                                           legion_index_partition_t handle_,
                                           legion_color_t color)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+  IndexSpace is = runtime->get_index_subspace(handle, color);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1723,16 +1713,14 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
 legion_index_space_t
 legion_index_partition_get_index_subspace_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_partition_t handle_,
   legion_domain_point_t color_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
   DomainPoint color = CObjectWrapper::unwrap(color_);
 
-  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+  IndexSpace is = runtime->get_index_subspace(handle, color);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1740,56 +1728,48 @@ legion_index_partition_get_index_subspace_domain_point(
 bool
 legion_index_partition_has_index_subspace_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_partition_t handle_,
   legion_domain_point_t color_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
   DomainPoint color = CObjectWrapper::unwrap(color_);
 
-  return runtime->has_index_subspace(ctx, handle, color);
+  return runtime->has_index_subspace(handle, color);
 }
 
 legion_domain_t
 legion_index_partition_get_color_space(legion_runtime_t runtime_,
-                                       legion_context_t ctx_,
                                        legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  Domain d = runtime->get_index_partition_color_space(ctx, handle);
+  Domain d = runtime->get_index_partition_color_space(handle);
 
   return CObjectWrapper::wrap(d);
 }
 
 legion_color_t
 legion_index_partition_get_color(legion_runtime_t runtime_,
-                                 legion_context_t ctx_,
                                  legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  Color c = runtime->get_index_partition_color(ctx, handle);
+  Color c = runtime->get_index_partition_color(handle);
 
   return c;
 }
 
 legion_index_space_t
 legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
-                                              legion_context_t ctx_,
                                               legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  IndexSpace is = runtime->get_parent_index_space(ctx, handle);
+  IndexSpace is = runtime->get_parent_index_space(handle);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1937,40 +1917,34 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
 
 legion_color_t
 legion_logical_region_get_color(legion_runtime_t runtime_,
-                                legion_context_t ctx_,
                                 legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->get_logical_region_color(ctx, handle);
+  return runtime->get_logical_region_color(handle);
 }
 
 bool
 legion_logical_region_has_parent_logical_partition(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->has_parent_logical_partition(ctx, handle);
+  return runtime->has_parent_logical_partition(handle);
 }
 
 legion_logical_partition_t
 legion_logical_region_get_parent_logical_partition(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalPartition p = runtime->get_parent_logical_partition(ctx, handle);
+  LogicalPartition p = runtime->get_parent_logical_partition(handle);
   return CObjectWrapper::wrap(p);
 }
 
@@ -2048,93 +2022,81 @@ legion_logical_partition_destroy(legion_runtime_t runtime_,
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_index_space_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalRegion r = runtime->get_logical_subregion(ctx, parent, handle);
+  LogicalRegion r = runtime->get_logical_subregion(parent, handle);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_color(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_color_t c)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  LogicalRegion r = runtime->get_logical_subregion_by_color(parent, c);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_color_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_, 
   legion_logical_partition_t parent_,
   legion_domain_point_t c_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   DomainPoint c = CObjectWrapper::unwrap(c_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  LogicalRegion r = runtime->get_logical_subregion_by_color(parent, c);
   return CObjectWrapper::wrap(r);
 }
 
 bool
 legion_logical_partition_has_logical_subregion_by_color_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_domain_point_t c_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   DomainPoint c = CObjectWrapper::unwrap(c_);
 
-  return runtime->has_logical_subregion_by_color(ctx, parent, c);
+  return runtime->has_logical_subregion_by_color(parent, c);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_tree(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_space_t handle_,
   legion_field_space_t fspace_,
   legion_region_tree_id_t tid)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
   FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_tree(ctx, handle, fspace, tid);
+  LogicalRegion r = runtime->get_logical_subregion_by_tree(handle, fspace, tid);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_parent_logical_region(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalRegion r = runtime->get_parent_logical_region(ctx, handle);
+  LogicalRegion r = runtime->get_parent_logical_region(handle);
   return CObjectWrapper::wrap(r);
 }
 

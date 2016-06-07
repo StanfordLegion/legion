@@ -426,7 +426,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_domain_t
   legion_domain_from_index_space(legion_runtime_t runtime,
-                                 legion_context_t ctx,
                                  legion_index_space_t is);
 
   /**
@@ -770,7 +769,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_domain_t
   legion_index_space_get_domain(legion_runtime_t runtime,
-                                legion_context_t ctx,
                                 legion_index_space_t handle);
 
   /**
@@ -1043,7 +1041,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   bool
   legion_index_partition_is_disjoint(legion_runtime_t runtime,
-                                     legion_context_t ctx,
                                      legion_index_partition_t handle);
 
   /**
@@ -1051,7 +1048,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   bool
   legion_index_partition_is_complete(legion_runtime_t runtime,
-                                     legion_context_t ctx,
                                      legion_index_partition_t handle);
 
   /**
@@ -1061,7 +1057,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_index_space_t
   legion_index_partition_get_index_subspace(legion_runtime_t runtime,
-                                            legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
 
@@ -1073,7 +1068,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_index_space_t
   legion_index_partition_get_index_subspace_domain_point(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_index_partition_t handle,
     legion_domain_point_t color);
 
@@ -1083,7 +1077,6 @@ typedef legion_lowlevel_coord_t coord_t;
   bool
   legion_index_partition_has_index_subspace_domain_point(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_index_partition_t handle,
     legion_domain_point_t color);
 
@@ -1092,7 +1085,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_domain_t
   legion_index_partition_get_color_space(legion_runtime_t runtime,
-                                         legion_context_t ctx,
                                          legion_index_partition_t handle);
 
   /**
@@ -1100,7 +1092,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_color_t
   legion_index_partition_get_color(legion_runtime_t runtime,
-                                   legion_context_t ctx,
                                    legion_index_partition_t handle);
 
   /**
@@ -1110,7 +1101,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_index_space_t
   legion_index_partition_get_parent_index_space(legion_runtime_t runtime,
-                                                legion_context_t ctx,
                                                 legion_index_partition_t handle);
 
   /**
@@ -1229,7 +1219,6 @@ typedef legion_lowlevel_coord_t coord_t;
    */
   legion_color_t
   legion_logical_region_get_color(legion_runtime_t runtime,
-                                  legion_context_t ctx,
                                   legion_logical_region_t handle);
 
   /**
@@ -1238,7 +1227,6 @@ typedef legion_lowlevel_coord_t coord_t;
   bool
   legion_logical_region_has_parent_logical_partition(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_region_t handle);
 
   /**
@@ -1247,7 +1235,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_partition_t
   legion_logical_region_get_parent_logical_partition(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_region_t handle);
 
   /**
@@ -1312,7 +1299,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_index_space_t handle);
 
@@ -1324,7 +1310,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_color(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
 
@@ -1336,7 +1321,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_color_domain_point(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_domain_point_t c);
 
@@ -1346,7 +1330,6 @@ typedef legion_lowlevel_coord_t coord_t;
   bool
   legion_logical_partition_has_logical_subregion_by_color_domain_point(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_domain_point_t c);
 
@@ -1358,7 +1341,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_tree(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_index_space_t handle,
     legion_field_space_t fspace,
     legion_region_tree_id_t tid);
@@ -1369,7 +1351,6 @@ typedef legion_lowlevel_coord_t coord_t;
   legion_logical_region_t
   legion_logical_partition_get_parent_logical_region(
     legion_runtime_t runtime,
-    legion_context_t ctx,
     legion_logical_partition_t handle);
 
   /**
