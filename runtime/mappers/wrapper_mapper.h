@@ -61,6 +61,7 @@ namespace Legion {
 			Mapper::TaskOptions wait_task_options;
 
 public:
+	//void Deserialize(std::string rec_string);
       const char* get_mapper_name(void) const;
       MapperSyncModel get_mapper_sync_model(void) const;
 
@@ -197,6 +198,7 @@ public:
                                       const MapperTaskResult&       result);
 
     protected:
+      MapperRuntime *const mrt;
       const Processor       local_proc;
       const Processor::Kind local_kind;
       const AddressSpace    node_id;

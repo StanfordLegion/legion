@@ -13646,7 +13646,7 @@ namespace Legion {
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
-     if(Mapping::WrapperMapper::ownerprocessor!=it->first) managers.insert(it->second->find_mapper(map_id));
+     	managers.insert(it->second->find_mapper(map_id));
       }
       Mapper::MapperMessage message_args;
       message_args.sender = source;

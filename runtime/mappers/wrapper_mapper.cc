@@ -35,7 +35,7 @@ namespace Legion {
 		MapperEvent WrapperMapper::mapevent;			
 		int WrapperMapper::broadcastcount=0;	
 		
-		WrapperMapper::WrapperMapper(Mapper* dmapper,MapperRuntime *rt, Machine machine, Processor local):Mapper(rt), dmapper(dmapper), local_proc(local), local_kind(local.kind()), 
+		WrapperMapper::WrapperMapper(Mapper* dmapper,MapperRuntime *rt, Machine machine, Processor local):Mapper(rt), dmapper(dmapper), mrt(rt), local_proc(local), local_kind(local.kind()), 
 		node_id(local.address_space()), machine(machine),
 		max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
 		max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -129,13 +129,12 @@ std::cout<<"The processors added are: ";
 			while ((pos = tasks_str.find(delim)) != std::string::npos){
 				token = tasks_str.substr(0, pos);
 				map_tasks.insert(std::pair<std::string, int>(token.substr(0, token.size()-1),(int)(token.at(token.size()-1))));
-				//std::cout << token << "\n";
 				tasks_str.erase(0, pos + delim.length());
 			}
 			WrapperMapper::tasks_map = map_tasks;
+			std::set<Processor>::iterator it;			
 
 			int ip;
-			std::set<Processor>::iterator it;
 			std::map<Processor, int> map_procs;
 			while ((pos = procs_str.find(delim)) != std::string::npos){
 				token = procs_str.substr(0, pos);
@@ -144,13 +143,15 @@ std::cout<<"The processors added are: ";
 					it = WrapperMapper::all_procs.begin();
 					std::advance(it, ip);
 				}
-				map_procs.insert(std::pair<Processor,int>(*it, (int)procs_str[procs_str.size()-1]));
+				std::cout<<"Processor being inserted"<<it->id;
+				//map_procs.insert(std::pair<Processor,int>(*it, (int)(token.at(token.size()-1))));
 				procs_str.erase(0, pos + delim.length());
-			}	
+			}
 			WrapperMapper::procs_map = map_procs;
 			it = WrapperMapper::all_procs.begin();
 					std::advance(it, 1);
 			WrapperMapper::ownerprocessor = *it;
+
 	}
 
 		void WrapperMapper::get_input(const MapperContext(ctx)){
@@ -507,7 +508,7 @@ std::cout<<"The processors added are: ";
 				char send_mess_chars[send_size];
 				std::strcpy(send_mess_chars, send_message.c_str());
 				void *message_point = &send_mess_chars;
-				mapper_runtime->broadcast(ctx, message_point, send_size*sizeof(char));              	
+				mrt->broadcast(ctx, message_point, send_size*sizeof(char));              	
 					break;
 				}
 				
@@ -1025,7 +1026,7 @@ std::cout<<"The processors added are: ";
 				char send_mess_chars[send_size];
 				std::strcpy(send_mess_chars, send_message.c_str());
 				void *message_point = &send_mess_chars;
-				mapper_runtime->broadcast(ctx, message_point, send_size*sizeof(char));                                        
+				mrt->broadcast(ctx, message_point, send_size*sizeof(char));                                        
 				WrapperMapper::databroadcasted=1;
 
 			}
@@ -1048,9 +1049,9 @@ std::cout<<"The processors added are: ";
 					wait_task_options = output;
 					select_task_options_message message ={11,task.get_task_name(),wait_task_options};
 					void *message_point = &message;
-					WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
-					mapper_runtime->send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
-					mapper_runtime->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
+					WrapperMapper::mapevent = mrt->create_mapper_event(ctx);
+					mrt->send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
+					mrt->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 					output = wait_task_options;
 				}
 			}
@@ -1290,12 +1291,12 @@ std::cout<<"The processors added are: ";
 
 					select_task_options_message mess ={11,task_name,output};
 					void *message_point = &mess;
-					mapper_runtime->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
+					mrt->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
 				}
 			}
 			else if (rec_message->tag ==11){
 				wait_task_options = rec_message->output;				
-				mapper_runtime->trigger_mapper_event(ctx, WrapperMapper::mapevent);
+				mrt->trigger_mapper_event(ctx, WrapperMapper::mapevent);
 			}
 			else {
 				const char *rec1_message =(const char *)message.message;
