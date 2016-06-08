@@ -264,6 +264,7 @@ function base.task:set_config_options(t)
 end
 
 function base.task:get_config_options()
+  self:complete()
   assert(self.config_options)
   return self.config_options
 end
