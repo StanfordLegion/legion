@@ -7114,8 +7114,6 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
 #endif
-      // Initialize our one virtual manager
-      VirtualManager::initialize_virtual_instance(this, 0/*same across nodes*/);
     }
 
     //--------------------------------------------------------------------------
@@ -19849,6 +19847,10 @@ namespace Legion {
         local_rt->initialize_legion_prof();
       local_rt->register_static_variants();
       local_rt->register_static_constraints();
+      // Initialize our one virtual manager, do this after we register
+      // the static constraints so we get a valid layout constraint ID
+      VirtualManager::initialize_virtual_instance(local_rt, 
+                                                  0/*same across nodes*/);
       // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
         local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
