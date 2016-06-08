@@ -2,7 +2,7 @@
 #include <cassert>
 #include <limits.h>
 #include <algorithm>
-
+#include <typeinfo>
 #include "wrapper_mapper.h"
 
 
@@ -57,11 +57,15 @@ namespace Legion {
 			}
 		}
 		WrapperMapper::~WrapperMapper(){
-			if (node_id==1) {std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
+ std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 				
 				std::cout<<"the tasks added are: ";
 				for (std::map<std::string, int>::const_iterator i = WrapperMapper::tasks_map.begin(); i != WrapperMapper::tasks_map.end(); ++i) std::cout<< i->first << "  ";
-				std::cout<<"\n>    ";}
+				std::cout<<"\n>    ";
+std::cout<<"The processors added are: ";
+							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							std::cout<<"\n>    ";
+						
 		}
 
 		bool is_number(const std::string& s)
@@ -108,17 +112,46 @@ namespace Legion {
 			for (std::map<int, int>::const_iterator i = procs_map.begin(); i!=procs_map.end(); ++i){
 				send_string = send_string + NumberToString(i->first) + NumberToString(i->second) + "\\";
 			}
-
-			std::cout<<send_string;
+			//std::cout<<send_string;
 
 		return send_string;
 		}
 
 		void Deserialize(std::string rec_string){
-			std::size_t hash_pos = rec_string.find("#");
-			std::cout<<"RAJ SHAH"<<rec_string.substr(0, hash_pos);
-			std::cout<<"SHAH RAJ"<<rec_string.substr(hash_pos+1, rec_string.size() - hash_pos);
-		}
+			std::size_t hash_pos  = rec_string.find("#");
+			std::string tasks_str = rec_string.substr(0, hash_pos);
+			std::string procs_str = rec_string.substr(hash_pos+1, rec_string.size() - hash_pos);
+			
+			std::string delim = "\\";
+			std::map<std::string, int> map_tasks;			
+			std::string token;
+			std::size_t pos = 0;
+			while ((pos = tasks_str.find(delim)) != std::string::npos){
+				token = tasks_str.substr(0, pos);
+				map_tasks.insert(std::pair<std::string, int>(token.substr(0, token.size()-1),(int)(token.at(token.size()-1))));
+				//std::cout << token << "\n";
+				tasks_str.erase(0, pos + delim.length());
+			}
+			WrapperMapper::tasks_map = map_tasks;
+
+			int ip;
+			std::set<Processor>::iterator it;
+			std::map<Processor, int> map_procs;
+			while ((pos = procs_str.find(delim)) != std::string::npos){
+				token = procs_str.substr(0, pos);
+				ip = std::atoi(token.substr(0, token.size()-1).c_str());
+				if ((unsigned)ip<WrapperMapper::all_procs.size()){
+					it = WrapperMapper::all_procs.begin();
+					std::advance(it, ip);
+				}
+				map_procs.insert(std::pair<Processor,int>(*it, (int)procs_str[procs_str.size()-1]));
+				procs_str.erase(0, pos + delim.length());
+			}	
+			WrapperMapper::procs_map = map_procs;
+			it = WrapperMapper::all_procs.begin();
+					std::advance(it, 1);
+			WrapperMapper::ownerprocessor = *it;
+	}
 
 		void WrapperMapper::get_input(const MapperContext(ctx)){
 			std::string strValue;
@@ -469,13 +502,12 @@ namespace Legion {
 				}
 				
 				else if (strValue.compare("exit")==0){
-					get_input_message message = {12, WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map};
-					
-					void *message_point = &message;
-					//WrapperMapper::mapevent = mapper_runtime->create_mapper_event(ctx);
-					//mapper_runtime->broadcast(ctx, message_point, sizeof(get_input_message),2);
-					//mapper_runtime->wait_on_mapper_event(ctx, WrapperMapper::mapevent);
-					
+				std::string send_message = Serialize(WrapperMapper::tasks_map, WrapperMapper::procs_map_int);
+				int send_size = send_message.size()+1;
+				char send_mess_chars[send_size];
+				std::strcpy(send_mess_chars, send_message.c_str());
+				void *message_point = &send_mess_chars;
+				mapper_runtime->broadcast(ctx, message_point, send_size*sizeof(char));              	
 					break;
 				}
 				
@@ -1268,7 +1300,7 @@ namespace Legion {
 			else {
 				const char *rec1_message =(const char *)message.message;
 
-				if (node_id!=0){	
+				if (node_id!=0 && WrapperMapper::localowner == local_proc){	
 					std::string rec_string = rec1_message;		
 					Deserialize(rec_string);		
 				}
