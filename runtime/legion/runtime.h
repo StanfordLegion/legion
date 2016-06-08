@@ -488,10 +488,6 @@ namespace Legion {
     public:
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
-#ifdef HANG_TRACE
-    public:
-      void dump_state(FILE *target);
-#endif
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -2161,10 +2157,6 @@ namespace Legion {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef HANG_TRACE
-    public:
-      void dump_processor_states(FILE *target);
-#endif
     public:
       // Manage the execution of tasks within a context
       void activate_context(SingleTask *context);
@@ -2178,6 +2170,7 @@ namespace Legion {
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
+      ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
       RtEvent issue_runtime_meta_task(const void *args, size_t arglen,
                                   HLRTaskID tid, HLRPriority hlr_priority,
                                   Operation *op = NULL,
@@ -2497,6 +2490,9 @@ namespace Legion {
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
     protected:
+      Reservation processor_mapping_lock;
+      std::map<Processor,unsigned> processor_mapping;
+    protected:
       Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
       LegionDeque<DistributedID,
@@ -2608,7 +2604,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -2696,7 +2692,9 @@ namespace Legion {
       static void log_machine(Machine machine);
     public:
       // Static member variables
-      static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
+      static Runtime *the_runtime;
+      // the runtime map is only valid when running with -hl:separate
+      static std::map<Processor,Runtime*> *runtime_map;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
@@ -2732,10 +2730,6 @@ namespace Legion {
       static bool bit_mask_logging;
 #endif
       static bool program_order_execution;
-#ifdef DEBUG_PERF
-    public:
-      static unsigned long long perf_trace_tolerance;
-#endif
     public:
       static unsigned num_profiling_nodes;
     public:

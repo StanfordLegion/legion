@@ -31,10 +31,6 @@
 #include "test_mapper.h"
 #include "replay_mapper.h"
 #include "debug_mapper.h"
-#ifdef HANG_TRACE
-#include <signal.h>
-#include <execinfo.h>
-#endif
 #include <unistd.h> // sleep for warnings
 
 namespace LegionRuntime {
@@ -2034,32 +2030,6 @@ namespace Legion {
                                          HLR_THROUGHPUT_PRIORITY, 
                                          op, precondition);
     }
-
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    void ProcessorManager::dump_state(FILE *target)
-    //--------------------------------------------------------------------------
-    {
-      fprintf(target,"State of Processor: " IDFMT " (kind=%d)\n", 
-              local_proc.id, proc_kind);
-      fprintf(target,"  Current Pending Task: %d\n", current_pending);
-      fprintf(target,"  Has Executing Task: %d\n", current_executing);
-      fprintf(target,"  Idle Task Enabled: %d\n", idle_task_enabled);
-      fprintf(target,"  Dependence Queue Depth: %ld\n", 
-              dependence_queues.size());
-      for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
-        fprintf(target,"    Queue at depth %d has %ld elements\n",
-                idx, dependence_queues[idx].queue.size());
-      fprintf(target,"  Ready Queue Count: %ld\n", ready_queues.size());
-      for (std::map<MapperID,std::list<TaskOp*> >::const_iterator it = 
-            ready_queues.begin(); it != ready_queues.end(); it++)
-        fprintf(target,"    Ready queue %d has %ld elements\n",
-                it->first, it->second.size());
-      fprintf(target,"  Local Queue has %ld elements\n", 
-              local_ready_queue.size());
-      fflush(target);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
@@ -6978,6 +6948,7 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         group_lock(Reservation::create_reservation()),
+        processor_mapping_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         distributed_collectable_lock(Reservation::create_reservation()),
@@ -7476,6 +7447,8 @@ namespace Legion {
       projection_functors.clear();
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
+      processor_mapping_lock.destroy_reservation();
+      processor_mapping_lock = Reservation::NO_RESERVATION;
       distributed_id_lock.destroy_reservation();
       distributed_id_lock = Reservation::NO_RESERVATION;
       distributed_collectable_lock.destroy_reservation();
@@ -15735,20 +15708,6 @@ namespace Legion {
                                      result, acquire, tight_region_bounds);
     }
 
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    void Runtime::dump_processor_states(FILE *target)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need to hold the lock since we are hung when this is called  
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->dump_state(target);
-      }
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void Runtime::process_schedule_request(Processor proc)
     //--------------------------------------------------------------------------
@@ -15925,16 +15884,7 @@ namespace Legion {
       // Compute a hash of all the processor ids to avoid testing all sets 
       // Only need to worry about local IDs since all processors are
       // in this address space.
-      ProcessorMask local_mask;
-      for (std::vector<Processor>::const_iterator it = procs.begin(); 
-            it != procs.end(); it++)
-      {
-        uint64_t local_id = it->local_id();
-#ifdef DEBUG_LEGION
-        assert(local_id < MAX_NUM_PROCS);
-#endif
-        local_mask.set_bit(local_id);
-      }
+      ProcessorMask local_mask = find_processor_mask(procs);
       uint64_t hash = local_mask.get_hash_key();
       AutoLock g_lock(group_lock);
       std::map<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned >::iterator 
@@ -15956,6 +15906,52 @@ namespace Legion {
       else
         processor_groups[hash].push_back(ProcessorGroupInfo(group, local_mask));
       return group;
+    }
+
+    //--------------------------------------------------------------------------
+    ProcessorMask Runtime::find_processor_mask(
+                                            const std::vector<Processor> &procs)
+    //--------------------------------------------------------------------------
+    {
+      ProcessorMask result;
+      std::vector<Processor> need_allocation;
+      {
+        AutoLock p_lock(processor_mapping_lock,1,false/*exclusive*/);
+        for (std::vector<Processor>::const_iterator it = procs.begin();
+              it != procs.end(); it++)
+        {
+          std::map<Processor,unsigned>::const_iterator finder = 
+            processor_mapping.find(*it);
+          if (finder == processor_mapping.end())
+          {
+            need_allocation.push_back(*it);
+            continue;
+          }
+          result.set_bit(finder->second);
+        }
+      }
+      if (need_allocation.empty())
+        return result;
+      AutoLock p_lock(processor_mapping_lock);
+      for (std::vector<Processor>::const_iterator it = 
+            need_allocation.begin(); it != need_allocation.end(); it++)
+      {
+        // Check to make sure we didn't lose the race
+        std::map<Processor,unsigned>::const_iterator finder = 
+            processor_mapping.find(*it);
+        if (finder != processor_mapping.end())
+        {
+          result.set_bit(finder->second);
+          continue;
+        }
+        unsigned next_index = processor_mapping.size();
+#ifdef DEBUG_LEGION
+        assert(next_index < MAX_NUM_PROCS);
+#endif
+        processor_mapping[*it] = next_index;
+        result.set_bit(next_index);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -16639,7 +16635,7 @@ namespace Legion {
       }
       IndividualTask *result = get_available(individual_task_lock, 
                                          available_individual_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock i_lock(individual_task_lock);
@@ -16667,7 +16663,7 @@ namespace Legion {
       }
       PointTask *result = get_available(point_task_lock, 
                                         available_point_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock p_lock(point_task_lock);
@@ -16695,7 +16691,7 @@ namespace Legion {
       }
       IndexTask *result = get_available(index_task_lock, 
                                        available_index_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock i_lock(index_task_lock);
@@ -16723,7 +16719,7 @@ namespace Legion {
       }
       SliceTask *result = get_available(slice_task_lock, 
                                        available_slice_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock s_lock(slice_task_lock);
@@ -17232,7 +17228,7 @@ namespace Legion {
     {
       AutoLock i_lock(individual_task_lock);
       available_individual_tasks.push_front(task);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_individual_tasks.erase(task);
 #endif
     }
@@ -17242,7 +17238,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(point_task_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_point_tasks.erase(task);
 #endif
       // Note that we can safely delete point tasks because they are
@@ -17261,7 +17257,7 @@ namespace Legion {
     {
       AutoLock i_lock(index_task_lock);
       available_index_tasks.push_front(task);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_index_tasks.erase(task);
 #endif
     }
@@ -17271,7 +17267,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(slice_task_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_slice_tasks.erase(task);
 #endif
       // Note that we can safely delete slice tasks because they are
@@ -18210,7 +18206,7 @@ namespace Legion {
     }
 #endif
 
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void Runtime::print_out_individual_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
@@ -18668,7 +18664,8 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Runtime* Runtime::runtime_map[(MAX_NUM_PROCS+1)];
+    /*static*/ Runtime* Runtime::the_runtime = NULL;
+    /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
@@ -18716,33 +18713,7 @@ namespace Legion {
     /*static*/ bool Runtime::verify_disjointness = false;
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
-#ifdef DEBUG_PERF
-    /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
-#endif
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
-
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    static void catch_hang(int signal)
-    //--------------------------------------------------------------------------
-    {
-      assert(signal == SIGTERM);
-      static int call_count = 0;
-      int count = __sync_fetch_and_add(&call_count, 0);
-      if (count == 0)
-      {
-        Runtime *rt = Runtime::runtime_map[1];
-        const char *prefix = "";
-        char file_name[1024];
-        sprintf(file_name,"%strace_%d.txt", prefix, rt->address_space);
-        FILE *target = fopen(file_name,"w");
-        //rt->dump_processor_states(target);
-        //rt->print_outstanding_tasks(target);
-        rt->print_out_acquire_ops(target);
-        fclose(target);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -18800,6 +18771,8 @@ namespace Legion {
         // Set these values here before parsing the input arguments
         // so that we don't need to trust the C runtime to do 
         // static initialization properly (always risky).
+        the_runtime = NULL;
+        runtime_map = NULL;
         separate_runtime_instances = false;
         record_registration = false;
         stealing_disabled = false;
@@ -18890,9 +18863,6 @@ namespace Legion {
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
-#endif
-#ifdef DEBUG_PERF
-          INT_ARG("-hl:perf_tol", perf_trace_tolerance);
 #endif
           INT_ARG("-hl:prof", num_profiling_nodes);
         }
@@ -19029,9 +18999,6 @@ namespace Legion {
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
-#ifdef HANG_TRACE
-      signal(SIGTERM, catch_hang); 
-#endif
       // For the moment, we only need to register our runtime tasks
       // We'll register everything else once the Legion runtime starts
       RtEvent tasks_registered = register_runtime_tasks(realm);
@@ -19059,6 +19026,21 @@ namespace Legion {
           assert(false);
 #endif
           exit(ERROR_SEPARATE_UTILITY_PROCS);
+        }
+#ifdef DEBUG_LEGION
+        assert(runtime_map == NULL);
+#endif
+        // Create the runtime map for everyone to use
+        runtime_map = new std::map<Processor,Runtime*>();
+        // Instantiate all the entries, but assign them to NULL
+        // so that the map doesn't change while parallel start-up
+        // is occurring
+        Machine::ProcessorQuery local_procs(machine);
+        local_procs.local_address_space();
+        for (Machine::ProcessorQuery::iterator it = local_procs.begin();
+              it != local_procs.end(); it++)
+        {
+          (*runtime_map)[*it] = NULL;
         }
       }
       // Check for exceeding the local number of processors
@@ -19235,10 +19217,23 @@ namespace Legion {
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
+      if (separate_runtime_instances)
+      {
 #ifdef DEBUG_LEGION
-      assert(p.local_id() < (MAX_NUM_PROCS+1));
+        assert(runtime_map != NULL);
+        assert(the_runtime == NULL);
+        assert(runtime_map->find(p) != runtime_map->end());
 #endif
-      return runtime_map[p.local_id()];
+        return (*runtime_map)[p];
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(runtime_map == NULL);
+        assert(the_runtime != NULL);
+#endif
+        return the_runtime;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19830,17 +19825,32 @@ namespace Legion {
       Runtime *local_rt = new Runtime(machine, local_space_id, 
                                       local_procs, local_util_procs,
                                       address_spaces, proc_spaces);
-      // Now set up the runtime on all of the local processors
-      // and their utility processors
-      for (std::set<Processor>::const_iterator it = local_procs.begin();
-            it != local_procs.end(); it++)
+      if (separate_runtime_instances)
       {
-        runtime_map[it->local_id()] = local_rt;
+#ifdef DEBUG_LEGION
+        assert(local_util_procs.empty());
+        assert(runtime_map != NULL);
+#endif
+        // Now set up the runtime on all of the local processors
+        // and their utility processors
+        for (std::set<Processor>::const_iterator it = local_procs.begin();
+              it != local_procs.end(); it++)
+        {
+          std::map<Processor,Runtime*>::iterator finder = 
+            runtime_map->find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != runtime_map->end());
+          assert(finder->second == NULL);
+#endif
+          finder->second = local_rt;
+        }
       }
-      for (std::set<Processor>::const_iterator it = local_util_procs.begin();
-            it != local_util_procs.end(); it++)
+      else
       {
-        runtime_map[it->local_id()] = local_rt;
+#ifdef DEBUG_LEGION
+        assert(the_runtime == NULL);
+#endif
+        the_runtime = local_rt; 
       }
       // Do the rest of our initialization
       if (local_space_id < Runtime::num_profiling_nodes)
