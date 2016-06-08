@@ -22,7 +22,6 @@ namespace Realm {
 
     class ID {
     public:
-#ifdef REALM_IDS_ARE_64BIT
       typedef unsigned long long IDType;
 
       enum {
@@ -32,26 +31,6 @@ namespace Realm {
 	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
 	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
       };
-#else
-      // two forms of bit pack for IDs:
-      //
-      //  3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
-      //  1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-      // +-----+---------------------------------------------------------+
-      // |  TYP  |   NODE  |         INDEX                               |
-      // |  TYP  |   NODE  |  INDEX_H    |           INDEX_L             |
-      // +-----+---------------------------------------------------------+
-
-      typedef unsigned int IDType;
-
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 7,
-	INDEX_L_BITS = 16,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 32 - TYPE_BITS - INDEX_BITS /* 5 = 32 nodes */
-      };
-#endif
 
       enum ID_Types {
 	ID_SPECIAL,
