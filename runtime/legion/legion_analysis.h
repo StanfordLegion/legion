@@ -161,22 +161,21 @@ namespace Legion {
       const FieldMask& get_advance_mask(RegionTreeNode *node, 
                                         bool &is_split) const;
     public:
-      void pack_version_info(Serializer &rez, AddressSpaceID local_space,
-                             ContextID ctx);
+      void pack_version_info(Serializer &rez, AddressSpaceID local_space);
       void unpack_version_info(Deserializer &derez);
       void make_local(std::set<RtEvent> &preconditions,
-                      RegionTreeForest *forest, ContextID ctx);
+                      RegionTreeForest *forest);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
+    public:
+      void pack_buffer(Serializer &rez, AddressSpaceID local_space);
+      void unpack_buffer(RegionTreeForest *forest);
     protected:
-      void pack_buffer(Serializer &rez, 
-                       AddressSpaceID local_space, ContextID ctx);
-      void unpack_buffer(RegionTreeForest *forest, ContextID ctx);
       void pack_node_info(Serializer &rez, NodeInfo &info,
-                          RegionTreeNode *node, ContextID ctx);
-      void unpack_node_info(RegionTreeNode *node, ContextID ctx,
+                          RegionTreeNode *node);
+      void unpack_node_info(RegionTreeNode *node,
                             Deserializer &derez, AddressSpaceID source);
     protected:
       LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
@@ -286,8 +285,6 @@ namespace Legion {
     public:
       void pack_user(Serializer &rez);
       static PhysicalUser* unpack_user(Deserializer &derez, 
-                                       FieldSpaceNode *node,
-                                       AddressSpaceID source,
                                        bool add_reference);
     public:
       RegionUsage usage;
@@ -423,12 +420,6 @@ namespace Legion {
                                   bool capture_leave_open = false,
                                   bool split_node = false);
       void advance_version_numbers(const FieldMask &mask);
-    public:
-      VersionState* create_new_version_state(VersionID vid); 
-      VersionState* create_remote_version_state(VersionID vid, 
-                              DistributedID did, AddressSpaceID owner_space);
-      VersionState* find_remote_version_state(VersionID vid, DistributedID did,
-                                              AddressSpaceID owner_space);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -620,10 +611,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
     public:
-      PhysicalState(CurrentState *manager);
-#ifdef DEBUG_LEGION
-      PhysicalState(CurrentState *manager, RegionTreeNode *node);
-#endif
+      PhysicalState(RegionTreeNode *node);
       PhysicalState(const PhysicalState &rhs);
       ~PhysicalState(void);
     public:
@@ -657,7 +645,7 @@ namespace Legion {
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     public:
-      CurrentState *const manager;
+      RegionTreeNode *const node;
     public:
       // Fields which have dirty data
       FieldMask dirty_mask;
@@ -674,10 +662,6 @@ namespace Legion {
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
-#ifdef DEBUG_LEGION
-    public:
-      RegionTreeNode *const node;
-#endif
     };
 
     /**
@@ -715,7 +699,7 @@ namespace Legion {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   CurrentState *manager); 
+                   RegionTreeNode *node);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -804,7 +788,7 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
     public:
       const VersionID version_number;
-      CurrentState *const manager;
+      RegionTreeNode *const logical_node;
     protected:
       Reservation state_lock;
       // Fields which have been directly written to

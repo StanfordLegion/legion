@@ -715,10 +715,7 @@ namespace Legion {
       assert(infos.size() == regions.size());
 #endif
       for (unsigned idx = 0; idx < infos.size(); idx++)
-      {
-        infos[idx].pack_version_info(rez, local_space, 
-                                     get_parent_context(idx).get_id()); 
-      }
+        infos[idx].pack_version_info(rez, local_space); 
     }
 
     //--------------------------------------------------------------------------
@@ -3020,8 +3017,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         VersionInfo &info = get_version_info(idx);
-        info.pack_version_info(rez, local_space, 
-                               get_parent_context(idx).get_id());
+        info.pack_version_info(rez, local_space); 
       }
       // Pack up our virtual mapping information
       std::vector<unsigned> virtual_indexes;
@@ -8112,25 +8108,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL);
+#ifdef DEBUG_LEGION
+      assert(version_infos.size() == virtual_mapped.size());
+#endif
       std::set<RtEvent> preconditions; 
       if (is_remote())
       {
-        // If we're remote and locally mapped, we are done
         if (is_locally_mapped())
         {
-          if (!has_virtual_instances())
+          // If we have any virtual instances we need to unpack them now
+          if (has_virtual_instances())
           {
-            Runtime::trigger_event(ready_event);
-            return;
+            for (unsigned idx = 0; idx < version_infos.size(); idx++)
+            {
+              if (!virtual_mapped[idx])
+                continue;
+              version_infos[idx].unpack_buffer(runtime->forest);
+            }
           }
-          // Otherwise we need to make local any virtually mapped instances
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            if (!virtual_mapped[idx])
-              continue;
-            version_infos[idx].make_local(preconditions, runtime->forest,
-                                          get_parent_context(idx).get_id());
-          }
+          Runtime::trigger_event(ready_event);
+          return;
         }
         else
         {
@@ -8138,10 +8135,8 @@ namespace Legion {
           // that was not early mapped or was virtually mapped 
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
           {
-            if ((early_mapped_regions.find(idx) == early_mapped_regions.end()) 
-                || virtual_mapped[idx])
-              version_infos[idx].make_local(preconditions, runtime->forest,
-                                            get_parent_context(idx).get_id());
+            if (early_mapped_regions.find(idx) == early_mapped_regions.end()) 
+              version_infos[idx].make_local(preconditions, runtime->forest);
           }
         }
       }
@@ -8152,10 +8147,7 @@ namespace Legion {
         {
           // If we're locally mapping, we need everything now
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            version_infos[idx].make_local(preconditions, runtime->forest,
-                                          get_parent_context(idx).get_id());
-          }
+            version_infos[idx].make_local(preconditions, runtime->forest);
         }
         else
         {
@@ -8164,8 +8156,7 @@ namespace Legion {
           {
             if (!regions[idx].is_restricted())
               continue;
-            version_infos[idx].make_local(preconditions, runtime->forest,
-                                          get_parent_context(idx).get_id());
+            version_infos[idx].make_local(preconditions, runtime->forest);
           }
         }
       }
@@ -9740,6 +9731,8 @@ namespace Legion {
         }
         remote_instances.clear();
       }
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        version_infos[idx].release();
       version_infos.clear();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
@@ -9883,7 +9876,10 @@ namespace Legion {
       unpack_base_external_task(derez);
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
         version_infos[idx].unpack_version_info(derez);
+        version_infos[idx].unpack_buffer(runtime->forest);
+      }
       virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);
@@ -10700,8 +10696,7 @@ namespace Legion {
       {
         // If we're locally mapped, request everyone's state
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, runtime->forest, 
-                                        get_parent_context(idx).get_id());
+          version_infos[idx].make_local(preconditions, runtime->forest); 
       }
       else
       {
@@ -10712,8 +10707,7 @@ namespace Legion {
           // We need to request state for any early mapped regions, either
           // because they are restricted or we actually need to early map them
           if (req.is_restricted() || req.must_premap())
-            version_infos[idx].make_local(preconditions, runtime->forest, 
-                                          get_parent_context(idx).get_id());
+            version_infos[idx].make_local(preconditions, runtime->forest); 
         }
       }
       if (preconditions.empty())
@@ -11785,9 +11779,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_REMOTE_STATE_ANALYSIS_CALL);
-      // If we are locally mapped, we are done no matter what
       if (is_locally_mapped())
       {
+        // Unpack our version infos
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          version_infos[idx].unpack_buffer(runtime->forest);
         Runtime::trigger_event(ready_event);
         return;
       }
@@ -11796,8 +11792,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
       {
         if (early_mapped_regions.find(idx) == early_mapped_regions.end())
-          version_infos[idx].make_local(preconditions, runtime->forest,
-                                        get_parent_context(idx).get_id());
+          version_infos[idx].make_local(preconditions, runtime->forest);
       }
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);

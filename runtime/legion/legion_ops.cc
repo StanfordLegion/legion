@@ -1811,11 +1811,8 @@ namespace Legion {
     void MapOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -2889,19 +2886,9 @@ namespace Legion {
     {
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_versions.size(); idx++)
-      {
-        RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_context(src_parent_indexes[idx]);
-        src_versions[idx].make_local(preconditions, runtime->forest, 
-                                     physical_ctx.get_id());
-      }
+        src_versions[idx].make_local(preconditions, runtime->forest); 
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-      {
-        RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_context(dst_parent_indexes[idx]);
-        dst_versions[idx].make_local(preconditions, runtime->forest, 
-                                     physical_ctx.get_id());
-      }
+        dst_versions[idx].make_local(preconditions, runtime->forest); 
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -4549,11 +4536,8 @@ namespace Legion {
     void CloseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(find_parent_index(0));
       std::set<RtEvent> preconditions;
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -5724,11 +5708,8 @@ namespace Legion {
     void AcquireOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -6290,11 +6271,8 @@ namespace Legion {
     void ReleaseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -8999,11 +8977,8 @@ namespace Legion {
                                                         RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -9496,11 +9471,8 @@ namespace Legion {
     void FillOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -10114,11 +10086,8 @@ namespace Legion {
     void AttachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -10479,11 +10448,8 @@ namespace Legion {
     void DetachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else

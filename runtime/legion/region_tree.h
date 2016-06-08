@@ -821,17 +821,6 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
-      struct ChildRequestFunctor {
-      public:
-        ChildRequestFunctor(Runtime *rt, Serializer &r, AddressSpaceID t)
-          : runtime(rt), rez(r), target(t) { }
-      public:
-        void apply(AddressSpaceID next);
-      private:
-        Runtime *const runtime;
-        Serializer &rez;
-        AddressSpaceID target;
-      };
     public:
       IndexSpaceNode(IndexSpace handle, const Domain &d, 
                      IndexPartNode *par, ColorPoint c,
@@ -934,8 +923,6 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
-      void send_child_node(AddressSpaceID target, 
-                    const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -944,6 +931,9 @@ namespace Legion {
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void handle_node_child_response(Deserializer &derez);
+      static void handle_colors_request(RegionTreeForest *context,
+                            Deserializer &derez, AddressSpaceID source);
+      static void handle_colors_response(Deserializer &derez);
     public:
       IndexSpaceAllocator* get_allocator(void);
     public:
@@ -1088,8 +1078,6 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
-      void send_child_node(AddressSpaceID target,
-                         const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -1603,8 +1591,10 @@ namespace Legion {
                                     SingleTask *context);
       InstanceView* find_instance_view(PhysicalManager *manager,
                                        SingleTask *context);
-      VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
+    public:
+      VersionState* find_remote_version_state(VersionID vid,
                                   DistributedID did, AddressSpaceID owner);
+      VersionState* create_new_version_state(VersionID vid); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);

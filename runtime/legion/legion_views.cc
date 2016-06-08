@@ -151,14 +151,14 @@ namespace Legion {
       derez.deserialize(did);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      // We have to be able to find this or it is very bad for deadlock
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready.wait();
 #ifdef DEBUG_LEGION
-      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
-      assert(inst_view != NULL);
-#else
-      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+      assert(view->is_instance_view());
 #endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->process_update_request(source, done_event, derez);
     }
 
@@ -172,14 +172,14 @@ namespace Legion {
       derez.deserialize(did);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      // We have to be able to find this or it is very bad for deadlock
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready.wait();
 #ifdef DEBUG_LEGION
-      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
-      assert(inst_view != NULL);
-#else
-      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+      assert(view->is_instance_view());
 #endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->process_update_response(derez, done_event);
     }
 
@@ -191,14 +191,14 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      // We have to be able to find this or it is very bad for deadlock
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready.wait();
 #ifdef DEBUG_LEGION
-      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
-      assert(inst_view != NULL);
-#else
-      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+      assert(view->is_instance_view());
 #endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->process_remote_update(derez, source);
     }
 
@@ -214,14 +214,14 @@ namespace Legion {
       derez.deserialize(invalid_mask);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      // We have to be able to find this or it is very bad for deadlock
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      RtEvent ready = RtEvent::NO_RT_EVENT;
+      LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+      if (ready.exists())
+        ready.wait();
 #ifdef DEBUG_LEGION
-      InstanceView *inst_view = dynamic_cast<InstanceView*>(dc);
-      assert(inst_view != NULL);
-#else
-      InstanceView *inst_view = static_cast<InstanceView*>(dc);
+      assert(view->is_instance_view());
 #endif
+      InstanceView *inst_view = view->as_instance_view();
       inst_view->process_remote_invalidate(invalid_mask, done_event);
     }
 
@@ -3089,7 +3089,7 @@ namespace Legion {
           if (users.single)
           {
             rez.serialize<size_t>(1);
-            rez.serialize(*(users.users.single_user));
+            users.users.single_user->pack_user(rez);
             rez.serialize(users.user_mask);
           }
           else
@@ -3099,7 +3099,7 @@ namespace Legion {
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              rez.serialize(*(uit->first));
+              uit->first->pack_user(rez);
               rez.serialize(uit->second);
             }
           }
@@ -3113,7 +3113,7 @@ namespace Legion {
           if (users.single)
           {
             rez.serialize<size_t>(1);
-            rez.serialize(*(users.users.single_user));
+            users.users.single_user->pack_user(rez);
             rez.serialize(users.user_mask);
           }
           else
@@ -3123,7 +3123,7 @@ namespace Legion {
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              rez.serialize(*(uit->first));
+              uit->first->pack_user(rez);
               rez.serialize(uit->second);
             }
           }
@@ -3192,8 +3192,8 @@ namespace Legion {
                 *(current_users.users.multi_users);
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
-              PhysicalUser *new_user = legion_new<PhysicalUser>();
-              derez.deserialize(*new_user);
+              PhysicalUser *new_user = 
+                PhysicalUser::unpack_user(derez, false/*add ref*/);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               current_users.user_mask |= new_mask;
@@ -3205,8 +3205,7 @@ namespace Legion {
             if (num_users == 1)
             {
               current_users.users.single_user = 
-                legion_new<PhysicalUser>();
-              derez.deserialize(*(current_users.users.single_user)); 
+                PhysicalUser::unpack_user(derez, false/*add ref*/);
               derez.deserialize(current_users.user_mask);
             }
             else
@@ -3218,8 +3217,8 @@ namespace Legion {
                 *(current_users.users.multi_users);
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
-                PhysicalUser *new_user = legion_new<PhysicalUser>();
-                derez.deserialize(*new_user);
+                PhysicalUser *new_user = 
+                  PhysicalUser::unpack_user(derez, false/*add ref*/);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 current_users.user_mask |= new_mask;
@@ -3260,8 +3259,8 @@ namespace Legion {
                 *(previous_users.users.multi_users);
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
-              PhysicalUser *new_user = legion_new<PhysicalUser>();
-              derez.deserialize(*new_user);
+              PhysicalUser *new_user = 
+                PhysicalUser::unpack_user(derez, false/*add ref*/);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               previous_users.user_mask |= new_mask;
@@ -3273,8 +3272,7 @@ namespace Legion {
             if (num_users == 1)
             {
               previous_users.users.single_user = 
-                legion_new<PhysicalUser>();
-              derez.deserialize(*(previous_users.users.single_user)); 
+                PhysicalUser::unpack_user(derez, false/*add ref*/);
               derez.deserialize(previous_users.user_mask);
             }
             else
@@ -3286,8 +3284,8 @@ namespace Legion {
                 *(previous_users.users.multi_users);
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
-                PhysicalUser *new_user = legion_new<PhysicalUser>();
-                derez.deserialize(*new_user);
+                PhysicalUser *new_user = 
+                  PhysicalUser::unpack_user(derez, false/*add ref*/);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 previous_users.user_mask |= new_mask;
@@ -3679,7 +3677,7 @@ namespace Legion {
           rez.serialize(logical_node->as_partition_node()->handle);
         rez.serialize(destroy_event);
         VersionInfo &info = version_info->get_version_info();
-        info.pack_version_info(rez, 0, 0);
+        info.pack_version_info(rez, 0);
         root->pack_composite_tree(rez, target);
       }
       runtime->send_composite_view(target, rez);

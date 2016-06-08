@@ -5615,10 +5615,42 @@ namespace Legion {
       }
       // if we make it here, send a request
       AddressSpaceID owner_space = get_owner_space();
+      if (owner_space == context->runtime->address_space)
+      {
+        switch (c.get_dim())
+        {
+          case 0:
+            {
+              log_index.error("Unable to find entry for color %d in "
+                              "index space %x.", c.get_index(), handle.id);
+              break;
+            }
+          case 1:
+            {
+              log_index.error("Unable to find entry for color %d in "
+                              "index space %x.", c[0], handle.id);
+              break;
+            }
+          case 2:
+            {
+              log_index.error("Unable to find entry for color (%d,%d) in "
+                              "index space %x.", c[0], c[1], handle.id);
+              break;
+            }
+          case 3:
+            {
+              log_index.error("Unable to find entry for color (%d,%d,%d) in "
+                              "index space %x.", c[0], c[1], c[2], handle.id);
+              break;
+            }
+          default:
+            assert(false);
+        }
 #ifdef DEBUG_LEGION
-      AddressSpaceID local_space = context->runtime->address_space;
-      assert(owner_space != local_space);
+        assert(false);
 #endif
+        exit(ERROR_INVALID_PARTITION_COLOR);
+      }
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       IndexPartition child_handle = IndexPartition::NO_PART;
       IndexPartition *volatile handle_ptr = &child_handle;
@@ -5937,13 +5969,32 @@ namespace Legion {
     void IndexSpaceNode::get_colors(std::set<ColorPoint> &colors)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
-            valid_map.begin(); it != valid_map.end(); it++)
+      // If we're not the owner, we need to request an up to date set of colors
+      // since it can change arbitrarily
+      AddressSpaceID owner_space = get_owner_space();
+      if (owner_space != context->runtime->address_space)
       {
-        // Can be NULL in some cases of parallel partitioning
-        if (it->second != NULL)
-          colors.insert(it->first);
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(&colors);
+          rez.serialize(ready_event); 
+        }
+        context->runtime->send_index_space_colors_request(owner_space, rez);
+        ready_event.wait();
+      }
+      else
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
+              valid_map.begin(); it != valid_map.end(); it++)
+        {
+          // Can be NULL in some cases of parallel partitioning
+          if (it->second != NULL)
+            colors.insert(it->first);
+        }
       }
     }
 
@@ -6456,69 +6507,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::ChildRequestFunctor::apply(AddressSpaceID next)
-    //--------------------------------------------------------------------------
-    {
-      if (next != target)
-        runtime->send_index_space_child_request(next, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_child_node(AddressSpaceID target,
-                          const ColorPoint &child_color, RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-      // First check to see if we have it
-      IndexPartNode *child_node = NULL;
-      // If we're the owner, check to see if we have it
-      AddressSpaceID local_space = context->runtime->address_space;
-      if (get_owner_space() == local_space)
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
-          color_map.find(child_color);
-        if (finder != color_map.end())
-          child_node = finder->second;
-      }
-      else
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
-          color_map.find(child_color);
-        // We only got this as a result of a broadcast, so see if we
-        // are the owner
-        if ((finder != color_map.end()) &&
-            (finder->second->get_owner_space() == local_space))
-          child_node = finder->second;
-        else
-          return; // nothing for us to do
-      }
-      // If we got the node, send its information
-      if (child_node != NULL)
-      {
-        child_node->send_node(target, false/*up*/, true/*down*/);
-        // Then send the trigger
-        Serializer rez;
-        rez.serialize(to_trigger);
-        context->runtime->send_index_partition_return(target, rez);
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(get_owner_space() == local_space); // better be the owner
-#endif
-        // Send out broadcasts to everyone with the node
-        Serializer rez;
-        rez.serialize(handle);
-        rez.serialize(target);
-        rez.serialize(child_color);
-        rez.serialize(to_trigger);
-        ChildRequestFunctor functor(context->runtime, rez, target);
-        creation_set.map(functor);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_creation(
         RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6741,6 +6729,54 @@ namespace Legion {
         default:
           assert(false);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_colors_request(
+          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      std::set<ColorPoint> *target;
+      derez.deserialize(target);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      IndexSpaceNode *node = context->get_node(handle);
+      std::set<ColorPoint> results;
+      node->get_colors(results);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize<size_t>(results.size());
+        for (std::set<ColorPoint>::const_iterator it = results.begin();
+              it != results.end(); it++)
+          it->serialize(rez);
+        rez.serialize(ready);
+      }
+      context->runtime->send_index_space_colors_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_colors_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::set<ColorPoint> *target;
+      derez.deserialize(target);
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      for (unsigned idx = 0; idx < num_colors; idx++)
+      {
+        ColorPoint cp;
+        cp.deserialize(derez);
+        target->insert(cp);
+      }
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      Runtime::trigger_event(ready);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7019,16 +7055,45 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
-#ifdef DEBUG_LEGION
-      if (!color_space.contains(c.get_point()))
-      {
-        log_index.error("Invalid color for index subspace!");
-        assert(false);
-        exit(ERROR_INVALID_INDEX_PART_COLOR);
-      }
-#endif
       AddressSpaceID owner_space = get_owner_space();
       AddressSpaceID local_space = context->runtime->address_space;
+      if (owner_space == local_space)
+      {
+        switch (c.get_dim())
+        {
+          case 0:
+            {
+              log_index.error("Unable to find entry for color %d in "
+                              "index partition %x.", c.get_index(), handle.id);
+              break;
+            }
+          case 1:
+            {
+              log_index.error("Unable to find entry for color %d in "
+                              "index partition %x.", c[0], handle.id);
+              break;
+            }
+          case 2:
+            {
+              log_index.error("Unable to find entry for color (%d,%d) in "
+                              "index partition %x.", c[0], c[1], handle.id);
+              break;
+            }
+          case 3:
+            {
+              log_index.error("Unable to find entry for color (%d,%d,%d) in "
+                              "index partition %x.", 
+                              c[0], c[1], c[2], handle.id);
+              break;
+            }
+          default:
+            assert(false);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
+      }
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
@@ -7967,23 +8032,6 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         child_creation.add(target);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::send_child_node(AddressSpaceID target,
-                          const ColorPoint &child_color, RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      AddressSpaceID local_space = context->runtime->address_space;
-      // This message is only sent to the owner
-      assert(get_owner_space() == local_space);
-#endif
-      IndexSpaceNode* child_node = get_child(child_color);
-      child_node->send_node(target, false/*up*/, true/*down*/);
-      Serializer rez;
-      rez.serialize(to_trigger);
-      context->runtime->send_index_space_return(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -12427,7 +12475,7 @@ namespace Legion {
           FieldMask state_mask;
           derez.deserialize(state_mask);
           VersionState *version_state = 
-            state.find_remote_version_state(vid, did, owner);
+            find_remote_version_state(vid, did, owner);
           LegionMap<VersionState*,FieldMask>::aligned::iterator finder =
             info.states.find(version_state);
           if (finder == info.states.end())
@@ -12460,7 +12508,7 @@ namespace Legion {
           FieldMask state_mask;
           derez.deserialize(state_mask);
           VersionState *version_state = 
-            state.find_remote_version_state(vid, did, owner);
+            find_remote_version_state(vid, did, owner);
           LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
             info.states.find(version_state);
           if (finder == info.states.end())
@@ -14183,12 +14231,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* RegionTreeNode::find_remote_version_state(ContextID ctx,
-                  VersionID vid, DistributedID did, AddressSpaceID owner_space)
+    VersionState* RegionTreeNode::find_remote_version_state(VersionID vid, 
+                                  DistributedID did, AddressSpaceID owner_space)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
-      return state.find_remote_version_state(vid, did, owner_space);
+      // Use the node lock to ensure that we don't
+      // replicated version states on a node
+      VersionState *result = NULL;
+      Runtime *runtime = context->runtime;
+      {
+        AutoLock n_lock(node_lock);
+        if (runtime->has_distributed_collectable(did))
+        {
+          DistributedCollectable *dc = 
+            runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+          result = dynamic_cast<VersionState*>(dc);
+          assert(result != NULL);
+#else
+          result = static_cast<VersionState*>(dc);
+#endif
+        }
+        else // Otherwise make it
+        {
+          AddressSpaceID local_space = runtime->address_space;
+#ifdef DEBUG_LEGION
+          assert(owner_space != local_space);
+#endif
+          result = legion_new<VersionState>(vid, context->runtime, 
+                                    did, owner_space, local_space, this);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* RegionTreeNode::create_new_version_state(VersionID vid)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID new_did = 
+        context->runtime->get_available_distributed_id(false);
+      AddressSpace local_space = context->runtime->address_space;
+      return legion_new<VersionState>(vid, context->runtime, 
+                        new_did, local_space, local_space, this);
     }
 
     //--------------------------------------------------------------------------

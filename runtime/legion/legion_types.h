@@ -443,8 +443,9 @@ namespace Legion {
       CONTEXT_VIRTUAL_CHANNEL = 7,
       MANAGER_VIRTUAL_CHANNEL = 8,
       VIEW_VIRTUAL_CHANNEL = 9,
-      VARIANT_VIRTUAL_CHANNEL = 10,
-      MAX_NUM_VIRTUAL_CHANNELS = 11, // this one must be last
+      UPDATE_VIRTUAL_CHANNEL = 10,
+      VARIANT_VIRTUAL_CHANNEL = 11,
+      MAX_NUM_VIRTUAL_CHANNELS = 12, // this one must be last
     };
 
     enum MessageKind {
@@ -456,6 +457,8 @@ namespace Legion {
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_CHILD_REQUEST,
       SEND_INDEX_SPACE_CHILD_RESPONSE,
+      SEND_INDEX_SPACE_COLORS_REQUEST,
+      SEND_INDEX_SPACE_COLORS_RESPONSE,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
@@ -563,6 +566,8 @@ namespace Legion {
         "Send Index Space Return",                                    \
         "Send Index Space Child Request",                             \
         "Send Index Space Child Response",                            \
+        "Send Index Space Colors Request",                            \
+        "Send Index Space Colors Response",                           \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
