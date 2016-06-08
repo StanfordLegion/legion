@@ -576,8 +576,8 @@ void AdversarialMapper::map_task(const MapperContext         ctx,
   }
   // Get the execution layout constraints for this variant
   const TaskLayoutConstraintSet &layout_constraints = 
-    mapper_runtime->find_task_layout_constraints(ctx, task.task_id, 
-                                           output.chosen_variant);
+    runtime->find_task_layout_constraints(ctx, task.task_id, 
+                                          output.chosen_variant);
   for (unsigned idx = 0; idx < task.regions.size(); idx++)
   {
     if (premapped[idx])
@@ -626,7 +626,7 @@ void PartitioningMapper::select_tunable_value(const MapperContext ctx,
   {
     Machine::ProcessorQuery all_procs(machine);
     all_procs.only_kind(Processor::LOC_PROC);
-    mapper_runtime->pack_tunable<size_t>(all_procs.count(), output);
+    runtime->pack_tunable<size_t>(all_procs.count(), output);
     return;
   }
   // Should never get here

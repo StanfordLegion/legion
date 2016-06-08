@@ -99,7 +99,7 @@ namespace Legion {
       };
     public:
       DefaultMapper(MapperRuntime *rt, Machine machine, Processor local, 
-                    const char *maper_name = NULL);
+                    const char *mapper_name = NULL);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
     public:
@@ -294,9 +294,16 @@ namespace Legion {
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
     protected: // member helper methods
-      Processor select_random_processor(
+      Processor default_select_random_processor(
                               const std::vector<Processor> &procs) const;
-      VariantInfo find_preferred_variant(const Task &task, MapperContext ctx,
+      Processor default_get_next_local_cpu(void);
+      Processor default_get_next_global_cpu(void);
+      Processor default_get_next_local_gpu(void);
+      Processor default_get_next_global_gpu(void);
+      Processor default_get_next_local_io(void);
+      Processor default_get_next_global_io(void);
+      VariantInfo default_find_preferred_variant(
+                                 const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
                                  Processor::Kind kind = Processor::NO_KIND);
       void default_slice_task(const Task &task,
@@ -329,6 +336,8 @@ namespace Legion {
       void default_create_copy_instance(MapperContext ctx, const Copy &copy,
                               const RegionRequirement &req, unsigned index,
                               std::vector<PhysicalInstance> &instances);
+      LogicalRegion default_find_common_ancestor(MapperContext ctx,
+                                      const std::set<LogicalRegion> &regions);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
@@ -367,6 +376,12 @@ namespace Legion {
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_gpus;
+    protected:
+      // For doing round-robining of tasks onto processors
+      unsigned next_local_io, next_local_cpu, next_local_gpu;
+      Processor next_global_io,next_global_cpu,next_global_gpu;
+      Machine::ProcessorQuery *global_io_query, *global_cpu_query,
+                              *global_gpu_query;
     protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,

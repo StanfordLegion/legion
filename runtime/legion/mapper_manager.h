@@ -28,7 +28,7 @@ namespace Legion {
                       Operation *op = NULL); 
     public:
       MapperManager*const               manager;
-      UserEvent                         resume;
+      RtUserEvent                         resume;
       MappingCallKind                   kind;
       Operation*                        operation;
       std::map<PhysicalManager*,
@@ -248,7 +248,7 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition) = 0;
+                                 RtEvent &precondition) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info,
@@ -404,6 +404,9 @@ namespace Legion {
                                       IndexSpace handle);
       IndexPartition get_parent_index_partition(MappingCallInfo *info,
                                                 IndexSpace handle);
+      unsigned get_index_space_depth(MappingCallInfo *info, IndexSpace handle);
+      unsigned get_index_partition_depth(MappingCallInfo *info, 
+                                         IndexPartition handle);
     public:
       size_t get_field_size(MappingCallInfo *info, 
                             FieldSpace handle, FieldID fid);
@@ -496,7 +499,7 @@ namespace Legion {
       std::vector<MappingCallInfo*> available_infos;
     protected:
       unsigned next_mapper_event;
-      std::map<unsigned,UserEvent> mapper_events;
+      std::map<unsigned,RtUserEvent> mapper_events;
     };
 
     /**
@@ -525,7 +528,7 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition);
+                                 RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info,
@@ -577,14 +580,14 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition);
+                                 RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info,
                                       bool first_invocation = true);
     protected:
       // Must be called while holding the lock
-      void release_lock(std::vector<UserEvent> &to_trigger); 
+      void release_lock(std::vector<RtUserEvent> &to_trigger); 
     protected:
       LockState lock_state;
       std::set<MappingCallInfo*> current_holders;
@@ -606,7 +609,7 @@ namespace Legion {
       MapperContinuation(MapperManager *manager,
                          MappingCallInfo *info);
     public:
-      void defer(Runtime *runtime, Event precondition, Operation *op = NULL);
+      void defer(Runtime *runtime, RtEvent precondition, Operation *op = NULL);
     public:
       virtual void execute(void) = 0;
     public:

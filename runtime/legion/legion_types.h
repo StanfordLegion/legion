@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "legion_config.h"
+#include "legion_template_help.h"
 
 // Make sure we have the appropriate defines in place for including realm
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
@@ -43,29 +44,6 @@
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion {
-  /**
-   * \struct LegionStaticAssert
-   * Help with static assertions.
-   */
-  template<bool> struct LegionStaticAssert;
-  template<> struct LegionStaticAssert<true> { };
-#define LEGION_STATIC_ASSERT(condition) \
-  do { LegionStaticAssert<(condition)>(); } while (0)
-
-  /**
-   * \struct LegionTypeEquality
-   * Help with checking equality of types.
-   */
-  template<typename T, typename U>
-  struct LegionTypeInequality {
-  public:
-    static const bool value = true;
-  };
-  template<typename T>
-  struct LegionTypeInequality<T,T> {
-  public:
-    static const bool value = false;
-  };
 
   typedef ::legion_error_t LegionErrorType;
   typedef ::legion_privilege_mode_t PrivilegeMode;
@@ -77,6 +55,14 @@ namespace Legion {
   typedef ::legion_dependence_type_t DependenceType;
   typedef ::legion_index_space_kind_t IndexSpaceKind;
   typedef ::legion_file_mode_t LegionFileMode;
+  typedef ::legion_execution_constraint_t ExecutionConstraintKind;
+  typedef ::legion_layout_constraint_t LayoutConstraintKind;
+  typedef ::legion_equality_kind_t EqualityKind;
+  typedef ::legion_dimension_kind_t DimensionKind;
+  typedef ::legion_isa_kind_t ISAKind;
+  typedef ::legion_resource_constraint_t ResourceKind;
+  typedef ::legion_launch_constraint_t LaunchKind;
+  typedef ::legion_specialized_constraint_t SpecializedKind;
 
   // Forward declarations for user level objects
   // legion.h
@@ -148,6 +134,13 @@ namespace Legion {
   class ColorPoint;
   class Serializer;
   class Deserializer;
+  class LgEvent; // base event type for legion
+  class ApEvent; // application event
+  class ApUserEvent; // application user event
+  class ApBarrier; // application barrier
+  class RtEvent; // runtime event
+  class RtUserEvent; // runtime user event
+  class RtBarrier;
   template<typename T> class Fraction;
   template<typename T, unsigned int MAX, 
            unsigned SHIFT, unsigned MASK> class BitMask;
@@ -277,6 +270,7 @@ namespace Legion {
       HLR_SELECT_TUNABLE_TASK_ID,
       HLR_DEFERRED_ENQUEUE_TASK_ID,
       HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
+      HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -338,6 +332,7 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Select Tunable",                                         \
         "Deferred Task Enqueue",                                  \
+        "Deferred Composite Handle",                              \
         "Deferred Mapper Message",                                \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
@@ -457,6 +452,7 @@ namespace Legion {
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_CHILD_REQUEST,
       SEND_INDEX_SPACE_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
       SEND_INDEX_PARTITION_RETURN,
@@ -563,6 +559,7 @@ namespace Legion {
         "Send Index Space Return",                                    \
         "Send Index Space Child Request",                             \
         "Send Index Space Child Response",                            \
+        "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
@@ -778,7 +775,7 @@ namespace Legion {
       REGION_TREE_PHYSICAL_FILL_FIELDS_CALL,
       REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
       REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
-      REGION_NODE_REGISTER_LOGICAL_NODE_CALL,
+      REGION_NODE_REGISTER_LOGICAL_USER_CALL,
       REGION_NODE_OPEN_LOGICAL_NODE_CALL,
       REGION_NODE_REGISTER_LOGICAL_FAT_PATH_CALL,
       REGION_NODE_OPEN_LOGICAL_FAT_PATH_CALL,
@@ -961,7 +958,7 @@ namespace Legion {
       "Region Tree Physical Fill Fields",                             \
       "Region Tree Physical Attach File",                             \
       "Region Tree Physical Detach File",                             \
-      "Region Node Register Logical Node",                            \
+      "Region Node Register Logical User",                            \
       "Region Node Open Logical Node",                                \
       "Region Node Register Logical Fat Path",                        \
       "Region Node Open Logical Fat Path",                            \
@@ -1257,7 +1254,6 @@ namespace Legion {
     extern LegionRuntime::Logger::Category log_field;            \
     extern LegionRuntime::Logger::Category log_region;           \
     extern LegionRuntime::Logger::Category log_inst;             \
-    extern LegionRuntime::Logger::Category log_leak;             \
     extern LegionRuntime::Logger::Category log_variant;          \
     extern LegionRuntime::Logger::Category log_allocation;       \
     extern LegionRuntime::Logger::Category log_prof;             \
@@ -1277,10 +1273,7 @@ namespace Legion {
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
-  typedef Realm::Event Event;
-  typedef Realm::UserEvent UserEvent;
   typedef Realm::Reservation Reservation;
-  typedef Realm::Barrier Barrier;
   typedef ::legion_reduction_op_id_t ReductionOpID;
   typedef Realm::ReductionOpUntyped ReductionOp;
   typedef ::legion_custom_serdez_id_t CustomSerdezID;
@@ -1500,6 +1493,110 @@ namespace Legion {
 #undef PROC_SHIFT
 #undef PROC_MASK
   }; // namespace Internal
+
+  // Legion derived event types
+  class LgEvent : public Realm::Event {
+  public:
+    static const LgEvent NO_LG_EVENT;
+  public:
+    LgEvent(void) { id = 0; gen = 0; }
+    LgEvent(const LgEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    explicit LgEvent(const Realm::Event e) { id = e.id; gen = e.gen; }
+  public:
+    inline LgEvent& operator=(const LgEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class ApEvent : public LgEvent {
+  public:
+    static const ApEvent NO_AP_EVENT;
+  public:
+    ApEvent(void) : LgEvent() { }
+    ApEvent(const ApEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+  public:
+    inline ApEvent& operator=(const ApEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class ApUserEvent : public ApEvent {
+  public:
+    static const ApUserEvent NO_AP_USER_EVENT;
+  public:
+    ApUserEvent(void) : ApEvent() { }
+    ApUserEvent(const ApUserEvent &rhs) : ApEvent(rhs) { }
+    explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
+  public:
+    inline ApUserEvent& operator=(const ApUserEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+  };
+
+  class ApBarrier : public ApEvent {
+  public:
+    static const ApBarrier NO_AP_BARRIER;
+  public:
+    ApBarrier(void) : ApEvent(), timestamp(0) { }
+    ApBarrier(const ApBarrier &rhs) 
+      : ApEvent(rhs), timestamp(rhs.timestamp) { }
+    explicit ApBarrier(const Realm::Barrier &b) 
+      : ApEvent(b), timestamp(b.timestamp) { }
+  public:
+    inline ApBarrier& operator=(const ApBarrier &rhs)
+      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+    inline operator Realm::Barrier() const
+      { Realm::Barrier b; b.id = id; b.gen = gen; 
+        b.timestamp = timestamp; return b; }
+  public:
+    Realm::Barrier::timestamp_t timestamp;
+  };
+
+  class RtEvent : public LgEvent {
+  public:
+    static const RtEvent NO_RT_EVENT;
+  public:
+    RtEvent(void) : LgEvent() { }
+    RtEvent(const RtEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+  public:
+    inline RtEvent& operator=(const RtEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+  };
+
+  class RtUserEvent : public RtEvent {
+  public:
+    static const RtUserEvent NO_RT_USER_EVENT;
+  public:
+    RtUserEvent(void) : RtEvent() { }
+    RtUserEvent(const RtUserEvent &rhs) : RtEvent(rhs) { }
+    explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
+  public:
+    inline RtUserEvent& operator=(const RtUserEvent &rhs)
+      { id = rhs.id; gen = rhs.gen; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+  };
+
+  class RtBarrier : public RtEvent {
+  public:
+    static const RtBarrier NO_RT_BARRIER;
+  public:
+    RtBarrier(void) : RtEvent(), timestamp(0) { }
+    RtBarrier(const RtBarrier &rhs)
+      : RtEvent(rhs), timestamp(rhs.timestamp) { }
+    explicit RtBarrier(const Realm::Barrier &b)
+      : RtEvent(b), timestamp(b.timestamp) { }
+  public:
+    inline RtBarrier& operator=(const RtBarrier &rhs)
+      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+    inline operator Realm::Barrier() const
+      { Realm::Barrier b; b.id = id; b.gen = gen; 
+        b.timestamp = timestamp; return b; } 
+  public:
+    Realm::Barrier::timestamp_t timestamp;
+  };
+
 }; // Legion namespace
 
 #endif // __LEGION_TYPES_H__

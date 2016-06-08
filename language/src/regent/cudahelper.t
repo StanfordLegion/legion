@@ -12,9 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local config = require("regent/config")
+local log = require("regent/log")
+
 local cudahelper = {}
 
-local log = require("regent/log")
+if not config.args()["cuda"] then return cudahelper end
 
 if not terralib.cudacompile then
   cudahelper.check_cuda_available = function() return false end

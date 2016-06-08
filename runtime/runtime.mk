@@ -41,6 +41,7 @@ ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 SLIB_REALM      := librealm.a
 LEGION_LIBS     := -L. -llegion -lrealm
 else
+$(error Error: SHARED_LOWLEVEL=1 is no longer supported)
 SLIB_SHAREDLLR  := libsharedllr.a
 LEGION_LIBS     := -L. -llegion -lsharedllr
 endif

@@ -891,6 +891,7 @@ function type_check.expr_cast(cx, node)
     for i, param in ipairs(to_params) do
       local arg = to_args[i]
       mapping[param] = arg
+      mapping[param:gettype()] = arg:gettype()
     end
 
     std.validate_args(node, to_fields, from_fields, false, terralib.types.unit, mapping, false)
@@ -3052,11 +3053,21 @@ function type_check.stat(cx, node)
   end
 end
 
-function type_check.stat_task_param(cx, node)
+function type_check.top_task_param(cx, node, mapping)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
-  return ast.typed.stat.TaskParam {
+  -- Check for parameters with duplicate types.
+  if std.type_supports_constraints(param_type) then
+    if mapping[param_type] then
+      log.error(node, "parameters " .. tostring(node.symbol) .. " and " ..
+                  tostring(mapping[param_type]) ..
+                  " have the same type, but are required to be distinct")
+    end
+    mapping[param_type] = node.symbol
+  end
+
+  return ast.typed.top.TaskParam {
     symbol = node.symbol,
     param_type = param_type,
     options = node.options,
@@ -3064,12 +3075,13 @@ function type_check.stat_task_param(cx, node)
   }
 end
 
-function type_check.stat_task(cx, node)
+function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
 
+  local mapping = {}
   local params = node.params:map(
-    function(param) return type_check.stat_task_param(cx, param) end)
+    function(param) return type_check.top_task_param(cx, param, mapping) end)
   local prototype = node.prototype
   prototype:set_param_symbols(
     params:map(function(param) return param.symbol end))
@@ -3127,7 +3139,7 @@ function type_check.stat_task(cx, node)
   prototype:set_constraints(cx.constraints)
   prototype:set_region_universe(cx.region_universe)
 
-  return ast.typed.stat.Task {
+  return ast.typed.top.Task {
     name = node.name,
     params = params,
     return_type = return_type,
@@ -3149,9 +3161,9 @@ function type_check.stat_task(cx, node)
   }
 end
 
-function type_check.stat_fspace(cx, node)
+function type_check.top_fspace(cx, node)
   node.fspace.constraints = type_check.constraints(cx, node.constraints)
-  return ast.typed.stat.Fspace {
+  return ast.typed.top.Fspace {
     name = node.name,
     fspace = node.fspace,
     options = node.options,
@@ -3159,12 +3171,28 @@ function type_check.stat_fspace(cx, node)
   }
 end
 
-function type_check.stat_top(cx, node)
-  if node:is(ast.specialized.stat.Task) then
-    return type_check.stat_task(cx, node)
+function type_check.top_quote_expr(cx, node)
+  -- Type check lazily, when the expression is interpolated.
+  return ast.typed.top.QuoteExpr(node)
+end
 
-  elseif node:is(ast.specialized.stat.Fspace) then
-    return type_check.stat_fspace(cx, node)
+function type_check.top_quote_stat(cx, node)
+  -- Type check lazily, when the statement is interpolated.
+  return ast.typed.top.QuoteStat(node)
+end
+
+function type_check.top(cx, node)
+  if node:is(ast.specialized.top.Task) then
+    return type_check.top_task(cx, node)
+
+  elseif node:is(ast.specialized.top.Fspace) then
+    return type_check.top_fspace(cx, node)
+
+  elseif node:is(ast.specialized.top.QuoteExpr) then
+    return type_check.top_quote_expr(cx, node)
+
+  elseif node:is(ast.specialized.top.QuoteStat) then
+    return type_check.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -3173,7 +3201,7 @@ end
 
 function type_check.entry(node)
   local cx = context.new_global_scope({})
-  return type_check.stat_top(cx, node)
+  return type_check.top(cx, node)
 end
 
 return type_check

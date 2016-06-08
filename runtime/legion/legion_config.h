@@ -335,6 +335,7 @@ typedef enum legion_error_t {
   ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
   ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME = 150,
   ERROR_INVALID_MAPPER_SYNCHRONIZATION = 151,
+  ERROR_ILLEGAL_RESTRICTED_REDUCTION = 152,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -405,6 +406,110 @@ enum {
   NAME_SEMANTIC_TAG = 0,
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
+
+typedef enum legion_execution_constraint_t {
+  ISA_CONSTRAINT = 0, // instruction set architecture
+  PROCESSOR_CONSTRAINT = 1, // processor kind constraint
+  RESOURCE_CONSTRAINT = 2, // physical resources
+  LAUNCH_CONSTRAINT = 3, // launch configuration
+  COLOCATION_CONSTRAINT = 4, // region requirements in same instance
+} legion_execution_constraint_t;
+
+typedef enum legion_layout_constraint_t {
+  SPECIALIZED_CONSTRAINT = 0, // normal or speicalized (e.g. reduction-fold)
+  MEMORY_CONSTRAINT = 1, // constraint on the kind of memory
+  FIELD_CONSTRAINT = 2, // ordering of fields
+  ORDERING_CONSTRAINT = 3, // ordering of dimensions
+  SPLITTING_CONSTRAINT = 4, // splitting of dimensions 
+  DIMENSION_CONSTRAINT = 5, // dimension size constraint
+  ALIGNMENT_CONSTRAINT = 6, // alignment of a field
+  OFFSET_CONSTRAINT = 7, // offset of a field
+  POINTER_CONSTRAINT = 8, // pointer of a field
+} legion_layout_constraint_t;
+
+typedef enum legion_equality_kind_t {
+  LT_EK = 0, // <
+  LE_EK = 1, // <=
+  GT_EK = 2, // >
+  GE_EK = 3, // >=
+  EQ_EK = 4, // ==
+  NE_EK = 5, // !=
+} legion_equality_kind_t;
+
+typedef enum legion_dimension_kind_t {
+  DIM_X = 0, // first logical index space dimension
+  DIM_Y = 1, // second logical index space dimension
+  DIM_Z = 2, // ...
+  DIM_F = 3, // field dimension
+  INNER_DIM_X = 4, // inner dimension for tiling X
+  OUTER_DIM_X = 5, // outer dimension for tiling X
+  INNER_DIM_Y = 6, // ...
+  OUTER_DIM_Y = 7,
+  INNER_DIM_Z = 8,
+  OUTER_DIM_Z = 9,
+} legion_dimension_kind_t;
+
+// Make all flags 1-hot encoding so we can logically-or them together
+typedef enum legion_isa_kind_t {
+  // Top-level ISA Kinds
+  X86_ISA   = 0x00000001,
+  ARM_ISA   = 0x00000002,
+  POW_ISA   = 0x00000004, // Power PC
+  PTX_ISA   = 0x00000008, // auto-launch by runtime
+  CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
+  LUA_ISA   = 0x00000020, // run on Lua processor
+  TERRA_ISA = 0x00000040, // JIT to target processor kind
+  LLVM_ISA  = 0x00000080, // JIT to target processor kind
+  GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
+  // x86 Vector Instructions
+  SSE_ISA   = 0x00000200,
+  SSE2_ISA  = 0x00000400,
+  SSE3_ISA  = 0x00000800,
+  SSE4_ISA  = 0x00001000,
+  AVX_ISA   = 0x00002000,
+  AVX2_ISA  = 0x00004000,
+  FMA_ISA   = 0x00008000,
+  MIC_ISA   = 0x00010000,
+  // GPU variants
+  SM_10_ISA = 0x00020000,
+  SM_20_ISA = 0x00040000,
+  SM_30_ISA = 0x00080000,
+  SM_35_ISA = 0x00100000,
+  // ARM Vector Instructions
+  NEON_ISA  = 0x00200000,
+} legion_isa_kind_t;
+
+typedef enum legion_resource_constraint_t {
+  L1_CACHE_SIZE = 0,
+  L2_CACHE_SIZE = 1,
+  L3_CACHE_SIZE = 2,
+  L1_CACHE_ASSOCIATIVITY = 3,
+  L2_CACHE_ASSOCIATIVITY = 4,
+  L3_CACHE_ASSOCIATIVITY = 5,
+  REGISTER_FILE_SIZE = 6,
+  SHARED_MEMORY_SIZE = 7,
+  TEXTURE_CACHE_SIZE = 8,
+  CONSTANT_CACHE_SIZE = 9,
+  NAMED_BARRIERS = 10,
+  SM_COUNT = 11, // total SMs on the device
+  MAX_OCCUPANCY = 12, // max warps per SM
+} legion_resource_constraint_t;
+
+typedef enum legion_launch_constraint_t {
+  CTA_SHAPE = 0,
+  GRID_SHAPE = 1,
+  DYNAMIC_SHARED_MEMORY = 2,
+  REGISTERS_PER_THREAD = 3,
+  CTAS_PER_SM = 4,
+  NAMED_BARRIERS_PER_CTA = 5,
+} legion_launch_constraint_t;
+
+typedef enum legion_specialized_constraint_t {
+  NORMAL_SPECIALIZE = 0,
+  REDUCTION_FOLD_SPECIALIZE = 1,
+  REDUCTION_LIST_SPECIALIZE = 2,
+  VIRTUAL_SPECIALIZE = 3,
+} legion_specialized_constraint_t;
 
 //==========================================================================
 //                                Types

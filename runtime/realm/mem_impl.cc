@@ -90,8 +90,8 @@ namespace Realm {
 #ifdef REALM_PROFILE_MEMORY_USAGE
       printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",
 	     me.id, 
-	     peak_usage, peak_usage / 1048576.0,
-	     peak_footprint, peak_footprint / 1048576.0);
+	     (size_t)peak_usage, peak_usage / 1048576.0,
+	     (size_t)peak_footprint, peak_footprint / 1048576.0);
 #endif
     }
 

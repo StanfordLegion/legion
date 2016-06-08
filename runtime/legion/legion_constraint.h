@@ -24,50 +24,6 @@
 
 namespace Legion {
 
-    // These are the constraint kinds for describing execution 
-    enum ExecutionConstraintKind {
-      ISA_CONSTRAINT, // instruction set architecture
-      PROCESSOR_CONSTRAINT, // processor kind constraint
-      RESOURCE_CONSTRAINT, // physical resources
-      LAUNCH_CONSTRAINT, // launch configuration
-      COLOCATION_CONSTRAINT, // region requirements in same instance
-    };
-
-    // These are the constraint kinds for describing data layout 
-    enum LayoutConstraintKind {
-      SPECIALIZED_CONSTRAINT, // normal or speicalized (e.g. reduction-fold)
-      MEMORY_CONSTRAINT, // constraint on the kind of memory
-      FIELD_CONSTRAINT, // ordering of fields
-      ORDERING_CONSTRAINT, // ordering of dimensions
-      SPLITTING_CONSTRAINT, // splitting of dimensions 
-      DIMENSION_CONSTRAINT, // dimension size constraint
-      ALIGNMENT_CONSTRAINT, // alignment of a field
-      OFFSET_CONSTRAINT, // offset of a field
-      POINTER_CONSTRAINT, // pointer of a field
-    };
-
-    enum EqualityKind {
-      LT_EK, // <
-      LE_EK, // <=
-      GT_EK, // >
-      GE_EK, // >=
-      EQ_EK, // ==
-      NE_EK, // !=
-    };
-
-    enum DimensionKind {
-      DIM_X, // first logical index space dimension
-      DIM_Y, // second logical index space dimension
-      DIM_Z, // ...
-      DIM_F, // field dimension
-      INNER_DIM_X, // inner dimension for tiling X
-      OUTER_DIM_X, // outer dimension for tiling X
-      INNER_DIM_Y, // ...
-      OUTER_DIM_Y,
-      INNER_DIM_Z,
-      OUTER_DIM_Z,
-    };
-
     /**
      * \class ISAConstraint
      * ISA constraints specify the kind of instruction constraints
@@ -84,36 +40,6 @@ namespace Legion {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                                 ISA_CONSTRAINT;
-    public:
-      // Make all flags 1-hot encoding so we can logically-or them together
-      enum ISAKind {
-        // Top-level ISA Kinds
-        X86_ISA   = 0x00000001,
-        ARM_ISA   = 0x00000002,
-        POW_ISA   = 0x00000004, // Power PC
-        PTX_ISA   = 0x00000008, // auto-launch by runtime
-        CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
-        LUA_ISA   = 0x00000020, // run on Lua processor
-        TERRA_ISA = 0x00000040, // JIT to target processor kind
-        LLVM_ISA  = 0x00000080, // JIT to target processor kind
-        GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
-        // x86 Vector Instructions
-        SSE_ISA   = 0x00000200,
-        SSE2_ISA  = 0x00000400,
-        SSE3_ISA  = 0x00000800,
-        SSE4_ISA  = 0x00001000,
-        AVX_ISA   = 0x00002000,
-        AVX2_ISA  = 0x00004000,
-        FMA_ISA   = 0x00008000,
-        MIC_ISA   = 0x00010000,
-        // GPU variants
-        SM_10_ISA = 0x00020000,
-        SM_20_ISA = 0x00040000,
-        SM_30_ISA = 0x00080000,
-        SM_35_ISA = 0x00100000,
-        // ARM Vector Instructions
-        NEON_ISA  = 0x00200000,
-      };
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
@@ -167,22 +93,6 @@ namespace Legion {
       static const ExecutionConstraintKind constraint_kind = 
                                             RESOURCE_CONSTRAINT;
     public:
-      enum ResourceKind {
-        L1_CACHE_SIZE,
-        L2_CACHE_SIZE,
-        L3_CACHE_SIZE,
-        L1_CACHE_ASSOCIATIVITY,
-        L2_CACHE_ASSOCIATIVITY,
-        L3_CACHE_ASSOCIATIVITY,
-        REGISTER_FILE_SIZE,
-        SHARED_MEMORY_SIZE,
-        TEXTURE_CACHE_SIZE,
-        CONSTANT_CACHE_SIZE,
-        NAMED_BARRIERS,
-        SM_COUNT, // total SMs on the device
-        MAX_OCCUPANCY, // max warps per SM
-      };
-    public:
       ResourceConstraint(void);
       ResourceConstraint(ResourceKind resource_kind, 
                          EqualityKind eq_kind, size_t value);
@@ -210,15 +120,6 @@ namespace Legion {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                             LAUNCH_CONSTRAINT;
-    public:
-      enum LaunchKind {
-        CTA_SHAPE,
-        GRID_SHAPE,
-        DYNAMIC_SHARED_MEMORY,
-        REGISTERS_PER_THREAD,
-        CTAS_PER_SM,
-        NAMED_BARRIERS_PER_CTA,
-      };
     public:
       LaunchConstraint(void);
       LaunchConstraint(LaunchKind kind, size_t value);
@@ -307,13 +208,6 @@ namespace Legion {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             SPECIALIZED_CONSTRAINT;
-    public:
-      enum SpecializedKind {
-        NORMAL_SPECIALIZE,
-        REDUCTION_FOLD_SPECIALIZE,
-        REDUCTION_LIST_SPECIALIZE,
-        VIRTUAL_SPECIALIZE,
-      };
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
                             ReductionOpID redop = 0);

@@ -299,7 +299,7 @@ int read_events(FILE *f)
         unsigned long long ev2_id;
         unsigned wgen, pos, gen2, ts;
         int delta;
-        int ret = sscanf(s, "  [%d] L:%*p %ndeferred arrival: barrier=%llx/%d (%d), delta=%d",
+        int ret = sscanf(s, "  [%d] L:%*p - %ndeferred arrival: barrier=%llx/%d (%d), delta=%d",
                          &wgen, &pos, &ev2_id, &gen2, &ts, &delta);
         if(ret == 5) {
           Event *e1 = Event::get_event(ev_id, wgen);

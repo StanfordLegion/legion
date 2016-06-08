@@ -153,7 +153,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_memory_query_t, Machine::MemoryQuery *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
                          Mapping::Utilities::MachineQueryInterface *);
-      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper*);
+      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper *);
+      NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet *);
+      NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet *);
+      NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t

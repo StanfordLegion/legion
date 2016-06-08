@@ -202,7 +202,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Mapper::Mapper(MapperRuntime *rt)
-      : mapper_runtime(rt)
+      : runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -706,6 +706,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned MapperRuntime::get_index_space_depth(MapperContext ctx,
+                                                  IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_space_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned MapperRuntime::get_index_partition_depth(MapperContext ctx,
+                                                    IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_index_partition_depth(ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
     size_t MapperRuntime::get_field_size(MapperContext ctx,
                                            FieldSpace handle, FieldID fid) const
     //--------------------------------------------------------------------------
@@ -719,6 +735,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->manager->get_field_space_fields(ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::get_field_space_fields(MapperContext ctx, 
+                          FieldSpace handle, std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> local;
+      ctx->manager->get_field_space_fields(ctx, handle, local);
+      fields.insert(local.begin(), local.end());
     }
 
     //--------------------------------------------------------------------------

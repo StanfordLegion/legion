@@ -37,7 +37,7 @@ function parser.option_values(p)
   if p:nextif("(") then
     p:expect("__unroll")
     p:expect("(")
-    local value = p:next(p.number)
+    local value = p:expect(p.number)
     p:expect(")")
     if value.value ~= math.floor(value.value) then
       p:error("unroll factor should be an integer")
@@ -124,9 +124,26 @@ function parser.reduction_op(p, optional)
   end
 end
 
+function parser.field_names(p)
+  local start = ast.save(p)
+  local names_expr
+  if p:nextif("[") then
+    names_expr = p:luaexpr()
+    p:expect("]")
+  elseif p:nextif("ispace") then
+    names_expr = "ispace"
+  else
+    names_expr = p:expect(p.name).value
+  end
+  return ast.unspecialized.FieldNames {
+    names_expr = names_expr,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.region_field(p)
   local start = ast.save(p)
-  local field_name = p:expect(p.name).value
+  local field_name = p:field_names()
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -443,7 +460,7 @@ function parser.expr_prefix(p)
     }
 
   elseif p:matches(p.name) then
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     p:ref(name)
     return ast.unspecialized.expr.ID {
       name = name,
@@ -996,7 +1013,7 @@ end
 function parser.field(p)
   local start = ast.save(p)
   if p:matches(p.name) and p:lookahead("=") then
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     p:expect("=")
     local value = p:expr()
     return ast.unspecialized.expr.CtorRecField {
@@ -1084,9 +1101,8 @@ function parser.fnargs(p)
   end
 end
 
-function parser.expr_primary(p)
+function parser.expr_primary_continuation(p, expr)
   local start = ast.save(p)
-  local expr = p:expr_prefix()
 
   while true do
     if p:nextif(".") then
@@ -1094,14 +1110,11 @@ function parser.expr_primary(p)
       if p:nextif("{") then
         repeat
           if p:matches("}") then break end
-          local field_name = p:next(p.name).value
-          field_names:insert(field_name)
+          field_names:insert(p:field_names())
         until not p:sep()
         p:expect("}")
-      elseif p:nextif("ispace") then
-        field_names:insert("ispace")
       else
-        field_names:insert(p:next(p.name).value)
+        field_names:insert(p:field_names())
       end
       expr = ast.unspecialized.expr.FieldAccess {
         value = expr,
@@ -1121,7 +1134,7 @@ function parser.expr_primary(p)
       }
 
     elseif p:nextif(":") then
-      local method_name = p:next(p.name).value
+      local method_name = p:expect(p.name).value
       local args, conditions = p:fnargs()
       if #conditions > 0 then
         p:error("method call cannot have conditions")
@@ -1152,6 +1165,11 @@ function parser.expr_primary(p)
   return expr
 end
 
+function parser.expr_primary(p)
+  local expr = p:expr_prefix()
+  return p:expr_primary_continuation(expr)
+end
+
 function parser.expr_simple(p)
   local options = p:options(true, false)
   if options:is(ast.unspecialized.expr) then
@@ -1160,7 +1178,7 @@ function parser.expr_simple(p)
 
   local start = ast.save(p)
   if p:matches(p.number) then
-    local token = p:next(p.number)
+    local token = p:expect(p.number)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = token.valuetype,
@@ -1169,7 +1187,7 @@ function parser.expr_simple(p)
     }
 
   elseif p:matches(p.string) then
-    local token = p:next(p.string)
+    local token = p:expect(p.string)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = rawstring,
@@ -1446,10 +1464,10 @@ function parser.stat_var_unpack(p, start, options)
   local names = terralib.newlist()
   local fields = terralib.newlist()
   repeat
-    local name = p:next(p.name).value
+    local name = p:expect(p.name).value
     names:insert(name)
     if p:nextif("=") then
-      fields:insert(p:next(p.name).value)
+      fields:insert(p:expect(p.name).value)
     else
       fields:insert(name)
     end
@@ -1476,11 +1494,17 @@ function parser.stat_var(p, options)
   local names = terralib.newlist()
   local type_exprs = terralib.newlist()
   repeat
-    names:insert(p:next(p.name).value)
-    if p:nextif(":") then
-      type_exprs:insert(p:luaexpr())
+    if p:nextif("[") then
+      names:insert(p:luaexpr())
+      type_exprs:insert(false)
+      p:expect("]")
     else
-      type_exprs:insert(nil)
+      names:insert(p:expect(p.name).value)
+      if p:nextif(":") then
+        type_exprs:insert(p:luaexpr())
+      else
+        type_exprs:insert(false)
+      end
     end
   until not p:nextif(",")
   local values = terralib.newlist()
@@ -1570,9 +1594,38 @@ function parser.stat_expr_assignment(p, start, first_lhs, options)
   end
 end
 
+function parser.stat_expr_escape(p, options)
+  local start = ast.save(p)
+
+  p:expect("[")
+  local value = p:luaexpr()
+  p:expect("]")
+
+  return ast.unspecialized.expr.Escape {
+    expr = value,
+    options = ast.default_options(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_expr(p, options)
   local start = ast.save(p)
-  local first_lhs = p:expr_lhs()
+
+  local quoted_maybe_stat = false
+  local first_lhs
+  if p:matches("[") then
+    first_lhs = p:stat_expr_escape(start, options)
+    if p:matches(".") or p:matches("[") or p:matches(":") or
+      p:matches("(") or p:matches("{") or p:matches(p.string)
+    then
+      first_lhs = p:expr_primary_continuation(first_lhs)
+    else
+      quoted_maybe_stat = true
+    end
+  else
+    first_lhs = p:expr_lhs()
+  end
+
   if p:matches(",") or
     p:matches("=") or
     (p:matches("+") and p:lookahead("=")) or
@@ -1583,6 +1636,12 @@ function parser.stat_expr(p, options)
     (p:matches("min") and p:lookahead("="))
   then
     return p:stat_expr_assignment(start, first_lhs, options)
+  elseif quoted_maybe_stat then
+    return ast.unspecialized.stat.Escape {
+      expr = first_lhs.expr,
+      options = options,
+      span = ast.span(start, p),
+    }
   else
     return ast.unspecialized.stat.Expr {
       expr = first_lhs,
@@ -1637,7 +1696,7 @@ function parser.stat(p)
   end
 end
 
-function parser.stat_task_name(p)
+function parser.top_task_name(p)
   local name = terralib.newlist()
   repeat
     name:insert(p:expect(p.name).value)
@@ -1645,7 +1704,7 @@ function parser.stat_task_name(p)
   return data.newtuple(unpack(name))
 end
 
-function parser.stat_task_params(p)
+function parser.top_task_params(p)
   p:expect("(")
   local params = terralib.newlist()
   if not p:matches(")") then
@@ -1654,7 +1713,7 @@ function parser.stat_task_params(p)
       local param_name = p:expect(p.name).value
       p:expect(":")
       local param_type = p:luaexpr()
-      params:insert(ast.unspecialized.stat.TaskParam {
+      params:insert(ast.unspecialized.top.TaskParam {
           param_name = param_name,
           type_expr = param_type,
           options = ast.default_options(),
@@ -1666,14 +1725,14 @@ function parser.stat_task_params(p)
   return params
 end
 
-function parser.stat_task_return(p)
+function parser.top_task_return(p)
   if p:nextif(":") then
     return p:luaexpr()
   end
   return function(env) return std.untyped end
 end
 
-function parser.stat_task_effects(p)
+function parser.top_task_effects(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
   local flags = terralib.newlist()
@@ -1697,18 +1756,18 @@ function parser.stat_task_effects(p)
   return privileges, coherence_modes, flags, conditions, constraints
 end
 
-function parser.stat_task(p, options)
+function parser.top_task(p, options)
   local start = ast.save(p)
   p:expect("task")
-  local name = p:stat_task_name()
-  local params = p:stat_task_params()
-  local return_type = p:stat_task_return()
+  local name = p:top_task_name()
+  local params = p:top_task_params()
+  local return_type = p:top_task_return()
   local privileges, coherence_modes, flags, conditions, constraints =
-    p:stat_task_effects()
+    p:top_task_effects()
   local body = p:block()
   p:expect("end")
 
-  return ast.unspecialized.stat.Task {
+  return ast.unspecialized.top.Task {
     name = name,
     params = params,
     return_type_expr = return_type,
@@ -1723,7 +1782,7 @@ function parser.stat_task(p, options)
   }
 end
 
-function parser.stat_fspace_params(p)
+function parser.top_fspace_params(p)
   local params = terralib.newlist()
   if p:nextif("(") then
     if not p:matches(")") then
@@ -1732,7 +1791,7 @@ function parser.stat_fspace_params(p)
         local param_name = p:expect(p.name).value
         p:expect(":")
         local param_type = p:luaexpr()
-        params:insert(ast.unspecialized.stat.FspaceParam {
+        params:insert(ast.unspecialized.top.FspaceParam {
           param_name = param_name,
           type_expr = param_type,
           options = ast.default_options(),
@@ -1745,28 +1804,42 @@ function parser.stat_fspace_params(p)
   return params
 end
 
-function parser.stat_fspace_fields(p)
+function parser.top_fspace_fields(p)
   local fields = terralib.newlist()
   p:expect("{")
   repeat
     if p:matches("}") then break end
 
     local start = ast.save(p)
-    local field_name = p:expect(p.name).value
+    local field_names = terralib.newlist()
+    if p:nextif("{") then
+      repeat
+        if p:matches("}") then break end
+        field_names:insert(p:expect(p.name).value)
+      until not p:nextif(",")
+      p:expect("}")
+    else
+      field_names:insert(p:expect(p.name).value)
+    end
     p:expect(":")
     local field_type = p:luaexpr()
-    fields:insert(ast.unspecialized.stat.FspaceField {
-      field_name = field_name,
-      type_expr = field_type,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    })
+
+    fields:insertall(
+      field_names:map(
+        function(field_name)
+          return ast.unspecialized.top.FspaceField {
+            field_name = field_name,
+            type_expr = field_type,
+            options = ast.default_options(),
+            span = ast.span(start, p),
+          }
+        end))
   until not p:sep()
   p:expect("}")
   return fields
 end
 
-function parser.stat_fspace_constraints(p)
+function parser.top_fspace_constraints(p)
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
@@ -1777,15 +1850,15 @@ function parser.stat_fspace_constraints(p)
   return constraints
 end
 
-function parser.stat_fspace(p, options)
+function parser.top_fspace(p, options)
   local start = ast.save(p)
   p:expect("fspace")
   local name = p:expect(p.name).value
-  local params = p:stat_fspace_params()
-  local fields = p:stat_fspace_fields()
-  local constraints = p:stat_fspace_constraints()
+  local params = p:top_fspace_params()
+  local fields = p:top_fspace_fields()
+  local constraints = p:top_fspace_constraints()
 
-  return ast.unspecialized.stat.Fspace {
+  return ast.unspecialized.top.Fspace {
     name = name,
     params = params,
     fields = fields,
@@ -1795,23 +1868,66 @@ function parser.stat_fspace(p, options)
   }
 end
 
-function parser.stat_top(p)
+function parser.top_stat(p)
   local options = p:options(false, true)
 
-  local stat
   if p:matches("task") then
-    return p:stat_task(options)
+    return p:top_task(options)
 
   elseif p:matches("fspace") then
-    return p:stat_fspace(options)
+    return p:top_fspace(options)
 
   else
     p:error("unexpected token in top-level statement")
   end
 end
 
-function parser:parse(lex)
-  return parsing.Parse(self, lex, "stat_top")
+function parser.top_quote_expr(p, options)
+  local start = ast.save(p)
+  p:expect("rexpr")
+  local expr = p:expr()
+  p:expect("end")
+
+  return ast.unspecialized.top.QuoteExpr {
+    expr = expr,
+    options = options,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.top_quote_stat(p, options)
+  local start = ast.save(p)
+  p:expect("rquote")
+  local block = p:block()
+  p:expect("end")
+
+  return ast.unspecialized.top.QuoteStat {
+    block = block,
+    options = options,
+    span = ast.span(start, p),
+  }
+end
+
+function parser.top_expr(p)
+  local options = p:options(false, true)
+
+  if p:matches("rexpr") then
+    return p:top_quote_expr(options)
+
+  elseif p:matches("rquote") then
+    return p:top_quote_stat(options)
+
+  else
+    p:error("unexpected token in top-level statement")
+  end
+end
+
+function parser:entry_expr(lex)
+  return parsing.Parse(self, lex, "top_expr")
+end
+
+function parser:entry_stat(lex)
+  return parsing.Parse(self, lex, "top_stat")
 end
 
 return parser

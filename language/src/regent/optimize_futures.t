@@ -1299,7 +1299,7 @@ function optimize_futures.stat(cx, node)
   end
 end
 
-function optimize_futures.stat_task_param(cx, param)
+function optimize_futures.top_task_param(cx, param)
   if cx:is_future(param.symbol) then
     local param_type = param.param_type
     local future_type = std.future(param_type)
@@ -1330,22 +1330,22 @@ function optimize_futures.stat_task_param(cx, param)
   end
 end
 
-function optimize_futures.stat_task_params(cx, node)
+function optimize_futures.top_task_params(cx, node)
   local results = terralib.newlist()
   local actions = terralib.newlist()
   for _, param in ipairs(node.params) do
-    local result, action = optimize_futures.stat_task_param(cx, param)
+    local result, action = optimize_futures.top_task_param(cx, param)
     results:insert(result)
     if action then actions:insert(action) end
   end
   return results, actions
 end
 
-function optimize_futures.stat_task(cx, node)
+function optimize_futures.top_task(cx, node)
   local cx = cx:new_task_scope()
   analyze_var_flow.block(cx, node.body)
   compute_var_futures(cx, node.params)
-  local params, actions = optimize_futures.stat_task_params(cx, node)
+  local params, actions = optimize_futures.top_task_params(cx, node)
   node.prototype:set_param_symbols(
     params:map(function(param) return param.symbol end),
     true)
@@ -1362,9 +1362,9 @@ function optimize_futures.stat_task(cx, node)
   }
 end
 
-function optimize_futures.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_futures.stat_task(cx, node)
+function optimize_futures.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_futures.top_task(cx, node)
 
   else
     return node
@@ -1373,7 +1373,7 @@ end
 
 function optimize_futures.entry(node)
   local cx = context.new_global_scope()
-  return optimize_futures.stat_top(cx, node)
+  return optimize_futures.top(cx, node)
 end
 
 return optimize_futures

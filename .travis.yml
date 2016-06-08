@@ -11,10 +11,10 @@ env:
   global:
   - WARN_AS_ERROR=1
   matrix:
-  - CC_FLAGS=
-  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  - CC_FLAGS=-DLEGION_SPY
-  - CC_FLAGS=-std=c++0x
+  - CC_FLAGS= DEBUG=0
+  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
+  - CC_FLAGS=-DLEGION_SPY DEBUG=1 TEST_SPY=1
+  - CC_FLAGS=-std=c++0x DEBUG=0
 matrix:
   exclude:
     - os: osx
@@ -45,6 +45,11 @@ before_install:
       sudo apt-get update -qq
       sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev
     fi
+  - |
+    if [ "$(uname)" = "Darwin" ]; then
+      brew update
+      brew install pypy
+    fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "clang++" ]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
   - if [ "$(uname)" = "Linux" ]; then export LLVM_CONFIG="llvm-config-3.5"; fi
@@ -55,7 +60,7 @@ script:
   - ./language/travis.py
   - |
     make -s -C examples/00_hello_world LG_RT_DIR=../../runtime clean
-    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime
+    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime -j2
     examples/00_hello_world/hello_world
     make -s -C examples/01_tasks_and_futures LG_RT_DIR=../../runtime
     examples/01_tasks_and_futures/tasks_and_futures
@@ -71,8 +76,8 @@ script:
     examples/06_privileges/privileges
     make -s -C examples/07_partitioning LG_RT_DIR=../../runtime
     examples/07_partitioning/partitioning
-    make -s -C examples/08_multiple_partitioning LG_RT_DIR=../../runtime
-    examples/08_multiple_partitioning/multiple_partitioning
+    make -s -C examples/08_multiple_partitions LG_RT_DIR=../../runtime
+    examples/08_multiple_partitions/multiple_partitions
     make -s -C examples/09_custom_mapper LG_RT_DIR=../../runtime
     examples/09_custom_mapper/custom_mapper
     make -s -C examples/full_circuit LG_RT_DIR=../../runtime
@@ -80,8 +85,12 @@ script:
     make -s -C examples/full_ghost LG_RT_DIR=../../runtime
     examples/full_ghost/ghost -ll:cpu 4
   - |
-    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-    make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+    if [ $DEBUG -eq 0 ]; then
+      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+    fi
   - |
-    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-    make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+    if [ $DEBUG -eq 0 ]; then
+      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
+      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+    fi

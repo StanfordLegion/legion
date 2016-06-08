@@ -34,7 +34,7 @@ terra sub_task(task : c.legion_task_t,
                runtime : c.legion_runtime_t)
   var r = c.legion_physical_region_get_logical_region(regions[0])
   var is = r.index_space
-  var d = c.legion_index_space_get_domain(runtime, ctx, is)
+  var d = c.legion_index_space_get_domain(runtime, is)
   var rect = c.legion_domain_get_rect_1d(d)
 
   var a1 = c.legion_physical_region_get_field_accessor_generic(

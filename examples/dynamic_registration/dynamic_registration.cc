@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include "legion.h"
 #include "legion_c.h"
+
+using namespace Legion;
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;

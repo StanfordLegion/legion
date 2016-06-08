@@ -36,7 +36,8 @@ namespace Legion {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, AddressSpaceID local_space,
-                  RegionTreeNode *node, bool register_now);
+                  RegionTreeNode *node, RtUserEvent destroy_event,
+                  bool register_now);
       virtual ~LogicalView(void);
     public:
       static void delete_logical_view(LogicalView *view);
@@ -71,10 +72,10 @@ namespace Legion {
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      void defer_collect_user(Event term_event);
-      virtual void collect_users(const std::set<Event> &term_events) = 0;
+      void defer_collect_user(ApEvent term_event);
+      virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
-                                          const std::set<Event> &term_events);
+                                          const std::set<ApEvent> &term_events);
     public:
       static inline DistributedID encode_materialized_did(DistributedID did,
                                                            bool top);
@@ -107,7 +108,8 @@ namespace Legion {
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
                    AddressSpaceID logical_owner, RegionTreeNode *node, 
-                   SingleTask *owner_context, bool register_now); 
+                   SingleTask *owner_context, RtUserEvent destroy_event,
+                   bool register_now); 
       virtual ~InstanceView(void);
     public:
       inline bool is_logical_owner(void) const
@@ -128,35 +130,36 @@ namespace Legion {
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
-                     LegionMap<Event,FieldMask>::aligned &preconditions,
-                                           std::set<Event> &applied_events) = 0;
-      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                     LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<RtEvent> &applied_events) = 0;
+      virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  const VersionInfo &version_info,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
                                  const AddressSpaceID source,
-                                 std::set<Event> &applied_events) = 0;
-      virtual Event find_user_precondition(const RegionUsage &user,
-                                           Event term_event,
+                                 std::set<RtEvent> &applied_events) = 0;
+      virtual ApEvent find_user_precondition(const RegionUsage &user,
+                                           ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
                                            const VersionInfo &version_info,
-                                           std::set<Event> &applied_events) = 0;
-      virtual void add_user(const RegionUsage &user, Event term_event,
+                                           std::set<RtEvent> &applied_events) = 0;
+      virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
-                            std::set<Event> &applied_events) = 0;
+                            std::set<RtEvent> &applied_events) = 0;
       // This is a fused version of the above two methods
-      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+      virtual ApEvent add_user_fused(const RegionUsage &user,
+                                   ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
                                    const AddressSpaceID source,
-                                   std::set<Event> &applied_events,
+                                   std::set<RtEvent> &applied_events,
                                    bool update_versions = true) = 0;
-      virtual void add_initial_user(Event term_event,
+      virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
@@ -171,7 +174,7 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       // Instance recycling
-      virtual void collect_users(const std::set<Event> &term_events) = 0;
+      virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
     public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
@@ -190,13 +193,13 @@ namespace Legion {
         { return get_subview(c)->as_instance_view(); }
     public:
       virtual void process_update_request(AddressSpaceID source,
-                               UserEvent done_event, Deserializer &derez) = 0;
+                               RtUserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
-                                           UserEvent done_event) = 0;
+                                           RtUserEvent done_event) = 0;
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source) = 0;
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             UserEvent done_event) = 0;
+                                             RtUserEvent done_event) = 0;
     public:
       static void handle_view_update_request(Deserializer &derez, 
           Runtime *runtime, AddressSpaceID source); 
@@ -237,7 +240,8 @@ namespace Legion {
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        AddressSpaceID logical_owner, RegionTreeNode *node, 
                        InstanceManager *manager, MaterializedView *parent, 
-                       SingleTask *owner_context, bool register_now);
+                       SingleTask *owner_context, RtUserEvent destroy_event,
+                       bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -269,7 +273,7 @@ namespace Legion {
       virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
     public:
-      void accumulate_events(std::set<Event> &all_events);
+      void accumulate_events(std::set<ApEvent> &all_events);
     public:
       virtual bool has_manager(void) const { return true; }
       virtual PhysicalManager* get_manager(void) const { return manager; }
@@ -284,8 +288,8 @@ namespace Legion {
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
-                         LegionMap<Event,FieldMask>::aligned &preconditions,
-                                           std::set<Event> &applied_events);
+                         LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                           std::set<RtEvent> &applied_events);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
@@ -294,8 +298,8 @@ namespace Legion {
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
-                       LegionMap<Event,FieldMask>::aligned &preconditions,
-                                         std::set<Event> &applied_events);
+                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<RtEvent> &applied_events);
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
@@ -303,104 +307,105 @@ namespace Legion {
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
-                           LegionMap<Event,FieldMask>::aligned &preconditions,
-                                         std::set<Event> &applied_events);
+                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<RtEvent> &applied_events);
     public:
-      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+      virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  const VersionInfo &version_info,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
                                  const AddressSpaceID source,
-                                 std::set<Event> &applied_events);
+                                 std::set<RtEvent> &applied_events);
     protected:
-      void add_copy_user_above(const RegionUsage &usage, Event copy_term,
+      void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
-                               std::set<Event> &applied_events);
+                               std::set<RtEvent> &applied_events);
       void add_local_copy_user(const RegionUsage &usage, 
-                               Event copy_term, bool base_user,
+                               ApEvent copy_term, bool base_user,
                                const ColorPoint &child_color,
                                const VersionInfo &version_info,
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
-                               std::set<Event> &applied_events);
+                               std::set<RtEvent> &applied_events);
     public:
-      virtual Event find_user_precondition(const RegionUsage &user,
-                                           Event term_event,
+      virtual ApEvent find_user_precondition(const RegionUsage &user,
+                                           ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
                                            const VersionInfo &version_info,
-                                           std::set<Event> &applied_events);
+                                           std::set<RtEvent> &applied_events);
     protected:
       void find_user_preconditions_above(const RegionUsage &usage,
-                                         Event term_event,
+                                         ApEvent term_event,
                                          const ColorPoint &child_color,
                                          const VersionInfo &version_info,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          const FieldMask &user_mask,
-                                         std::set<Event> &preconditions,
-                                         std::set<Event> &applied_events);
+                                         std::set<ApEvent> &preconditions,
+                                         std::set<RtEvent> &applied_events);
       void find_local_user_preconditions(const RegionUsage &usage,
-                                         Event term_event,
+                                         ApEvent term_event,
                                          const ColorPoint &child_color,
                                          const VersionInfo &version_info,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          const FieldMask &user_mask,
-                                         std::set<Event> &preconditions,
-                                         std::set<Event> &applied_events);
+                                         std::set<ApEvent> &preconditions,
+                                         std::set<RtEvent> &applied_events);
     public:
-      virtual void add_user(const RegionUsage &user, Event term_event,
+      virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
-                            std::set<Event> &applied_events);
+                            std::set<RtEvent> &applied_events);
     protected:
-      void add_user_above(const RegionUsage &usage, Event term_event,
+      void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
                           const VersionInfo &version_info,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const bool need_version_update,
                           const AddressSpaceID source,
-                          std::set<Event> &applied_events);
-      bool add_local_user(const RegionUsage &usage, Event term_event,
+                          std::set<RtEvent> &applied_events);
+      bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
                           const VersionInfo &version_info,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const AddressSpaceID source,
-                          std::set<Event> &applied_events);
+                          std::set<RtEvent> &applied_events);
     public:
       // This is a fused version of the above two virtual methods
-      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+      virtual ApEvent add_user_fused(const RegionUsage &user, 
+                                   ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
                                    const AddressSpaceID source,
-                                   std::set<Event> &applied_events,
+                                   std::set<RtEvent> &applied_events,
                                    bool update_versions = true);
     protected:
-      void add_user_above_fused(const RegionUsage &usage, Event term_event,
+      void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
                                 const ColorPoint &child_color,
                                 const VersionInfo &version_info,
                                 const UniqueID op_id,
                                 const unsigned index,
                                 const FieldMask &user_mask,
                                 const AddressSpaceID source,
-                                std::set<Event> &preconditions,
-                                std::set<Event> &applied_events,
+                                std::set<ApEvent> &preconditions,
+                                std::set<RtEvent> &applied_events,
                                 const bool need_version_update);
     public:
-      virtual void add_initial_user(Event term_event,
+      virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
@@ -410,10 +415,10 @@ namespace Legion {
       virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void collect_users(const std::set<Event> &term_users);
+      virtual void collect_users(const std::set<ApEvent> &term_users);
     public:
       virtual void send_view(AddressSpaceID target); 
-      void update_gc_events(const std::deque<Event> &gc_events);
+      void update_gc_events(const std::deque<ApEvent> &gc_events);
     protected:
       // Update the version numbers
       // These first two methods do two-phase updates for copies
@@ -424,17 +429,18 @@ namespace Legion {
                                 FieldMask &write_skip_mask,
                                 FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
-                            LegionMap<VersionID,FieldMask>::aligned &add_only);
+                            LegionMap<VersionID,FieldMask>::aligned &add_only,
+                                bool is_reducing);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
-                      AddressSpaceID source, std::set<Event> &applied_events);
+                      AddressSpaceID source, std::set<RtEvent> &applied_events);
       // This method does one phase update and advance for users
       // This one will take it's own lock
       bool update_version_numbers(const FieldMask &user_mask,
                                   const VersionInfo &version_info,
                                   const AddressSpaceID source,
-                                  std::set<Event> &applied_events);
+                                  std::set<RtEvent> &applied_events);
     protected:
       void filter_and_add(FieldMask &filter_mask,
                 const LegionMap<VersionID,FieldMask>::aligned &add_versions);
@@ -442,40 +448,42 @@ namespace Legion {
       void sanity_check_versions(void);
 #endif
     protected:
-      void add_current_user(PhysicalUser *user, Event term_event,
+      void add_current_user(PhysicalUser *user, ApEvent term_event,
                             const FieldMask &user_mask);
-      void filter_local_users(Event term_event);
-      void filter_current_user(Event user_event, const FieldMask &filter_mask);
-      void filter_previous_user(Event user_event, const FieldMask &filter_mask);
+      void filter_local_users(ApEvent term_event);
+      void filter_current_user(ApEvent user_event, 
+                               const FieldMask &filter_mask);
+      void filter_previous_user(ApEvent user_event, 
+                                const FieldMask &filter_mask);
     protected:
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
-                                      Event term_event,
+                                      ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
-                                      std::set<Event> &preconditions,
-                                      std::set<Event> &dead_events,
-                  LegionMap<Event,FieldMask>::aligned &filter_events,
+                                      std::set<ApEvent> &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                  LegionMap<ApEvent,FieldMask>::aligned &filter_events,
                                       FieldMask &observed, 
                                       FieldMask &non_dominated);
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
-                                      Event term_event,
+                                      ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
-                                      std::set<Event> &preconditions,
-                                      std::set<Event> &dead_events);
+                                      std::set<ApEvent> &preconditions,
+                                      std::set<ApEvent> &dead_events);
       // Overloaded versions for being precise about copy preconditions
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
                                       const UniqueID op_id,
                                       const unsigned index,
-                  LegionMap<Event,FieldMask>::aligned &preconditions,
-                                      std::set<Event> &dead_events,
-                  LegionMap<Event,FieldMask>::aligned &filter_events,
+                  LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                  LegionMap<ApEvent,FieldMask>::aligned &filter_events,
                                       FieldMask &observed, 
                                       FieldMask &non_dominated);
       void find_previous_preconditions(const FieldMask &user_mask,
@@ -483,10 +491,10 @@ namespace Legion {
                                       const ColorPoint &child_color,
                                       const UniqueID op_id,
                                       const unsigned index,
-                  LegionMap<Event,FieldMask>::aligned &preconditions,
-                                      std::set<Event> &dead_events);
+                  LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                      std::set<ApEvent> &dead_events);
       void find_previous_filter_users(const FieldMask &dominated_mask,
-                  LegionMap<Event,FieldMask>::aligned &filter_events);
+                  LegionMap<ApEvent,FieldMask>::aligned &filter_events);
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                      const RegionUsage &next_user,
                                      const ColorPoint &child_color,
@@ -515,23 +523,23 @@ namespace Legion {
       void perform_remote_valid_check(const FieldMask &check_mask,
                                       const VersionInfo &version_info,
                                       bool reading,
-                                      std::set<Event> *wait_on = NULL);
+                                      std::set<RtEvent> *wait_on = NULL);
       void perform_read_invalidations(const FieldMask &check_mask,
                                       const VersionInfo &version_info,
                                       const AddressSpaceID source,
-                                      std::set<Event> &applied_events);
+                                      std::set<RtEvent> &applied_events);
       void send_invalidations(const FieldMask &invalidate_mask,
                               const AddressSpaceID can_skip,
-                              std::set<Event> &applied_events);
+                              std::set<RtEvent> &applied_events);
     public:
       virtual void process_update_request(AddressSpaceID source,
-                               UserEvent done_event, Deserializer &derez);
+                               RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                                           UserEvent done_event);
+                                           RtUserEvent done_event);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             UserEvent done_event);
+                                             RtUserEvent done_event);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -560,14 +568,14 @@ namespace Legion {
       // hold locks in read-only mode prevent user fragmentation. It also
       // deals better with the common case which are higher views in
       // the view tree that less frequently filter their sub-users.
-      LegionMap<Event,EventUsers>::aligned current_epoch_users;
-      LegionMap<Event,EventUsers>::aligned previous_epoch_users;
+      LegionMap<ApEvent,EventUsers>::aligned current_epoch_users;
+      LegionMap<ApEvent,EventUsers>::aligned previous_epoch_users;
       // Also keep a set of events for which we have outstanding
       // garbage collection meta-tasks so we don't launch more than one
       // We need this even though we have the data structures above because
       // an event might be filtered out for some fields, so we can't rely
       // on it to detect when we have outstanding gc meta-tasks
-      std::set<Event> outstanding_gc_events;
+      std::set<ApEvent> outstanding_gc_events;
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
@@ -589,10 +597,10 @@ namespace Legion {
       FieldMask current_remote_read_requests, previous_remote_read_requests;
       // Remote nodes also have a data structure for deduplicating
       // requests to the logical owner for updates to particular fields
-      LegionMap<Event,FieldMask>::aligned remote_update_requests;
+      LegionMap<RtEvent,FieldMask>::aligned remote_update_requests;
     protected:
       // Useful for pruning the initial users at cleanup time
-      std::set<Event> initial_user_events;
+      std::set<ApEvent> initial_user_events;
     };
 
     /**
@@ -621,7 +629,7 @@ namespace Legion {
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     AddressSpaceID logical_owner, RegionTreeNode *node, 
                     ReductionManager *manager, SingleTask *owner_context,
-                    bool register_now);
+                    RtUserEvent destroy_event, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -630,24 +638,24 @@ namespace Legion {
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              const VersionInfo &version_info, 
                              Operation *op, unsigned index,
-                             std::set<Event> &map_applied_events);
-      Event perform_deferred_reduction(MaterializedView *target,
+                             std::set<RtEvent> &map_applied_events);
+      ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
-                                        const std::set<Event> &preconditions,
+                                        const std::set<ApEvent> &preconditions,
                                         Operation *op, unsigned index,
                                         CopyAcrossHelper *helper,
                                         RegionTreeNode *intersect,
-                                        std::set<Event> &map_applied_events);
-      Event perform_deferred_across_reduction(MaterializedView *target,
+                                        std::set<RtEvent> &map_applied_events);
+      ApEvent perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
                                               FieldID src_field,
                                               unsigned src_index,
                                        const VersionInfo &version_info,
-                                       const std::set<Event> &preconditions,
+                                       const std::set<ApEvent> &preconditions,
                                        Operation *op, unsigned index,
                                        RegionTreeNode *intersect,
-                                       std::set<Event> &map_applied_events);
+                                       std::set<RtEvent> &map_applied_events);
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
@@ -665,46 +673,46 @@ namespace Legion {
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
-                         LegionMap<Event,FieldMask>::aligned &preconditions,
-                                           std::set<Event> &applied_events);
-      virtual void add_copy_user(ReductionOpID redop, Event copy_term,
+                         LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                           std::set<RtEvent> &applied_events);
+      virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  const VersionInfo &version_info,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
                                  const AddressSpaceID source,
-                                 std::set<Event> &applied_events);
-      virtual Event find_user_precondition(const RegionUsage &user,
-                                           Event term_event,
+                                 std::set<RtEvent> &applied_events);
+      virtual ApEvent find_user_precondition(const RegionUsage &user,
+                                           ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
                                            const VersionInfo &version_info,
-                                           std::set<Event> &applied_events);
-      virtual void add_user(const RegionUsage &user, Event term_event,
+                                           std::set<RtEvent> &applied_events);
+      virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             const VersionInfo &version_info,
-                            std::set<Event> &applied_events);
+                            std::set<RtEvent> &applied_events);
       // This is a fused version of the above two methods
-      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+      virtual ApEvent add_user_fused(const RegionUsage &user,ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info,
                                    const AddressSpaceID source,
-                                   std::set<Event> &applied_events,
+                                   std::set<RtEvent> &applied_events,
                                    bool update_versions = true);
-      virtual void add_initial_user(Event term_event,
+      virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
                                     const unsigned index);
     protected:
       void find_reducing_preconditions(const FieldMask &user_mask,
-                                       Event term_event,
-                                       std::set<Event> &wait_on);
+                                       ApEvent term_event,
+                                       std::set<ApEvent> &wait_on);
       void find_reading_preconditions(const FieldMask &user_mask,
-                                      Event term_event,
-                                      std::set<Event> &wait_on);
+                                      ApEvent term_event,
+                                      std::set<ApEvent> &wait_on);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields,
@@ -722,40 +730,40 @@ namespace Legion {
       virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual void collect_users(const std::set<Event> &term_events);
+      virtual void collect_users(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
-                             Event term_event, const FieldMask &user_mask);
-      void filter_local_users(Event term_event);
+                             ApEvent term_event, const FieldMask &user_mask);
+      void filter_local_users(ApEvent term_event);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       void perform_remote_valid_check(void);
       virtual void process_update_request(AddressSpaceID source,
-                               UserEvent done_event, Deserializer &derez);
+                               RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                                           UserEvent done_event);
+                                           RtUserEvent done_event);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             UserEvent done_event);
+                                             RtUserEvent done_event);
     public:
       ReductionOpID get_redop(void) const;
     public:
       ReductionManager *const manager;
     protected:
-      LegionMap<Event,EventUsers>::aligned reduction_users;
-      LegionMap<Event,EventUsers>::aligned reading_users;
-      std::set<Event> outstanding_gc_events;
+      LegionMap<ApEvent,EventUsers>::aligned reduction_users;
+      LegionMap<ApEvent,EventUsers>::aligned reading_users;
+      std::set<ApEvent> outstanding_gc_events;
     protected:
-      std::set<Event> initial_user_events;
+      std::set<ApEvent> initial_user_events;
     protected:
       // the request event for reducers
       // only needed on remote views
-      Event remote_request_event; 
+      RtEvent remote_request_event; 
     };
 
     /**
@@ -773,7 +781,8 @@ namespace Legion {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space,
-                   RegionTreeNode *node, bool register_now);
+                   RegionTreeNode *node, RtUserEvent destroy_event,
+                   bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -794,7 +803,7 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       // Should never be called
-      virtual void collect_users(const std::set<Event> &term_events)
+      virtual void collect_users(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
@@ -807,21 +816,21 @@ namespace Legion {
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,
                                   const std::vector<unsigned> &dst_indexes,
-                                        Event precondition,
-                                        std::set<Event> &postconditions);
-      void find_field_descriptors(Event term_event,
+                                        ApEvent precondition,
+                                        std::set<ApEvent> &postconditions);
+      void find_field_descriptors(ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   FieldID field_id, Operation *op,
                                   const unsigned index,
                           std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<Event> &preconditions);
+                                  std::set<ApEvent> &preconditions);
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
-                    const LegionMap<Event,FieldMask>::aligned &preconditions,
-                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
@@ -857,7 +866,8 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info, bool register_now);
+                    CompositeVersionInfo *version_info, 
+                    RtUserEvent destroy_event, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -883,8 +893,8 @@ namespace Legion {
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
-                    const LegionMap<Event,FieldMask>::aligned &preconditions,
-                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_composite_view(Runtime *runtime, 
@@ -934,31 +944,31 @@ namespace Legion {
                                  MaterializedView *dst,
                                  const FieldMask &copy_mask,
                                  const VersionInfo &src_version_info,
-              const LegionMap<Event,FieldMask>::aligned &preconditions,
-                    LegionMap<Event,FieldMask>::aligned &postconditions,
-                    LegionMap<Event,FieldMask>::aligned &postreductions,
+              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
                     CopyAcrossHelper *helper, bool check_root = true) const;
       CompositeNode* find_next_root(RegionTreeNode *target) const;
       void find_valid_views(const FieldMask &search_mask,
                       LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
       void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
                        FieldMask copy_mask, const VersionInfo &src_version_info,
-                      const LegionMap<Event,FieldMask>::aligned &preconditions,
-                            LegionMap<Event,FieldMask>::aligned &postconditions,
-                      const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                            CopyAcrossHelper *helper) const;
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                    const LegionMap<LogicalView*,FieldMask>::aligned &views,
+                          CopyAcrossHelper *helper) const;
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
                                    const FieldMask &copy_mask,
                                    const VersionInfo &src_version_info,
-                      const LegionMap<Event,FieldMask>::aligned &preconditions,
-                            LegionMap<Event,FieldMask>::aligned &postconditions,
-                            CopyAcrossHelper *helper) const;
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                          CopyAcrossHelper *helper) const;
     public:
       void pack_composite_tree(Serializer &rez, AddressSpaceID target);
       void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
-                                 Runtime *runtime,std::set<Event> &ready_events,
-                                 std::map<LogicalView*,unsigned> &pending_refs);
+                               Runtime *runtime,std::set<RtEvent> &ready_events,
+                               std::map<LogicalView*,unsigned> &pending_refs);
     public:
       void notify_active(void);
       void notify_inactive(void);
@@ -1003,7 +1013,7 @@ namespace Legion {
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
                RegionTreeNode *node, FillViewValue *value,
-               bool register_now);
+               RtUserEvent destroy_event, bool register_now);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:
@@ -1027,8 +1037,8 @@ namespace Legion {
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
-                    const LegionMap<Event,FieldMask>::aligned &preconditions,
-                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,

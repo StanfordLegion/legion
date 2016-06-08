@@ -398,7 +398,7 @@ namespace Realm {
       template <int DIM>
       LegionRuntime::Arrays::Point<DIM> get_point(void) const { assert(dim == DIM); return LegionRuntime::Arrays::Point<DIM>(point_data); }
 
-      bool is_null(void) const { return (dim > -1); }
+      bool is_null(void) const { return (dim == -1); }
 
       static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
 
