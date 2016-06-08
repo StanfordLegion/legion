@@ -7055,33 +7055,32 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
-      AddressSpaceID owner_space = get_owner_space();
-      AddressSpaceID local_space = context->runtime->address_space;
-      if (owner_space == local_space)
+#ifdef DEBUG_LEGION
+      if (!color_space.contains(c.get_point()))
       {
         switch (c.get_dim())
         {
           case 0:
             {
-              log_index.error("Unable to find entry for color %d in "
+              log_index.error("Invalid request for color %d in "
                               "index partition %x.", c.get_index(), handle.id);
               break;
             }
           case 1:
             {
-              log_index.error("Unable to find entry for color %d in "
+              log_index.error("Invalid request for color %d in "
                               "index partition %x.", c[0], handle.id);
               break;
             }
           case 2:
             {
-              log_index.error("Unable to find entry for color (%d,%d) in "
+              log_index.error("Invalid request for color (%d,%d) in "
                               "index partition %x.", c[0], c[1], handle.id);
               break;
             }
           case 3:
             {
-              log_index.error("Unable to find entry for color (%d,%d,%d) in "
+              log_index.error("Invalid request for color (%d,%d,%d) in "
                               "index partition %x.", 
                               c[0], c[1], c[2], handle.id);
               break;
@@ -7089,11 +7088,12 @@ namespace Legion {
           default:
             assert(false);
         }
-#ifdef DEBUG_LEGION
         assert(false);
-#endif
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
       }
+#endif
+      AddressSpaceID owner_space = get_owner_space();
+      AddressSpaceID local_space = context->runtime->address_space;
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
