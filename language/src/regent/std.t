@@ -3107,10 +3107,9 @@ local function make_task_wrapper(task_body)
   end
 end
 
-function std.setup(main_task, extra_setup_thunk)
-  assert(std.is_task(main_task))
+local function make_normal_layout()
   local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
-  local layout_registration = quote
+  return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
     -- SOA, Fortran array order
@@ -3121,8 +3120,68 @@ function std.setup(main_task, extra_setup_thunk)
     dims[3] = c.DIM_F
     c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
 
+    -- Normal instance
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.NORMAL_SPECIALIZE, 0)
+
     var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "SOA")
     c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
+local function make_reduction_layout(op_id)
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    -- SOA, Fortran array order
+    var dims : c.legion_dimension_kind_t[4]
+    dims[0] = c.DIM_X
+    dims[1] = c.DIM_Y
+    dims[2] = c.DIM_Z
+    dims[3] = c.DIM_F
+    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+
+    -- Reduction fold instance
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.REDUCTION_FOLD_SPECIALIZE, [op_id])
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, ["SOA(" .. tostring(op_id) .. ")"])
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
+function std.setup(main_task, extra_setup_thunk)
+  assert(std.is_task(main_task))
+
+  local reduction_registrations = terralib.newlist()
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(reduction_types) do
+      local register = c["register_reduction_" .. op.name .. "_" .. tostring(op_type)]
+      local op_id = std.reduction_op_ids[op.op][op_type]
+      reduction_registrations:insert(
+        quote
+          [register](op_id)
+        end)
+    end
+  end
+
+  local layout_registrations = terralib.newlist()
+  local layout_normal
+  do
+    local layout_id, layout_actions = make_normal_layout()
+    layout_registrations:insert(layout_actions)
+    layout_normal = layout_id
+  end
+
+  local layout_reduction = data.new_recursive_map(1)
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(reduction_types) do
+      local op_id = std.reduction_op_ids[op.op][op_type]
+      local layout_id, layout_actions = make_reduction_layout(op_id)
+      layout_registrations:insert(layout_actions)
+      layout_reduction[op.op][op_type] = layout_id
+    end
   end
 
   local task_registrations = tasks:map(
@@ -3134,27 +3193,45 @@ function std.setup(main_task, extra_setup_thunk)
 
       local wrapped_task = make_task_wrapper(task:getdefinition())
 
-      local num_regions = 0
+      local layout_constraints = terralib.newsymbol(
+        c.legion_task_layout_constraint_set_t, "layout_constraints")
+      local layout_constraint_actions = terralib.newlist()
       if std.config["layout-constraints"] then
         local fn_type = task:gettype()
         local param_types = fn_type.parameters
-        for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
-          local param_type = param_types[i]
-          local privileges =
+        local region_i = 0
+        for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+          local param_type = param_types[param_i]
+          local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
             std.find_task_privileges(param_type, task:getprivileges(),
                                      task:get_coherence_modes(), task:get_flags())
-          num_regions = num_regions + #privileges
+          for i, privilege in ipairs(privileges) do
+            local field_types = privilege_field_types[i]
+
+            local layout = layout_normal
+            if std.is_reduction_op(privilege) then
+              local op = std.get_reduction_op(privilege)
+              assert(#field_types == 1)
+              local field_type = field_types[1]
+              layout = layout_reduction[op][field_type]
+            end
+
+            layout_constraint_actions:insert(
+              quote
+                c.legion_task_layout_constraint_set_add_layout_constraint(
+                  [layout_constraints], [region_i], [layout])
+              end)
+
+            region_i = region_i + 1
+          end
         end
       end
 
       return quote
         var execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
-        var layout_constraints = c.legion_task_layout_constraint_set_create()
-        for i = 0, num_regions do
-          c.legion_task_layout_constraint_set_add_layout_constraint(
-            layout_constraints, i, layout_id)
-        end
+        var [layout_constraints] = c.legion_task_layout_constraint_set_create()
+        [layout_constraint_actions]
         var options = c.legion_task_config_options_t {
           leaf = options.leaf,
           inner = options.inner,
@@ -3186,18 +3263,6 @@ function std.setup(main_task, extra_setup_thunk)
     cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
-  local reduction_registrations = terralib.newlist()
-  for _, op in ipairs(reduction_ops) do
-    for _, op_type in ipairs(reduction_types) do
-      local register = c["register_reduction_" .. op.name .. "_" .. tostring(op_type)]
-      local op_id = std.reduction_op_ids[op.op][op_type]
-      reduction_registrations:insert(
-        quote
-          [register](op_id)
-        end)
-    end
-  end
-
   local extra_setup = quote end
   if extra_setup_thunk then
     extra_setup = quote
@@ -3206,9 +3271,9 @@ function std.setup(main_task, extra_setup_thunk)
   end
 
   local terra main(argc : int, argv : &rawstring)
-    [layout_registration];
-    [task_registrations];
     [reduction_registrations];
+    [layout_registrations];
+    [task_registrations];
     [extra_setup];
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
     return c.legion_runtime_start(argc, argv, false)
