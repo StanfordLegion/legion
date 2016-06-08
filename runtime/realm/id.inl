@@ -149,7 +149,7 @@ namespace Realm {
     return this->memory.type_tag == FMT_Memory::TAG_VALUE;
   }
 
-  /*static*/ ID ID::make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx)
+  /*static*/ inline ID ID::make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx)
   {
     ID id;
     id.instance.type_tag = FMT_Instance::TAG_VALUE;
@@ -165,7 +165,7 @@ namespace Realm {
     return this->instance.type_tag == FMT_Instance::TAG_VALUE;
   }
 
-  /*static*/ ID ID::make_processor(unsigned owner_node, unsigned proc_idx)
+  /*static*/ inline ID ID::make_processor(unsigned owner_node, unsigned proc_idx)
   {
     ID id;
     id.proc.type_tag = FMT_Processor::TAG_VALUE;
@@ -180,7 +180,7 @@ namespace Realm {
     return this->proc.type_tag == FMT_Processor::TAG_VALUE;
   }
 
-  /*static*/ ID ID::make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx)
+  /*static*/ inline ID ID::make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx)
   {
     ID id;
     id.pgroup.type_tag = FMT_ProcGroup::TAG_VALUE;
@@ -195,7 +195,7 @@ namespace Realm {
     return this->pgroup.type_tag == FMT_ProcGroup::TAG_VALUE;
   }
 
-  /*static*/ ID ID::make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx)
+  /*static*/ inline ID ID::make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx)
   {
     ID id;
     id.idxspace.type_tag = FMT_IdxSpace::TAG_VALUE;
@@ -210,7 +210,7 @@ namespace Realm {
     return this->idxspace.type_tag == FMT_IdxSpace::TAG_VALUE;
   }
 
-  /*static*/ ID ID::make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx)
+  /*static*/ inline ID ID::make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx)
   {
     ID id;
     id.allocator.type_tag = FMT_Allocator::TAG_VALUE;
