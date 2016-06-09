@@ -1034,13 +1034,14 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
+      UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView* result = 
               legion_new<MaterializedView>(context, view_did, 
                                            owner_space, owner_space, 
                                            logical_owner, region_node,
                                            const_cast<InstanceManager*>(this),
                                            (MaterializedView*)NULL/*parent*/, 
-                                           own_ctx, 
+                                           context_uid,
                                            RtUserEvent::NO_RT_USER_EVENT, 
                                            true/*register now*/);
       register_active_context(own_ctx);
@@ -1415,12 +1416,14 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
+      UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView *result = 
              legion_new<ReductionView>(context, view_did, 
                                        owner_space, owner_space, 
                                        logical_owner, region_node, 
                                        const_cast<ReductionManager*>(this),
-                                       own_ctx, RtUserEvent::NO_RT_USER_EVENT,
+                                       context_uid, 
+                                       RtUserEvent::NO_RT_USER_EVENT,
                                        true/*register now*/);
       register_active_context(own_ctx);
       return result;

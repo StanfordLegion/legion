@@ -127,7 +127,7 @@ namespace Legion {
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
                                AddressSpaceID log_own, RegionTreeNode *node, 
-                               SingleTask *own_ctx, RtUserEvent destroy_event,
+                               UniqueID own_ctx, RtUserEvent destroy_event,
                                bool register_now)
       : LogicalView(ctx, did, owner_sp, local_sp, node, destroy_event,
           register_now), owner_context(own_ctx), logical_owner(log_own)
@@ -235,7 +235,7 @@ namespace Legion {
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                AddressSpaceID log_own, RegionTreeNode *node, 
                                InstanceManager *man, MaterializedView *par, 
-                               SingleTask *own_ctx, RtUserEvent destroy_event,
+                               UniqueID own_ctx, RtUserEvent destroy_event,
                                bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
          loc_addr, log_own, node, own_ctx, destroy_event, register_now), 
@@ -268,7 +268,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, 
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, 
           RtUserEvent::NO_RT_USER_EVENT, false),
         manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
@@ -1324,7 +1324,7 @@ namespace Legion {
         }
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
-        rez.serialize<UniqueID>(owner_context->get_context_uid());
+        rez.serialize(owner_context);
         rez.serialize(destroy_event);
       }
       runtime->send_materialized_view(target, rez);
@@ -2754,7 +2754,6 @@ namespace Legion {
       assert(phy_man->is_instance_manager());
 #endif
       InstanceManager *inst_manager = phy_man->as_instance_manager();
-      SingleTask *owner_context = runtime->find_context(context_uid);
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -2763,14 +2762,14 @@ namespace Legion {
                                               runtime->address_space,
                                               logical_owner, 
                                               target_node, inst_manager,
-                                              parent, owner_context,
+                                              parent, context_uid,
                                               destroy_event,
                                               false/*register now*/);
       else
         view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
                                      runtime->address_space, logical_owner,
                                      target_node, inst_manager, parent, 
-                                     owner_context, destroy_event,
+                                     context_uid, destroy_event,
                                      false/*register now*/);
       // Register only after construction
       view->register_with_runtime(false/*send notification*/);
@@ -4078,6 +4077,7 @@ namespace Legion {
     {
       bool changed = false;
       LegionMap<DeferredView*,FieldMask>::aligned deferred_views;
+      const UniqueID target_context_uid = closer.target_ctx->get_context_uid();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             views->begin(); it != views->end(); it++)
       {
@@ -4093,7 +4093,7 @@ namespace Legion {
         { 
           InstanceView *inst_view = it->first->as_instance_view();
           // Check to see if it is the same context as our target context
-          if (inst_view->owner_context == closer.target_ctx)
+          if (inst_view->owner_context == target_context_uid)
           {
             // Same context so we can use the same view
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
@@ -5071,7 +5071,7 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  AddressSpaceID log_own, RegionTreeNode *node, 
-                                 ReductionManager *man, SingleTask *own_ctx, 
+                                 ReductionManager *man, UniqueID own_ctx, 
                                  RtUserEvent destroy_event, bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), own_sp, loc_sp, log_own, 
           node, own_ctx, destroy_event, register_now), 
@@ -5097,7 +5097,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, 
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, 
           RtUserEvent::NO_RT_USER_EVENT, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
@@ -5944,7 +5944,7 @@ namespace Legion {
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
-        rez.serialize<UniqueID>(owner_context->get_context_uid());
+        rez.serialize(owner_context);
         rez.serialize(destroy_event);
       }
       runtime->send_reduction_view(target, rez);
@@ -5996,7 +5996,6 @@ namespace Legion {
       assert(phy_man->is_reduction_manager());
 #endif
       ReductionManager *red_manager = phy_man->as_reduction_manager();
-      SingleTask *owner_context = runtime->find_context(context_uid);
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -6005,12 +6004,12 @@ namespace Legion {
                                            runtime->address_space,
                                            logical_owner,
                                            target_node, red_manager,
-                                           owner_context, destroy_event,
+                                           context_uid, destroy_event,
                                            false/*register now*/);
       else
         view = legion_new<ReductionView>(runtime->forest, did, owner_space,
                                   runtime->address_space, logical_owner,
-                                  target_node, red_manager, owner_context,
+                                  target_node, red_manager, context_uid,
                                   destroy_event, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(false/*send notification*/);

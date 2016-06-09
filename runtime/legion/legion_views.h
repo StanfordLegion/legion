@@ -108,7 +108,7 @@ namespace Legion {
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
                    AddressSpaceID logical_owner, RegionTreeNode *node, 
-                   SingleTask *owner_context, RtUserEvent destroy_event,
+                   UniqueID owner_context, RtUserEvent destroy_event,
                    bool register_now); 
       virtual ~InstanceView(void);
     public:
@@ -209,7 +209,10 @@ namespace Legion {
       static void handle_view_remote_invalidate(Deserializer &derez,  
                                                 Runtime *rt);
     public:
-      SingleTask *const owner_context;
+      // The ID of the context that made this view
+      // Note this view can escape this context inside a composite
+      // instance made for a virtual mapping
+      const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
       const AddressSpaceID logical_owner;
     };
@@ -240,7 +243,7 @@ namespace Legion {
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        AddressSpaceID logical_owner, RegionTreeNode *node, 
                        InstanceManager *manager, MaterializedView *parent, 
-                       SingleTask *owner_context, RtUserEvent destroy_event,
+                       UniqueID owner_context, RtUserEvent destroy_event,
                        bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
@@ -628,7 +631,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     AddressSpaceID logical_owner, RegionTreeNode *node, 
-                    ReductionManager *manager, SingleTask *owner_context,
+                    ReductionManager *manager, UniqueID owner_context,
                     RtUserEvent destroy_event, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);

@@ -14048,12 +14048,12 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     bool RegionTreeNode::register_instance_view(PhysicalManager *manager,
-                                        SingleTask *context, InstanceView *view)
+                                       UniqueID context_uid, InstanceView *view)
     //--------------------------------------------------------------------------
     {
-      std::pair<PhysicalManager*,SingleTask*> key(manager, context);
+      std::pair<PhysicalManager*,UniqueID> key(manager, context_uid);
       AutoLock n_lock(node_lock);
-      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*>::
+      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
         tracked::const_iterator finder = instance_views.find(key);
       if (finder != instance_views.end())
       {
@@ -14068,12 +14068,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::unregister_instance_view(PhysicalManager *manager,
-                                                  SingleTask *context)
+                                                  UniqueID context_uid)
     //--------------------------------------------------------------------------
     {
-      std::pair<PhysicalManager*,SingleTask*> key(manager, context);
+      std::pair<PhysicalManager*,UniqueID> key(manager, context_uid);
       AutoLock n_lock(node_lock);
-      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*>::
+      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
         tracked::iterator finder = instance_views.find(key);
       if (finder != instance_views.end())
         instance_views.erase(finder);
@@ -14084,9 +14084,10 @@ namespace Legion {
                                                      SingleTask *context) 
     //--------------------------------------------------------------------------
     {
-      std::pair<PhysicalManager*,SingleTask*> key(manager, context);
+      std::pair<PhysicalManager*,UniqueID> key(manager, 
+                                                  context->get_context_uid());
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*>::
+      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
         tracked::const_iterator finder = instance_views.find(key);
       if (finder != instance_views.end())
         return finder->second;

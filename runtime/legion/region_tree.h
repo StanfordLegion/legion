@@ -1496,9 +1496,9 @@ namespace Legion {
                                 std::vector<MaterializedView*> &target_views);
     public:
       bool register_instance_view(PhysicalManager *manager, 
-                                  SingleTask *context, InstanceView *view);
+                                  UniqueID context_uid, InstanceView *view);
       void unregister_instance_view(PhysicalManager *manager, 
-                                    SingleTask *context);
+                                    UniqueID context_uid);
       InstanceView* find_instance_view(PhysicalManager *manager,
                                        SingleTask *context);
     public:
@@ -1618,7 +1618,7 @@ namespace Legion {
       // should rarely need to be accessed for tracking views
       // The distributed IDs here correspond to the Instance Manager
       // distributed ID.
-      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*,
+      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*,
                 LOGICAL_VIEW_ALLOC>::tracked instance_views;
       LegionMap<DistributedID,PhysicalManager*,
                 PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
