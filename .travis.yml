@@ -15,6 +15,7 @@ env:
   - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
   - CC_FLAGS=-DLEGION_SPY DEBUG=1 TEST_SPY=1
   - CC_FLAGS=-std=c++0x DEBUG=0
+  # - CC_FLAGS= DEBUG=1 USE_GASNET=1 USE_LLVM=1
 matrix:
   exclude:
     - os: osx
@@ -42,12 +43,12 @@ before_install:
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
-      git clone https://github.com/StanfordLegion/gasnet.git
-      pushd gasnet
-      make -j2
-      export GASNET_ROOT="$PWD/release"
+      export GASNET_ROOT="$PWD/gasnet/release"
       export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
       unset WARN_AS_ERROR
+      git clone https://github.com/StanfordLegion/gasnet.git gasnet
+      pushd gasnet
+      make -j2
       popd
     fi
 script:
