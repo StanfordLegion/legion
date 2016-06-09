@@ -41,19 +41,13 @@ namespace Realm {
       // IDXSPACE:    tag:4 = 0x5,  owner_node:16,   creator_node:16, idxspace_idx: 28
       // ALLOCATOR:   tag:8 = 0x1b, owner_node:16,   creator_node:16, allocator_idx: 24
 
-      // the actual bit fields
-      enum {
-	TYPE_BITS = 4,
-	INDEX_H_BITS = 12,
-	INDEX_L_BITS = 32,
-	INDEX_BITS = INDEX_H_BITS + INDEX_L_BITS,
-	NODE_BITS = 64 - TYPE_BITS - INDEX_BITS /* 16 = 64k nodes */
-      };
+      static const int NODE_FIELD_WIDTH = 16;
+      static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
 
       struct FMT_Event {
 	IDType generation : 20;
 	IDType gen_event_idx : 27;
-	IDType creator_node : 16;
+	IDType creator_node : NODE_FIELD_WIDTH;
 	IDType type_tag : 1;
 	static const IDType TAG_VALUE = 1;
       };
@@ -77,7 +71,7 @@ namespace Realm {
       struct FMT_Memory {
 	IDType mem_idx : 12;
 	IDType unused : 28;
-	IDType creator_node : 16;
+	IDType owner_node : 16;
 	IDType type_tag : 8;
 	static const IDType TAG_VALUE = 0x1e;
       };
@@ -163,36 +157,24 @@ namespace Realm {
 	ID_UNUSED_15,
       };
 
-      enum ID_Specials {
-	ID_INVALID = 0,
-	ID_GLOBAL_MEM = (1U << INDEX_H_BITS) - 1,
-      };
+      static const IDType ID_NULL = 0;
 
-      ID(IDType _value);
+      ID(void);
+      ID(IDType _id);
+      ID(const ID& copy_from);
+
+      ID& operator=(const ID& copy_from);
 
       template <class T>
       ID(T thing_to_get_id_from);
 
-      ID(ID_Types _type, unsigned _node, IDType _index);
-      ID(ID_Types _type, unsigned _node, IDType _index_h, IDType _index_l);
-
       bool operator==(const ID& rhs) const;
-
-      IDType id(void) const;
-      ID_Types type(void) const;
-      unsigned node(void) const;
-      IDType index(void) const;
-      IDType index_h(void) const;
-      IDType index_l(void) const;
 
       template <class T>
       T convert(void) const;
 
-    protected:
-      ID(void) {}
-    public:
       union {
-	IDType value;
+	IDType id;
 	FMT_Event event;
 	FMT_Barrier barrier;
 	FMT_Reservation rsrv;
@@ -207,8 +189,6 @@ namespace Realm {
       friend std::ostream& operator<<(std::ostream& os, ID id);
     };
 
-    inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << id.value << std::dec; }
-	
 }; // namespace Realm
 
 #include "id.inl"

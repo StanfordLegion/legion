@@ -202,7 +202,7 @@ namespace Realm {
 
       pthread_mutex_lock(&vector_lock);
       ID id(inst);
-      unsigned index = id.index_l();
+      unsigned index = id.instance.inst_idx;
       if (index < file_vec.size())
         file_vec[index] = fd;
       else {
@@ -218,7 +218,7 @@ namespace Realm {
     {
       pthread_mutex_lock(&vector_lock);
       ID id(i);
-      unsigned index = id.index_l();
+      unsigned index = id.instance.inst_idx;
       assert(index < file_vec.size());
       int fd = file_vec[index];
       pthread_mutex_unlock(&vector_lock);

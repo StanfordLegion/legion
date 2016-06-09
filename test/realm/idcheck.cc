@@ -40,9 +40,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_event(0, 0, 0);
     ID hi = ID::make_event(-1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "event";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "event";
     assert(lo.is_event());
     assert(hi.is_event());
   }
@@ -51,9 +51,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_barrier(0, 0, 0);
     ID hi = ID::make_barrier(-1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "barrier";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "barrier";
     assert(lo.is_barrier());
     assert(hi.is_barrier());
   }
@@ -62,9 +62,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_reservation(0, 0);
     ID hi = ID::make_reservation(-1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "reservation";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "reservation";
     assert(lo.is_reservation());
     assert(hi.is_reservation());
   }
@@ -73,9 +73,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_memory(0, 0);
     ID hi = ID::make_memory(-1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "memory";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "memory";
     assert(lo.is_memory());
     assert(hi.is_memory());
   }
@@ -84,9 +84,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_instance(0, 0, 0, 0);
     ID hi = ID::make_instance(-1U, -1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "instance";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "instance";
     assert(lo.is_instance());
     assert(hi.is_instance());
   }
@@ -95,9 +95,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_processor(0, 0);
     ID hi = ID::make_processor(-1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "processor";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "processor";
     assert(lo.is_processor());
     assert(hi.is_processor());
   }
@@ -106,9 +106,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_procgroup(0, 0, 0);
     ID hi = ID::make_procgroup(-1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "procgroup";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "procgroup";
     assert(lo.is_procgroup());
     assert(hi.is_procgroup());
   }
@@ -117,9 +117,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_idxspace(0, 0, 0);
     ID hi = ID::make_idxspace(-1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "idxspace";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "idxspace";
     assert(lo.is_idxspace());
     assert(hi.is_idxspace());
   }
@@ -128,9 +128,9 @@ int main(int argc, const char *argv[])
   {
     ID lo = ID::make_allocator(0, 0, 0);
     ID hi = ID::make_allocator(-1U, -1U, -1U);
-    assert(ranges.count(lo.value) == 0);
-    ranges[lo.value] = hi.value;
-    names[lo.value] = "allocator";
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "allocator";
     assert(lo.is_allocator());
     assert(hi.is_allocator());
   }

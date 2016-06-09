@@ -60,7 +60,7 @@ namespace Realm {
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
       // are we creating a local group?
-      if((members.size() == 0) || (ID(members[0]).node() == gasnet_mynode())) {
+      if((members.size() == 0) || (ID(members[0]).proc.owner_node == gasnet_mynode())) {
 	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
@@ -99,12 +99,12 @@ namespace Realm {
     void Processor::get_group_members(std::vector<Processor>& members)
     {
       // if we're a plain old processor, the only member of our "group" is ourself
-      if(ID(*this).type() == ID::ID_PROCESSOR) {
+      if(ID(*this).is_processor()) {
 	members.push_back(*this);
 	return;
       }
 
-      assert(ID(*this).type() == ID::ID_PROCGROUP);
+      assert(ID(*this).is_procgroup());
 
       ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
       grp->get_group_members(members);
@@ -162,12 +162,18 @@ namespace Realm {
 
     AddressSpace Processor::address_space(void) const
     {
-      return ID(id).node();
+      // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
+      ID id(*this);
+      assert(id.is_processor());
+      return id.proc.owner_node;
     }
 
     ID::IDType Processor::local_id(void) const
     {
-      return ID(id).index();
+      // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
+      ID id(*this);
+      assert(id.is_processor());
+      return id.proc.proc_idx;
     }
 
     Event Processor::register_task(TaskFuncID func_id,
@@ -202,14 +208,16 @@ namespace Realm {
       std::vector<Processor> local_procs;
       std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
       // is the target a single processor or a group?
-      if(ID(*this).type() == ID::ID_PROCESSOR) {
-	gasnet_node_t n = ID(*this).node();
+      ID id(*this);
+      if(id.is_processor()) {
+	gasnet_node_t n = id.proc.owner_node;
 	if(n == gasnet_mynode())
 	  local_procs.push_back(*this);
 	else
 	  remote_procs[n].push_back(*this);
       } else {
 	// assume we're a group
+	assert(id.is_procgroup());
 	ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
 	std::vector<Processor> members;
 	grp->get_group_members(members);
@@ -217,7 +225,7 @@ namespace Realm {
 	    it != members.end();
 	    it++) {
 	  Processor p = *it;
-	  gasnet_node_t n = ID(p).node();
+	  gasnet_node_t n = ID(p).proc.owner_node;
 	  if(n == gasnet_mynode())
 	    local_procs.push_back(p);
 	  else
@@ -429,16 +437,16 @@ namespace Realm {
 
     void ProcessorGroup::init(Processor _me, int _owner)
     {
-      assert(ID(_me).node() == (unsigned)_owner);
+      assert(ID(_me).pgroup.owner_node == (unsigned)_owner);
 
       me = _me;
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup.owner_node);
     }
 
     void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
     {
-      // can only be perform on owner node
-      assert(ID(me).node() == gasnet_mynode());
+      // can only be performed on owner node
+      assert(ID(me).pgroup.owner_node == gasnet_mynode());
       
       // can only be done once
       assert(!members_valid);
@@ -748,7 +756,15 @@ namespace Realm {
 		       << " proc=" << me
 		       << " finish=" << finish_event;
 
-      gasnet_node_t target = ID(me).node();
+      ID id(me);
+      gasnet_node_t target;
+      if(id.is_processor())
+	target = id.proc.owner_node;
+      else if(id.is_procgroup())
+	target = id.pgroup.owner_node;
+      else {
+	assert(0);
+      }
 
       get_runtime()->optable.add_remote_operation(finish_event, target);
 

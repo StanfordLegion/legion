@@ -2430,7 +2430,7 @@ namespace LegionRuntime {
                                         OASVec &oas_vec)
       {
         ID id(dst_inst);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         int fd = dst_mem->get_file_des(index);
         return new FileWriteCopier(fd, src_base, src_inst, dst_inst, oas_vec, this);
       }
@@ -2525,7 +2525,7 @@ namespace LegionRuntime {
                                         OASVec &oas_vec)
       {
         ID id(src_inst);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         int fd = src_mem->get_file_des(index);
         return new FileReadCopier(fd, dst_base, src_inst, dst_inst, oas_vec, this);
       }
@@ -4356,7 +4356,7 @@ namespace Realm {
                                          fill_value_size, wait_on,
                                          ev, 0/*priority*/, requests);
         Memory mem = it->inst.get_location();
-        int node = ID(mem).node();
+        int node = ID(mem).memory.owner_node;
         if (((unsigned)node) == gasnet_mynode()) {
 	  get_runtime()->optable.add_local_operation(ev, r);
           r->check_readiness(false, dma_queue);
@@ -4405,8 +4405,8 @@ namespace LegionRuntime {
     static int select_dma_node(Memory src_mem, Memory dst_mem,
 			       ReductionOpID redop_id, bool red_fold)
     {
-      int src_node = ID(src_mem).node();
-      int dst_node = ID(dst_mem).node();
+      int src_node = ID(src_mem).memory.owner_node;
+      int dst_node = ID(dst_mem).memory.owner_node;
 
       bool src_is_rdma = get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GLOBAL;
       bool dst_is_rdma = get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GLOBAL;
@@ -4669,7 +4669,7 @@ namespace Realm {
 	    src_it != srcs.end();
 	    src_it++)
 	{
-	  int n = ID(src_it->inst).node();
+	  int n = ID(src_it->inst).instance.owner_node;
 	  if((src_node != -1) && (src_node != n)) {
 	    // for now, don't handle case where source data is split across nodes
 	    assert(0);
