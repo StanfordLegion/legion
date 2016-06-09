@@ -3143,6 +3143,19 @@ local function make_virtual_layout()
   end
 end
 
+local function make_unconstrained_layout()
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.NO_SPECIALIZE, 0)
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "unconstrained")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
 local function make_reduction_layout(op_id)
   local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
   return layout_id, quote
@@ -3195,6 +3208,13 @@ function std.setup(main_task, extra_setup_thunk)
     layout_virtual = layout_id
   end
 
+  local layout_unconstrained
+  do
+    local layout_id, layout_actions = make_unconstrained_layout()
+    layout_registrations:insert(layout_actions)
+    layout_unconstrained = layout_id
+  end
+
   local layout_reduction = data.new_recursive_map(1)
   for _, op in ipairs(reduction_ops) do
     for _, op_type in ipairs(reduction_types) do
@@ -3238,7 +3258,7 @@ function std.setup(main_task, extra_setup_thunk)
               layout = layout_reduction[op][field_type]
             end
             if options.inner then
-              layout = layout_virtual
+              layout = layout_unconstrained
             end
             layout_constraint_actions:insert(
               quote
