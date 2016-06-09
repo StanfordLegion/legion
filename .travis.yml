@@ -43,7 +43,7 @@ before_install:
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
-      git clone git@github.com:StanfordLegion/gasnet.git
+      git clone https://github.com/StanfordLegion/gasnet.git
       cd gasnet
       make -j2
       export GASNET_ROOT="$PWD/release"
