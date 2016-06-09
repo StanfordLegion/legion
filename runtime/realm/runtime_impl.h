@@ -235,7 +235,8 @@ namespace Realm {
       GASNetHSL shutdown_mutex;
       GASNetCondVar shutdown_condvar;
 
-      CoreReservationSet core_reservations;
+      CoreMap *core_map;
+      CoreReservationSet *core_reservations;
 
       OperationTable optable;
 

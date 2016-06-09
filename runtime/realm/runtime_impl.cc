@@ -381,6 +381,7 @@ namespace Realm {
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0), run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	core_map(0), core_reservations(0),
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
@@ -391,6 +392,8 @@ namespace Realm {
     RuntimeImpl::~RuntimeImpl(void)
     {
       delete machine;
+      delete core_reservations;
+      delete core_map;
     }
 
     Memory RuntimeImpl::next_local_memory_id(void)
@@ -449,7 +452,8 @@ namespace Realm {
 
     CoreReservationSet& RuntimeImpl::core_reservation_set(void)
     {
-      return core_reservations;
+      assert(core_reservations);
+      return *core_reservations;
     }
 
     const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
@@ -606,8 +610,6 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
-      sampling_profiler.configure_from_cmdline(cmdline, core_reservations);
-
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -638,6 +640,8 @@ namespace Realm {
       // should local proc threads get dedicated cores?
       bool dummy_reservation_ok = true;
       bool show_reservations = false;
+      // are hyperthreads considered to share a physical core
+      bool hyperthread_sharing = true;
 
       CommandLineParser cp;
       cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
@@ -648,7 +652,8 @@ namespace Realm {
 	.add_option_int("-ll:amsg", active_msg_worker_threads)
 	.add_option_int("-ll:ahandlers", active_msg_handler_threads)
 	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
-	.add_option_bool("-ll:show_rsrv", show_reservations);
+	.add_option_bool("-ll:show_rsrv", show_reservations)
+	.add_option_int("-ll:ht_sharing", hyperthread_sharing);
 
       std::string event_trace_file, lock_trace_file;
 
@@ -721,6 +726,11 @@ namespace Realm {
         gasnet_exit(1);
       }
 
+      core_map = CoreMap::discover_core_map(hyperthread_sharing);
+      core_reservations = new CoreReservationSet(core_map);
+
+      sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
+
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
@@ -771,7 +781,7 @@ namespace Realm {
 
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
-		     core_reservations,
+		     *core_reservations,
 		     *argc, (const char **)*argv);
 
 #ifdef USE_GASNET
@@ -826,13 +836,13 @@ namespace Realm {
       start_polling_threads(active_msg_worker_threads);
 
       start_handler_threads(active_msg_handler_threads,
-			    core_reservations,
+			    *core_reservations,
 			    stack_size_in_mb << 20);
 
       LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-							core_reservations);
+							*core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -929,11 +939,11 @@ namespace Realm {
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
       //  threads that have already been requested
-      bool ok = core_reservations.satisfy_reservations(dummy_reservation_ok);
+      bool ok = core_reservations->satisfy_reservations(dummy_reservation_ok);
       if(ok) {
 	if(show_reservations) {
-	  std::cout << *core_reservations.get_core_map() << std::endl;
-	  core_reservations.report_reservations(std::cout);
+	  std::cout << *core_map << std::endl;
+	  core_reservations->report_reservations(std::cout);
 	}
       } else {
 	printf("HELP!  Could not satisfy all core reservations!\n");
