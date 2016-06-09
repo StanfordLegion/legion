@@ -1961,6 +1961,7 @@ namespace Legion {
       }
       switch (constraints.specialized_constraint.get_kind())
       {
+        case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
             
@@ -2229,6 +2230,7 @@ namespace Legion {
       // the constraints and see if we recognize any of them
       switch (constraints.specialized_constraint.get_kind())
       {
+        case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
             const std::vector<DimensionKind> &ordering = 
