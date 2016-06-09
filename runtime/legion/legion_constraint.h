@@ -209,7 +209,7 @@ namespace Legion {
       static const LayoutConstraintKind constraint_kind = 
                                             SPECIALIZED_CONSTRAINT;
     public:
-      SpecializedConstraint(SpecializedKind kind = NO_SPECIALIZE,
+      SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
                             ReductionOpID redop = 0);
     public:
       bool entails(const SpecializedConstraint &other) const;
