@@ -80,7 +80,6 @@ namespace Legion {
       void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
-      void update_known_nodes(AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
@@ -100,7 +99,6 @@ namespace Legion {
       Reservation layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
                LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
-      NodeSet known_nodes;
     }; 
  
     /**

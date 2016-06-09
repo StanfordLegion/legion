@@ -452,26 +452,7 @@ namespace Legion {
                                                     AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      RezCheck z(rez);
-      // Do a quick check to see if the target already has the layout
-      // We don't need to hold a lock here since if we lose the race
-      // we will just send the layout twice and everything will be
-      // resolved on the far side
-      if (known_nodes.contains(target))
-        rez.serialize<bool>(true);
-      else
-        rez.serialize<bool>(false);
       rez.serialize(constraints->layout_id);
-      rez.serialize(allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::update_known_nodes(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Hold the lock to get serial access to this data structure
-      AutoLock l_lock(layout_lock);
-      known_nodes.add(target);
     }
 
     //--------------------------------------------------------------------------
@@ -480,41 +461,27 @@ namespace Legion {
                                  AddressSpaceID source, RegionNode *region_node)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      bool has_local;
-      derez.deserialize(has_local);
       FieldSpaceNode *field_space_node = region_node->column_source;
-      LayoutDescription *result = NULL;
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
+
       LayoutConstraints *constraints = 
         region_node->context->runtime->find_layout_constraints(layout_id);
-      FieldMask mask;
-      derez.deserialize(mask);
-      if (has_local)
-      {
-        // If we have a local layout, then we should be able to find it
-        result = field_space_node->find_layout_description(mask, constraints);
-      }
-      else
-      {
-        const std::vector<FieldID> &field_set = 
-          constraints->field_constraint.get_field_set();
-        std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
-        std::vector<unsigned> mask_index_map(field_set.size());
-        std::vector<CustomSerdezID> serdez(field_set.size());
-        mask.clear();
-        field_space_node->compute_create_offsets(field_set, field_sizes,
-                                        mask_index_map, serdez, mask);
-        result = field_space_node->create_layout_description(mask, constraints,
+
+      FieldMask instance_mask;
+      const std::vector<FieldID> &field_set = 
+        constraints->field_constraint.get_field_set(); 
+      std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
+      std::vector<unsigned> mask_index_map(field_set.size());
+      std::vector<CustomSerdezID> serdez(field_set.size());
+      field_space_node->compute_create_offsets(field_set, field_sizes,
+                                         mask_index_map, serdez, instance_mask);
+      LayoutDescription *result = 
+        field_space_node->create_layout_description(instance_mask, constraints,
                                        mask_index_map, serdez, field_sizes);
-      }
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      // Record that the sender already has this layout
-      // Only do this after we've registered the instance
-      result->update_known_nodes(source);
       return result;
     }
 
@@ -1195,10 +1162,6 @@ namespace Legion {
       }
       context->runtime->send_instance_manager(target, rez);
       register_remote_instance(target, destroy_event);
-      // Finally we can update our known nodes
-      // It's only safe to do this after the message
-      // has been sent
-      layout->update_known_nodes(target);
     }
 
     //--------------------------------------------------------------------------
