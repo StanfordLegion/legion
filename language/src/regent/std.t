@@ -3218,7 +3218,7 @@ function std.setup(main_task, extra_setup_thunk)
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
       -- No layout constraints for inner tasks
-      if std.config["layout-constraints"] and not options.inner then
+      if std.config["layout-constraints"] then
         local fn_type = task:gettype()
         local param_types = fn_type.parameters
         local region_i = 0
@@ -3245,7 +3245,6 @@ function std.setup(main_task, extra_setup_thunk)
                 c.legion_task_layout_constraint_set_add_layout_constraint(
                   [layout_constraints], [region_i], [layout])
               end)
-
             region_i = region_i + 1
           end
         end
