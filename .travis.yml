@@ -41,7 +41,7 @@ before_install:
   - if [ "$(uname)" = "Linux" -a "$CXX" = "clang++" ]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
   - if [ "$(uname)" = "Linux" ]; then export LLVM_CONFIG="llvm-config-3.5"; fi
   - |
-    if [ $USE_GASNET -eq 1 ]; then
+    if [ "$USE_GASNET" -eq 1 ]; then
       export CONDUIT=mpi
       git clone git@github.com:StanfordLegion/gasnet.git
       cd gasnet
@@ -79,12 +79,12 @@ script:
     make -s -C examples/full_ghost LG_RT_DIR=../../runtime
     examples/full_ghost/ghost -ll:cpu 4
   - |
-    if [ $DEBUG -eq 0 ]; then
+    if [ "$DEBUG" -eq 0 ]; then
       make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
       make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
     fi
   - |
-    if [ $DEBUG -eq 0 ]; then
+    if [ "$DEBUG" -eq 0 ]; then
       make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
       make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
     fi
