@@ -109,6 +109,8 @@ terra top_level_task(task : Lg.legion_task_t,
   C.printf("End top task!\n")
 end
 
+local args = require("manual_capi_args")
+
 terra legion_main()
   Lg.legion_runtime_register_task_void(
     TOP_TASK_ID,
@@ -131,7 +133,8 @@ terra legion_main()
     "fake_task",
     fake_task)
   Lg.legion_runtime_set_top_level_task_id(TOP_TASK_ID)
-  Lg.legion_runtime_start(0, [&rawstring](0), false)
+  [args.argv_setup]
+  Lg.legion_runtime_start(args.argc, args.argv, false)
 end
 
 legion_main()
