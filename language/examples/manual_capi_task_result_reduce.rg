@@ -142,6 +142,8 @@ terra future_task(
   return Lg.legion_task_result_create(&output, sizeof(int))
 end
 
+local args = require("manual_capi_args")
+
 terra main()
   -- register tasks
   Lg.legion_runtime_set_top_level_task_id(TOP_LEVEL_TASK_ID)
@@ -171,7 +173,8 @@ terra main()
   Lg.register_reduction_global_plus_int32(REDID);
 
   -- Start the runtime
-  Lg.legion_runtime_start(0, [&rawstring](0), false)
+  [args.argv_setup]
+  Lg.legion_runtime_start(args.argc, args.argv, false)
 end
 
 main()

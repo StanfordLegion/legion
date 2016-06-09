@@ -114,7 +114,9 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     except TestFailure as e:
         failure = '\n'.join(
             itertools.takewhile(
-                (lambda line: line != 'stack traceback:'),
+                (lambda line: line != 'stack traceback:' and
+                 'Caught a fatal signal:' not in line and
+                 '----------' not in line),
                 itertools.dropwhile(
                     (lambda line: 'Errors reported during' in line),
                     (line.strip() for line in e.output.strip().split('\n')
