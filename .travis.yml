@@ -15,6 +15,7 @@ env:
   - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
   - CC_FLAGS=-DLEGION_SPY DEBUG=1 TEST_SPY=1
   - CC_FLAGS=-std=c++0x DEBUG=0
+  - CC_FLAGS= DEBUG=1 USE_GASNET=1 USE_LLVM=1
 matrix:
   exclude:
     - os: osx
@@ -43,7 +44,7 @@ before_install:
       # sudo sh -c "echo 'deb http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/precise/ llvm-toolchain-precise-3.5 main' >> /etc/apt/sources.list"
       # wget -O - http://legion.stanford.edu/~eslaught/llvm-deb-mirror/apt/llvm-snapshot.gpg.key | sudo apt-key add -
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev
     fi
   - |
     if [ "$(uname)" = "Darwin" ]; then
@@ -53,9 +54,16 @@ before_install:
   - if [ "$(uname)" = "Linux" -a "$CXX" = "g++" ]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [ "$(uname)" = "Linux" -a "$CXX" = "clang++" ]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
   - if [ "$(uname)" = "Linux" ]; then export LLVM_CONFIG="llvm-config-3.5"; fi
-  - export TERRA_CXX="$CXX"
-  - export TERRA_CC="$CC"
-  - export TERRA_LINK="$CXX"
+  - |
+    if [ $USE_GASNET -eq 1 ]; then
+      export CONDUIT=mpi
+      git clone git@github.com:StanfordLegion/gasnet.git
+      cd gasnet
+      make -j2
+      export GASNET_ROOT="$PWD/release"
+      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
+      unset WARN_AS_ERROR
+    fi
 script:
   - ./language/travis.py
   - |
