@@ -559,6 +559,31 @@ namespace Legion {
         {
           result.is_inner = runtime->is_inner_variant(ctx, task.task_id,
                                                        result.variant);
+          if (result.is_inner)
+          {
+            // Default mapper assumes virtual mappings for all inner
+            // tasks, so see if there are any layout constraints that
+            // are inconsistent with this approach
+            const TaskLayoutConstraintSet &next_layout_constraints = 
+                runtime->find_task_layout_constraints(ctx, 
+                                            task.task_id, result.variant);
+            if (!next_layout_constraints.layouts.empty())
+            {
+              for (std::multimap<unsigned,LayoutConstraintID>::const_iterator 
+                    it = next_layout_constraints.layouts.begin();
+                    it != next_layout_constraints.layouts.end(); it++)
+              {
+                const LayoutConstraintSet &req_cons = 
+                    runtime->find_layout_constraints(ctx, it->second);
+                if ((req_cons.specialized_constraint.kind != NO_SPECIALIZE) &&
+                   (req_cons.specialized_constraint.kind != VIRTUAL_SPECIALIZE))
+                {
+                  result.is_inner = false;
+                  break;
+                }
+              }
+            }
+          }
           preferred_variants[task.task_id] = result;
         }
         return result;
