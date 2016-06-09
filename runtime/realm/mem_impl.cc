@@ -38,12 +38,7 @@ namespace Realm {
 
     AddressSpace Memory::address_space(void) const
     {
-#ifndef DISABLE_MAPPER_ADDRESS_SPACE_HACK
-      // new mapper has trouble with memories in different address spaces still
-      return 0;
-#else
       return ID(id).node();
-#endif
     }
 
     ID::IDType Memory::local_id(void) const
