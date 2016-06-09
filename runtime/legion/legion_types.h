@@ -1278,7 +1278,6 @@ namespace Legion {
   typedef Realm::Domain Domain;
   typedef Realm::DomainPoint DomainPoint;
   typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-  typedef Realm::RegionInstance PhysicalInstance;
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
@@ -1359,7 +1358,8 @@ namespace Legion {
   };
 
   namespace Internal { 
-
+    // This is only needed internally
+    typedef Realm::RegionInstance PhysicalInstance;
     // Pull some of the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
     typedef Mapping::PhysicalInstance MappingInstance;
