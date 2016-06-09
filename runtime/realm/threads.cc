@@ -131,10 +131,10 @@ namespace Realm {
   //
   // class CoreReservationSet
 
-  CoreReservationSet::CoreReservationSet(void)
+  CoreReservationSet::CoreReservationSet(bool hyperthread_sharing)
     : owns_coremap(true), cm(0)
   {
-    cm = CoreMap::discover_core_map();
+    cm = CoreMap::discover_core_map(hyperthread_sharing);
   }
 
   CoreReservationSet::CoreReservationSet(const CoreMap *_cm)
@@ -1194,64 +1194,8 @@ namespace Realm {
     }
   }
 
-  // bulldozer siblings share fpu
-  void update_bd_sharing(std::map<int, std::set<CoreMap::Proc *> > bd_sets)
-  {
-    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = bd_sets.begin();
-        it != bd_sets.end();
-        it++) {
-      const std::set<CoreMap::Proc *>& bd = it->second;
-
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = bd.begin(); it1 != bd.end(); it1++) {
-        for(std::set<CoreMap::Proc *>::const_iterator it2 = bd.begin(); it2 != bd.end(); it2++) {
-          if(it1 != it2) {
-            CoreMap::Proc *p = *it1;
-            p->shares_fpu.insert(*it2);
-          }
-        }
-      }
-    }
-  }
-
 #ifdef __linux__
-#ifdef REALM_USE_HWLOC
-  // find bulldozer cpus that share fpu
-  static int get_bd_sibling_id(int cpu_id, int core_id) {
-    char str[1024];
-    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
-    FILE *f = fopen(str, "r");
-    if(!f) {
-      std::cout << "can't read '" << str << "' - skipping";
-    }
-    hwloc_bitmap_t set = hwloc_bitmap_alloc();
-    hwloc_linux_parse_cpumap_file(f, set);
-
-    fclose(f);
-
-    hwloc_bitmap_clr(set, cpu_id);
-    int siblingid = hwloc_bitmap_first(set);
-
-    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
-    f = fopen(str, "r");
-    if(!f) {
-      std::cout << "can't read '" << str << "' - skipping";
-    }
-    int sib_core_id;
-    int count = fscanf(f, "%d", &sib_core_id);
-    fclose(f);
-    if(count != 1) {
-      std::cout << "can't find core id in '" << str << "' - skipping";
-    }
-    if (sib_core_id != core_id) {
-      return siblingid;
-    } else {
-      return -1;
-    }
-  }
-
-#else
-
-  static CoreMap *extract_core_map_from_linux_sys(void)
+  static CoreMap *extract_core_map_from_linux_sys(bool hyperthread_sharing)
   {
     cpu_set_t cset;
     int ret = sched_getaffinity(0, sizeof(cset), &cset);
@@ -1330,16 +1274,71 @@ namespace Realm {
     }
     closedir(nd);
 
-    update_ht_sharing(ht_sets);
+    if(hyperthread_sharing)
+      update_ht_sharing(ht_sets);
 
     // all done!
     return cm;
   }
 #endif
-#endif
 
 #ifdef REALM_USE_HWLOC
-  static CoreMap *extract_core_map_from_hwloc(void)
+  // bulldozer siblings share fpu
+  static void update_bd_sharing(std::map<int, std::set<CoreMap::Proc *> > bd_sets)
+  {
+    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = bd_sets.begin();
+        it != bd_sets.end();
+        it++) {
+      const std::set<CoreMap::Proc *>& bd = it->second;
+
+      for(std::set<CoreMap::Proc *>::const_iterator it1 = bd.begin(); it1 != bd.end(); it1++) {
+        for(std::set<CoreMap::Proc *>::const_iterator it2 = bd.begin(); it2 != bd.end(); it2++) {
+          if(it1 != it2) {
+            CoreMap::Proc *p = *it1;
+            p->shares_fpu.insert(*it2);
+          }
+        }
+      }
+    }
+  }
+
+#ifdef __linux__
+  // find bulldozer cpus that share fpu
+  static int get_bd_sibling_id(int cpu_id, int core_id) {
+    char str[1024];
+    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
+    FILE *f = fopen(str, "r");
+    if(!f) {
+      std::cout << "can't read '" << str << "' - skipping";
+    }
+    hwloc_bitmap_t set = hwloc_bitmap_alloc();
+    hwloc_linux_parse_cpumap_file(f, set);
+
+    fclose(f);
+
+    hwloc_bitmap_clr(set, cpu_id);
+    int siblingid = hwloc_bitmap_first(set);
+
+    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
+    f = fopen(str, "r");
+    if(!f) {
+      std::cout << "can't read '" << str << "' - skipping";
+    }
+    int sib_core_id;
+    int count = fscanf(f, "%d", &sib_core_id);
+    fclose(f);
+    if(count != 1) {
+      std::cout << "can't find core id in '" << str << "' - skipping";
+    }
+    if (sib_core_id != core_id) {
+      return siblingid;
+    } else {
+      return -1;
+    }
+  }
+#endif
+
+  static CoreMap *extract_core_map_from_hwloc(bool hyperthread_sharing)
   {
     CoreMap *cm = new CoreMap;
 
@@ -1389,7 +1388,8 @@ namespace Realm {
     }
     hwloc_topology_destroy(topology);
 
-    update_ht_sharing(ht_sets);
+    if(hyperthread_sharing)
+      update_ht_sharing(ht_sets);
     update_bd_sharing(bd_sets);
 
     // all done!
@@ -1397,7 +1397,7 @@ namespace Realm {
   }
 #endif
 
-  /*static*/ CoreMap *CoreMap::discover_core_map(void)
+  /*static*/ CoreMap *CoreMap::discover_core_map(bool hyperthread_sharing)
   {
     // we'll try a number of different strategies to discover the local cores:
     // 1) a user-defined synthetic map, if REALM_SYNTHETIC_CORE_MAP is set
@@ -1437,17 +1437,17 @@ namespace Realm {
     // 2) extracted from hwloc information
 #ifdef REALM_USE_HWLOC
     {
-      CoreMap *cm = extract_core_map_from_hwloc();
-      if(cm) return cm;
-    }
-#else
-    // 3) extracted from Linux's /sys
-#ifdef __linux__
-    {
-      CoreMap *cm = extract_core_map_from_linux_sys();
+      CoreMap *cm = extract_core_map_from_hwloc(hyperthread_sharing);
       if(cm) return cm;
     }
 #endif
+
+    // 3) extracted from Linux's /sys
+#ifdef __linux__
+    {
+      CoreMap *cm = extract_core_map_from_linux_sys(hyperthread_sharing);
+      if(cm) return cm;
+    }
 #endif
 
     // 4) as a final fallback a single-core synthetic map
