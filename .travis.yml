@@ -44,11 +44,12 @@ before_install:
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
       git clone https://github.com/StanfordLegion/gasnet.git
-      cd gasnet
+      pushd gasnet
       make -j2
       export GASNET_ROOT="$PWD/release"
       export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
       unset WARN_AS_ERROR
+      popd
     fi
 script:
   - ./language/travis.py
