@@ -1986,10 +1986,15 @@ static void *bytedup(const void *data, size_t datalen)
 #ifndef DISABLE_BARRIER_MIGRATION
 	  // if there were zero local waiters and a single remote waiter, this barrier is an obvious
 	  //  candidate for migration
-	  if(local_notifications.empty() && (remote_notifications.size() == 1)) {
+          // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
+	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
+             (ID(me).node() == gasnet_mynode())) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
+            // remember that we had up to date information up to this generation so that we don't try to
+            //   subscribe to things we already know about
+            gen_subscribed = generation;
 	  }
 #endif
 	}
@@ -2097,7 +2102,7 @@ static void *bytedup(const void *data, size_t datalen)
 	}
 
 	if(previous_subscription < needed_gen) {
-	  log_barrier.info("subscribing to barrier " IDFMT "/%d", me.id(), needed_gen);
+	  log_barrier.info() << "subscribing to barrier " << me << "/" << needed_gen << " (prev=" << previous_subscription << ")";
 	  BarrierSubscribeMessage::send_request(owner, me.id(), needed_gen, gasnet_mynode(), false/*!forwarded*/);
 	}
       }
@@ -2306,11 +2311,15 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->generations.erase(it);
 	  }
 	} else {
-	  // hold this trigger until we get messages for the earlier generation(s)
-	  log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
-			   args.barrier_id, impl->generation, 
-			   args.previous_gen, args.trigger_gen);
-	  impl->held_triggers[args.previous_gen] = args.trigger_gen;
+          // the current migration implementation sometimes results in duplicate trigger
+          //  messages, which we can ignore here
+	  if(args.previous_gen > impl->generation) {
+	    // hold this trigger until we get messages for the earlier generation(s)
+	    log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
+			     args.barrier_id, impl->generation, 
+			     args.previous_gen, args.trigger_gen);
+	    impl->held_triggers[args.previous_gen] = args.trigger_gen;
+          }
 	}
 
 	// is there any data we need to store?
