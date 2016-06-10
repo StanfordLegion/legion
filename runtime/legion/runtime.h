@@ -2912,9 +2912,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
@@ -2931,9 +2931,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
@@ -2953,9 +2953,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       for (std::set<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
@@ -2996,7 +2996,13 @@ namespace Legion {
     /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      ApUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_ap_user_event(result);
+      return result;
+#else
       return ApUserEvent(Realm::UserEvent::create_user_event());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3007,6 +3013,7 @@ namespace Legion {
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
+      LegionSpy::log_ap_user_event_trigger(to_trigger);
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
@@ -3016,7 +3023,13 @@ namespace Legion {
     /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      RtUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_rt_user_event(result);
+      return result;
+#else
       return RtUserEvent(Realm::UserEvent::create_user_event());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3026,6 +3039,9 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_rt_user_event_trigger(to_trigger);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3106,9 +3122,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (precondition.exists() && !result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, result);

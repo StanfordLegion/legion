@@ -428,6 +428,26 @@ namespace Legion {
 			one.id, one.gen, two.id, two.gen);
       }
 
+      static inline void log_ap_user_event(ApUserEvent event)
+      {
+        log_spy.print("Ap User Event " IDFMT " %u", event.id, event.gen);
+      }
+
+      static inline void log_rt_user_event(RtUserEvent event)
+      {
+        log_spy.print("Rt User Event " IDFMT " %u", event.id, event.gen);
+      }
+
+      static inline void log_ap_user_event_trigger(ApUserEvent event)
+      {
+        log_spy.print("Ap User Event Trigger " IDFMT " %u",event.id,event.gen);
+      }
+
+      static inline void log_rt_user_event_trigger(RtUserEvent event)
+      {
+        log_spy.print("Rt User Event Trigger " IDFMT " %u",event.id,event.gen);
+      }
+
       static inline void log_operation_events(UniqueID uid,
                                               LgEvent pre, LgEvent post)
       {
