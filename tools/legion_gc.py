@@ -47,7 +47,7 @@ future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Constraints
 constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Source Kinds
-source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_]+)')
+source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_ ]+)')
 # Deletion Pattern
 deletion_pat = re.compile(prefix + r'GC Deletion (?P<did>[0-9]+) (?P<node>[0-9]+)')
 
@@ -839,7 +839,7 @@ class State(object):
 
     def get_manager(self, did, node):
         key = (did,node)
-        if did not in self.managers:
+        if key not in self.managers:
             self.managers[key] = Manager(did, node)
             if key in self.unknowns:
                 self.managers[key].clone(self.unknowns[key])
