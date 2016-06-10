@@ -2110,7 +2110,7 @@ namespace Legion {
       {
         VersionState *init_state = 
           owner->create_new_version_state(init_version);
-        init_state->add_base_valid_ref(VERSION_MANAGER_REF);
+        init_state->add_base_valid_ref(CURRENT_STATE_REF);
         init_state->initialize(term_event, usage, user_mask, 
                                targets, init_op_id, init_index, corresponding);
         current_version_infos[init_version].valid_fields = user_mask;
@@ -3513,7 +3513,7 @@ namespace Legion {
       DistributedID did = 
                     node->context->runtime->get_available_distributed_id(false);
       CompositeVersionInfo *composite_info = new CompositeVersionInfo();
-      composite_info->get_version_info().clone_from(version_info);
+      //composite_info->get_version_info().clone_from(version_info);
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
@@ -6647,6 +6647,30 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // InstanceSet 
     /////////////////////////////////////////////////////////////
+    
+    //--------------------------------------------------------------------------
+    InstanceSet::CollectableRef& InstanceSet::CollectableRef::operator=(
+                                         const InstanceSet::CollectableRef &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Do not copy references
+      if (composite && (ptr.view != NULL) && 
+          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(ptr.view);
+      valid_fields = rhs.valid_fields;
+      ready_event = rhs.ready_event;
+      composite = rhs.composite;
+      local = rhs.local;
+      if (composite)
+      {
+        ptr.view = rhs.ptr.view;
+        if (ptr.view != NULL)
+          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+      }
+      else
+        ptr.manager = rhs.ptr.manager;
+      return *this;
+    }
 
     //--------------------------------------------------------------------------
     InstanceSet::InstanceSet(size_t init_size /*=0*/)
@@ -6760,7 +6784,8 @@ namespace Legion {
       {
         if (refs.single != NULL)
         {
-          CollectableRef *next = legion_new<CollectableRef>(*refs.single);
+          CollectableRef *next = 
+            legion_new<CollectableRef,InstanceRef>(*refs.single);
           next->add_reference();
           if (refs.single->remove_reference())
             legion_delete(refs.single);
@@ -6917,7 +6942,7 @@ namespace Legion {
         else if (new_size == 1)
         {
           CollectableRef *next = 
-            legion_new<CollectableRef>(refs.multi->vector[0]);
+            legion_new<CollectableRef,InstanceRef>(refs.multi->vector[0]);
           if (refs.multi->remove_reference())
             legion_delete(refs.multi);
           next->add_reference();
@@ -7013,7 +7038,7 @@ namespace Legion {
         }
         else
         {
-          refs.single = legion_new<CollectableRef>(ref);
+          refs.single = legion_new<CollectableRef,InstanceRef>(ref);
           refs.single->add_reference();
         }
       }

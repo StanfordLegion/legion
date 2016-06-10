@@ -5477,7 +5477,7 @@ namespace Legion {
             std::map<PhysicalManager*,std::pair<unsigned,bool> > 
               *epoch_acquired = this->must_epoch->get_acquired_instances_ref();
             if (epoch_acquired != NULL)
-              acquired->insert(epoch_acquired->begin(), epoch_acquired->end());  
+              acquired->insert(epoch_acquired->begin(), epoch_acquired->end());
           }
           else
             acquired = get_acquired_instances_ref();

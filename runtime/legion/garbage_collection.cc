@@ -301,8 +301,9 @@ namespace Legion {
         {
           // Still have to use an atomic here
           unsigned previous = __sync_fetch_and_add(&valid_references, cnt);
-          if (previous == 0)
-            has_valid_references = true;
+          if (previous > 0)
+            return true;
+          has_valid_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -507,6 +508,596 @@ namespace Legion {
       return do_deletion;
     }
 #endif // USE_REMOTE_REFERENCES
+
+#ifdef DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_base_gc_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          gc_references += cnt;
+          std::map<ReferenceSource,int>::iterator finder = 
+            detailed_base_gc_references.find(source);
+          if (finder == detailed_base_gc_references.end())
+            detailed_base_gc_references[source] = cnt;
+          else
+            finder->second += cnt;
+          if (gc_references > cnt)
+            return;
+#ifdef DEBUG_LEGION
+          assert(!has_gc_references);
+#endif
+          has_gc_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // If we get here it is probably a race in reference counting
+        // scheme above, so mark it is as such
+        assert(false);
+        delete this;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_nested_gc_ref_internal (
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          gc_references++;
+          std::map<DistributedID,int>::iterator finder = 
+            detailed_nested_gc_references.find(did);
+          if (finder == detailed_nested_gc_references.end())
+            detailed_nested_gc_references[did] = cnt;
+          else
+            finder->second += cnt;
+          if (gc_references > cnt)
+            return;
+#ifdef DEBUG_LEGION
+          assert(!has_gc_references);
+#endif
+          has_gc_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // If we get here it is probably a race in reference counting
+        // scheme above, so mark it is as such
+        assert(false);
+        delete this;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_base_gc_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+#ifdef DEBUG_LEGION
+          assert(gc_references >= cnt);
+          assert(has_gc_references);
+#endif
+          gc_references -= cnt;
+          std::map<ReferenceSource,int>::iterator finder = 
+            detailed_base_gc_references.find(source);
+          assert(finder != detailed_base_gc_references.end());
+          assert(finder->second >= cnt);
+          finder->second -= cnt;
+          if (finder->second == 0)
+            detailed_base_gc_references.erase(finder);
+          if (gc_references > 0)
+            return false;
+          has_gc_references = false;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_nested_gc_ref_internal(
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+#ifdef DEBUG_LEGION
+          assert(gc_references >= cnt);
+          assert(has_gc_references);
+#endif
+          gc_references--;
+          std::map<DistributedID,int>::iterator finder = 
+            detailed_nested_gc_references.find(did);
+          assert(finder != detailed_nested_gc_references.end());
+          assert(finder->second >= cnt);
+          finder->second -= cnt;
+          if (finder->second == 0)
+            detailed_nested_gc_references.erase(finder);
+          if (gc_references > 0)
+            return false;
+          has_gc_references = false;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_base_valid_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          valid_references += cnt;
+          std::map<ReferenceSource,int>::iterator finder = 
+            detailed_base_valid_references.find(source);
+          if (finder == detailed_base_valid_references.end())
+            detailed_base_valid_references[source] = cnt;
+          else
+            finder->second += cnt;
+          if (valid_references > cnt)
+            return;
+#ifdef DEBUG_LEGION
+          assert(!has_valid_references);
+#endif
+          has_valid_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_nested_valid_ref_internal (
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          valid_references += cnt;
+          std::map<DistributedID,int>::iterator finder = 
+            detailed_nested_valid_references.find(did);
+          if (finder == detailed_nested_valid_references.end())
+            detailed_nested_valid_references[did] = cnt;
+          else
+            finder->second += cnt;
+          if (valid_references > cnt)
+            return;
+#ifdef DEBUG_LEGION
+          assert(!has_valid_references);
+#endif
+          has_valid_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_base_valid_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+#ifdef DEBUG_LEGION
+          assert(valid_references >= cnt);
+          assert(has_valid_references);
+#endif
+          valid_references -= cnt;
+          std::map<ReferenceSource,int>::iterator finder = 
+            detailed_base_valid_references.find(source);
+          assert(finder != detailed_base_valid_references.end());
+          assert(finder->second >= cnt);
+          finder->second -= cnt;
+          if (finder->second == 0)
+            detailed_base_valid_references.erase(finder);
+          if (valid_references > 0)
+            return false;
+          has_valid_references = false;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_nested_valid_ref_internal(
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+#ifdef DEBUG_LEGION
+          assert(valid_references >= cnt);
+          assert(has_valid_references);
+#endif
+          valid_references -= cnt;
+          std::map<DistributedID,int>::iterator finder = 
+            detailed_nested_valid_references.find(did);
+          assert(finder != detailed_nested_valid_references.end());
+          assert(finder->second >= cnt);
+          finder->second -= cnt;
+          if (finder->second == 0)
+            detailed_nested_valid_references.erase(finder);
+          if (valid_references > 0)
+            return false;
+          has_valid_references = false;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::try_add_valid_reference_internal(
+                            ReferenceSource source, bool must_be_valid, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        // Check our state and see if this is going to work
+        if (must_be_valid && (current_state != VALID_STATE))
+          return false;
+        // If we are in any of the deleted states, it is no good
+        if ((current_state == DELETED_STATE) || 
+            (current_state == ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_INVALID_DELETED_STATE) ||
+            (current_state == PENDING_INACTIVE_DELETED_STATE))
+          return false;
+        if (first)
+        {
+          unsigned previous = valid_references;
+          valid_references += cnt;
+          std::map<ReferenceSource,int>::iterator finder = 
+            detailed_base_valid_references.find(source);
+          if (finder == detailed_base_valid_references.end())
+            detailed_base_valid_references[source] = cnt;
+          else
+            finder->second += cnt;
+          if (previous > 0)
+            return true;
+          has_valid_references = true;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_base_resource_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      resource_references++;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_resource_references.find(source);
+      if (finder == detailed_base_resource_references.end())
+        detailed_base_resource_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (resource_references > cnt)
+        return;
+#ifdef DEBUG_LEGION
+      assert(!has_resource_references);
+#endif
+      has_resource_references = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_nested_resource_ref_internal (
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      resource_references++;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_resource_references.find(did);
+      if (finder == detailed_nested_resource_references.end())
+        detailed_nested_resource_references[did] = cnt;
+      else
+        finder->second += cnt;
+      if (resource_references > cnt)
+        return;
+#ifdef DEBUG_LEGION
+      assert(!has_resource_references);
+#endif
+      has_resource_references = true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_base_resource_ref_internal(
+                                                ReferenceSource source, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(resource_references >= cnt);
+      assert(has_resource_references);
+#endif
+      resource_references--;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_resource_references.find(source);
+      assert(finder != detailed_base_resource_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_base_resource_references.erase(finder);
+      if (resource_references > 0)
+        return false;
+      has_resource_references = false;
+      return can_delete();
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_nested_resource_ref_internal(
+                                                     DistributedID did, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(resource_references >= cnt);
+      assert(has_resource_references);
+#endif
+      resource_references -= cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_resource_references.find(did);
+      assert(finder != detailed_nested_resource_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_nested_resource_references.erase(finder);
+      if (resource_references > 0)
+        return false;
+      has_resource_references = false;
+      return can_delete();
+    }
+#endif // DEBUG_LEGION_GC
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::has_remote_instance(

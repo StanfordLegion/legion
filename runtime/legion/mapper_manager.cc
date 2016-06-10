@@ -1780,7 +1780,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
           *(ctx->acquired_instances);
         // Figure out which instances weren't deleted yet
         for (unsigned idx = 0; idx < instances.size(); idx++)

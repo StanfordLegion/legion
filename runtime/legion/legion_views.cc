@@ -1241,7 +1241,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
-        manager->add_nested_gc_ref(did);
+      {
+        if (is_owner())
+          manager->add_nested_gc_ref(did);
+        else
+          send_remote_gc_update(owner_space, 1, true/*add*/);
+      }
       else
         parent->add_nested_gc_ref(did);
     }
@@ -1251,8 +1256,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL) 
+      {
         // we have a resource reference on the manager so no need to check
-        manager->remove_nested_gc_ref(did);
+        if (is_owner())
+          manager->remove_nested_gc_ref(did);
+        else
+          send_remote_gc_update(owner_space, 1, false/*add*/);
+      }
       else if (parent->remove_nested_gc_ref(did))
         legion_delete(parent);
     }
@@ -1262,7 +1272,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
-        manager->add_nested_valid_ref(did);
+      {
+        if (is_owner())
+          manager->add_nested_valid_ref(did);
+        else
+          send_remote_valid_update(owner_space, 1, true/*add*/);
+      }
       else
         parent->add_nested_valid_ref(did);
     }
@@ -1272,8 +1287,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
+      {
         // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did);
+        if (is_owner())
+          manager->remove_nested_valid_ref(did);
+        else
+          send_remote_valid_update(owner_space, 1, false/*add*/);
+      }
       else if(parent->remove_nested_valid_ref(did))
         legion_delete(parent);
     }

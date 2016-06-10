@@ -42,21 +42,20 @@ namespace Legion {
       VERSION_INFO_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      VERSION_MANAGER_REF = 6,
-      PENDING_GC_REF = 7,
-      REMOTE_DID_REF = 8,
-      PENDING_COLLECTIVE_REF = 9,
-      MEMORY_MANAGER_REF = 10,
-      COMPOSITE_NODE_REF = 11,
-      COMPOSITE_HANDLE_REF = 12,
-      PERSISTENCE_REF = 13,
-      REMOTE_CREATE_REF = 14,
-      INSTANCE_MAPPER_REF = 15,
-      APPLICATION_REF = 16,
-      MAPPING_ACQUIRE_REF = 17,
-      NEVER_GC_REF = 18,
-      CONTEXT_REF = 19,
-      LAST_SOURCE_REF = 20,
+      PENDING_GC_REF = 6,
+      REMOTE_DID_REF = 7,
+      PENDING_COLLECTIVE_REF = 8,
+      MEMORY_MANAGER_REF = 9,
+      COMPOSITE_NODE_REF = 10,
+      COMPOSITE_HANDLE_REF = 11,
+      PERSISTENCE_REF = 12,
+      REMOTE_CREATE_REF = 13,
+      INSTANCE_MAPPER_REF = 14,
+      APPLICATION_REF = 15,
+      MAPPING_ACQUIRE_REF = 16,
+      NEVER_GC_REF = 17,
+      CONTEXT_REF = 18,
+      LAST_SOURCE_REF = 19,
     };
 
     enum ReferenceKind {
@@ -73,7 +72,6 @@ namespace Legion {
       "Version Info Reference",                     \
       "Physical State Reference",                   \
       "Physical Region Reference",                  \
-      "Version Manager Reference",                  \
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
@@ -192,7 +190,7 @@ namespace Legion {
                                            int cnt = 1);
       inline bool remove_nested_resource_ref(DistributedID source, 
                                              int cnt = 1);
-    public: // some help for manaing physical instances 
+    public: // some help for managing physical instances 
       inline bool try_add_base_valid_ref(ReferenceSource source,
                                          bool must_be_valid,
                                          int cnt = 1);
@@ -213,6 +211,25 @@ namespace Legion {
                                 AddressSpaceID target, ReferenceKind kind);
       bool remove_create_reference(AddressSpaceID source,
                                    AddressSpaceID target, ReferenceKind kind);
+#endif
+#ifdef DEBUG_LEGION_GC
+    private:
+      void add_base_gc_ref_internal(ReferenceSource source, int cnt);
+      void add_nested_gc_ref_internal(DistributedID source, int cnt);
+      bool remove_base_gc_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_gc_ref_internal(DistributedID source, int cnt);
+    public:
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt);
+      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool try_add_valid_reference_internal(ReferenceSource source, 
+                                            bool must_be_valid, int cnt);
+    public:
+      void add_base_resource_ref_internal(ReferenceSource source, int cnt);
+      void add_nested_resource_ref_internal(DistributedID source, int cnt); 
+      bool remove_base_resource_ref_internal(ReferenceSource source, int cnt); 
+      bool remove_nested_resource_ref_internal(DistributedID source, int cnt);
 #endif
     public:
       // Methods for changing state
@@ -291,6 +308,15 @@ namespace Legion {
                          AddressSpaceID/*dst*/>,int> create_gc_refs;
       std::map<std::pair<AddressSpaceID/*src*/,
                          AddressSpaceID/*dst*/>,int> create_valid_refs;
+#endif
+#ifdef DEBUG_LEGION_GC
+    protected:
+      std::map<ReferenceSource,int> detailed_base_gc_references;
+      std::map<DistributedID,int> detailed_nested_gc_references;
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+      std::map<ReferenceSource,int> detailed_base_resource_references;
+      std::map<DistributedID,int> detailed_nested_resource_references;
 #endif
     protected:
       // Track all the remote instances (relative to ourselves) we know about
@@ -408,12 +434,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_gc_reference();
+#else
+      add_base_gc_ref_internal(source, cnt); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -427,12 +457,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_gc_reference();
+#else
+      add_nested_gc_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -446,6 +480,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -453,6 +488,9 @@ namespace Legion {
       if (previous == cnt)
         return remove_gc_reference();
       return false;
+#else
+      return remove_base_gc_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -466,6 +504,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -473,6 +512,10 @@ namespace Legion {
       if (previous == cnt)
         return remove_gc_reference();
       return false;
+#else
+      return remove_nested_gc_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -486,12 +529,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_valid_reference();
+#else
+      add_base_valid_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -505,12 +552,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_valid_reference();
+#else
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -524,6 +575,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -531,6 +583,9 @@ namespace Legion {
       if (previous == cnt)
         return remove_valid_reference();
       return false;
+#else
+      return remove_base_valid_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -544,6 +599,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -551,6 +607,10 @@ namespace Legion {
       if (previous == cnt)
         return remove_valid_reference();
       return false;
+#else
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -564,12 +624,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_resource_reference();
+#else
+      add_base_resource_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -583,12 +647,17 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_resource_reference();
+#else
+      add_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -602,6 +671,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -609,6 +679,9 @@ namespace Legion {
       if (previous == cnt)
         return remove_resource_reference();
       return false;
+#else
+      return remove_base_resource_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -622,6 +695,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -629,6 +703,10 @@ namespace Legion {
       if (previous == cnt)
         return remove_resource_reference();
       return false;
+#else
+      return remove_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -640,12 +718,20 @@ namespace Legion {
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
+#ifdef DEBUG_LEGION_GC
+      bool result = try_add_valid_reference_internal(source, must_be_valid,cnt);
+#else
       bool result = try_add_valid_reference(must_be_valid, cnt);
+#endif
       if (result)
         log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
       return result; 
 #else
+#ifdef DEBUG_LEGION_GC
+      return try_add_valid_reference_internal(source, must_be_valid, cnt);
+#else
       return try_add_valid_reference(must_be_valid, cnt);
+#endif
 #endif
     }
 

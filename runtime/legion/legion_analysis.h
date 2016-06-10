@@ -167,6 +167,7 @@ namespace Legion {
                       RegionTreeForest *forest);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
+      // TODO: delete these with versioning fix
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     public:
@@ -1147,7 +1148,7 @@ namespace Legion {
       void unpack_reference(Runtime *rt, TaskOp *task,
                             Deserializer &derez, RtEvent &ready);
       static void handle_deferred_composite_handle(const void *args);
-    private:
+    protected:
       FieldMask valid_fields; 
       ApEvent ready_event;
       union {
@@ -1170,9 +1171,12 @@ namespace Legion {
       struct CollectableRef : public Collectable, public InstanceRef {
       public:
         CollectableRef(void)
-          : Collectable(), InstanceRef() { }
+          : Collectable(0), InstanceRef() { }
         CollectableRef(const InstanceRef &ref)
-          : Collectable(), InstanceRef(ref) { }
+          : Collectable(0), InstanceRef(ref) { }
+        ~CollectableRef(void) { }
+      public:
+        CollectableRef& operator=(const CollectableRef &rhs);
       };
       struct InternalSet : public Collectable {
       public:
