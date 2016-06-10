@@ -941,7 +941,7 @@ namespace Legion {
       log_garbage.info("GC Instance Manager %ld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
-      if (is_owner() && Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, 0);
         LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
@@ -1243,7 +1243,7 @@ namespace Legion {
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     {  
-      if (is_owner() && Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
         LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
