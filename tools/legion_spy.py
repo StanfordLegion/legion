@@ -6344,7 +6344,8 @@ class EventHandle(object):
 class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
-                 'incoming_copies', 'outgoing_copies', 'generation']
+                 'incoming_copies', 'outgoing_copies', 'generation', 'ap_user_event',
+                 'rt_user_event', 'user_event_triggered']
     def __init__(self, state, handle):
         self.state = state
         self.handle = handle
@@ -6357,6 +6358,9 @@ class Event(object):
         self.outgoing_fills = None
         self.incoming_copies = None
         self.outgoing_copies = None
+        self.ap_user_event = False
+        self.rt_user_event = False
+        self.user_event_triggered = False
         # For traversals
         self.generation = 0
 
@@ -6367,6 +6371,58 @@ class Event(object):
         return str(self.handle)
 
     __repr__ = __str__
+
+    def set_ap_user_event(self):
+        assert not self.ap_user_event
+        assert not self.rt_user_event
+        self.ap_user_event = True
+
+    def set_rt_user_event(self):
+        assert not self.ap_user_event
+        assert not self.rt_user_event
+        self.rt_user_event = True
+
+    def set_triggered(self):
+        assert not self.user_event_triggered
+        assert self.ap_user_event or self.rt_user_event
+        self.user_event_triggered = True
+
+    def check_for_user_event_leak(self):
+        if self.user_event_triggered:
+            return
+        if not self.ap_user_event and not self.rt_user_event:
+            return
+        # This is an untriggered user event, report it
+        if self.ap_user_event:
+            print "WARNING: "+str(self)+" is an untriggered application user event"
+        else:
+            print "WARNING: "+str(self)+" is an untriggered runtime user event"
+        print "  Incoming:"
+        if self.incoming:
+            for ev in self.incoming:
+                print "    "+str(ev)
+        if self.incoming_ops:
+            for op in self.incoming_ops:
+                print "    "+str(op)
+        if self.incoming_copies:
+            for copy in self.incoming_copies:
+                print "    "+str(copy)
+        if self.incoming_fills:
+            for fill in self.incoming_fills:
+                print "    "+str(fill)
+        print "  Outgoing:"
+        if self.outgoing:
+            for ev in self.outgoing:
+                print "    "+str(ev)
+        if self.outgoing_ops:
+            for op in self.outgoing_ops:
+                print "    "+str(op)
+        if self.outgoing_copies:
+            for copy in self.outgoing_copies:
+                print "    "+str(copy)
+        if self.outgoing_fills:
+            for fill in self.outgoing_fills:
+                print "    "+str(fill)
 
     def add_incoming(self, prev):
         if self.incoming is None:
@@ -7118,6 +7174,14 @@ mapping_decision_pat    = re.compile(
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) (?P<id2>[0-9a-f]+) "+
            "(?P<gen2>[0-9]+)")
+ap_user_event_pat       = re.compile(
+    prefix+"Ap User Event (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+rt_user_event_pat       = re.compile(
+    prefix+"Rt User Event (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+ap_user_event_trig_pat  = re.compile(
+    prefix+"Ap User Event Trigger (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+rt_user_event_trig_pat  = re.compile(
+    prefix+"Rt User Event Trigger (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
 operation_event_pat     = re.compile(
     prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) "+
            "(?P<id2>[0-9a-f]+) (?P<gen2>[0-9]+)")
@@ -7160,6 +7224,26 @@ def parse_legion_spy_line(line, state):
         if e1.exists():
             e2.add_incoming(e1)
             e1.add_outgoing(e2)
+        return True
+    m = ap_user_event_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e.set_ap_user_event()
+        return True
+    m = rt_user_event_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e.set_rt_user_event()
+        return True
+    m = ap_user_event_trig_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e.set_triggered()
+        return True
+    m = rt_user_event_trig_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e.set_triggered()
         return True
     m = operation_event_pat.match(line)
     if m is not None:
@@ -7703,7 +7787,7 @@ class State(object):
         if self.verbose:
             print 'Matched %d lines in %s' % (matches,file_name)
         if skipped > 0:
-            print 'WARNING: Skipped %d lines' % skipped
+            print 'WARNING: Skipped %d lines when reading %s' % (skipped,file_name)
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
@@ -7905,6 +7989,10 @@ class State(object):
         if print_result:
             print "No cycles detected"
         return False
+
+    def perform_user_event_leak_checks(self):
+        for event in self.events.itervalues():
+            event.check_for_user_event_leak()
 
     def make_region_tree_graphs(self, path, simplify_graphs):
         index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
@@ -8132,7 +8220,7 @@ class State(object):
         gc.collect()
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -k -u -v -a -t] "+\
+    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -w -k -u -v -a -t] "+\
           "<file_name(s)>+"
     print "  -l : perform logical checks"
     print "  -p : perform physical checks"
@@ -8146,6 +8234,7 @@ def usage():
     print "  -y : generate mapper replay file"
     print "  -z : add extra detail to graphs"
     print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
+    print "  -w : perform user event leak check"
     print "  -k : keep temporary files"
     print "  -u : keep graphs unsimplified (maintains all redundant edges)"
     print "  -v : verbose"
@@ -8234,7 +8323,7 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
     try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeiqsyzkuvat')
+        opts, args = getopt(sys.argv[1:],'lpcrmdeiqsyzkuvatw')
     except GetoptError as err:
         print "ERROR: "+str(err)
         sys.exit(1)
@@ -8253,6 +8342,7 @@ def main(temp_dir):
     replay_file = False
     detailed_graphs = False
     sanity_checks = False
+    user_event_leaks = False
     keep_temp_files = False
     simplify_graphs = True # Note that this defaults to true
     verbose = False
@@ -8293,6 +8383,9 @@ def main(temp_dir):
             continue
         if opt == '-s':
             sanity_checks = True
+            continue
+        if opt == '-w':
+            user_event_leaks = True
             continue
         if opt == '-k':
             keep_temp_files = True
@@ -8345,6 +8438,11 @@ def main(temp_dir):
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime. Disabling cycle checks."
         cycle_checks = False
+    if user_event_leaks and not physical_enabled:
+        print "WARNING: Requested user event leak checks but logging information "+\
+              "is missing. Please compile the runtime with -DLEGION_SPY to enable "+\
+              "validation of the runtime. Disabling user event leak checks."
+        user_event_leaks = False
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
     need_logical = dataflow_graphs and not logical_enabled
@@ -8371,6 +8469,9 @@ def main(temp_dir):
     if cycle_checks:
         print "Performing cycle checks..."
         state.perform_cycle_checks()
+    if user_event_leaks:
+        print "Performing user event leak checks..."
+        state.perform_user_event_leak_checks()
     if region_tree_graphs:
         print "Making region tree graphs..."
         state.make_region_tree_graphs(temp_dir, simplify_graphs)
