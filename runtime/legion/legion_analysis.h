@@ -1171,9 +1171,11 @@ namespace Legion {
       struct CollectableRef : public Collectable, public InstanceRef {
       public:
         CollectableRef(void)
-          : Collectable(0), InstanceRef() { }
+          : Collectable(), InstanceRef() { }
         CollectableRef(const InstanceRef &ref)
-          : Collectable(0), InstanceRef(ref) { }
+          : Collectable(), InstanceRef(ref) { }
+        CollectableRef(const CollectableRef &rhs)
+          : Collectable(), InstanceRef(rhs) { }
         ~CollectableRef(void) { }
       public:
         CollectableRef& operator=(const CollectableRef &rhs);

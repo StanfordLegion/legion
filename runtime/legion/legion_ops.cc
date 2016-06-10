@@ -5439,15 +5439,6 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
-      // We already know the instances that we are going to need
-      InstanceSet chosen_instances;
-      parent_ctx->get_physical_references(parent_idx, chosen_instances);
-      // This should have exactly one instance and it should be 
-      // composite reference
-#ifdef DEBUG_LEGION
-      assert(chosen_instances.size() == 1);
-      assert(chosen_instances[0].is_composite_ref());
-#endif
       InstanceSet composite_refs(1);
       composite_refs[0] = InstanceRef(true/*composite*/);
       // Always eagerly translate composite instances back out into

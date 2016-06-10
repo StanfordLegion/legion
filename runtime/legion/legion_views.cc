@@ -3212,7 +3212,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
               PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, false/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               current_users.user_mask |= new_mask;
@@ -3224,7 +3224,7 @@ namespace Legion {
             if (num_users == 1)
             {
               current_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, false/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/);
               derez.deserialize(current_users.user_mask);
             }
             else
@@ -3237,7 +3237,7 @@ namespace Legion {
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
                 PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, false/*add ref*/);
+                  PhysicalUser::unpack_user(derez, true/*add ref*/);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 current_users.user_mask |= new_mask;
@@ -3246,7 +3246,10 @@ namespace Legion {
             // Didn't have it before so update the collect events
             if (outstanding_gc_events.find(current_event) == 
                   outstanding_gc_events.end())
+            {
+              outstanding_gc_events.insert(current_event);
               collect_events.insert(current_event);
+            }
           }
         }
         // Previous users
@@ -3279,7 +3282,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
               PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, false/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               previous_users.user_mask |= new_mask;
@@ -3291,7 +3294,7 @@ namespace Legion {
             if (num_users == 1)
             {
               previous_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, false/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/);
               derez.deserialize(previous_users.user_mask);
             }
             else
@@ -3304,7 +3307,7 @@ namespace Legion {
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
                 PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, false/*add ref*/);
+                  PhysicalUser::unpack_user(derez, true/*add ref*/);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 previous_users.user_mask |= new_mask;
@@ -3313,7 +3316,10 @@ namespace Legion {
             // Didn't have it before so update the collect events
             if (outstanding_gc_events.find(previous_event) == 
                   outstanding_gc_events.end())
+            {
+              outstanding_gc_events.insert(previous_event);
               collect_events.insert(previous_event);
+            }
           }
         }
         // Update our remote valid mask
