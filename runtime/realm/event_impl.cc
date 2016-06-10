@@ -2252,7 +2252,10 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// it's theoretically possible for multiple trigger messages to arrive out
 	//  of order, so check if this message triggers the oldest possible range
-	if(args.previous_gen == impl->generation) {
+  // NOTE: it's ok for previous_gen to be earlier than our current generation - this
+  //  occurs with barrier migration because the new owner may not know which notifications
+  //  have already been performed
+  if(args.previous_gen <= impl->generation) {
 	  // see if we can pick up any of the held triggers too
 	  while(!impl->held_triggers.empty()) {
 	    std::map<Event::gen_t, Event::gen_t>::iterator it = impl->held_triggers.begin();
@@ -2280,15 +2283,11 @@ static void *bytedup(const void *data, size_t datalen)
 	    impl->generations.erase(it);
 	  }
 	} else {
-          // the current migration implementation sometimes results in duplicate trigger
-          //  messages, which we can ignore here
-	  if(args.previous_gen > impl->generation) {
-	    // hold this trigger until we get messages for the earlier generation(s)
-	    log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
-			     args.barrier_id, impl->generation, 
-			     args.previous_gen, args.trigger_gen);
-	    impl->held_triggers[args.previous_gen] = args.trigger_gen;
-          }
+   // hold this trigger until we get messages for the earlier generation(s)
+    log_barrier.info("holding future trigger: " IDFMT "/%d (%d -> %d)",
+         args.barrier_id, impl->generation, 
+         args.previous_gen, args.trigger_gen);
+    impl->held_triggers[args.previous_gen] = args.trigger_gen;
 	}
 
 	// is there any data we need to store?
