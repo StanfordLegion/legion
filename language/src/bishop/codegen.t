@@ -31,35 +31,37 @@ local codegen = {}
 
 local property_setters = {
   task = {
-    target = {}
+    target = {},
+    priority = {}
   },
   region = {
     target = {}
   }
 }
 
-function property_setters:register_setter(rule_type, field, arg_type, setter)
-  self[rule_type][field][arg_type] = setter
-end
-
-function property_setters:find_setter(rule_type, node)
-  local setter_info = self[rule_type][node.field][node.value.expr_type]
+function property_setters:find_setter(rule_type, node, output_var)
+  local setter_info = self[rule_type][node.field][output_var.type]
   if not setter_info then
     log.error(node, "field " .. node.field .. " is not valid")
   end
   return setter_info
 end
 
-property_setters:register_setter("task", "target", std.processor_type,
-                                 {fn = c.bishop_task_set_target_processor})
-property_setters:register_setter("task", "target", std.processor_list_type,
-                                 {fn = c.bishop_task_set_target_processor_list,
-                                  cleanup = c.bishop_delete_processor_list})
-property_setters:register_setter("region", "target", std.memory_type,
-                                 {fn = c.bishop_region_set_target_memory})
-property_setters:register_setter("region", "target", std.memory_list_type,
-                                 {fn = c.bishop_region_set_target_memory_list,
-                                  cleanup = c.bishop_delete_memory_list})
+property_setters.task.target[c.legion_task_options_t] =
+  c.bishop_task_set_target_processor_select_task_options
+property_setters.task.target[c.legion_map_task_output_t] =
+  c.bishop_task_set_target_processor_map_task
+property_setters.task.priority[c.legion_map_task_output_t] =
+  c.bishop_task_set_priority
+
+--property_setters:register_setter("task", "target", std.processor_list_type,
+--                                 {fn = c.bishop_task_set_target_processor_list,
+--                                  cleanup = c.bishop_delete_processor_list})
+--property_setters:register_setter("region", "target", std.memory_type,
+--                                 {fn = c.bishop_region_set_target_memory})
+--property_setters:register_setter("region", "target", std.memory_list_type,
+--                                 {fn = c.bishop_region_set_target_memory_list,
+--                                  cleanup = c.bishop_delete_memory_list})
 
 local processor_isa = {
   x86 = c.X86_ISA,
@@ -310,12 +312,12 @@ function codegen.expr(binders, state_var, node)
   }
 end
 
-function codegen.property(binders, state_var, rule_type, obj_var, node)
-  local setter_info = property_setters:find_setter(rule_type, node)
+function codegen.property(binders, state_var, rule_type, task_var, output_var, node)
+  local setter_info = property_setters:find_setter(rule_type, node, output_var)
   local value = codegen.expr(binders, state_var, node.value)
   local actions = quote
     [value.actions]
-    var result = [setter_info.fn]([obj_var], [value.value])
+    var result = [setter_info]([task_var], [output_var], [value.value])
     if not result then
       c.bishop_logger_warning("  property '%s' was not properly assigned",
         node.field)
@@ -332,6 +334,9 @@ end
 
 function codegen.task_rule(state_type, node)
   local task_var = terralib.newsymbol(c.legion_task_t)
+  local options_var = terralib.newsymbol(c.legion_task_options_t)
+  local map_task_input_var = terralib.newsymbol(c.legion_map_task_input_t)
+  local map_task_output_var = terralib.newsymbol(c.legion_map_task_output_t)
   local is_matched = terralib.newsymbol(bool)
   local point_var = terralib.newsymbol(c.legion_domain_point_t, "dp_")
   local selector = node.selector
@@ -360,6 +365,7 @@ function codegen.task_rule(state_type, node)
 
   local select_task_options_pattern_matches = quote end
   local select_target_for_point_pattern_matches = quote end
+  local map_task_pattern_matches = quote end
   local predicate_pattern_matches = quote end
   first_element.patterns:map(function(pattern)
     if pattern.field == "index" then
@@ -376,6 +382,10 @@ function codegen.task_rule(state_type, node)
         var [binder]
         [binder] = [point_var]
       end
+      map_task_pattern_matches = quote
+        [map_task_pattern_matches]
+        var [binder] = c.legion_task_get_index_point([task_var])
+      end
     else
       log.error(node, "field " .. pattern.field ..
       " is not supported for pattern match")
@@ -384,6 +394,7 @@ function codegen.task_rule(state_type, node)
 
   local select_task_options_body = quote end
   local select_target_for_point_body = quote end
+  local map_task_body = quote end
 
   node.properties:map(function(property)
     if property.field == "target" then
@@ -418,7 +429,11 @@ function codegen.task_rule(state_type, node)
       end
       select_task_options_body = quote
         [select_task_options_body]
-        [codegen.property(binders, state_var, "task", task_var, property)]
+        [codegen.property(binders, state_var, "task", task_var, options_var, property)]
+      end
+      map_task_body = quote
+        [map_task_body]
+        [codegen.property(binders, state_var, "task", task_var, map_task_output_var, property)]
       end
     end
   end)
@@ -464,7 +479,8 @@ function codegen.task_rule(state_type, node)
   end
 
   local terra select_task_options(ptr        : &opaque,
-                                  [task_var])
+                                  [task_var],
+                                  [options_var])
     var [state_var] = [&state_type](ptr)
     [selector_body]
     [early_out("select_task_options")]
@@ -484,11 +500,26 @@ function codegen.task_rule(state_type, node)
     [select_target_for_point_body]
   end
 
+  local terra map_task(ptr        : &opaque,
+                       [task_var],
+                       [map_task_input_var],
+                       [map_task_output_var])
+    var [state_var] = [&state_type](ptr)
+    [selector_body]
+    [early_out("map_task")]
+    [map_task_pattern_matches]
+    [constraint_checks]
+    [early_out("map_task")]
+    c.bishop_logger_info("[map_task] rule at %s matches", position_string)
+    [map_task_body]
+  end
+
+
   return {
     matches = matches,
     select_task_options = select_task_options,
     select_target_for_point = select_target_for_point,
-    select_task_variant = 0,
+    map_task = map_task,
   }
 end
 

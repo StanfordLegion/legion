@@ -80,6 +80,9 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_task_layout_constraint_set_t);
+  NEW_OPAQUE_TYPE(legion_task_options_t);
+  NEW_OPAQUE_TYPE(legion_map_task_input_t);
+  NEW_OPAQUE_TYPE(legion_map_task_output_t);
 #undef NEW_OPAQUE_TYPE
 
   /**

@@ -42,6 +42,7 @@ local property_type_assignment = {
   task = {
     inline = { std.compile_option_type },
     isa = { std.isa_type },
+    priority = { int },
     target = { std.processor_type, std.processor_list_type },
     vectorize = { std.compile_option_type },
   },

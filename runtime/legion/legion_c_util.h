@@ -157,6 +157,9 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
+      NEW_OPAQUE_WRAPPER(legion_task_options_t, Mapping::Mapper::TaskOptions *);
+      NEW_OPAQUE_WRAPPER(legion_map_task_input_t, Mapping::Mapper::MapTaskInput *);
+      NEW_OPAQUE_WRAPPER(legion_map_task_output_t, Mapping::Mapper::MapTaskOutput *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t

@@ -38,15 +38,17 @@ namespace Legion {
                      MapperRuntime*, Machine, Processor);
 				~BishopMapper();
 
-				//virtual void select_task_options(Task *task);
-				//virtual void slice_domain(const Task *task, const Domain &domain,
-				//		std::vector<DomainSplit> &slices);
-				//virtual bool pre_map_task(Task *task);
-				//virtual void select_task_variant(Task *task);
-				//virtual bool map_task(Task *task);
-
-				//virtual void notify_mapping_result(const Mappable *mappable);
-				//virtual void notify_mapping_failed(const Mappable *mappable);
+        virtual void select_task_options(const MapperContext ctx,
+                                         const Task&         task,
+                                               TaskOptions&  output);
+        virtual void slice_task(const MapperContext    ctx,
+                                const Task&            task,
+                                const SliceTaskInput&  input,
+                                      SliceTaskOutput& output);
+        virtual void map_task(const MapperContext  ctx,
+                              const Task&          task,
+                              const MapTaskInput&  input,
+                                    MapTaskOutput& output);
 
       private:
         std::vector<bishop_task_rule_t> task_rules;

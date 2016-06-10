@@ -152,6 +152,10 @@ bishop_filter_processors_by_isa(bishop_processor_list_t source,
           if (proc.kind() == Processor::TOC_PROC) result.push_back(proc_);
           break;
         }
+      default:
+        {
+          break;
+        }
     }
   }
 
@@ -199,29 +203,52 @@ bishop_filter_memories_by_kind(bishop_memory_list_t source,
   return result_;
 }
 
-bool
-bishop_task_set_target_processor(legion_task_t task_, legion_processor_t proc_)
+//bool
+//bishop_task_set_target_processor(legion_task_t task_, legion_processor_t proc_)
+//{
+//  //Task* task = CObjectWrapper::unwrap(task_);
+//  //task->target_proc = CObjectWrapper::unwrap(proc_);
+//  return true;
+//}
+
+bool bishop_task_set_target_processor_select_task_options(legion_task_t task_,
+                                                          legion_task_options_t options_,
+                                                          legion_processor_t proc_)
 {
-  //Task* task = CObjectWrapper::unwrap(task_);
-  //task->target_proc = CObjectWrapper::unwrap(proc_);
+  Mapper::TaskOptions* options = CObjectWrapper::unwrap(options_);
+  options->initial_proc = CObjectWrapper::unwrap(proc_);
+  return true;
+}
+
+bool bishop_task_set_target_processor_map_task(legion_task_t task_,
+                                               legion_map_task_output_t output_,
+                                               legion_processor_t proc_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->target_procs.clear();
+  output->target_procs.push_back(CObjectWrapper::unwrap(proc_));
+  return true;
+}
+
+bool bishop_task_set_priority(legion_task_t task_,
+                              legion_map_task_output_t output_,
+                              legion_task_priority_t priority_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->task_priority = priority_;
   return true;
 }
 
 bool
-bishop_task_set_target_processor_list(legion_task_t task_,
-                                      bishop_processor_list_t list_)
+bishop_task_set_target_processors(legion_task_t task_,
+                                  legion_map_task_output_t output_,
+                                  bishop_processor_list_t list_)
 {
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->target_procs.clear();
+  for (unsigned i = 0; i < list_.size; ++i)
+    output->target_procs.push_back(CObjectWrapper::unwrap(list_.list[i]));
   return true;
-  //if (list_.size > 0)
-  //{
-  //  Task* task = CObjectWrapper::unwrap(task_);
-  //  task->target_proc = CObjectWrapper::unwrap(list_.list[0]);
-  //  for (unsigned i = 1; i < list_.size; ++i)
-  //    task->additional_procs.insert(CObjectWrapper::unwrap(list_.list[i]));
-  //  return true;
-  //}
-  //else
-  //  return false;
 }
 
 bool
