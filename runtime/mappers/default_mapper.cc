@@ -641,6 +641,7 @@ namespace Legion {
       // Iterate over the premap regions
       bool has_variant_info = false;
       VariantInfo info;
+      bool has_restricted_regions = false;
       for (std::map<unsigned,std::vector<PhysicalInstance> >::const_iterator
             it = input.valid_instances.begin(); 
             it != input.valid_instances.end(); it++)
@@ -650,6 +651,7 @@ namespace Legion {
         if (task.regions[it->first].is_restricted())
         {
           output.premapped_instances.insert(*it);
+          has_restricted_regions = true;
           continue;
         }
         // These are non-restricted regions which means they have to be
@@ -806,6 +808,10 @@ namespace Legion {
                                           task.target_proc, target_memory);
         }
       }
+      // If we have any restricted regions, put the task 
+      // back on the origin processor
+      if (has_restricted_regions)
+        output.new_target_proc = task.orig_proc;
     }
 
     //--------------------------------------------------------------------------
