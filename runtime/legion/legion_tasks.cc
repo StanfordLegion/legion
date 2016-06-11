@@ -1976,6 +1976,8 @@ namespace Legion {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
+      // Initialize this to not have a new target processor
+      output.new_target_proc = Processor::NO_PROC;
       // Set up the inputs and outputs 
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
@@ -2008,13 +2010,16 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_premap_task(this, &input, &output);
+      // See if we need to update the new target processor
+      if (output.new_target_proc.exists())
+        this->target_proc = output.new_target_proc;
       // Now do the registration
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
       {
         VersionInfo &version_info = get_version_info(*it);
         RegionTreeContext req_ctx = get_parent_context(*it);
-        InstanceSet chosen_instances;
+        InstanceSet &chosen_instances = early_mapped_regions[*it];
         // If this is restricted then we know what the answer is so
         // just ignore whatever the mapper did
         if (regions[*it].is_restricted())
@@ -5452,6 +5457,10 @@ namespace Legion {
               }
             }
           }
+          if (Runtime::legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, idx,
+                                                  regions[idx],
+                                                  physical_instances[idx]);
           continue;
         }
         // Skip any NO_ACCESS or empty privilege field regions
