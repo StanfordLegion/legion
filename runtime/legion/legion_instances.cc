@@ -524,7 +524,8 @@ namespace Legion {
       // If we're the owner remove our resource references
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       else
@@ -538,7 +539,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_active(void)
+    void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -550,11 +551,11 @@ namespace Legion {
         memory_manager->activate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_inactive(void)
+    void PhysicalManager::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -565,11 +566,11 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_valid(void)
+    void PhysicalManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // No need to do anything
@@ -582,11 +583,11 @@ namespace Legion {
         memory_manager->validate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_invalid(void)
+    void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -597,7 +598,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
       if (!is_owner())
-        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
     }
 
     //--------------------------------------------------------------------------

@@ -25,6 +25,78 @@ namespace Legion {
   namespace Internal {
 
     /////////////////////////////////////////////////////////////
+    // LocalReferenceMutator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LocalReferenceMutator::LocalReferenceMutator(
+                                               const LocalReferenceMutator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    LocalReferenceMutator::~LocalReferenceMutator(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!mutation_effects.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(mutation_effects);
+        wait_on.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    LocalReferenceMutator& LocalReferenceMutator::operator=(
+                                               const LocalReferenceMutator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LocalReferenceMutator::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      mutation_effects.insert(event);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // WrapperReferenceMutator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    WrapperReferenceMutator::WrapperReferenceMutator(
+                                             const WrapperReferenceMutator &rhs)
+      : mutation_effects(rhs.mutation_effects)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    WrapperReferenceMutator& WrapperReferenceMutator::operator=(
+                                             const WrapperReferenceMutator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperReferenceMutator::record_reference_mutation_effect(RtEvent ev)
+    //--------------------------------------------------------------------------
+    {
+      mutation_effects.insert(ev);
+    }
+
+    /////////////////////////////////////////////////////////////
     // DistributedCollectable 
     /////////////////////////////////////////////////////////////
 
@@ -90,7 +162,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_gc_reference(void)
+    void DistributedCollectable::add_gc_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -106,13 +178,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -135,7 +207,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_gc_reference(void)
+    bool DistributedCollectable::remove_gc_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -151,13 +223,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -174,7 +246,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_valid_reference(void)
+    void DistributedCollectable::add_valid_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -194,13 +266,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -222,7 +294,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_valid_reference(void)
+    bool DistributedCollectable::remove_valid_reference(
+                                                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -242,13 +315,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -265,8 +338,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::try_add_valid_reference(bool must_be_valid,
-                                                         int cnt /*=1*/)
+    bool DistributedCollectable::try_add_valid_reference(
+                  ReferenceMutator *mutator, bool must_be_valid, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
       bool need_activate = false;
@@ -279,13 +352,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         // Check our state and see if this is going to work
         if (must_be_valid && (current_state != VALID_STATE))
@@ -379,7 +452,7 @@ namespace Legion {
 #ifdef USE_REMOTE_REFERENCES
     //--------------------------------------------------------------------------
     bool DistributedCollectable::add_create_reference(AddressSpaceID source,
-                                      AddressSpaceID target, ReferenceKind kind)
+           ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -398,13 +471,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -445,7 +518,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_create_reference(AddressSpaceID source,
-                                      AddressSpaceID target, ReferenceKind kind)
+           ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -463,13 +536,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -512,7 +585,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_base_gc_ref_internal(
-                                                ReferenceSource source, int cnt)
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -528,13 +601,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -567,7 +640,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_nested_gc_ref_internal (
-                                                     DistributedID did, int cnt)
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -583,13 +656,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -622,7 +695,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_base_gc_ref_internal(
-                                                ReferenceSource source, int cnt)
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -638,13 +711,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -673,7 +746,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_gc_ref_internal(
-                                                     DistributedID did, int cnt)
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -689,13 +762,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -724,7 +797,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_base_valid_ref_internal(
-                                                ReferenceSource source, int cnt)
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -744,13 +817,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -782,7 +855,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_nested_valid_ref_internal (
-                                                     DistributedID did, int cnt)
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -802,13 +875,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -840,7 +913,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_base_valid_ref_internal(
-                                                ReferenceSource source, int cnt)
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -860,13 +933,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -895,7 +968,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_valid_ref_internal(
-                                                     DistributedID did, int cnt)
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -915,13 +988,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         if (first)
         {
@@ -950,7 +1023,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::try_add_valid_reference_internal(
-                            ReferenceSource source, bool must_be_valid, int cnt)
+                            ReferenceSource source, ReferenceMutator *mutator, 
+                            bool must_be_valid, int cnt)
     //--------------------------------------------------------------------------
     {
       bool need_activate = false;
@@ -963,13 +1037,13 @@ namespace Legion {
       while (!done)
       {
         if (need_activate)
-          notify_active();
+          notify_active(mutator);
         if (need_validate)
-          notify_valid();
+          notify_valid(mutator);
         if (need_invalidate)
-          notify_invalid();
+          notify_invalid(mutator);
         if (need_deactivate)
-          notify_inactive();
+          notify_inactive(mutator);
         AutoLock gc(gc_lock);
         // Check our state and see if this is going to work
         if (must_be_valid && (current_state != VALID_STATE))
@@ -1166,7 +1240,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_valid_update(AddressSpaceID target,
-                                                       unsigned count, bool add)
+                            ReferenceMutator *mutator, unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1186,7 +1260,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_gc_update(AddressSpaceID target,
-                                                       unsigned count, bool add)
+                            ReferenceMutator *mutator, unsigned count, bool add)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1317,9 +1391,11 @@ namespace Legion {
       derez.deserialize(count);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
+      LocalReferenceMutator mutator;
       if (count > 0)
-        target->add_base_valid_ref(REMOTE_DID_REF, unsigned(count));
-      else if (target->remove_base_valid_ref(REMOTE_DID_REF, unsigned(-count)))
+        target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
+      else if (target->remove_base_valid_ref(REMOTE_DID_REF, &mutator,
+                                             unsigned(-count)))
         delete target;
     }
 
@@ -1335,9 +1411,11 @@ namespace Legion {
       derez.deserialize(count);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
+      LocalReferenceMutator mutator;
       if (count > 0)
-        target->add_base_gc_ref(REMOTE_DID_REF, unsigned(count));
-      else if (target->remove_base_gc_ref(REMOTE_DID_REF, unsigned(-count)))
+        target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
+      else if (target->remove_base_gc_ref(REMOTE_DID_REF, &mutator,
+                                          unsigned(-count)))
         delete target;
     }
 

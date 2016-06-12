@@ -1133,6 +1133,11 @@ namespace Legion {
     class VersionInfo;
     class RestrictInfo;
 
+    class Collectable;
+    class Notifiable;
+    class ReferenceMutator;
+    class LocalReferenceMutator;
+    class NeverReferenceMutator;
     class DistributedCollectable;
     class LayoutDescription;
     class PhysicalManager; // base class for instance and reduction

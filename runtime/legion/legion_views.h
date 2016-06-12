@@ -63,10 +63,10 @@ namespace Legion {
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
@@ -166,10 +166,10 @@ namespace Legion {
                                     const unsigned index) = 0;
     public:
       // Reference counting state change functions
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -414,10 +414,10 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const unsigned index);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_users);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -729,10 +729,10 @@ namespace Legion {
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -798,10 +798,10 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -900,10 +900,10 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const ColorPoint &c);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -993,10 +993,10 @@ namespace Legion {
                                Runtime *runtime, std::map<LogicalView*,
                                 std::pair<RtEvent,unsigned> > &pending_refs);
     public:
-      void notify_active(void);
-      void notify_inactive(void);
-      void notify_valid(void);
-      void notify_invalid(void);
+      void notify_active(ReferenceMutator *mutator);
+      void notify_inactive(ReferenceMutator *mutator);
+      void notify_valid(ReferenceMutator *mutator);
+      void notify_invalid(ReferenceMutator *mutator);
     public:
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
@@ -1047,10 +1047,10 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const ColorPoint &c);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:

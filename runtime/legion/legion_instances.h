@@ -135,10 +135,10 @@ namespace Legion {
       inline VirtualManager* as_virtual_manager(void) const;
     public:
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 

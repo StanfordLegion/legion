@@ -4354,7 +4354,8 @@ namespace Legion {
       if (is_owner())
       {
         // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this); 
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL); 
         map_over_remote_instances(functor);
       }
 #ifdef LEGION_GC
@@ -4416,8 +4417,8 @@ namespace Legion {
       {
         LogicalView *new_view = corresponding[idx];
         const FieldMask &view_mask = targets[idx].get_valid_fields();
-        new_view->add_nested_gc_ref(did);
         new_view->add_nested_valid_ref(did);
+        new_view->add_nested_gc_ref(did);
         if (new_view->is_instance_view())
         {
           InstanceView *inst_view = new_view->as_instance_view();
@@ -4713,6 +4714,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(node->context->runtime,
                         VERSION_STATE_MERGE_PHYSICAL_STATE_CALL);
+      WrapperReferenceMutator mutator(applied_conditions);
       if (need_lock)
       {
         // We're writing so we need the lock in exclusive mode
@@ -4755,11 +4757,11 @@ namespace Legion {
           track_aligned::iterator finder = valid_views.find(it->first);
         if (finder == valid_views.end())
         {
-          it->first->add_nested_gc_ref(did);
+          it->first->add_nested_gc_ref(did, &mutator);
 #ifdef DEBUG_LEGION
           assert(currently_valid);
 #endif
-          it->first->add_nested_valid_ref(did);
+          it->first->add_nested_valid_ref(did, &mutator);
           valid_views[it->first] = overlap;
         }
         else
@@ -4778,11 +4780,11 @@ namespace Legion {
             track_aligned::iterator finder = reduction_views.find(it->first);
           if (finder == reduction_views.end())
           {
-            it->first->add_nested_gc_ref(did);
+            it->first->add_nested_gc_ref(did, &mutator);
 #ifdef DEBUG_LEGION
             assert(currently_valid);
 #endif
-            it->first->add_nested_valid_ref(did);
+            it->first->add_nested_valid_ref(did, &mutator);
             reduction_views[it->first] = overlap;
           }
           else
@@ -4833,6 +4835,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(node->context->runtime,
                         VERSION_STATE_FILTER_AND_MERGE_PHYSICAL_STATE_CALL);
+      WrapperReferenceMutator mutator(applied_conditions);
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_LEGION
@@ -4870,8 +4873,8 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               valid_views.erase(*it);
-              (*it)->remove_nested_valid_ref(did);
-              if ((*it)->remove_nested_gc_ref(did))
+              (*it)->remove_nested_valid_ref(did, &mutator);
+              if ((*it)->remove_nested_gc_ref(did, &mutator))
                 legion_delete(*it);
             }
           }
@@ -4893,8 +4896,8 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               reduction_views.erase(*it);
-              (*it)->remove_nested_valid_ref(did);
-              if ((*it)->remove_nested_gc_ref(did))
+              (*it)->remove_nested_valid_ref(did, &mutator);
+              if ((*it)->remove_nested_gc_ref(did, &mutator))
                 legion_delete(*it);
             }
           }
@@ -4969,7 +4972,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::notify_active(void)
+    void VersionState::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -4979,17 +4982,17 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_nested_gc_ref(did);
+        it->first->add_nested_gc_ref(did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->add_nested_gc_ref(did);
+        it->first->add_nested_gc_ref(did, mutator);
       }
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::notify_inactive(void)
+    void VersionState::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Do nothing we only care about valid references
@@ -5003,25 +5006,25 @@ namespace Legion {
       // No need to hold the lock since no one else should be accessing us
       if (is_owner() && !remote_instances.empty())
       {
-        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<GC_REF_KIND,false/*add*/> functor(this, NULL);
         map_over_remote_instances(functor);
       }
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_nested_gc_ref(did))
+        if (it->first->remove_nested_gc_ref(did, mutator))
           LogicalView::delete_logical_view(it->first);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_nested_gc_ref(did))
+        if (it->first->remove_nested_gc_ref(did, mutator))
           legion_delete(it->first);
       }
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::notify_valid(void)
+    void VersionState::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5031,17 +5034,17 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_nested_valid_ref(did);
+        it->first->add_nested_valid_ref(did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->add_nested_valid_ref(did);
+        it->first->add_nested_valid_ref(did, mutator);
       }
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::notify_invalid(void)
+    void VersionState::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5055,19 +5058,19 @@ namespace Legion {
       if (is_owner() && !remote_instances.empty())
       {
         // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this); 
+        UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this, NULL);
         map_over_remote_instances(functor);
       }
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did))
+        if (it->first->remove_nested_valid_ref(did, mutator))
           LogicalView::delete_logical_view(it->first);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did))
+        if (it->first->remove_nested_valid_ref(did, mutator))
           legion_delete(it->first);
       }
     }
@@ -5865,6 +5868,7 @@ namespace Legion {
       }
       std::set<RtEvent> preconditions;
       std::vector<LogicalView*> pending_views;
+      WrapperReferenceMutator mutator(preconditions);
       {
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
@@ -5948,8 +5952,8 @@ namespace Legion {
               pending_views.push_back(view);
               continue;
             }
-            view->add_nested_gc_ref(did);
-            view->add_nested_valid_ref(did);
+            view->add_nested_valid_ref(did, &mutator);
+            view->add_nested_gc_ref(did, &mutator);
           }
           size_t num_reduction_views;
           derez.deserialize(num_reduction_views);
@@ -5973,8 +5977,8 @@ namespace Legion {
             assert(view->is_instance_view());
             assert(view->as_instance_view()->is_reduction_view());
 #endif
-            view->add_nested_gc_ref(did);
-            view->add_nested_valid_ref(did);
+            view->add_nested_valid_ref(did, &mutator);
+            view->add_nested_gc_ref(did, &mutator);
           }
         }
         else
@@ -6011,8 +6015,8 @@ namespace Legion {
                 pending_views.push_back(view);
                 continue;
               }
-              view->add_nested_gc_ref(did);
-              view->add_nested_valid_ref(did);
+              view->add_nested_valid_ref(did, &mutator);
+              view->add_nested_gc_ref(did, &mutator);
             }
           }
           size_t num_reduction_views;
@@ -6048,8 +6052,8 @@ namespace Legion {
                 pending_views.push_back(view);
                 continue;
               }
-              view->add_nested_gc_ref(did);
-              view->add_nested_valid_ref(did);
+              view->add_nested_valid_ref(did, &mutator);
+              view->add_nested_gc_ref(did, &mutator);
             }
           }
         }
@@ -6066,8 +6070,8 @@ namespace Legion {
         for (std::vector<LogicalView*>::const_iterator it = 
               pending_views.begin(); it != pending_views.end(); it++)
         {
-          (*it)->add_nested_gc_ref(did);
-          (*it)->add_nested_valid_ref(did);
+          (*it)->add_nested_valid_ref(did, &mutator);
+          (*it)->add_nested_gc_ref(did, &mutator);
         }
       }
       if (!preconditions.empty())
@@ -6626,9 +6630,13 @@ namespace Legion {
         }
         else
         {
+          std::set<RtEvent> ready_events;
+          WrapperReferenceMutator mutator(ready_events);
           // No need to wait, we are done now
           ptr.view = view->as_composite_view();
-          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF, &mutator);
+          if (!ready_events.empty())
+            ready = Runtime::merge_events(ready_events);
         }
       }
       else
@@ -6641,7 +6649,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferCompositeHandleArgs *args = (const DeferCompositeHandleArgs*)a;
-      args->view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+      LocalReferenceMutator mutator;
+      args->view->add_base_valid_ref(COMPOSITE_HANDLE_REF, &mutator);
     }
 
     /////////////////////////////////////////////////////////////

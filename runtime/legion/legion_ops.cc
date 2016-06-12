@@ -237,14 +237,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::release_acquired_instances(
+    void Operation::release_acquired_instances(
        std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
       for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, this, 
                                              it->second.first))
           PhysicalManager::delete_physical_manager(it->first);
       }
@@ -266,6 +266,14 @@ namespace Legion {
         parent_ctx->register_new_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      // should be overwridden by inheriting classes
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2258,7 +2266,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(
+      int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 chosen_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
@@ -3600,7 +3608,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_idx = runtime->forest->physical_convert_mapping(
+      int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
                               !Runtime::unsafe_mapper);
@@ -4902,7 +4910,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(
+      int composite_index = runtime->forest->physical_convert_mapping(this,
                                   requirement, output.chosen_instances, 
                                   chosen_instances, bad_tree, missing_fields,
                                   &acquired_instances, unacquired, 

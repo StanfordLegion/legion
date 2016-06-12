@@ -437,7 +437,8 @@ namespace Legion {
       // the instances on remote nodes
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       // don't want to leak events
@@ -610,16 +611,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_active(void)
+    void FutureImpl::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_valid(void)
+    void FutureImpl::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -627,7 +628,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_invalid(void)
+    void FutureImpl::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -635,12 +636,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_inactive(void)
+    void FutureImpl::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2782,6 +2783,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool remove_min_reference = false;
+      IgnoreReferenceMutator mutator;
       if (!is_owner)
       {
         RtUserEvent never_gc_wait;
@@ -2851,8 +2853,8 @@ namespace Legion {
           if (success)
           {
             // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF);
-            manager->send_remote_valid_update(owner_space, 1, false/*add*/);
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
+            manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
             // Then record it
             AutoLock m_lock(manager_lock);
             InstanceInfo &info = current_instances[manager];
@@ -2862,7 +2864,8 @@ namespace Legion {
               info.min_priority = GC_NEVER_PRIORITY;
             info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
+          if (remove_duplicate && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
@@ -2871,7 +2874,8 @@ namespace Legion {
         // If this a max priority, try adding the reference beforehand, if
         // it fails then we know the instance is already deleted so whatever
         if ((priority == GC_NEVER_PRIORITY) &&
-            !manager->try_add_base_valid_ref(NEVER_GC_REF, true/*must be valid*/))
+            !manager->try_add_base_valid_ref(NEVER_GC_REF, &mutator,
+                                             true/*must be valid*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
@@ -2941,7 +2945,8 @@ namespace Legion {
           }
         }
       }
-      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
+      if (remove_min_reference && 
+          manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
         PhysicalManager::delete_physical_manager(manager);
     }
 
@@ -3303,6 +3308,8 @@ namespace Legion {
       RtEvent manager_ready = RtEvent::NO_RT_EVENT;
       PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(did, manager_ready);
+      std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
         manager_ready.wait();
@@ -3310,8 +3317,8 @@ namespace Legion {
       // and then remove the remote DID
       if (acquire)
       {
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-        manager->send_remote_valid_update(source, 1, false/*add*/);
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);
       }
       *target = MappingInstance(manager);
       *success = true;
@@ -3336,7 +3343,7 @@ namespace Legion {
             // Record the instance as a max priority instance
             bool remove_duplicate = false;
             // No need to be safe here, we have a valid reference
-            manager->add_base_valid_ref(NEVER_GC_REF);
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
             {
               std::pair<MapperID,Processor> key(mapper_id,processor);
               AutoLock m_lock(manager_lock);
@@ -3348,7 +3355,7 @@ namespace Legion {
               info.mapper_priorities[key] = NEVER_GC_REF;
             }
             if (remove_duplicate && 
-                manager->remove_base_valid_ref(NEVER_GC_REF))
+                manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
               PhysicalManager::delete_physical_manager(manager);
           }
         }
@@ -3366,7 +3373,7 @@ namespace Legion {
           derez.deserialize(processor);
           bool remove_duplicate = false;
           // No need to be safe here, we have a valid reference
-          manager->add_base_valid_ref(NEVER_GC_REF);
+          manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             AutoLock m_lock(manager_lock);
@@ -3377,12 +3384,16 @@ namespace Legion {
               info.min_priority = NEVER_GC_REF;
             info.mapper_priorities[key] = NEVER_GC_REF;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
+          if (remove_duplicate && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
       // Trigger that we are done
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -3443,7 +3454,7 @@ namespace Legion {
         derez.deserialize(success);
         // If we succeed we can trigger immediately, otherwise we
         // have to send back the response to fail
-        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF,
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, NULL,
                                              false/*must be valid*/))
         {
           Serializer rez;
@@ -3509,7 +3520,7 @@ namespace Legion {
           continue;
         }
         // Otherwise try to acquire it locally
-        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, 
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, NULL,
                                              false/*needs valid*/))
         {
           failures.push_back(idx);
@@ -3600,7 +3611,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3650,7 +3661,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3701,7 +3712,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3751,7 +3762,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3801,7 +3812,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        true/*must already be valid*/))
                 continue;
             }
@@ -3850,7 +3861,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        true/*must already be valid*/))
                 continue;
             }
@@ -4082,7 +4093,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -4183,7 +4194,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -10838,7 +10849,7 @@ namespace Legion {
             // garbage collection by the runtime
             result->add_reference();
             launcher.predicate_false_future.impl->add_base_gc_ref(
-                                                    FUTURE_HANDLE_REF);
+                                                FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
@@ -20076,7 +20087,7 @@ namespace Legion {
             future_args->target->complete_future();
             if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->target);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -20098,7 +20109,7 @@ namespace Legion {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -20306,7 +20317,7 @@ namespace Legion {
               (const SelectTunableArgs*)args;
             Runtime::get_runtime(p)->perform_tunable_selection(tunable_args);
             // Remove the reference that we added
-            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
+            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               legion_delete(tunable_args->result);
             break;
           }

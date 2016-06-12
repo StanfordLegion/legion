@@ -739,10 +739,10 @@ namespace Legion {
             const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
                                 std::set<RtEvent> &applied_conditions);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);

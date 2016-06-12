@@ -2053,7 +2053,7 @@ namespace Legion {
           std::vector<FieldID> missing_fields;
           std::vector<PhysicalManager*> unacquired;
           int composite_index = runtime->forest->physical_convert_mapping(
-              regions[*it], finder->second, 
+              this, regions[*it], finder->second, 
               chosen_instances, bad_tree, missing_fields,
               Runtime::unsafe_mapper ? NULL : get_acquired_instances_ref(),
               unacquired, !Runtime::unsafe_mapper);
@@ -2635,14 +2635,17 @@ namespace Legion {
         Runtime::trigger_event(window_wait);
       }
       // Clean up our instance top views
-      for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
-            instance_top_views.begin(); it != instance_top_views.end(); it++)
+      if (!instance_top_views.empty())
       {
-        it->first->unregister_active_context(this);
-        if (it->second->remove_base_resource_ref(CONTEXT_REF))
-          LogicalView::delete_logical_view(it->second);
+        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+              instance_top_views.begin(); it != instance_top_views.end(); it++)
+        {
+          it->first->unregister_active_context(this);
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            LogicalView::delete_logical_view(it->second);
+        }
+        instance_top_views.clear();
       }
-      instance_top_views.clear();
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -3931,9 +3934,9 @@ namespace Legion {
       RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       InstanceSet instance_set;
-      runtime->forest->physical_convert_mapping(created_requirements[index], 
-          instances, instance_set, bad_tree, missing_fields, 
-          NULL, unacquired, false/*do acquire_checks*/);
+      runtime->forest->physical_convert_mapping(this, 
+          created_requirements[index], instances, instance_set, bad_tree, 
+          missing_fields, NULL, unacquired, false/*do acquire_checks*/);
       runtime->forest->log_mapping_decision(unique_op_id,
           regions.size() + index, created_requirements[index], instance_set);
     }
@@ -5492,7 +5495,7 @@ namespace Legion {
             acquired = get_acquired_instances_ref();
         }
         int composite_idx = 
-          runtime->forest->physical_convert_mapping(regions[idx],
+          runtime->forest->physical_convert_mapping(this, regions[idx],
                 output.chosen_instances[idx], result, bad_tree, missing_fields,
                 acquired, unacquired, !Runtime::unsafe_mapper);
         if (free_acquired)
@@ -6136,7 +6139,7 @@ namespace Legion {
         RegionTreeID bad_tree = 0;
         std::vector<PhysicalManager*> unacquired;
         bool had_composite = 
-          runtime->forest->physical_convert_postmapping(req,
+          runtime->forest->physical_convert_postmapping(this, req,
                               output.chosen_instances[idx], result, bad_tree,
                               Runtime::unsafe_mapper ? NULL : 
                                 get_acquired_instances_ref(),
@@ -6538,7 +6541,7 @@ namespace Legion {
           // Try adding a valid reference to make sure it doesn't get
           // collected while we are trying to do this, we're on the owner
           // node so this doesn't need to be valid initially
-          if (it->first->try_add_base_valid_ref(CONTEXT_REF, false))
+          if (it->first->try_add_base_valid_ref(CONTEXT_REF, NULL, false))
             copy_top_views.push_back(it->first);
           // If we couldn't add the valid ref that means this instance
           // is definitely going to be collected
@@ -8239,8 +8242,8 @@ namespace Legion {
         else
         {
           // Add references so they aren't garbage collected
-          result.impl->add_base_gc_ref(DEFERRED_TASK_REF);
-          predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
+          result.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
+          predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
           Runtime::DeferredFutureSetArgs args;
           args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
           args.target = result.impl;
@@ -10883,7 +10886,8 @@ namespace Legion {
           {
             // Add references so things won't be prematurely collected
             future_map.impl->add_reference();
-            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
+            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF,
+                                                         this);
             Runtime::DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = future_map.impl;
@@ -10926,8 +10930,9 @@ namespace Legion {
           else
           {
             // Add references so they aren't garbage collected 
-            reduction_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
-            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF);
+            reduction_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, this);
+            predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF, 
+                                                         this);
             Runtime::DeferredFutureSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_SET_ID;
             args.target = reduction_future.impl;

@@ -298,7 +298,8 @@ namespace Legion {
           delete manager;
         if (is_owner())
         {
-          UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+          UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+            functor(this, NULL);
           map_over_remote_instances(functor);
         }
       }
@@ -1237,64 +1238,64 @@ namespace Legion {
     }
  
     //--------------------------------------------------------------------------
-    void MaterializedView::notify_active(void)
+    void MaterializedView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
       {
         if (is_owner())
-          manager->add_nested_gc_ref(did);
+          manager->add_nested_gc_ref(did, mutator);
         else
-          send_remote_gc_update(owner_space, 1, true/*add*/);
+          send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
       }
       else
-        parent->add_nested_gc_ref(did);
+        parent->add_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::notify_inactive(void)
+    void MaterializedView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL) 
       {
         // we have a resource reference on the manager so no need to check
         if (is_owner())
-          manager->remove_nested_gc_ref(did);
+          manager->remove_nested_gc_ref(did, mutator);
         else
-          send_remote_gc_update(owner_space, 1, false/*add*/);
+          send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       }
-      else if (parent->remove_nested_gc_ref(did))
+      else if (parent->remove_nested_gc_ref(did, mutator))
         legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::notify_valid(void)
+    void MaterializedView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
       {
         if (is_owner())
-          manager->add_nested_valid_ref(did);
+          manager->add_nested_valid_ref(did, mutator);
         else
-          send_remote_valid_update(owner_space, 1, true/*add*/);
+          send_remote_valid_update(owner_space, mutator, 1, true/*add*/);
       }
       else
-        parent->add_nested_valid_ref(did);
+        parent->add_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::notify_invalid(void)
+    void MaterializedView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
       {
         // we have a resource reference on the manager so no need to check
         if (is_owner())
-          manager->remove_nested_valid_ref(did);
+          manager->remove_nested_valid_ref(did, mutator);
         else
-          send_remote_valid_update(owner_space, 1, false/*add*/);
+          send_remote_valid_update(owner_space, mutator, 1, false/*add*/);
       }
-      else if(parent->remove_nested_valid_ref(did))
+      else if(parent->remove_nested_valid_ref(did, mutator))
         legion_delete(parent);
     }
 
@@ -3618,7 +3619,8 @@ namespace Legion {
     {
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       // Delete our root
@@ -3656,31 +3658,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::notify_active(void)
+    void CompositeView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_active();
+      root->notify_active(mutator);
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::notify_inactive(void)
+    void CompositeView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_inactive(); 
+      root->notify_inactive(mutator); 
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::notify_valid(void)
+    void CompositeView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_valid();
+      root->notify_valid(mutator);
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::notify_invalid(void)
+    void CompositeView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_invalid();
+      root->notify_invalid(mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4797,90 +4799,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_active(void)
+    void CompositeNode::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_nested_gc_ref(owner_did);
+        it->first->add_nested_gc_ref(owner_did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->add_nested_gc_ref(owner_did);
+        it->first->add_nested_gc_ref(owner_did, mutator);
       }
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        it->first->notify_active();
+        it->first->notify_active(mutator);
       }
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_inactive(void)
+    void CompositeNode::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_gc_ref(owner_did);
+        it->first->remove_nested_gc_ref(owner_did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_gc_ref(owner_did);
+        it->first->remove_nested_gc_ref(owner_did, mutator);
       }
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        it->first->notify_inactive();
+        it->first->notify_inactive(mutator);
       }
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_valid(void)
+    void CompositeNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->add_nested_valid_ref(owner_did);
+        it->first->add_nested_valid_ref(owner_did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->add_nested_valid_ref(owner_did);
+        it->first->add_nested_valid_ref(owner_did, mutator);
       }
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        it->first->notify_valid();
+        it->first->notify_valid(mutator);
       }
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_invalid(void)
+    void CompositeNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_valid_ref(owner_did);
+        it->first->remove_nested_valid_ref(owner_did, mutator);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_valid_ref(owner_did);
+        it->first->remove_nested_valid_ref(owner_did, mutator);
       }
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        it->first->notify_invalid();
+        it->first->notify_invalid(mutator);
       }
     }
 
@@ -4931,7 +4933,8 @@ namespace Legion {
         delete value;
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
 #ifdef LEGION_GC
@@ -4958,28 +4961,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::notify_active(void)
+    void FillView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
     }
 
     //--------------------------------------------------------------------------
-    void FillView::notify_inactive(void)
+    void FillView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
     }
     
     //--------------------------------------------------------------------------
-    void FillView::notify_valid(void)
+    void FillView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
     }
 
     //--------------------------------------------------------------------------
-    void FillView::notify_invalid(void)
+    void FillView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -5140,7 +5143,8 @@ namespace Legion {
       if (is_owner())
       {
         // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       if (manager->remove_nested_resource_ref(did))
@@ -5907,33 +5911,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_active(void)
+    void ReductionView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_gc_ref(did);
+      manager->add_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_inactive(void)
+    void ReductionView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // No need to check for deletion of the manager since
       // we know that we also hold a resource reference
-      manager->remove_nested_gc_ref(did);
+      manager->remove_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_valid(void)
+    void ReductionView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_valid_ref(did);
+      manager->add_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_invalid(void)
+    void ReductionView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->remove_nested_valid_ref(did);
+      manager->remove_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------

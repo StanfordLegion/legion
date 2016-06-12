@@ -37,7 +37,7 @@ namespace Legion {
      * of all operations that can be performed in a Legion
      * program.
      */
-    class Operation {
+    class Operation : public ReferenceMutator {
     public:
       enum OpKind {
         MAP_OP_KIND,
@@ -207,13 +207,16 @@ namespace Legion {
       // This means that region == parent and the
       // coherence mode is exclusive
       static void localize_region_requirement(RegionRequirement &req);
-      static void release_acquired_instances(std::map<PhysicalManager*,
+      void release_acquired_instances(std::map<PhysicalManager*,
                         std::pair<unsigned,bool> > &acquired_instances);
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
       void initialize_operation(SingleTask *ctx, bool track,
                                 unsigned num_regions = 0); 
+    public:
+      // Inherited from ReferenceMutator
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // The following two calls may be implemented
       // differently depending on the operation, but we

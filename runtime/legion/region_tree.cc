@@ -2688,7 +2688,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,
+    int RegionTreeForest::physical_convert_mapping(Operation *op,
+                                  const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
@@ -2775,13 +2776,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(*acquired, unacquired); 
+        perform_missing_acquires(op, *acquired, unacquired); 
       }
       return -1; // no composite index
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::physical_convert_postmapping(
+    bool RegionTreeForest::physical_convert_postmapping(Operation *op,
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
                                      InstanceSet &result,RegionTreeID &bad_tree,
@@ -2832,7 +2833,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(*acquired, unacquired);
+        perform_missing_acquires(op, *acquired, unacquired);
       }
       return has_composite;
     }
@@ -2874,7 +2875,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_missing_acquires(
+    void RegionTreeForest::perform_missing_acquires(Operation *op,
                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
@@ -2885,7 +2886,7 @@ namespace Legion {
       for (std::vector<PhysicalManager*>::const_iterator it = 
             unacquired.begin(); it != unacquired.end(); it++)
       {
-        if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
+        if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, op,
                                             !(*it)->is_owner()))
         {
           acquired.insert(std::pair<PhysicalManager*,
@@ -2931,9 +2932,9 @@ namespace Legion {
                   bool> >(*it,std::pair<unsigned,bool>(1,false)));
               // make the reference a local reference and 
               // remove our remote did reference
-              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, op);
               (*it)->send_remote_valid_update(req_it->first->owner_space,
-                                          1, false/*add*/);
+                                          NULL, 1, false/*add*/);
             }
           }
         }
@@ -12344,13 +12345,14 @@ namespace Legion {
           if (finder == info.states.end())
           {
             info.states[version_state] = state_mask;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF);
+            LocalReferenceMutator mutator;
+            version_state->add_base_valid_ref(CURRENT_STATE_REF, &mutator);
           }
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
           // No matter what remove our base valid reference
-          version_state->send_remote_valid_update(source, 1, false/*add*/);
+          version_state->send_remote_valid_update(source, NULL, 1,false/*add*/);
         }
       }
       unsigned num_previous;
@@ -12377,13 +12379,14 @@ namespace Legion {
           if (finder == info.states.end())
           {
             info.states[version_state] = state_mask;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF);
+            LocalReferenceMutator mutator;
+            version_state->add_base_valid_ref(CURRENT_STATE_REF, &mutator);
           }
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
           // No matter what remove our base valid reference
-          version_state->send_remote_valid_update(source, 1, false/*add*/);
+          version_state->send_remote_valid_update(source, NULL, 1,false/*add*/);
         }
       }
       unsigned num_reduc;

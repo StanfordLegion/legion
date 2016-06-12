@@ -398,7 +398,8 @@ namespace Legion {
                                       bool initial_user,
                                       std::set<RtEvent> &applied_events);
     public:
-      int physical_convert_mapping(const RegionRequirement &req,
+      int physical_convert_mapping(Operation *op,
+                               const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
@@ -406,7 +407,8 @@ namespace Legion {
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
-      bool physical_convert_postmapping(const RegionRequirement &req,
+      bool physical_convert_postmapping(Operation *op,
+                               const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::map<PhysicalManager*,
@@ -417,7 +419,7 @@ namespace Legion {
                                 const RegionRequirement &req,
                                 const InstanceSet &targets);
     protected: // helper method for the above two methods
-      void perform_missing_acquires(
+      void perform_missing_acquires(Operation *op,
                  std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:

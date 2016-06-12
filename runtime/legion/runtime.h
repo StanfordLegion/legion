@@ -175,10 +175,10 @@ namespace Legion {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
     public:
-      virtual void notify_active(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
     protected:
