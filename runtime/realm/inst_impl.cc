@@ -74,13 +74,6 @@ namespace Realm {
       return ID(id).instance.owner_node;
     }
 
-#ifdef TODO
-    ID::IDType RegionInstance::local_id(void) const
-    {
-      return ID(id).index();
-    }
-#endif
-
     Memory RegionInstance::get_location(void) const
     {
       RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);

@@ -43,13 +43,6 @@ namespace Realm {
       return id.memory.owner_node;
     }
 
-    ID::IDType Memory::local_id(void) const
-    {
-      // this is a hack for the Legion runtime
-      ID id(*this);
-      return id.memory.mem_idx;
-    }
-
     Memory::Kind Memory::kind(void) const
     {
       return get_runtime()->get_memory_impl(*this)->get_kind();

@@ -62,7 +62,6 @@ namespace Realm {
 		   Event wait_on = Event::NO_EVENT) const;
 
       AddressSpace address_space(void) const;
-      id_t local_id(void) const;
 
       LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
 

@@ -168,14 +168,6 @@ namespace Realm {
       return id.proc.owner_node;
     }
 
-    ID::IDType Processor::local_id(void) const
-    {
-      // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
-      ID id(*this);
-      assert(id.is_processor());
-      return id.proc.proc_idx;
-    }
-
     Event Processor::register_task(TaskFuncID func_id,
 				   const CodeDescriptor& codedesc,
 				   const ProfilingRequestSet& prs,
