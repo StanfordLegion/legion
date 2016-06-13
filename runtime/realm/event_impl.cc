@@ -1983,7 +1983,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  //  candidate for migration
           // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-             (ID(me).node() == gasnet_mynode())) {
+             (ID(me).barrier.creator_node == gasnet_mynode())) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
