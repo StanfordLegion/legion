@@ -425,34 +425,36 @@ namespace Legion {
       {
         if (one != two)
           log_spy.print("Event Event " IDFMT " %u " IDFMT " %u", 
-			one.id, one.gen, two.id, two.gen);
+			one.id, 0/*one.gen*/, two.id, 0/*two.gen*/);
       }
 
       static inline void log_ap_user_event(ApUserEvent event)
       {
-        log_spy.print("Ap User Event " IDFMT " %u", event.id, event.gen);
+        log_spy.print("Ap User Event " IDFMT " %u", event.id, 0/*event.gen*/);
       }
 
       static inline void log_rt_user_event(RtUserEvent event)
       {
-        log_spy.print("Rt User Event " IDFMT " %u", event.id, event.gen);
+        log_spy.print("Rt User Event " IDFMT " %u", event.id, 0/*event.gen*/);
       }
 
       static inline void log_ap_user_event_trigger(ApUserEvent event)
       {
-        log_spy.print("Ap User Event Trigger " IDFMT " %u",event.id,event.gen);
+        log_spy.print("Ap User Event Trigger " IDFMT " %u",
+		      event.id, 0/*event.gen*/);
       }
 
       static inline void log_rt_user_event_trigger(RtUserEvent event)
       {
-        log_spy.print("Rt User Event Trigger " IDFMT " %u",event.id,event.gen);
+        log_spy.print("Rt User Event Trigger " IDFMT " %u",
+		      event.id, 0/*event.gen*/);
       }
 
       static inline void log_operation_events(UniqueID uid,
                                               LgEvent pre, LgEvent post)
       {
         log_spy.print("Operation Events %llu " IDFMT " %u " IDFMT " %u",
-		      uid, pre.id, pre.gen, post.id, post.gen);
+		      uid, pre.id, 0/*pre.gen*/, post.id, 0/*post.gen*/);
       }
 
       static inline void log_copy_events(UniqueID op_unique_id,
@@ -463,7 +465,7 @@ namespace Legion {
                       IDFMT " %u", op_unique_id,
                       handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), handle.get_tree_id(), 
-                      pre.id, pre.gen, post.id, post.gen);
+                      pre.id, 0/*pre.gen*/, post.id, 0/*post.gen*/);
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,
@@ -471,7 +473,8 @@ namespace Legion {
                                         IDType dst, ReductionOpID redop)
       {
         log_spy.print("Copy Field " IDFMT " %u %d " IDFMT " %d " IDFMT " %d",
-                      post.id, post.gen, src_fid, src, dst_fid, dst, redop);
+                      post.id, 0/*post.gen*/,
+		      src_fid, src, dst_fid, dst, redop);
       }
 
       static inline void log_copy_intersect(LgEvent post, int is_region,
@@ -479,7 +482,8 @@ namespace Legion {
                                             unsigned tree_id)
       {
         log_spy.print("Copy Intersect " IDFMT " %u %d " IDFMT " %d %d",
-                      post.id, post.gen, is_region, index, field, tree_id);
+                      post.id, 0/*post.gen*/,
+		      is_region, index, field, tree_id);
       }
 
       static inline void log_fill_events(UniqueID op_unique_id,
@@ -489,13 +493,13 @@ namespace Legion {
         log_spy.print("Fill Events %llu %d %d %d " IDFMT " %u " IDFMT " %u",
 		      op_unique_id, handle.get_index_space().get_id(),
 		      handle.get_field_space().get_id(), handle.get_tree_id(),
-		      pre.id, pre.gen, post.id, post.gen);
+		      pre.id, 0/*pre.gen*/, post.id, 0/*post.gen*/);
       }
 
       static inline void log_fill_field(LgEvent post, FieldID fid, IDType dst)
       {
         log_spy.print("Fill Field " IDFMT " %u %d " IDFMT, 
-                      post.id, post.gen, fid, dst);
+                      post.id, 0/*post.gen*/, fid, dst);
       }
 
       static inline void log_fill_intersect(LgEvent post, int is_region,
@@ -503,7 +507,8 @@ namespace Legion {
                                             unsigned tree_id)
       {
         log_spy.print("Fill Intersect " IDFMT " %u %d " IDFMT " %d %d",
-		      post.id, post.gen, is_region, index, field, tree_id);
+		      post.id, 0/*post.gen*/,
+		      is_region, index, field, tree_id);
       }
 
       static inline void log_phase_barrier(ApBarrier barrier)

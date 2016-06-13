@@ -1663,8 +1663,11 @@ namespace Realm {
 
       Node *n = &nodes[id.event.creator_node];
       GenEventImpl *impl = n->events.lookup_entry(id.event.gen_event_idx, id.event.creator_node);
-      assert(impl->me == id);
-
+      {
+	ID check(impl->me);
+	assert(check.event.creator_node == id.event.creator_node);
+	assert(check.event.gen_event_idx == id.event.gen_event_idx);
+      }
       return impl;
     }
 
@@ -1675,7 +1678,11 @@ namespace Realm {
 
       Node *n = &nodes[id.barrier.creator_node];
       BarrierImpl *impl = n->barriers.lookup_entry(id.barrier.barrier_idx, id.barrier.creator_node);
-      assert(impl->me == id);
+      {
+	ID check(impl->me);
+	assert(check.barrier.creator_node == id.barrier.creator_node);
+	assert(check.barrier.barrier_idx == id.barrier.barrier_idx);
+      }
       return impl;
     }
 

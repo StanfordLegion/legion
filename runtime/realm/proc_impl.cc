@@ -555,16 +555,10 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
 
-    Event start_event, finish_event;
-    start_event.id = args.start_id;
-    start_event.gen = args.start_gen;
-    finish_event.id = args.finish_id;
-    finish_event.gen = args.finish_gen;
-
     log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
 		     << " proc=" << args.proc
-		     << " finish=" << finish_event;
+		     << " finish=" << args.finish_event;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
     fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
@@ -575,7 +569,7 @@ namespace Realm {
       fbd >> prs;
       
     p->spawn_task(args.func_id, data, args.user_arglen, prs,
-		  start_event, finish_event, args.priority);
+		  args.start_event, args.finish_event, args.priority);
   }
 
   /*static*/ void SpawnTaskMessage::send_request(gasnet_node_t target, Processor proc,
@@ -589,10 +583,8 @@ namespace Realm {
 
     r_args.proc = proc;
     r_args.func_id = func_id;
-    r_args.start_id = start_event.id;
-    r_args.start_gen = start_event.gen;
-    r_args.finish_id = finish_event.id;
-    r_args.finish_gen = finish_event.gen;
+    r_args.start_event = start_event;
+    r_args.finish_event = finish_event;
     r_args.priority = priority;
     r_args.user_arglen = arglen;
     

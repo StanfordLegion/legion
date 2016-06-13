@@ -430,17 +430,18 @@ namespace LegionRuntime {
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+      log_dma.info() << "dma request " << (void *)this << " deserialized - is="
+		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+      for(OASByInst::const_iterator it = oas_by_inst->begin();
+	  it != oas_by_inst->end();
+	  it++)
+	for(OASVec::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    it2++)
+	  log_dma.info() << "dma request " << (void *)this << " field: " <<
+	    it->first.first << "[" << it2->src_offset << "]->" <<
+	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size <<
+	    " serdez=" << it2->serdez_id;
     }
 
     CopyRequest::CopyRequest(const Domain& _domain,
@@ -605,7 +606,8 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug() << "request " << (void *)this << " - valid mask needed for index space "
+			      << domain.get_index_space() << " - sleeping on event " << e;
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -624,7 +626,7 @@ namespace LegionRuntime {
 		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
 		return false;
 	      }
-	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug() << "request " << (void *)this << " - src instance metadata invalid - sleeping on event " << e;
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -637,7 +639,7 @@ namespace LegionRuntime {
 		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
 		return false;
 	      }
-	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug() << "request " << (void *)this << " - dst instance metadata invalid - sleeping on event " << e;
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -2936,17 +2938,8 @@ namespace LegionRuntime {
       default: assert(0);
       };
 
-      log_dma.info("dma request %p finished - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+		     << domain << " before=" << before_copy << " after=" << get_finish_event();
 
       mpc->flush(this);
 
@@ -3294,7 +3287,7 @@ namespace LegionRuntime {
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3302,8 +3295,8 @@ namespace LegionRuntime {
 		   (red_fold ? "fold" : "apply"),
 		   redop_id,
 		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+		   before_copy.id,
+		   get_finish_event().id);
     }
 
     ReduceRequest::ReduceRequest(const Domain& _domain,
@@ -3325,7 +3318,7 @@ namespace LegionRuntime {
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
-      log_dma.info("dma request %p created - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3333,8 +3326,8 @@ namespace LegionRuntime {
 		   (red_fold ? "fold" : "apply"),
 		   redop_id,
 		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+		   before_copy.id,
+		   get_finish_event().id);
     }
 
     ReduceRequest::~ReduceRequest(void)
@@ -3422,7 +3415,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT, this, domain.get_index_space().id, e.id);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -3442,7 +3435,7 @@ namespace LegionRuntime {
 		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
 		return false;
 	      }
-	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT, this, e.id);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -3459,7 +3452,7 @@ namespace LegionRuntime {
 		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
 		return false;
 	      }
-	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT, this, e.id);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -3479,8 +3472,8 @@ namespace LegionRuntime {
 	    // request an exclusive lock on the instance to protect reductions
 	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
 	    state = STATE_INST_LOCK;
-	    log_dma.debug("request %p - instance lock acquire event " IDFMT "/%d",
-			 this, inst_lock_event.id, inst_lock_event.gen);
+	    log_dma.debug("request %p - instance lock acquire event " IDFMT,
+			 this, inst_lock_event.id);
 	  } else {
 	    // go straight to ready
 	    state = STATE_READY;
@@ -3500,7 +3493,7 @@ namespace LegionRuntime {
 	  log_dma.debug("request %p - instance lock acquired", this);
 	  state = STATE_READY;
 	} else {
-	  log_dma.debug("request %p - instance lock - sleeping on event " IDFMT "/%d", this, inst_lock_event.id, inst_lock_event.gen);
+	  log_dma.debug("request %p - instance lock - sleeping on event " IDFMT, this, inst_lock_event.id);
 	  waiter.sleep_on_event(inst_lock_event);
 	  return false;
 	}
@@ -3875,7 +3868,7 @@ namespace LegionRuntime {
 	delete mpc;
       }
 
-      log_dma.info("dma request %p finished - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3883,8 +3876,8 @@ namespace LegionRuntime {
 		   (red_fold ? "fold" : "apply"),
 		   redop_id,
 		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+		   before_copy.id,
+		   get_finish_event().id);
 
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
@@ -4021,7 +4014,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT, this, domain.get_index_space().id, e.id);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -4356,8 +4349,12 @@ namespace Realm {
                                          fill_value_size, wait_on,
                                          ev, 0/*priority*/, requests);
         Memory mem = it->inst.get_location();
-        int node = ID(mem).memory.owner_node;
-        if (((unsigned)node) == gasnet_mynode()) {
+        unsigned node = ID(mem).memory.owner_node;
+	if(node > ID::MAX_NODE_ID) {
+	  assert(0 && "fills to GASNet memory not supported yet");
+	  return Event::NO_EVENT;
+	}
+        if (node == (unsigned)gasnet_mynode()) {
 	  get_runtime()->optable.add_local_operation(ev, r);
           r->check_readiness(false, dma_queue);
         } else {
@@ -4554,7 +4551,7 @@ namespace Realm {
 
               r->serialize(msgdata);
 
-              log_dma.debug("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+              log_dma.debug("performing serdez on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
 	      get_runtime()->optable.add_remote_operation(ev, dma_node);
               RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 
@@ -4645,7 +4642,7 @@ namespace Realm {
 
             r->serialize(msgdata);
 
-	    log_dma.debug("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    log_dma.debug("performing copy on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
 	    get_runtime()->optable.add_remote_operation(ev, dma_node);
 	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  
@@ -4711,8 +4708,8 @@ namespace Realm {
           void *msgdata = malloc(msglen);
           r->serialize(msgdata);
 
-	  log_dma.debug("performing reduction on remote node (%d), event=" IDFMT "/%d",
-		       src_node, args.after_copy.id, args.after_copy.gen);
+	  log_dma.debug("performing reduction on remote node (%d), event=" IDFMT,
+		       src_node, args.after_copy.id);
 	  get_runtime()->optable.add_remote_operation(ev, src_node);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  // done with the local copy of the request

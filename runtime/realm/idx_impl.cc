@@ -121,9 +121,7 @@ namespace Realm {
       if(!r_impl->valid_mask_complete) {
 	Event wait_on = r_impl->request_valid_mask();
 	
-	log_copy.info("missing valid mask (" IDFMT "/%p) - waiting for " IDFMT "/%d",
-		      id, r_impl->valid_mask,
-		      wait_on.id, wait_on.gen);
+	log_copy.info() << "missing valid mask (" << *this << ") - waiting for " << wait_on;
 
 	wait_on.wait();
       }

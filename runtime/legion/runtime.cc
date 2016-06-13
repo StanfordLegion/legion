@@ -18244,9 +18244,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18274,9 +18274,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18304,9 +18304,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18334,9 +18334,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18383,33 +18383,33 @@ namespace Legion {
           case TaskOp::INDIVIDUAL_TASK_KIND:
             {
               fprintf(f,"Outstanding Individual Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::POINT_TASK_KIND:
             {
               fprintf(f,"Outstanding Point Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::INDEX_TASK_KIND:
             {
               fprintf(f,"Outstanding Index Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::SLICE_TASK_KIND:
             {
               fprintf(f,"Outstanding Slice Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           default:

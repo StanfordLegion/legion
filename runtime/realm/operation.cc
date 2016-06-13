@@ -223,9 +223,7 @@ namespace Realm {
   void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event.exists())
-      get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
-                                                              gasnet_mynode(),
-							      poisoned);
+      GenEventImpl::trigger(finish_event, poisoned);
   }
 
   void Operation::clear_profiling(void)

@@ -53,7 +53,7 @@ namespace Realm {
       };
 
       struct FMT_Barrier {
-	IDType generation : 20;
+	IDType generation : 20;  // MUST MATCH FMT_Event::generation size
 	IDType barrier_idx : 24;
 	IDType creator_node : 16;
 	IDType type_tag : 4;
