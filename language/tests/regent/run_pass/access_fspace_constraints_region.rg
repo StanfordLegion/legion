@@ -14,8 +14,6 @@
 
 import "regent"
 
-local c = regentlib.c
-
 fspace k (r : region(int)) {
   s : region(int),
 } where s <= r end
@@ -29,25 +27,24 @@ where reads(m) do
   return o
 end
 
-task g(a : region(int), b : k(a)) : int
+task g(a : region(int), b : k(a), c : ptr(int, a)) : int
 where reads(a), writes(a) do
   var d = b.s
-  var e = new(ptr(int, d))
+  var e = dynamic_cast(ptr(int, d), c)
   @e = 30
   return f(d)
 end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
-  var tc = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(tc, 0)
-  var u = partition(disjoint, t, tc)
-  c.legion_coloring_destroy(tc)
-  var v = u[0]
-  var y = new(ptr(int, v))
+  var y = new(ptr(int, t))
   @y = 7
+  var a = new(ptr(int, t))
+  @a = 1000
+  var u = partition(equal, t, ispace(int1d, 1))
+  var v = u[0]
   var z = [k(t)]{ s = v }
-  return g(t, z)
+  return g(t, z, a)
 end
 
 task main()
