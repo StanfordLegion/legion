@@ -7038,6 +7038,8 @@ namespace Legion {
           return 0;
         return 1;
       }
+      if (refs.multi == NULL)
+        return 0;
       return refs.multi->vector.size();
     }
 

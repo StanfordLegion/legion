@@ -4547,6 +4547,9 @@ namespace Legion {
        * -hl:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
        *              decision in order to stress-test the runtime.
+       * -hl:delay <sec> Delay the start of the runtime by 'sec' seconds.
+       *              This is often useful for attaching debuggers on 
+       *              one or more nodes prior to an application beginning.
        * -------------
        *  Profiling
        * -------------

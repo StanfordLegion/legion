@@ -10029,6 +10029,9 @@ namespace Legion {
       parent_ctx = enclosing; 
       indexes = clone->indexes;
       regions = clone->regions;
+      orig_proc = clone->orig_proc;
+      current_proc = clone->current_proc;
+      target_proc = clone->target_proc;
       physical_regions.resize(regions.size());
       // Now update the parent regions so that they are valid with
       // respect to the outermost context

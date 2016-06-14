@@ -18825,6 +18825,7 @@ namespace Legion {
         verify_disjointness = false;
         bit_mask_logging = false;
 #endif
+        unsigned delay_start = 0;
         for (int i = 1; i < argc; i++)
         {
           BOOL_ARG("-hl:separate",separate_runtime_instances);
@@ -18846,6 +18847,7 @@ namespace Legion {
             dynamic_independence_tests = false;
           BOOL_ARG("-hl:spy",legion_spy_enabled);
           BOOL_ARG("-hl:test",enable_test_mapper);
+          INT_ARG("-hl:delay", delay_start);
           if (!strcmp(argv[i],"-hl:replay"))
           {
             replay_file = argv[++i];
@@ -19010,6 +19012,8 @@ namespace Legion {
         sleep(5);
       }
 #endif
+      if (delay_start > 0)
+        sleep(delay_start);
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
