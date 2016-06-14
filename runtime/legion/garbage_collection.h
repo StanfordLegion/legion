@@ -334,9 +334,9 @@ namespace Legion {
       // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, 
                                     RtEvent destroy_event);
-      void register_with_runtime(bool send_notification);
+      void register_with_runtime(ReferenceMutator *mutator);
     public:
-      virtual void send_remote_registration(void);
+      virtual void send_remote_registration(ReferenceMutator *mutator);
       void send_remote_valid_update(AddressSpaceID target, 
                                     ReferenceMutator *mutator,
                                     unsigned count, bool add);
@@ -808,7 +808,8 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
 #ifdef DEBUG_LEGION_GC
-      bool result = try_add_valid_reference_internal(source, must_be_valid,cnt);
+      bool result = try_add_valid_reference_internal(source, mutator, 
+                                                     must_be_valid, cnt);
 #else
       bool result = try_add_valid_reference(must_be_valid, cnt);
 #endif

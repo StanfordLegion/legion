@@ -1800,8 +1800,8 @@ namespace Legion {
         }
       }
       // Now we can register all these instances
-      top_node->seed_state(ctx.get_id(), term_event, usage, user_mask, sources,
-                       context->get_unique_op_id(), init_index, corresponding); 
+      top_node->seed_state(ctx.get_id(), term_event, usage, user_mask, 
+                           sources, context, init_index, corresponding); 
     }
 
     //--------------------------------------------------------------------------
@@ -1825,7 +1825,7 @@ namespace Legion {
       std::vector<LogicalView*> corresponding(1);
       corresponding[0] = composite_view;
       top_node->seed_state(ctx.get_id(), ApEvent::NO_AP_EVENT, usage,user_mask, 
-          sources, context->get_unique_op_id(), init_index, corresponding);
+                           sources, context, init_index, corresponding);
     }
 
     //--------------------------------------------------------------------------
@@ -2014,6 +2014,7 @@ namespace Legion {
                                               InstanceRef &composite_ref,
                                               VersionInfo &version_info,
                                               SingleTask *target_ctx,
+                                              Operation *op,
                                               const bool needs_fields
 #ifdef DEBUG_LEGION
                                               , unsigned index
@@ -2036,14 +2037,14 @@ namespace Legion {
           child_node->column_source->get_field_mask(req.privilege_fields);
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
                                 composite_mask, version_info, target_ctx);
-        composite_ref.set_composite_view(view);
+        composite_ref.set_composite_view(view, op);
       }
       else
       {
         const FieldMask &composite_mask = composite_ref.get_valid_fields();
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
                                  composite_mask, version_info, target_ctx);
-        composite_ref.set_composite_view(view);
+        composite_ref.set_composite_view(view, op);
       }
     }
 
@@ -12181,9 +12182,11 @@ namespace Legion {
         field_rez.serialize(num_children);
         field_rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
       }
+      // Make an event to indicate when we are done moving the state back
+      RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
-        RezCheck z(rez);
+        RezCheck z(rez); 
         if (is_region())
         {
           rez.serialize<bool>(true);
@@ -12220,6 +12223,8 @@ namespace Legion {
             num_states++;
             // Add a valid reference for when it is in transit
             it->first->add_base_valid_ref(REMOTE_DID_REF);
+            // Remove it pending the completion of the transfer 
+            it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
             state_rez.serialize(it->first->did);
             state_rez.serialize(it->first->owner_space);
             state_rez.serialize(overlap);
@@ -12252,6 +12257,8 @@ namespace Legion {
             num_states++;
             // Add a valid reference for when it is in transit
             it->first->add_base_valid_ref(REMOTE_DID_REF);
+            // Remove it pending the completion of the transfer 
+            it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
             state_rez.serialize(it->first->did);
             state_rez.serialize(it->first->owner_space);
             state_rez.serialize(overlap);
@@ -12288,13 +12295,15 @@ namespace Legion {
         rez.serialize(send_partial);
         FieldMask send_restricted = state.restricted_fields & send_mask;
         rez.serialize(send_restricted);
+        
+        rez.serialize(done_event);
       }
       context->runtime->send_back_logical_state(target, rez);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::process_logical_state_return(Deserializer &derez,
-                                                      AddressSpaceID source)
+                               AddressSpaceID source, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       ContextID local_ctx;
@@ -12339,20 +12348,17 @@ namespace Legion {
           FieldMask state_mask;
           derez.deserialize(state_mask);
           VersionState *version_state = 
-            find_remote_version_state(vid, did, owner);
+            find_remote_version_state(vid, did, owner, mutator);
           LegionMap<VersionState*,FieldMask>::aligned::iterator finder =
             info.states.find(version_state);
           if (finder == info.states.end())
           {
             info.states[version_state] = state_mask;
-            LocalReferenceMutator mutator;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF, &mutator);
+            version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
           }
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
-          // No matter what remove our base valid reference
-          version_state->send_remote_valid_update(source, NULL, 1,false/*add*/);
         }
       }
       unsigned num_previous;
@@ -12373,20 +12379,17 @@ namespace Legion {
           FieldMask state_mask;
           derez.deserialize(state_mask);
           VersionState *version_state = 
-            find_remote_version_state(vid, did, owner);
+            find_remote_version_state(vid, did, owner, mutator);
           LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
             info.states.find(version_state);
           if (finder == info.states.end())
           {
             info.states[version_state] = state_mask;
-            LocalReferenceMutator mutator;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF, &mutator);
+            version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
           }
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
-          // No matter what remove our base valid reference
-          version_state->send_remote_valid_update(source, NULL, 1,false/*add*/);
         }
       }
       unsigned num_reduc;
@@ -12432,7 +12435,16 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = forest->get_node(handle);
       }
-      target_node->process_logical_state_return(derez, source);
+      std::set<RtEvent> mutator_events;
+      WrapperReferenceMutator mutator(mutator_events);
+      target_node->process_logical_state_return(derez, source, &mutator);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!mutator_events.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(mutator_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -14099,7 +14111,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionState* RegionTreeNode::find_remote_version_state(VersionID vid, 
-                                  DistributedID did, AddressSpaceID owner_space)
+       DistributedID did, AddressSpaceID owner_space, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // Use the node lock to ensure that we don't
@@ -14126,7 +14138,8 @@ namespace Legion {
           assert(owner_space != local_space);
 #endif
           result = legion_new<VersionState>(vid, context->runtime, 
-                                    did, owner_space, local_space, this);
+              did, owner_space, local_space, this, false/*register now*/);
+          result->register_with_runtime(mutator);
         }
       }
       return result;
@@ -14140,7 +14153,7 @@ namespace Legion {
         context->runtime->get_available_distributed_id(false);
       AddressSpace local_space = context->runtime->address_space;
       return legion_new<VersionState>(vid, context->runtime, 
-                        new_did, local_space, local_space, this);
+          new_did, local_space, local_space, this, true/*register now*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15602,12 +15615,12 @@ namespace Legion {
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
                                 const InstanceSet &targets,
-                                UniqueID init_op_id, unsigned init_index,
+                                SingleTask *context, unsigned init_index,
                                 const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
       get_current_state(ctx).initialize_state(term_event, usage, user_mask, 
-                              targets, init_op_id, init_index, corresponding);
+                              targets, context, init_index, corresponding);
     } 
 
     //--------------------------------------------------------------------------

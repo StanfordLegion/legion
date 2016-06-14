@@ -727,7 +727,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(void)
+    void FutureImpl::record_future_registered(Operation *creator)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -740,7 +740,7 @@ namespace Legion {
       if (!is_owner())
       {
         // Send the remote registration notice
-        send_remote_registration();
+        send_remote_registration(creator);
         // Then send the subscription for this future
         register_waiter(runtime->address_space);
       }
@@ -5559,7 +5559,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term)
+    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term,
+                                                ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
@@ -5568,7 +5569,7 @@ namespace Legion {
       {
         // Add a garbage collection reference to the view, it will
         // be removed in LogicalView::handle_deferred_collect
-        view->add_base_gc_ref(PENDING_GC_REF);
+        view->add_base_gc_ref(PENDING_GC_REF, mutator);
         collections[view].insert(term);
       }
       else
@@ -15862,7 +15863,7 @@ namespace Legion {
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      if (wait_on.exists())
+      if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
         args.hlr_id = HLR_DEFERRED_ENQUEUE_TASK_ID;
@@ -16052,8 +16053,8 @@ namespace Legion {
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
 #ifndef LEGION_GC
 #ifndef LEGION_SPY
-      AutoLock d_lock(distributed_id_lock);
-      available_distributed_ids.push_back(did);
+      //AutoLock d_lock(distributed_id_lock);
+      //available_distributed_ids.push_back(did);
 #endif
 #endif
 #ifdef DEBUG_LEGION
@@ -16296,7 +16297,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    FutureImpl* Runtime::find_or_create_future(DistributedID did)
+    FutureImpl* Runtime::find_or_create_future(DistributedID did,
+                                               Operation *requestor)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -16338,18 +16340,19 @@ namespace Legion {
         }
         dist_collectables[did] = result;
       }
-      result->record_future_registered();
+      result->record_future_registered(requestor);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event)
+    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,
+                                     ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       GarbageCollectionEpoch *to_trigger = NULL;
       {
         AutoLock gc(gc_epoch_lock);
-        current_gc_epoch->add_collection(view, term_event);
+        current_gc_epoch->add_collection(view, term_event, mutator);
         gc_epoch_counter++;
         if (gc_epoch_counter == Runtime::gc_epoch_size)
         {
@@ -19969,7 +19972,7 @@ namespace Legion {
           {
             const Operation::DeferredCompleteArgs *deferred_complete_args =
               (const Operation::DeferredCompleteArgs*)args;
-            deferred_complete_args->proxy_this->trigger_complete();
+            deferred_complete_args->proxy_this->complete_operation();
             break;
           } 
         case HLR_DEFERRED_COMMIT_ID:
@@ -20006,6 +20009,13 @@ namespace Legion {
             const SingleTask::DeferredDependenceArgs *deferred_trigger_args =
               (const SingleTask::DeferredDependenceArgs*)args;
             deferred_trigger_args->op->trigger_dependence_analysis();
+            break;
+          }
+        case HLR_TRIGGER_COMPLETE_ID:
+          {
+            const Operation::TriggerCompleteArgs *trigger_complete_args =
+              (const Operation::TriggerCompleteArgs*)args;
+            trigger_complete_args->proxy_this->trigger_complete();
             break;
           }
         case HLR_TRIGGER_OP_ID:
@@ -20348,6 +20358,16 @@ namespace Legion {
           {
             CompositeView::handle_deferred_view_creation(
                             Runtime::get_runtime(p), args);
+            break;
+          }
+        case HLR_UPDATE_VIEW_REFERENCES_TASK_ID:
+          {
+            VersionState::process_view_references(args);
+            break;
+          }
+        case HLR_REMOVE_VERSION_STATE_REF_TASK_ID:
+          {
+            VersionState::process_remove_version_state_ref(args);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:

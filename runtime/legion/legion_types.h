@@ -232,6 +232,7 @@ namespace Legion {
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
       HLR_TRIGGER_DEPENDENCE_ID,
+      HLR_TRIGGER_COMPLETE_ID,
       HLR_TRIGGER_OP_ID,
       HLR_TRIGGER_TASK_ID,
       HLR_DEFERRED_RECYCLE_ID,
@@ -273,6 +274,8 @@ namespace Legion {
       HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
       HLR_DEFER_COMPOSITE_NODE_TASK_ID,
       HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
+      HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
+      HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -297,6 +300,7 @@ namespace Legion {
         "Reclaim Local Field",                                    \
         "Garbage Collection",                                     \
         "Logical Dependence Analysis",                            \
+        "Trigger Complete",                                       \
         "Operation Physical Dependence Analysis",                 \
         "Task Physical Dependence Analysis",                      \
         "Deferred Recycle",                                       \
@@ -338,6 +342,8 @@ namespace Legion {
         "Deferred Composite Node Ref",                            \
         "Deferred Composite View Creation",                       \
         "Deferred Mapper Message",                                \
+        "Update View References for Version State",               \
+        "Deferred Remove Version State Valid Ref",                \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \

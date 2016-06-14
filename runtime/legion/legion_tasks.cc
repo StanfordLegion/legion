@@ -307,7 +307,7 @@ namespace Legion {
         DistributedID future_did;
         derez.deserialize(future_did);
         futures[idx] = Future(
-            runtime->find_or_create_future(future_did));
+            runtime->find_or_create_future(future_did, this));
       }
       size_t num_grants;
       derez.deserialize(num_grants);
@@ -706,16 +706,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::pack_version_infos(Serializer &rez,
-                                    std::vector<VersionInfo> &infos)
+                                    std::vector<VersionInfo> &infos,
+                                    const std::vector<bool> &full_version_infos)
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
-      AddressSpaceID local_space = runtime->address_space;
 #ifdef DEBUG_LEGION
       assert(infos.size() == regions.size());
 #endif
       for (unsigned idx = 0; idx < infos.size(); idx++)
-        infos[idx].pack_version_info(rez, local_space); 
+      {
+        rez.serialize<bool>(full_version_infos[idx]);
+        if (full_version_infos[idx])
+          infos[idx].pack_version_info(rez);
+        else
+          infos[idx].pack_version_numbers(rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -725,9 +731,14 @@ namespace Legion {
     {
       DerezCheck z(derez);
       infos.resize(regions.size());
-      for (unsigned idx = 0; idx < infos.size(); idx++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        infos[idx].unpack_version_info(derez);
+        bool full_info;
+        derez.deserialize(full_info);
+        if (full_info)
+          infos[idx].unpack_version_info(derez);
+        else
+          infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
     }
 
@@ -3020,12 +3031,11 @@ namespace Legion {
       rez.serialize(depth);
       // See if we need to pack up base task information
       pack_base_external_task(rez, target);
-      // Pack up the version information
-      AddressSpaceID local_space = runtime->address_space;
+      // Pack up the version numbers only 
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         VersionInfo &info = get_version_info(idx);
-        info.pack_version_info(rez, local_space); 
+        info.pack_version_numbers(rez);
       }
       // Pack up our virtual mapping information
       std::vector<unsigned> virtual_indexes;
@@ -3090,7 +3100,7 @@ namespace Legion {
           continue;
         unsigned index = regions.size() + idx;
         runtime->forest->send_back_logical_state(get_parent_context(index),
-            remote_outermost, created_requirements[idx], target);
+                       remote_outermost, created_requirements[idx], target);
       }
     }
 
@@ -6019,7 +6029,8 @@ namespace Legion {
                                               regions[idx],
                                               physical_instances[idx][0],
                                               get_version_info(idx),
-                                              target_ctx, false/*needs fields*/
+                                              target_ctx, this,
+                                              false/*needs fields*/
 #ifdef DEBUG_LEGION
                                               , idx, get_logging_name()
                                               , unique_op_id
@@ -8128,18 +8139,12 @@ namespace Legion {
       {
         if (is_locally_mapped())
         {
-          // If we have any virtual instances we need to unpack them now
-          if (has_virtual_instances())
+          // See if we have any to unpack and make local
+          for (unsigned idx = 0; idx < version_infos.size(); idx++)
           {
-            for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            {
-              if (!virtual_mapped[idx])
-                continue;
-              version_infos[idx].unpack_buffer(runtime->forest);
-            }
+            if (version_infos[idx].is_packed())
+              version_infos[idx].make_local(preconditions,this,runtime->forest);
           }
-          Runtime::trigger_event(ready_event);
-          return;
         }
         else
         {
@@ -8148,7 +8153,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
           {
             if (early_mapped_regions.find(idx) == early_mapped_regions.end()) 
-              version_infos[idx].make_local(preconditions, runtime->forest);
+              version_infos[idx].make_local(preconditions,this,runtime->forest);
           }
         }
       }
@@ -8159,7 +8164,7 @@ namespace Legion {
         {
           // If we're locally mapping, we need everything now
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            version_infos[idx].make_local(preconditions, runtime->forest);
+            version_infos[idx].make_local(preconditions, this, runtime->forest);
         }
         else
         {
@@ -8168,7 +8173,7 @@ namespace Legion {
           {
             if (!regions[idx].is_restricted())
               continue;
-            version_infos[idx].make_local(preconditions, runtime->forest);
+            version_infos[idx].make_local(preconditions, this, runtime->forest);
           }
         }
       }
@@ -8560,6 +8565,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
+      // For remote cases we have to keep track of the events for
+      // returning any created logical state, we can't commit until
+      // it is returned or we might prematurely release the references
+      // that we hold on the version state objects
       if (!is_remote())
       {
         // Pass back our created and deleted operations
@@ -8586,7 +8595,6 @@ namespace Legion {
         pack_remote_complete(rez);
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
-      
       // Invalidate any state that we had if we didn't already
       if (context.exists() && (!is_leaf() || has_virtual_instances()))
         invalidate_region_tree_contexts();
@@ -8716,6 +8724,13 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_mapping(applied_condition);
+    } 
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -8756,7 +8771,14 @@ namespace Legion {
       rez.serialize(remote_outermost_context);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      pack_version_infos(rez, version_infos);
+      if (!is_locally_mapped())
+      {
+        // Indicate we have to send full version infos for all requirements
+        std::vector<bool> full_version_infos(regions.size(), true);
+        pack_version_infos(rez, version_infos, full_version_infos);
+      }
+      else // Only virtual mapped regions require full infos
+        pack_version_infos(rez, version_infos, virtual_mapped);
       pack_restrict_infos(rez, restrict_infos);
       // Mark that we sent this task remotely
       sent_remotely = true;
@@ -8908,7 +8930,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndividualTask::pack_remote_complete(Serializer &rez) 
+    void IndividualTask::pack_remote_complete(Serializer &rez)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
@@ -9461,6 +9483,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, MinimalPoint *mp)
     //--------------------------------------------------------------------------
     {
@@ -9743,8 +9772,6 @@ namespace Legion {
         }
         remote_instances.clear();
       }
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        version_infos[idx].release();
       version_infos.clear();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
@@ -9888,10 +9915,7 @@ namespace Legion {
       unpack_base_external_task(derez);
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        version_infos[idx].unpack_version_info(derez);
-        version_infos[idx].unpack_buffer(runtime->forest);
-      }
+        version_infos[idx].unpack_version_numbers(derez, runtime->forest);
       virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);
@@ -10708,7 +10732,7 @@ namespace Legion {
       {
         // If we're locally mapped, request everyone's state
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, runtime->forest); 
+          version_infos[idx].make_local(preconditions, this, runtime->forest);
       }
       else
       {
@@ -10719,7 +10743,7 @@ namespace Legion {
           // We need to request state for any early mapped regions, either
           // because they are restricted or we actually need to early map them
           if (req.is_restricted() || req.must_premap())
-            version_infos[idx].make_local(preconditions, runtime->forest); 
+            version_infos[idx].make_local(preconditions, this, runtime->forest);
         }
       }
       if (preconditions.empty())
@@ -11339,6 +11363,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexTask::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
@@ -11793,20 +11824,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_REMOTE_STATE_ANALYSIS_CALL);
+      std::set<RtEvent> preconditions;
       if (is_locally_mapped())
       {
-        // Unpack our version infos
+        // See if we have any version infos that still need to be unpacked
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].unpack_buffer(runtime->forest);
-        Runtime::trigger_event(ready_event);
-        return;
+        {
+          if (version_infos[idx].is_packed())
+            version_infos[idx].make_local(preconditions, this, runtime->forest);
+        }
       }
-      // Otherwise we just need to request state for any non-eary mapped regions
-      std::set<RtEvent> preconditions;
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      else
       {
-        if (early_mapped_regions.find(idx) == early_mapped_regions.end())
-          version_infos[idx].make_local(preconditions, runtime->forest);
+        // Otherwise we just need to request state for 
+        // any non-eary mapped regions
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
+            version_infos[idx].make_local(preconditions, this, runtime->forest);
+        }
       }
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
@@ -12082,7 +12118,21 @@ namespace Legion {
       rez.serialize(remote_outermost_context);
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
-      pack_version_infos(rez, version_infos);
+      if (is_locally_mapped() && (num_unmapped_points == 0))
+      {
+        // If we've mapped everything and there are no virtual mappings
+        // then we can just send the version numbers
+        std::vector<bool> full_version_infos(regions.size(), false);
+        pack_version_infos(rez, version_infos, full_version_infos);
+      }
+      else
+      {
+        // Otherwise we have to send all the version infos, we could try
+        // and figure out which subset of region requirements have full
+        // or partial virtual mappings, but that might be expensive
+        std::vector<bool> full_version_infos(regions.size(), true);
+        pack_version_infos(rez, version_infos, full_version_infos);
+      }
       if (is_remote())
         pack_restrict_infos(rez, restrict_infos);
       else
@@ -12321,6 +12371,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::return_privileges(PointTask *point)
     //--------------------------------------------------------------------------
     {
@@ -12501,6 +12558,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_COMPLETE_CALL);
+      // For remote cases we have to keep track of the events for
+      // returning any created logical state, we can't commit until
+      // it is returned or we might prematurely release the references
+      // that we hold on the version state objects
       if (is_remote())
       {
         // Send back the message saying that this slice is complete

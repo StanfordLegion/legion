@@ -48,7 +48,7 @@ namespace Realm {
 
       static const Event NO_EVENT;
 
-      bool exists(void) const { return id != 0; }
+      inline bool exists(void) const { return id != 0; }
 
       // test whether an event has triggered without waiting
       bool has_triggered(void) const;

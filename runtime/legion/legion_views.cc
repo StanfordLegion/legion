@@ -101,11 +101,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalView::defer_collect_user(ApEvent term_event) 
+    void LogicalView::defer_collect_user(ApEvent term_event,
+                                         ReferenceMutator *mutator) 
     //--------------------------------------------------------------------------
     {
       // The runtime will add the gc reference to this view when necessary
-      runtime->defer_collect_user(this, term_event);
+      runtime->defer_collect_user(this, term_event, mutator);
     }
  
     //--------------------------------------------------------------------------
@@ -858,7 +859,10 @@ namespace Legion {
         }
       }
       if (issue_collect)
-        defer_collect_user(copy_term);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(copy_term, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1017,7 +1021,10 @@ namespace Legion {
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
-        defer_collect_user(term_event);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(term_event, &mutator);
+      }
       if (IS_ATOMIC(usage))
         find_atomic_reservations(user_mask, op, IS_WRITE(usage));
     }
@@ -1171,7 +1178,10 @@ namespace Legion {
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
-        defer_collect_user(term_event);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(term_event, &mutator);
+      }
       // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_LEGION
       if (term_event.exists())
@@ -1256,7 +1266,7 @@ namespace Legion {
     void MaterializedView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL) 
+      if (parent == NULL)
       {
         // we have a resource reference on the manager so no need to check
         if (is_owner())
@@ -1264,7 +1274,7 @@ namespace Legion {
         else
           send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       }
-      else if (parent->remove_nested_gc_ref(did, mutator))
+      else if(parent->remove_nested_gc_ref(did, mutator))
         legion_delete(parent);
     }
 
@@ -1273,12 +1283,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
-      {
-        if (is_owner())
-          manager->add_nested_valid_ref(did, mutator);
-        else
-          send_remote_valid_update(owner_space, mutator, 1, true/*add*/);
-      }
+        manager->add_nested_valid_ref(did, mutator);
       else
         parent->add_nested_valid_ref(did, mutator);
     }
@@ -1287,15 +1292,10 @@ namespace Legion {
     void MaterializedView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
+      if (parent == NULL) 
         // we have a resource reference on the manager so no need to check
-        if (is_owner())
-          manager->remove_nested_valid_ref(did, mutator);
-        else
-          send_remote_valid_update(owner_space, mutator, 1, false/*add*/);
-      }
-      else if(parent->remove_nested_valid_ref(did, mutator))
+        manager->remove_nested_valid_ref(did, mutator);
+      else if (parent->remove_nested_valid_ref(did, mutator))
         legion_delete(parent);
     }
 
@@ -1308,9 +1308,7 @@ namespace Legion {
         // Remove any event users from the current and previous users
         for (std::set<ApEvent>::const_iterator it = term_events.begin();
               it != term_events.end(); it++)
-        {
           filter_local_users(*it); 
-        }
       }
       if (parent != NULL)
         parent->collect_users(term_events);
@@ -2793,7 +2791,7 @@ namespace Legion {
                                      context_uid, destroy_event,
                                      false/*register now*/);
       // Register only after construction
-      view->register_with_runtime(false/*send notification*/);
+      view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3332,15 +3330,25 @@ namespace Legion {
 #endif
         remote_update_requests.erase(done_event);
       }
-      // Trigger our request saying everything is up to date
-      Runtime::trigger_event(done_event);
-      // Issue any defferred collections that we might have
+      
       if (!collect_events.empty())
       {
+        std::set<RtEvent> applied_events;
+        WrapperReferenceMutator mutator(applied_events);
         for (std::set<ApEvent>::const_iterator it = collect_events.begin();
               it != collect_events.end(); it++)
-          defer_collect_user(*it);
+          defer_collect_user(*it, &mutator);
+        if (!applied_events.empty())
+        {
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(applied_events));
+          return;
+        }
+        // Otherwise fall through to the normal trigger path
       }
+      // Trigger our request saying everything is up to date
+      // Issue any defferred collections that we might have
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3409,7 +3417,10 @@ namespace Legion {
                                  source, applied_conditions);
         if (add_local_user(usage, term_event, child_color, temp_version_info,
                            op_id, index, user_mask, source, applied_conditions))
-          defer_collect_user(term_event);
+        {
+          WrapperReferenceMutator mutator(applied_conditions);
+          defer_collect_user(term_event, &mutator);
+        }
       }
       // Chain the update events
       if (!applied_conditions.empty())
@@ -3592,11 +3603,7 @@ namespace Legion {
       root->set_owner_did(did);
       // Do remote registration if necessary
       if (!is_owner())
-      {
         add_base_resource_ref(REMOTE_DID_REF);
-        if (register_now)
-          send_remote_registration();
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3661,6 +3668,8 @@ namespace Legion {
     void CompositeView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
       root->notify_active(mutator);
     }
 
@@ -3668,6 +3677,8 @@ namespace Legion {
     void CompositeView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       root->notify_inactive(mutator); 
     }
 
@@ -3704,7 +3715,7 @@ namespace Legion {
           rez.serialize(logical_node->as_partition_node()->handle);
         rez.serialize(destroy_event);
         VersionInfo &info = version_info->get_version_info();
-        info.pack_version_info(rez, 0);
+        info.pack_version_numbers(rez);
         root->pack_composite_tree(rez, target);
       }
       runtime->send_composite_view(target, rez);
@@ -3823,7 +3834,7 @@ namespace Legion {
       derez.deserialize(destroy_event);
       CompositeVersionInfo *version_info = new CompositeVersionInfo();
       VersionInfo &info = version_info->get_version_info();
-      info.unpack_version_info(derez);
+      info.unpack_version_numbers(derez, runtime->forest);
       CompositeNode *root = legion_new<CompositeNode>(target_node, 
                                                       (CompositeNode*)NULL);
       std::map<LogicalView*,std::pair<RtEvent,unsigned> > pending_refs;
@@ -3886,7 +3897,7 @@ namespace Legion {
                            version_info, destroy_event, 
                            false/*register now*/);
       // Register only after construction
-      view->register_with_runtime(false/*send notification*/);
+      view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3919,7 +3930,7 @@ namespace Legion {
                            vargs->version_info, vargs->destroy_event,
                            false/*register now*/);
       // Register only after construction
-      view->register_with_runtime(false/*send notification*/);
+      view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4904,11 +4915,7 @@ namespace Legion {
 #endif
       value->add_reference();
       if (!is_owner())
-      {
         add_base_resource_ref(REMOTE_DID_REF);
-        if (register_now)
-          send_remote_registration();
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -4964,14 +4971,16 @@ namespace Legion {
     void FillView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
     void FillView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
     }
     
     //--------------------------------------------------------------------------
@@ -5089,7 +5098,7 @@ namespace Legion {
                                     runtime->address_space, target_node, 
                                     fill_value, destroy_event, 
                                     false/*register now*/);
-      view->register_with_runtime(false/*send notification*/);
+      view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5113,11 +5122,7 @@ namespace Legion {
       logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
       if (!is_owner())
-      {
         add_base_resource_ref(REMOTE_DID_REF);
-        if (register_now)
-          send_remote_registration();
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %ld %d %ld", did, local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
@@ -5500,7 +5505,10 @@ namespace Legion {
       }
       // Launch the garbage collection task if necessary
       if (issue_collect)
-        defer_collect_user(copy_term);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(copy_term, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5591,7 +5599,10 @@ namespace Legion {
       }
       // Launch the garbage collection task if we need to
       if (issue_collect)
-        defer_collect_user(term_event);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(term_event, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5661,7 +5672,10 @@ namespace Legion {
       }
       // Launch the garbage collection task if we need to
       if (issue_collect)
-        defer_collect_user(term_event);
+      {
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(term_event, &mutator);
+      }
       // Return our result
       return Runtime::merge_events(wait_on);
     }
@@ -5914,16 +5928,20 @@ namespace Legion {
     void ReductionView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_gc_ref(did, mutator);
+      if (is_owner())
+        manager->add_nested_gc_ref(did, mutator);
+      else
+        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletion of the manager since
-      // we know that we also hold a resource reference
-      manager->remove_nested_gc_ref(did, mutator);
+      if (is_owner())
+        manager->remove_nested_gc_ref(did, mutator);
+      else
+        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5937,6 +5955,8 @@ namespace Legion {
     void ReductionView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      // No need to check for deletion of the manager since
+      // we know that we also hold a resource reference
       manager->remove_nested_valid_ref(did, mutator);
     }
 
@@ -6042,7 +6062,7 @@ namespace Legion {
                                   target_node, red_manager, context_uid,
                                   destroy_event, false/*register now*/);
       // Only register after construction
-      view->register_with_runtime(false/*send notification*/);
+      view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6171,12 +6191,24 @@ namespace Legion {
           deferred_collections.insert(term_event);
         }
       }
-      // Trigger the done event
-      Runtime::trigger_event(done_event);
       // Defer all the event collections
-      for (std::set<ApEvent>::const_iterator it = deferred_collections.begin();
-            it != deferred_collections.end(); it++)
-        defer_collect_user(*it);
+      if (!deferred_collections.empty())
+      {
+        std::set<RtEvent> applied_events;
+        WrapperReferenceMutator mutator(applied_events);
+        for (std::set<ApEvent>::const_iterator it = 
+              deferred_collections.begin(); it != 
+              deferred_collections.end(); it++)
+          defer_collect_user(*it, &mutator);
+        if (!applied_events.empty())
+        {
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(applied_events));
+          return;
+        }
+      }
+      // Trigger the done event
+      Runtime::trigger_event(done_event); 
     }
 
     //--------------------------------------------------------------------------
@@ -6246,11 +6278,21 @@ namespace Legion {
           issue_collect = true;
         }
       }
-      // Now we can trigger our done event
-      Runtime::trigger_event(done_event);
       // Launch the garbage collection task if we need to
       if (issue_collect)
-        defer_collect_user(term_event);
+      {
+        std::set<RtEvent> applied_events;
+        WrapperReferenceMutator mutator(applied_events);
+        defer_collect_user(term_event, &mutator);
+        if (!applied_events.empty())
+        {
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(applied_events));
+          return;
+        }
+      }
+      // Now we can trigger our done event
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

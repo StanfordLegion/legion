@@ -126,7 +126,8 @@ namespace Legion {
       RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void pack_version_infos(Serializer &rez,
-                              std::vector<VersionInfo> &infos);
+                              std::vector<VersionInfo> &infos,
+                              const std::vector<bool> &full_version_info);
       void unpack_version_infos(Deserializer &derez,
                                 std::vector<VersionInfo> &infos);
     protected:
@@ -846,6 +847,8 @@ namespace Legion {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
@@ -965,6 +968,8 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
     protected:
@@ -1250,6 +1255,8 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
     public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    public:
       void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
@@ -1351,6 +1358,8 @@ namespace Legion {
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
+      public:
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void return_privileges(PointTask *point);
       void return_virtual_instance(unsigned index, InstanceSet &refs,
@@ -1364,7 +1373,7 @@ namespace Legion {
       void trigger_slice_commit(void);
     protected:
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
-      void pack_remote_complete(Serializer &rez);
+      void pack_remote_complete(Serializer &rez); 
       void pack_remote_commit(Serializer &rez);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);

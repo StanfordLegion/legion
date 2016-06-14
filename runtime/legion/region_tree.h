@@ -310,6 +310,7 @@ namespace Legion {
                               InstanceRef &composite_ref,
                               VersionInfo &version_info,
                               SingleTask *target_ctx,
+                              Operation *op,
                               const bool needs_fields
 #ifdef DEBUG_LEGION
                               , unsigned index
@@ -1353,7 +1354,8 @@ namespace Legion {
                                    const FieldMask &send_mask, 
                                    AddressSpaceID target);
       void process_logical_state_return(Deserializer &derez,
-                                        AddressSpaceID source);
+                                        AddressSpaceID source, 
+                                        ReferenceMutator *mutator);
       static void handle_logical_state_return(RegionTreeForest *forest,
                                               Deserializer &derez,
                                               AddressSpaceID source);
@@ -1505,7 +1507,7 @@ namespace Legion {
                                        SingleTask *context);
     public:
       VersionState* find_remote_version_state(VersionID vid,
-                                  DistributedID did, AddressSpaceID owner);
+        DistributedID did, AddressSpaceID owner, ReferenceMutator *mutator);
       VersionState* create_new_version_state(VersionID vid); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
@@ -1768,7 +1770,7 @@ namespace Legion {
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              const InstanceSet &targets,
-                             UniqueID init_op_id, unsigned init_index,
+                             SingleTask *context, unsigned init_index,
                              const std::vector<LogicalView*> &corresponding);
       void close_state(const TraversalInfo &info,
                        RegionUsage &usage, InstanceSet &targets);

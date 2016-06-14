@@ -112,7 +112,13 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
+      struct TriggerCompleteArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+      };
       struct DeferredCompleteArgs {
+      public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
@@ -299,7 +305,7 @@ namespace Legion {
       void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
-      void complete_operation(void);
+      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
       // Indicate that we are committing this operation
       void commit_operation(bool do_deactivate,
                             RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -613,6 +619,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -631,6 +638,7 @@ namespace Legion {
       VersionInfo version_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager *mapper;
     protected:
@@ -682,6 +690,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -710,6 +719,7 @@ namespace Legion {
     protected:
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       Mapper::CopyProfilingInfo   profiling_results;
       RtUserEvent                 profiling_reported;
@@ -979,6 +989,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       int invoke_mapper(const InstanceSet &valid_instances,
                               InstanceSet &chosen_instances);
@@ -986,6 +997,7 @@ namespace Legion {
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager *mapper;
     protected:
@@ -1058,11 +1070,13 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       void report_profiling_results(void);
     protected:
       unsigned parent_idx;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager *mapper;
     protected:
@@ -1095,8 +1109,10 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       unsigned parent_idx;
+      std::set<RtEvent> map_applied_conditions;
     };
 
     /**
@@ -1135,6 +1151,7 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -1151,6 +1168,7 @@ namespace Legion {
       VersionInfo       version_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
     protected:
@@ -1197,6 +1215,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -1213,6 +1232,7 @@ namespace Legion {
       VersionInfo       version_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+      std::set<RtEvent> map_applied_conditions;
     protected:
       MapperManager*    mapper;
     protected:
@@ -1842,6 +1862,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       void compute_parent_index(void);
     protected:
@@ -1855,6 +1876,7 @@ namespace Legion {
       IndexPartition projection; /* for pre-image only*/
       RegionTreePath privilege_path;
       unsigned parent_req_index;
+      std::set<RtEvent> map_applied_conditions;
     };
 
     /**
@@ -1972,6 +1994,7 @@ namespace Legion {
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       PhysicalInstance create_instance(const Domain &dom,
         const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
@@ -1989,6 +2012,7 @@ namespace Legion {
       ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
+      std::set<RtEvent> map_applied_conditions;
     };
 
     /**

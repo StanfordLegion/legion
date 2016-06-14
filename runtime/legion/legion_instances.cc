@@ -1214,7 +1214,7 @@ namespace Legion {
                                     destroy_event, false/*reg now*/, 
                                     use_event, flags);
       // Hold-off doing the registration until construction is complete
-      man->register_with_runtime(false/*no remote registration*/);
+      man->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1404,7 +1404,7 @@ namespace Legion {
                                            ptr_space, destroy_event, 
                                            false/*reg now*/);
       }
-      man->register_with_runtime(false/*no remote registration*/);
+      man->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
     //--------------------------------------------------------------------------

@@ -121,9 +121,11 @@ namespace Legion {
 #endif
       if (do_registration)
       {
+#ifdef DEBUG_LEGION
+        if (!is_owner())
+          assert(dest_event.exists());
+#endif
         runtime->register_distributed_collectable(did, this);
-        if (!is_owner() && !dest_event.exists())
-          send_remote_registration();
       }
       if (!is_owner())
         remote_instances.add(owner_space);
@@ -138,8 +140,6 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (destruction_event.exists())
-        Runtime::trigger_event(destruction_event);
       if (registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);
@@ -157,6 +157,9 @@ namespace Legion {
             runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
         }
       }
+      // Only do this after unregistering ourselves
+      if (destruction_event.exists())
+        Runtime::trigger_event(destruction_event);
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
     }
@@ -1209,7 +1212,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::register_with_runtime(bool send_notification)
+    void DistributedCollectable::register_with_runtime(
+                                                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1217,25 +1221,29 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner() && send_notification)
-        send_remote_registration();
+      if (!is_owner() && (mutator != NULL))
+        send_remote_registration(mutator);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_registration(void)
+    void DistributedCollectable::send_remote_registration(
+                                                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(registered_with_runtime);
 #endif
+      RtUserEvent registered_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(destruction_event);
+        rez.serialize(registered_event);
       }
       runtime->send_did_remote_registration(owner_space, rez);     
+      mutator->record_reference_mutation_effect(registered_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1244,18 +1252,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(count != 0);
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
+      RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
       if (!add)
         signed_count = -signed_count;
+      else
+        done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
+        if (add)
+          rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
+      if (add && (mutator != NULL))
+        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1264,18 +1280,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(count != 0);
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
+      RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
       if (!add)
         signed_count = -signed_count;
+      else
+        done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
+        if (add)
+          rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
+      if (add && (mutator != NULL))
+        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1284,6 +1308,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(count != 0);
       assert(registered_with_runtime);
 #endif
       int signed_count = count;
@@ -1374,9 +1399,12 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent destroy_event;
       derez.deserialize(destroy_event);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
       target->register_remote_instance(source, destroy_event);
+      Runtime::trigger_event(done_event);
     }
     
     //--------------------------------------------------------------------------
@@ -1391,10 +1419,20 @@ namespace Legion {
       derez.deserialize(count);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      LocalReferenceMutator mutator;
       if (count > 0)
+      {
+        std::set<RtEvent> mutator_events;
+        WrapperReferenceMutator mutator(mutator_events);
         target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-      else if (target->remove_base_valid_ref(REMOTE_DID_REF, &mutator,
+        RtUserEvent done_event;
+        derez.deserialize(done_event);
+        if (!mutator_events.empty())
+          Runtime::trigger_event(done_event, 
+              Runtime::merge_events(mutator_events));
+        else
+          Runtime::trigger_event(done_event);
+      }
+      else if (target->remove_base_valid_ref(REMOTE_DID_REF, NULL,
                                              unsigned(-count)))
         delete target;
     }
@@ -1411,10 +1449,20 @@ namespace Legion {
       derez.deserialize(count);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      LocalReferenceMutator mutator;
       if (count > 0)
+      {
+        std::set<RtEvent> mutator_events;
+        WrapperReferenceMutator mutator(mutator_events);
         target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
-      else if (target->remove_base_gc_ref(REMOTE_DID_REF, &mutator,
+        RtUserEvent done_event;
+        derez.deserialize(done_event);
+        if (!mutator_events.empty())
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(mutator_events));
+        else
+          Runtime::trigger_event(done_event);
+      }
+      else if (target->remove_base_gc_ref(REMOTE_DID_REF, NULL,
                                           unsigned(-count)))
         delete target;
     }

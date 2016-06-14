@@ -79,6 +79,8 @@ namespace Legion {
     public:
       inline const LegionMap<VersionID,FieldMask>::aligned& 
             get_field_versions(void) const { return field_versions; }
+      inline LegionMap<VersionID,FieldMask>::aligned& 
+            get_mutable_field_versions(void) { return field_versions; }
     public:
       void add_field_version(VersionID vid, const FieldMask &mask);
     private:
@@ -161,23 +163,35 @@ namespace Legion {
       const FieldMask& get_advance_mask(RegionTreeNode *node, 
                                         bool &is_split) const;
     public:
-      void pack_version_info(Serializer &rez, AddressSpaceID local_space);
+      // These pack all the state for the version info
+      void pack_version_info(Serializer &rez);
       void unpack_version_info(Deserializer &derez);
+    public:
+      // These only pack the version numbers
+      void pack_version_numbers(Serializer &rez);
+      void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
+    public:
       void make_local(std::set<RtEvent> &preconditions,
-                      RegionTreeForest *forest);
+                      Operation *owner_op, RegionTreeForest *forest);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
       // TODO: delete these with versioning fix
       void clone_from(const VersionInfo &rhs);
       void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
     public:
-      void pack_buffer(Serializer &rez, AddressSpaceID local_space);
-      void unpack_buffer(RegionTreeForest *forest);
+      inline bool is_packed(void) const { return packed; }
+      void pack_buffer(Serializer &rez);
+      void unpack_buffer(Operation *owner_op, RegionTreeForest *forest);
     protected:
       void pack_node_info(Serializer &rez, NodeInfo &info,
                           RegionTreeNode *node);
-      void unpack_node_info(RegionTreeNode *node,
-                            Deserializer &derez, AddressSpaceID source);
+      void unpack_node_info(Operation *owner_op, RegionTreeNode *node,
+                            Deserializer &derez);
+    protected:
+      void pack_node_version_numbers(Serializer &rez, NodeInfo &info,
+                                     RegionTreeNode *node);
+      void unpack_node_version_numbers(RegionTreeNode *node, 
+                                       Deserializer &derez);
     protected:
       LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
       RegionTreeNode *upper_bound_node;
@@ -409,7 +423,7 @@ namespace Legion {
                             const RegionUsage &usage,
                             const FieldMask &user_mask,
                             const InstanceSet &targets,
-                            UniqueID init_op_id, unsigned init_index,
+                            SingleTask *context, unsigned init_index,
                             const std::vector<LogicalView*> &corresponding);
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
@@ -697,10 +711,22 @@ namespace Legion {
         FieldMask *request_mask;
         RtUserEvent to_trigger;
       };
+      struct UpdateViewReferences {
+      public:
+        HLRTaskID hlr_id;
+        DistributedID did;
+        LogicalView *view;
+      };
+      struct RemoveVersionStateRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *proxy_this;
+        ReferenceSource ref_kind;
+      };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   RegionTreeNode *node);
+                   RegionTreeNode *node, bool register_now);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
     public:
@@ -712,7 +738,7 @@ namespace Legion {
     public:
       void initialize(ApEvent term_event, const RegionUsage &usage,
                       const FieldMask &user_mask, const InstanceSet &targets,
-                      UniqueID init_op_id, unsigned init_index,
+                      SingleTask *context, unsigned init_index,
                       const std::vector<LogicalView*> &corresponding);
       void update_split_previous_state(PhysicalState *state,
                                        const FieldMask &update_mask) const;
@@ -779,6 +805,8 @@ namespace Legion {
       void handle_version_state_response(AddressSpaceID source,
           RtUserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
+      static void process_view_references(const void *args);
+    public:
       static void process_version_state_path_only(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
       static void process_version_state_initialization(Runtime *rt,
@@ -787,6 +815,10 @@ namespace Legion {
                                                 Deserializer &derez);
       static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
+    public:
+      void remove_version_state_ref(ReferenceSource ref_kind, 
+                                    RtEvent done_event);
+      static void process_remove_version_state_ref(const void *args);
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;
@@ -1125,7 +1157,7 @@ namespace Legion {
     public:
       inline bool is_composite_ref(void) const { return composite; }
       inline bool is_local(void) const { return local; }
-      void set_composite_view(CompositeView *view);
+      void set_composite_view(CompositeView *view, ReferenceMutator *mutator);
       CompositeView* get_composite_view(void) const;
       MappingInstance get_mapping_instance(void) const;
     public:

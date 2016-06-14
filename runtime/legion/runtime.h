@@ -185,8 +185,8 @@ namespace Legion {
       void mark_sampled(void);
       void broadcast_result(void);
       void register_waiter(AddressSpaceID sid);
-      void record_future_registered(void);
     public:
+      void record_future_registered(Operation *creator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -914,7 +914,8 @@ namespace Legion {
     public:
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
-      void add_collection(LogicalView *view, ApEvent term_event);
+      void add_collection(LogicalView *view, ApEvent term_event,
+                          ReferenceMutator *mutator);
       RtEvent launch(void);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
@@ -2202,9 +2203,10 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did);
+      FutureImpl* find_or_create_future(DistributedID did,Operation *requestor);
     public:
-      void defer_collect_user(LogicalView *view, ApEvent term_event);
+      void defer_collect_user(LogicalView *view, ApEvent term_event, 
+                              ReferenceMutator *mutator);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
       void increment_outstanding_top_level_tasks(void);
@@ -2947,6 +2949,12 @@ namespace Legion {
                                                 const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return ApEvent::NO_AP_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
@@ -2986,6 +2994,12 @@ namespace Legion {
                                                 const std::set<RtEvent> &events)
     //--------------------------------------------------------------------------
     {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
       // No logging for runtime operations currently
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);

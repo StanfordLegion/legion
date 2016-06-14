@@ -72,7 +72,7 @@ namespace Legion {
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      void defer_collect_user(ApEvent term_event);
+      void defer_collect_user(ApEvent term_event, ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
                                           const std::set<ApEvent> &term_events);
