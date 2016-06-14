@@ -6384,7 +6384,6 @@ class Event(object):
 
     def set_triggered(self):
         assert not self.user_event_triggered
-        assert self.ap_user_event or self.rt_user_event
         self.user_event_triggered = True
 
     def check_for_user_event_leak(self):

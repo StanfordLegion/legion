@@ -16053,8 +16053,8 @@ namespace Legion {
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
 #ifndef LEGION_GC
 #ifndef LEGION_SPY
-      //AutoLock d_lock(distributed_id_lock);
-      //available_distributed_ids.push_back(did);
+      AutoLock d_lock(distributed_id_lock);
+      available_distributed_ids.push_back(did);
 #endif
 #endif
 #ifdef DEBUG_LEGION
