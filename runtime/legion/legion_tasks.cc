@@ -2576,7 +2576,7 @@ namespace Legion {
         Runtime::initial_task_window_size;
       context_configuration.hysteresis_percentage = 
         Runtime::initial_task_window_hysteresis;
-      context_configuration.max_outstanding_frames = -1;
+      context_configuration.max_outstanding_frames = 0;
       context_configuration.min_tasks_to_schedule = 
         Runtime::initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
@@ -3104,7 +3104,7 @@ namespace Legion {
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
-      if ((context_configuration.max_outstanding_frames <= 0) && 
+      if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
             (outstanding_count >= context_configuration.max_window_size))
       {
