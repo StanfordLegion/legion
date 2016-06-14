@@ -18882,6 +18882,8 @@ namespace Legion {
 #endif
           INT_ARG("-hl:prof", num_profiling_nodes);
         }
+        if (delay_start > 0)
+          sleep(delay_start);
 #undef INT_ARG
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
@@ -19011,9 +19013,7 @@ namespace Legion {
         fflush(stderr);
         sleep(5);
       }
-#endif
-      if (delay_start > 0)
-        sleep(delay_start);
+#endif 
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
