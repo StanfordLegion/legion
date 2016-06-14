@@ -22,9 +22,9 @@ matrix:
       compiler: gcc
 # blacklist some branches
 branches:
-  except:
-    - deppart
-    - rdir
+  only:
+    - stable
+    - master
 before_install:
   - |
     if [[ "$(uname)" = "Linux" ]]; then
