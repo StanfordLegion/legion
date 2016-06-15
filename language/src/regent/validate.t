@@ -39,7 +39,10 @@ function context:pop_local_scope()
 end
 
 function context:intern_variable(node, symbol)
-  assert(ast.is_node(node) and std.is_symbol(symbol))
+  assert(ast.is_node(node))
+  if not std.is_symbol(symbol) then
+    log.error(node, "expected a symbol, got " .. tostring(symbol))
+  end
   self.env[#self.env]:insert(node, symbol, symbol)
 end
 

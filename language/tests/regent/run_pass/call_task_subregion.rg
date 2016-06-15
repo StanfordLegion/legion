@@ -37,7 +37,7 @@ end
 
 task g() : int
   var r = region(ispace(ptr, 5), int)
-  var rc = [c.legion_coloring_create]();
+  var rc = c.legion_coloring_create()
   var x = new(ptr(int, r))
   c.legion_coloring_add_point(rc, 0, __raw(x))
   c.legion_coloring_add_point(rc, 1, __raw(x))
