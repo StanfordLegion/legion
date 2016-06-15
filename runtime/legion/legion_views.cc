@@ -4734,7 +4734,7 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        rez.serialize(it->first->logical_node->get_color());
+        it->first->logical_node->get_color().serialize(rez);
         rez.serialize(it->second);
         it->first->pack_composite_tree(rez, target);
       }
@@ -4801,7 +4801,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_children; idx++)
       {
         ColorPoint child_color;
-        derez.deserialize(child_color);
+        child_color.deserialize(derez);
         RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
         CompositeNode *child = legion_new<CompositeNode>(child_node, this);
         derez.deserialize(children[child]);
