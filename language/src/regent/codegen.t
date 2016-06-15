@@ -5280,7 +5280,10 @@ function codegen.expr_future(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local result_type = std.type_size_bucket_type(value_type)
+  local content_type = expr_type.result_type
+  local content_value = std.implicit_cast(value_type, content_type, value.value)
+
+  local result_type = std.type_size_bucket_type(content_type)
   if result_type == terralib.types.unit then
     assert(false)
   elseif result_type == c.legion_task_result_t then
@@ -5289,19 +5292,19 @@ function codegen.expr_future(cx, node)
     local result = terralib.newsymbol(c.legion_future_t, "result")
 
     local size_actions, size_value = std.compute_serialized_size(
-      value_type, value.value)
+      content_type, content_value)
     local ser_actions = std.serialize(
-      value_type, value.value, buffer, `(&[data_ptr]))
+      content_type, content_value, buffer, `(&[data_ptr]))
     local actions = quote
       [actions]
       [size_actions]
-      var [buffer] = c.malloc(terralib.sizeof(value_type) + [size_value])
+      var [buffer] = c.malloc(terralib.sizeof(content_type) + [size_value])
       std.assert([buffer] ~= nil, "malloc failed in future")
-      var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(value_type)
+      var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(content_type)
       [ser_actions]
       std.assert(
         [data_ptr] - [&uint8]([buffer]) ==
-          terralib.sizeof(value_type) + [size_value],
+          terralib.sizeof(content_type) + [size_value],
         "mismatch in data serialized in future")
       var [result] = c.legion_future_from_buffer(
         [cx.runtime], [&opaque](&[buffer]), [size_value])
@@ -5318,7 +5321,7 @@ function codegen.expr_future(cx, node)
     local result = terralib.newsymbol(c.legion_future_t, "result")
     local actions = quote
       [actions]
-      var buffer = [value.value]
+      var buffer = [content_value]
       var [result] = [future_from_fn]([cx.runtime], @[&result_type](&buffer))
     end
     return values.value(
