@@ -72,9 +72,12 @@ namespace LegionRuntime {
 
       class MaskEnumerator {
       public:
-        MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m, Mapping<1, 1> *dst_m, XferOrder::Type order)
+        MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m, Mapping<1, 1> *dst_m, XferOrder::Type order, bool is_src_ib, bool is_dst_ib)
           : is(_is), src_mapping(src_m), dst_mapping(dst_m), iter_order(order), rstart(0), rlen(0), rleft(0) {
           e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
+          e->peek_next(rstart, rlen);
+          src_idx_offset = is_src_ib ? src_mapping->image(rstart)[0] : 0;
+          dst_idx_offset = is_dst_ib ? dst_mapping->image(rstart)[0] : 0;
         };
 
         ~MaskEnumerator() {
@@ -86,8 +89,8 @@ namespace LegionRuntime {
             e->get_next(rstart, rlen);
             rleft = rlen;
           }
-          src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft);
-          dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft);
+          src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
+          dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
           return rleft;
         }
 
@@ -104,7 +107,7 @@ namespace LegionRuntime {
         };
 
         void move(size_t steps) {
-          assert(steps < rleft);
+          assert(steps <= rleft);
           rleft -= steps;
         };
       private:
@@ -112,9 +115,20 @@ namespace LegionRuntime {
         ElementMask::Enumerator* e;
         Mapping<1, 1> *src_mapping, *dst_mapping;
         XferOrder::Type iter_order;
-        coord_t rstart;
+        coord_t rstart, src_idx_offset, dst_idx_offset;
         size_t rlen, rleft;
       };
+
+      static inline off_t calc_mem_loc_ib(off_t alloc_offset, off_t field_start, int field_size, size_t elmt_size,
+                                          size_t block_size, size_t domain_size, off_t index)
+      {
+        off_t idx2 = domain_size / block_size * block_size;
+        if (index < idx2) {
+          return calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
+        } else {
+          return (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
+        }
+      }
 
       bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                             MaskEnumerator* me,
@@ -129,20 +143,26 @@ namespace LegionRuntime {
         coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
         coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
-        src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                 src_buf.elmt_size, src_buf.block_size, src_idx);
-        dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                 dst_buf.elmt_size, dst_buf.block_size, dst_idx);
         bool scatter_src_ib = false, scatter_dst_ib = false;
         // make sure we have source data ready
         if (src_buf.is_ib) {
+          src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
           todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
           scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
+        } else {
+          src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                   src_buf.elmt_size, src_buf.block_size, src_idx);
         }
         // make sure there are enough space in destination
         if (dst_buf.is_ib) {
+          dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
           todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
           scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
+        } else {
+          dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                   dst_buf.elmt_size, dst_buf.block_size, dst_idx);
         }
         if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
         ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
@@ -171,20 +191,26 @@ namespace LegionRuntime {
         coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
         coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
-        src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                 src_buf.elmt_size, src_buf.block_size, src_idx);
-        dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                 dst_buf.elmt_size, dst_buf.block_size, dst_idx);
         bool scatter_src_ib = false, scatter_dst_ib = false;
         // make sure we have source data ready
         if (src_buf.is_ib) {
+          src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
           todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
           scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
+        } else {
+	  src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                   src_buf.elmt_size, src_buf.block_size, src_idx);
         }
         // make sure there are enough space in destination
         if (dst_buf.is_ib) {
+          dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
           todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
           scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
+        } else {
+          dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                   dst_buf.elmt_size, dst_buf.block_size, dst_idx);
         }
         if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
         ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
@@ -391,7 +417,7 @@ namespace LegionRuntime {
         else {
           bytes_write += size;
         }
-        //printf("[%d] offset = %ld, bytes_writes[%lx]: %ld\n", gasnet_mynode(), offset, guid, bytes_write);
+        //printf("[%d] offset(%ld), size(%lu), bytes_writes[%lx]: %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
       }
 
       template<unsigned DIM>
@@ -421,7 +447,8 @@ namespace LegionRuntime {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order);
+                                  dst_buf.linearization.get_mapping<1>(), order,
+                                  src_buf.is_ib, dst_buf.is_ib);
         } else {
           li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                        dst_buf.linearization.get_mapping<DIM>(), order);
@@ -522,7 +549,8 @@ namespace LegionRuntime {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order);
+                                  dst_buf.linearization.get_mapping<1>(), order,
+                                  src_buf.is_ib, dst_buf.is_ib);
         } else {
           li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                        dst_buf.linearization.get_mapping<DIM>(), order);
@@ -701,7 +729,8 @@ namespace LegionRuntime {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order);
+                                  dst_buf.linearization.get_mapping<1>(), order,
+                                  src_buf.is_ib, dst_buf.is_ib);
         } else {
           li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                        dst_buf.linearization.get_mapping<DIM>(), order);
@@ -814,7 +843,8 @@ namespace LegionRuntime {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order);
+                                  dst_buf.linearization.get_mapping<1>(), order,
+                                  src_buf.is_ib, dst_buf.is_ib);
         } else {
           li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                        dst_buf.linearization.get_mapping<DIM>(), order);
@@ -993,7 +1023,8 @@ namespace LegionRuntime {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order);
+                                  dst_buf.linearization.get_mapping<1>(), order,
+                                  src_buf.is_ib, dst_buf.is_ib);
         } else {
           li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
                                                        dst_buf.linearization.get_mapping<DIM>(), order);
@@ -2319,8 +2350,12 @@ namespace LegionRuntime {
                            XferDesFence* _complete_fence, RegionInstance inst)
       {
         if (ID(_src_buf.memory).node() == gasnet_mynode()) {
-          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d)",
-                           _guid, _pre_xd_guid, _next_xd_guid, _kind);
+          size_t total_field_size = 0;
+          for (int i = 0; i < _oas_vec.size(); i++) {
+            total_field_size += _oas_vec[i].size;
+          }
+          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d), domain(%d), total_field_size(%d)",
+                           _guid, _pre_xd_guid, _next_xd_guid, _kind, _domain.get_volume(), total_field_size);
           XferDes* xd;
           switch (_kind) {
           case XferDes::XFER_MEM_CPY:

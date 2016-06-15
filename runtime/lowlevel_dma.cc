@@ -3020,6 +3020,7 @@ namespace LegionRuntime {
         Buffer pre_buf;
         assert(mem_path.size() - 1 == sub_path.size());
         for (int idx = 0; idx < mem_path.size(); idx ++) {
+	  log_new_dma.info("mem_path[%d]: node(%d), memory(%d)", idx, ID(mem_path[idx]).node(), mem_path[idx].kind());
           if (idx == 0) {
             pre_buf = src_buf;
           } else {
@@ -3073,11 +3074,11 @@ namespace LegionRuntime {
             }
             pre_buf = cur_buf;
             oasvec = oasvec_dst;
+          }
         }
       }
+      mark_finished(true/*successful*/);
     }
-    mark_finished(true/*successful*/);
-  }
 
 #ifdef ENUM_PERFORM_NEW_DMA
     template <unsigned DIM>
@@ -3617,7 +3618,24 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
-      return;
+
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        const InstPair &pair = oas_by_inst->begin()->first;
+        size_t total_field_size = 0;
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          for (size_t i = 0; i < it->second.size(); i++) {
+            total_field_size += it->second[i].size;
+          }
+        }
+
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        usage.size = total_field_size * domain.get_volume();
+        measurements.add_measurement(usage);
+      }
+
+     return;
       // </NEWDMA>
 
       // MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
