@@ -16,22 +16,11 @@
 #
 
 from __future__ import print_function
-import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
+import argparse, codecs, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
 from collections import OrderedDict
 import regent
 
 _version = sys.version_info.major
-
-if _version == 2: # Python 2.x:
-    # Use binary mode to avoid mangling newlines.
-    def _open(filename, mode='r'):
-        return open(filename, '%sb' % mode)
-elif _version == 3: # Python 3.x:
-    # Use text mode with UTF-8 encoding and '\n' newlines:
-    def _open(filename, mode='r'):
-        return open(filename, mode=mode, encoding='utf-8', newline='\n')
-else:
-    raise Exception('Incompatible Python version')
 
 if _version == 2: # Python 2.x:
     def glob(path):
@@ -85,7 +74,7 @@ def run_spy(logfile, verbose):
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
     re_label = re.compile(_re_label.format(label=label), re.MULTILINE)
-    with _open(filename, 'r') as f:
+    with codecs.open(filename, 'r', encoding='utf-8') as f:
         program_text = f.read()
     match = re.search(re_label, program_text)
     if match is None:
