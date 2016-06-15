@@ -5322,6 +5322,9 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
+        // Always have to do the traversal at this point to mark open children
+        InstanceSet &current_valid = valid[idx];
+        perform_physical_traversal(idx, enclosing[idx], current_valid);
         // See if we've already got an output from a must-epoch mapping
         if (!output.chosen_instances[idx].empty())
         {
@@ -5331,8 +5334,6 @@ namespace Legion {
           // We can skip this since we already know the result
           continue;
         }
-        InstanceSet &current_valid = valid[idx];
-        perform_physical_traversal(idx, enclosing[idx], current_valid);
         // Now we can prepare this for mapping,
         // filter for visible memories if necessary
         if (regions[idx].is_no_access())
