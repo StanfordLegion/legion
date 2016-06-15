@@ -172,216 +172,221 @@ static void walk_tree(Event *e, std::vector<Event *>& stack)
 int read_events(FILE *f)
 {
   char line[256];
-  // skip to beginning of events section
-  do {
+  int count = 0;
+  while(true) {
+    // skip to beginning of events section
+    do {
+      char *s = fgets(line, 255, f);
+      if(!s) {
+	if(count == 0)
+	  printf("WARNING: Unexpected EOF\n");
+	return count;
+      }
+    } while(strcmp(line, "PRINTING ALL PENDING EVENTS:\n"));
+    count++;
+
+    // now read events until we get to "DONE"
     char *s = fgets(line, 255, f);
     if(!s) {
       printf("WARNING: Unexpected EOF\n");
       return 0;
     }
-  } while(strcmp(line, "PRINTING ALL PENDING EVENTS:\n"));
-
-  // now read events until we get to "DONE"
-  char *s = fgets(line, 255, f);
-  if(!s) {
-    printf("WARNING: Unexpected EOF\n");
-    return 0;
-  }
-  while(strcmp(line, "DONE\n")) {
-    // Looking for something like this:
-    // Event 20000003: gen=110 subscr=0 local=1 remote=1
-    unsigned long long ev_id;
-    unsigned gen, subscr, nlocal, nfuture, nremote;
-    int ret = sscanf(s, "Barrier %llx: gen=%d subscr=%d", 
-                     &ev_id, &gen, &subscr);
-    if (ret != 3) {
-      ret = sscanf(s, "Event %llx: gen=%d subscr=%d local=%d+%d remote=%d",
-                   &ev_id, &gen, &subscr, &nlocal, &nfuture, &nremote);
-      assert(ret == 6);
-    }
-
-    // now read lines that start with a space
-    while(1) {
-      s = fgets(line, 255, f);
-      if(!s) {
-        printf("WARNING: Unexpected EOF\n");
-        return 0;
+    while(strcmp(line, "DONE\n")) {
+      // Looking for something like this:
+      // Event 20000003: gen=110 subscr=0 local=1 remote=1
+      unsigned long long ev_id;
+      unsigned gen, subscr, nlocal, nfuture, nremote;
+      int ret = sscanf(s, "Barrier %llx: gen=%d subscr=%d", 
+		       &ev_id, &gen, &subscr);
+      if (ret != 3) {
+	ret = sscanf(s, "Event %llx: gen=%d subscr=%d local=%d+%d remote=%d",
+		     &ev_id, &gen, &subscr, &nlocal, &nfuture, &nremote);
+	assert(ret == 6);
       }
-      //printf("(%s)\n", s);
-      if(s[0] != ' ') break;
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, proc_id, gen2;
-        int ret = sscanf(s, "  [%d] L:%*p %nutility thread for processor %x: after=%llx/%d",
-                         &wgen, &pos, &proc_id, &ev2_id, &gen2);
-        if(ret == 4) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2;
-	int left;
-        int ret = sscanf(s, "  [%d] L:%*p - %nevent merger: %llx/%d left=%d",
-                         &wgen, &pos, &ev2_id, &gen2, &left);
-        if(ret == 4) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2;
-        int ret = sscanf(s, "  [%d] L:%*p - %ndeferred trigger: after=%llx/%d",
-                         &wgen, &pos, &ev2_id, &gen2);
-        if(ret == 3) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2;
-        int ret = sscanf(s, "  [%d] L:%*p %nGPU Task: %*p after=%llx/%d",
-                         &wgen, &pos, &ev2_id, &gen2);
-        if(ret == 3) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2;
-        int ret = sscanf(s, "  [%d] L:%*p - %ndma request %*p: after %llx/%d",
-                         &wgen, &pos, &ev2_id, &gen2);
-        if(ret == 3) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2;
-        int ret = sscanf(s, "  [%d] L:%*p - %ndeferred task: func=%*d proc=%*x finish=%llx/%d",
-                         &wgen, &pos, &ev2_id, &gen2);
-        if(ret == 3) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, pos, gen2, ts;
-        int delta;
-        int ret = sscanf(s, "  [%d] L:%*p - %ndeferred arrival: barrier=%llx/%d (%d), delta=%d",
-                         &wgen, &pos, &ev2_id, &gen2, &ts, &delta);
-        if(ret == 5) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          Event *e2 = Event::get_event(ev2_id, gen2);
-          Event::link_events(e1, e2);
-          e2->set_desc(s + pos);
-          continue;
-        }
-      }
-
-      {
-        unsigned long long ev2_id;
-        unsigned wgen, gen2;
-        unsigned long long thr_id;
-        int ret = sscanf(s, "  [%d] L:%*p thread %llx waiting on %llx/%d",
-                         &wgen, &thr_id, &ev2_id, &gen2);
-        if(ret == 4) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          e1->add_waiting_thread(thr_id);
-          continue;
-        }
-      }
-
-      {
-	unsigned wgen;
-	char dummy;
-	unsigned long long thr_id = -1; // unknown
-        int ret = sscanf(s, "  [%d] L:%*p - EventTriggeredCondition (thread unknown%c",
-                         &wgen, &dummy);
-        if(ret == 2) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          e1->add_waiting_thread(thr_id);
-          continue;
-        }
-      }
-
-      {
-        unsigned wgen;
-        unsigned long long thr_id;
-        int ret = sscanf(s, "  [%d] L:%*p Waiting greenlet %llx of processor local worker",
-                         &wgen, &thr_id);
-        if(ret == 2) {
-          continue;
-        }
-      }
-
-      {
-        unsigned wgen;
-        char dummy;
-        int ret = sscanf(s, "  [%d] L:%*p external waiter%c",
-                         &wgen, &dummy);
-        if(ret == 2) {
-          Event *e1 = Event::get_event(ev_id, wgen);
-          e1->add_waiting_thread(0);
-          continue;
-        }
-      }
-
-      {
-	unsigned wgen;
-	void *dummy;
-	int ret = sscanf(s, "  [%d] L:%*p - operation table cleaner (table=%p)",
-			 &wgen, &dummy);
-	if(ret == 2) {
-	  // these are probably fine to ignore
-	  continue;
+      
+      // now read lines that start with a space
+      while(1) {
+	s = fgets(line, 255, f);
+	if(!s) {
+	  printf("WARNING: Unexpected EOF\n");
+	  return 0;
 	}
-      }
+	//printf("(%s)\n", s);
+	if(s[0] != ' ') break;
 
-      {
-        unsigned wgen, dummy;
-        int ret = sscanf(s, "  [%d] R: %d",
-                         &wgen, &dummy);
-        if(ret == 2) {
-          // do something with this?
-          continue;
-        }
-      }
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, proc_id, gen2;
+	  int ret = sscanf(s, "  [%d] L:%*p %nutility thread for processor %x: after=%llx/%d",
+			   &wgen, &pos, &proc_id, &ev2_id, &gen2);
+	  if(ret == 4) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
 
-      // if we get here, we failed to parse the dependent event
-      printf("(%s)\n", s);
-      exit(1);
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2;
+	  int left;
+	  int ret = sscanf(s, "  [%d] L:%*p - %nevent merger: %llx/%d left=%d",
+			   &wgen, &pos, &ev2_id, &gen2, &left);
+	  if(ret == 4) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred trigger: after=%llx/%d",
+			   &wgen, &pos, &ev2_id, &gen2);
+	  if(ret == 3) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+	
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2;
+	  int ret = sscanf(s, "  [%d] L:%*p %nGPU Task: %*p after=%llx/%d",
+			   &wgen, &pos, &ev2_id, &gen2);
+	  if(ret == 3) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndma request %*p: after %llx/%d",
+			   &wgen, &pos, &ev2_id, &gen2);
+	  if(ret == 3) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred task: func=%*d proc=%*x finish=%llx/%d",
+			   &wgen, &pos, &ev2_id, &gen2);
+	  if(ret == 3) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, pos, gen2, ts;
+	  int delta;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred arrival: barrier=%llx/%d (%d), delta=%d",
+			   &wgen, &pos, &ev2_id, &gen2, &ts, &delta);
+	  if(ret == 5) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id, gen2);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned long long ev2_id;
+	  unsigned wgen, gen2;
+	  unsigned long long thr_id;
+	  int ret = sscanf(s, "  [%d] L:%*p thread %llx waiting on %llx/%d",
+			   &wgen, &thr_id, &ev2_id, &gen2);
+	  if(ret == 4) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    e1->add_waiting_thread(thr_id);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned wgen;
+	  char dummy;
+	  unsigned long long thr_id = -1; // unknown
+	  int ret = sscanf(s, "  [%d] L:%*p - EventTriggeredCondition (thread unknown%c",
+			   &wgen, &dummy);
+	  if(ret == 2) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    e1->add_waiting_thread(thr_id);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned wgen;
+	  unsigned long long thr_id;
+	  int ret = sscanf(s, "  [%d] L:%*p Waiting greenlet %llx of processor local worker",
+			   &wgen, &thr_id);
+	  if(ret == 2) {
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned wgen;
+	  char dummy;
+	  int ret = sscanf(s, "  [%d] L:%*p external waiter%c",
+			   &wgen, &dummy);
+	  if(ret == 2) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    e1->add_waiting_thread(0);
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned wgen;
+	  void *dummy;
+	  int ret = sscanf(s, "  [%d] L:%*p - operation table cleaner (table=%p)",
+			   &wgen, &dummy);
+	  if(ret == 2) {
+	    // these are probably fine to ignore
+	    continue;
+	  }
+	}
+
+	{
+	  unsigned wgen, dummy;
+	  int ret = sscanf(s, "  [%d] R: %d",
+			   &wgen, &dummy);
+	  if(ret == 2) {
+	    // do something with this?
+	    continue;
+	  }
+	}
+
+	// if we get here, we failed to parse the dependent event
+	printf("(%s)\n", s);
+	exit(1);
+      }
     }
   }
 }
