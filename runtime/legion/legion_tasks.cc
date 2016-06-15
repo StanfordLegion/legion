@@ -8833,7 +8833,13 @@ namespace Legion {
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(completion_event, 
+                                        remote_completion_event);
+#endif
+      }
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -9427,6 +9433,9 @@ namespace Legion {
         slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
         complete_mapping();
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(completion_event, point_termination);
+#endif
       return false;
     }
 
