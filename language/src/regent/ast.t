@@ -410,21 +410,20 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
-                         "vectorize", "block"},
+ast.options:leaf("Set", {"block", "cuda", "inline", "parallel", "spmd", "trace",
+                         "vectorize"},
                  false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
-  local forbid = ast.options.Forbid { value = false }
   return ast.options.Set {
+    block = allow,
     cuda = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
     trace = allow,
     vectorize = allow,
-    block = forbid,
   }
 end
 

@@ -281,19 +281,19 @@ do
   for p_span in rp_spans do
     -- Save off point variable values from previous cycle.
     -- Initialize fields used in reductions.
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pmaswt = 0.0
     end
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pf.x = 0.0
     end
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -305,7 +305,7 @@ do
     --
 
     -- Copy state variables from previous time step and update position.
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -315,7 +315,7 @@ do
       p.pu0.x = pu0_x
       p.pxp.x = px0_x + dth*pu0_x
     end
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -392,7 +392,7 @@ do
 
     -- Save off zone variable value from previous cycle.
     -- Copy state variables from previous time step.
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -557,7 +557,7 @@ do
     --
 
     -- Compute zone densities.
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1084,7 +1084,7 @@ do
     do
       var fuzz = 1e-99
       var dth = 0.5 * dt
-      __demand(__vectorize)
+      -- __demand(__vectorize)
       for p_raw = p_span.start, p_span.stop do
         var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -1313,7 +1313,7 @@ do
 
     do
       var dtiny = 1.0 / dt
-      __demand(__vectorize)
+      -- __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1328,7 +1328,7 @@ do
 
     do
       var fuzz = 1e-99
-      __demand(__vectorize)
+      -- __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1336,7 +1336,7 @@ do
       end
     end
 
-    __demand(__vectorize)
+    -- __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
