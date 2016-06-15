@@ -63,15 +63,17 @@ local function uses(cx, region_type, polarity)
   assert(std.type_supports_privileges(region_type))
   local usage = { [region_type] = polarity }
   for other_region_type, _ in pairs(cx.region_universe) do
-    local constraint = {
-      lhs = region_type,
-      rhs = other_region_type,
-      op = "*"
-    }
-    if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
-      not std.check_constraint(cx, constraint)
-    then
-      usage[other_region_type] = polarity
+    if std.is_region(other_region_type) then -- Skip lists of regions
+      local constraint = {
+        lhs = region_type,
+        rhs = other_region_type,
+        op = "*"
+      }
+      if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
+        not std.check_constraint(cx, constraint)
+      then
+        usage[other_region_type] = polarity
+      end
     end
   end
   return setmetatable(usage, region_usage)
@@ -504,7 +506,7 @@ function task_initial_usage(cx, privileges)
   return usage
 end
 
-function optimize_inlines.stat_task(cx, node)
+function optimize_inlines.top_task(cx, node)
   local cx = cx:new_task_scope(
     node.prototype:get_constraints(),
     node.prototype:get_region_universe())
@@ -515,11 +517,11 @@ function optimize_inlines.stat_task(cx, node)
   return node { body = body }
 end
 
-function optimize_inlines.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) and
+function optimize_inlines.top(cx, node)
+  if node:is(ast.typed.top.Task) and
      not node.config_options.inner
   then
-    return optimize_inlines.stat_task(cx, node)
+    return optimize_inlines.top_task(cx, node)
 
   else
     return node
@@ -528,7 +530,7 @@ end
 
 function optimize_inlines.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_inlines.stat_top(cx, node)
+  return optimize_inlines.top(cx, node)
 end
 
 return optimize_inlines

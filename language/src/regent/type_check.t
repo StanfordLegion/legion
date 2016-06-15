@@ -515,8 +515,9 @@ function type_check.expr_index_access(cx, node)
   local index_type = std.check_read(cx, index)
 
   if std.is_partition(value_type) then
-    if not std.validate_implicit_cast(index_type, int) then
-      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    local color_type = value_type:colors().index_type
+    if not std.validate_implicit_cast(index_type, color_type) then
+      log.error(node, "type mismatch: expected " .. tostring(color_type) .. " but got " .. tostring(index_type))
     end
 
     local partition = value_type:partition()
@@ -890,6 +891,7 @@ function type_check.expr_cast(cx, node)
     for i, param in ipairs(to_params) do
       local arg = to_args[i]
       mapping[param] = arg
+      mapping[param:gettype()] = arg:gettype()
     end
 
     std.validate_args(node, to_fields, from_fields, false, terralib.types.unit, mapping, false)
@@ -1292,6 +1294,8 @@ function type_check.expr_partition(cx, node)
   local region_type = std.check_read(cx, region)
   local coloring = type_check.expr(cx, node.coloring)
   local coloring_type = std.check_read(cx, coloring)
+  local colors = node.colors and type_check.expr(cx, node.colors)
+  local colors_type = colors and std.check_read(cx, colors)
 
   -- Note: This test can't fail because disjointness is tested in the parser.
   assert(disjointness == std.disjoint or disjointness == std.aliased)
@@ -1301,17 +1305,45 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
+  if colors and not std.is_ispace(colors_type) then
+    log.error(node, "type mismatch in argument 4: expected ispace but got " ..
+                tostring(colors_type))
+  end
+  if colors and data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
+    log.error(node, "type mismatch in argument 4: expected ispace with " ..
+                tostring(region_type:ispace().dim) .. " dimensions but got " ..
+                tostring(colors_type))
+  end
+
   if region_type:is_opaque() then
-    if coloring_type ~= std.c.legion_coloring_t then
-      log.error(node,
-                "type mismatch in argument 3: expected legion_coloring_t but got " ..
-                  tostring(coloring_type))
+    if colors then
+      if coloring_type ~= std.c.legion_point_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_point_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
+    else
+      if coloring_type ~= std.c.legion_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
     end
   else
-    if coloring_type ~= std.c.legion_domain_coloring_t then
-      log.error(node,
-                "type mismatch in argument 3: expected legion_domain_coloring_t but got " ..
-                  tostring(coloring_type))
+    if colors then
+      if coloring_type ~= std.c.legion_domain_point_coloring_t and
+        coloring_type ~= std.c.legion_multi_domain_point_coloring_t
+      then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_domain_point_coloring_t or legion_multi_domain_point_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
+    else
+      if coloring_type ~= std.c.legion_domain_coloring_t then
+        log.error(node,
+                  "type mismatch in argument 3: expected legion_domain_coloring_t but got " ..
+                    tostring(coloring_type))
+      end
     end
   end
 
@@ -1321,7 +1353,13 @@ function type_check.expr_partition(cx, node)
   else
     region_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(disjointness, region_symbol)
+  local colors_symbol
+  if colors and colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  elseif colors then
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local expr_type = std.partition(disjointness, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1334,6 +1372,7 @@ function type_check.expr_partition(cx, node)
     disjointness = disjointness,
     region = region,
     coloring = coloring,
+    colors = colors,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1350,13 +1389,14 @@ function type_check.expr_partition_equal(cx, node)
     log.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(region_type))
   end
-  if not region_type:is_opaque() then
-    log.error(node, "type mismatch in argument 1: expected region of ispace(ptr) but got " ..
-                tostring(region_type))
-  end
 
   if not std.is_ispace(colors_type) then
     log.error(node, "type mismatch in argument 2: expected ispace but got " ..
+                tostring(colors_type))
+  end
+  if data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
+    log.error(node, "type mismatch in argument 2: expected ispace with " ..
+                tostring(region_type:ispace().dim) .. " dimensions but got " ..
                 tostring(colors_type))
   end
 
@@ -1364,9 +1404,15 @@ function type_check.expr_partition_equal(cx, node)
   if region:is(ast.typed.expr.ID) then
     region_symbol = region.value
   else
-    region_symbol = terralib.newsymbol()
+    region_symbol = std.newsymbol(region_type)
   end
-  local expr_type = std.partition(std.disjoint, region_symbol)
+  local colors_symbol
+  if colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  else
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol, colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1418,7 +1464,13 @@ function type_check.expr_partition_by_field(cx, node)
   else
     region_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(std.disjoint, region_symbol)
+  local colors_symbol
+  if colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  else
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local expr_type = std.partition(std.disjoint, region_symbol, colors_symbol)
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
     log.error(
@@ -1491,7 +1543,7 @@ function type_check.expr_image(cx, node)
   else
     parent_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(std.aliased, parent_symbol)
+  local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -1586,7 +1638,7 @@ function type_check.expr_preimage(cx, node)
   else
     parent_symbol = terralib.newsymbol()
   end
-  local expr_type = std.partition(partition_type.disjointness, parent_symbol)
+  local expr_type = std.partition(partition_type.disjointness, parent_symbol, partition_type.colors_symbol)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
@@ -2340,7 +2392,7 @@ function type_check.expr_binary(cx, node)
     end
 
     expr_type = std.partition(
-      disjointness, lhs_type.parent_region_symbol)
+      disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
   else
     if node.op == "&" or node.op == "|" then
       log.error(node.rhs, "operator " .. tostring(node.op) ..
@@ -3001,11 +3053,21 @@ function type_check.stat(cx, node)
   end
 end
 
-function type_check.stat_task_param(cx, node)
+function type_check.top_task_param(cx, node, mapping)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
-  return ast.typed.stat.TaskParam {
+  -- Check for parameters with duplicate types.
+  if std.type_supports_constraints(param_type) then
+    if mapping[param_type] then
+      log.error(node, "parameters " .. tostring(node.symbol) .. " and " ..
+                  tostring(mapping[param_type]) ..
+                  " have the same type, but are required to be distinct")
+    end
+    mapping[param_type] = node.symbol
+  end
+
+  return ast.typed.top.TaskParam {
     symbol = node.symbol,
     param_type = param_type,
     options = node.options,
@@ -3013,12 +3075,13 @@ function type_check.stat_task_param(cx, node)
   }
 end
 
-function type_check.stat_task(cx, node)
+function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
 
+  local mapping = {}
   local params = node.params:map(
-    function(param) return type_check.stat_task_param(cx, param) end)
+    function(param) return type_check.top_task_param(cx, param, mapping) end)
   local prototype = node.prototype
   prototype:set_param_symbols(
     params:map(function(param) return param.symbol end))
@@ -3076,7 +3139,7 @@ function type_check.stat_task(cx, node)
   prototype:set_constraints(cx.constraints)
   prototype:set_region_universe(cx.region_universe)
 
-  return ast.typed.stat.Task {
+  return ast.typed.top.Task {
     name = node.name,
     params = params,
     return_type = return_type,
@@ -3098,9 +3161,9 @@ function type_check.stat_task(cx, node)
   }
 end
 
-function type_check.stat_fspace(cx, node)
+function type_check.top_fspace(cx, node)
   node.fspace.constraints = type_check.constraints(cx, node.constraints)
-  return ast.typed.stat.Fspace {
+  return ast.typed.top.Fspace {
     name = node.name,
     fspace = node.fspace,
     options = node.options,
@@ -3108,12 +3171,28 @@ function type_check.stat_fspace(cx, node)
   }
 end
 
-function type_check.stat_top(cx, node)
-  if node:is(ast.specialized.stat.Task) then
-    return type_check.stat_task(cx, node)
+function type_check.top_quote_expr(cx, node)
+  -- Type check lazily, when the expression is interpolated.
+  return ast.typed.top.QuoteExpr(node)
+end
 
-  elseif node:is(ast.specialized.stat.Fspace) then
-    return type_check.stat_fspace(cx, node)
+function type_check.top_quote_stat(cx, node)
+  -- Type check lazily, when the statement is interpolated.
+  return ast.typed.top.QuoteStat(node)
+end
+
+function type_check.top(cx, node)
+  if node:is(ast.specialized.top.Task) then
+    return type_check.top_task(cx, node)
+
+  elseif node:is(ast.specialized.top.Fspace) then
+    return type_check.top_fspace(cx, node)
+
+  elseif node:is(ast.specialized.top.QuoteExpr) then
+    return type_check.top_quote_expr(cx, node)
+
+  elseif node:is(ast.specialized.top.QuoteStat) then
+    return type_check.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -3122,7 +3201,7 @@ end
 
 function type_check.entry(node)
   local cx = context.new_global_scope({})
-  return type_check.stat_top(cx, node)
+  return type_check.top(cx, node)
 end
 
 return type_check

@@ -20,7 +20,7 @@ using namespace LegionRuntime::HighLevel;
 LegionRuntime::Logger::Category log_mapper("mapper");
 
 CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
-  : DefaultMapper(m, rt, p)
+  : ShimMapper(m, rt, rt->get_mapper_runtime(), p)
 {
   std::set<Processor> all_procs;
   machine.get_all_processors(all_procs);
@@ -53,7 +53,7 @@ CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
 void CircuitMapper::select_task_options(Task *task)
 {
   if (map_to_gpus)
-    DefaultMapper::select_task_options(task);
+    ShimMapper::select_task_options(task);
   else
   {
     task->inline_task = false;
@@ -172,13 +172,12 @@ bool CircuitMapper::map_task(Task *task)
 
 bool CircuitMapper::map_inline(Inline *inline_operation)
 {
-  //bool ret = DefaultMapper::map_inline(inline_operation);
-  Memory sys_mem = all_sysmems[inline_operation->parent_task->target_proc];
-  assert(sys_mem.exists());
+  // let the default mapper do its thing, and then override the
+  //  blocking factor to force SOA
+  bool ret = ShimMapper::map_inline(inline_operation);
   RegionRequirement& req = inline_operation->requirement;
   req.blocking_factor = req.max_blocking_factor;
-  req.target_ranking.push_back(sys_mem);
-  return true;
+  return ret;
 }
 
 void CircuitMapper::notify_mapping_failed(const Mappable *mappable)

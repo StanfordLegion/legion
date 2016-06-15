@@ -19,8 +19,8 @@
 #include "legion_spy.h"
 #include "runtime.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     //--------------------------------------------------------------------------
     TreeStateLogger::TreeStateLogger(void)
@@ -89,7 +89,7 @@ namespace LegionRuntime {
     void TreeStateLogger::start_block(const char *fmt, ...)
     //--------------------------------------------------------------------------
     {
-      Event lock_event = logger_lock.acquire(0, true/*exclusive*/);
+      RtEvent lock_event(logger_lock.acquire(0, true/*exclusive*/));
       lock_event.wait();
       va_list args;
       va_start(args, fmt);
@@ -121,7 +121,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(Internal *rt, 
+    /*static*/ void TreeStateLogger::capture_state(Runtime *rt, 
                   const RegionRequirement *req, unsigned idx, 
                   const char *task_name, long long uid, 
                   RegionTreeNode *node, ContextID ctx, bool before, 
@@ -129,8 +129,8 @@ namespace LegionRuntime {
                   FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      if (Internal::logging_region_tree_state)
+#ifdef DEBUG_LEGION
+      if (Runtime::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
@@ -259,8 +259,8 @@ namespace LegionRuntime {
       }
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal  
+}; // namespace Legion
 
 // EOF
 

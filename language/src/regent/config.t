@@ -28,10 +28,15 @@ local default_options = {
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
+  ["layout-constraints"] = true,
   ["leaf"] = true,
   ["trace"] = true,
   ["vectorize"] = true,
+  ["validate"] = false,
   ["task-inlines"] = true,
+  ["flow"] = true,
+  ["flow-spmd"] = true,
+  ["flow-spmd-shardsize"] = 1,
 }
 
 local option = {
@@ -43,15 +48,17 @@ local option = {
   end,
 }
 
-function config.parse_args()
-  local rawargs = rawget(_G, "arg")
-
+function config.parse_args(rawargs)
   local options = {}
   for k, v in pairs(default_options) do
     options[k] = v
   end
 
   local args = terralib.newlist()
+
+  if not rawargs then
+    return setmetatable(options, option), args
+  end
 
   local i = 0
   local arg_i = 1
@@ -79,6 +86,16 @@ function config.parse_args()
   end
 
   return setmetatable(options, option), args
+end
+
+local memoize_args = terralib.memoize(
+  function()
+    local rawargs = rawget(_G, "arg")
+    return {config.parse_args(rawargs)}
+  end)
+
+function config.args()
+  return unpack(memoize_args())
 end
 
 return config

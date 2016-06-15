@@ -353,6 +353,28 @@ namespace Realm {
       assert(0);
     }
 
+    /*static*/ const char* Processor::get_kind_name(Kind kind)
+    {
+      switch (kind)
+      {
+        case NO_KIND:
+          return "NO_KIND";
+        case TOC_PROC:
+          return "TOC_PROC";
+        case LOC_PROC:
+          return "LOC_PROC";
+        case UTIL_PROC:
+          return "UTIL_PROC";
+        case IO_PROC:
+          return "IO_PROC";
+        case PROC_GROUP:
+          return "PROC_GROUP";
+        default:
+          assert(0);
+      }
+      return NULL;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

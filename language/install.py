@@ -145,8 +145,8 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
 def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
             external_terra_dir=None, gasnet_dir=None, debug=False,
             clean_first=True, thread_count=None, extra_flags=[]):
-    if shared_llr and general_llr:
-        raise Exception('Shared LLR is mutually exclusive with general LLR.')
+    if shared_llr:
+        raise Exception('Shared LLR is deprecated. Please use general LLR.')
 
     general = not shared_llr
 
@@ -194,9 +194,11 @@ def driver():
         help = 'Build Legion with the general low-level runtime.')
     parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
+        default = 'USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '1',
         help = 'Build Legion with GASNet.')
     parser.add_argument(
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
+        default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
         '--noclean', dest = 'clean_first', action = 'store_false', required = False,

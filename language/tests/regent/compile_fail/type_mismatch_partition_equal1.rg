@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_equal1.rg:25: type mismatch in argument 1: expected region of ispace(ptr) but got region(ispace(int1d), int32)
--- var p = partition(equal, r, c)
+-- type_mismatch_partition_equal1.rg:25: type mismatch in argument 1: expected region but got int32
+--   var p = partition(equal, r, c)
 --                   ^
 
 import "regent"
 
 task f()
-  var r = region(ispace(int1d, 5), int)
+  var r = 5
   var c = ispace(ptr, 3)
   var p = partition(equal, r, c)
 end

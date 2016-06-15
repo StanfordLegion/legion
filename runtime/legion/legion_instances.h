@@ -16,13 +16,14 @@
 #ifndef __LEGION_INSTANCES_H__
 #define __LEGION_INSTANCES_H__
 
+#include "runtime.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class LayoutDescription
@@ -37,21 +38,14 @@ namespace LegionRuntime {
      */
     class LayoutDescription : public Collectable {
     public:
-      struct OffsetEntry {
-      public:
-        OffsetEntry(void) { }
-        OffsetEntry(const FieldMask &m,
-                    const std::vector<Domain::CopySrcDstField> &f)
-          : offset_mask(m), offsets(f) { }
-      public:
-        FieldMask offset_mask;
-        std::vector<Domain::CopySrcDstField> offsets;
-      };
-    public:
-      LayoutDescription(const FieldMask &mask,
-                        const Domain &domain,
-                        size_t blocking_factor,
-                        FieldSpaceNode *owner);
+      LayoutDescription(FieldSpaceNode *owner,
+                        const FieldMask &mask,
+                        LayoutConstraints *constraints,
+                        const std::vector<unsigned> &mask_index_map,
+                        const std::vector<CustomSerdezID> &serdez,
+          const std::vector<std::pair<FieldID,size_t> > &field_sizes);
+      // Used only by the virtual manager
+      LayoutDescription(const FieldMask &mask, LayoutConstraints *constraints);
       LayoutDescription(const LayoutDescription &rhs);
       ~LayoutDescription(void);
     public:
@@ -59,58 +53,53 @@ namespace LegionRuntime {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
+      void log_instance_layout(PhysicalInstance inst) const;
+    public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalInstance inst,
+                                std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(FieldID copy_field, PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
-      void add_field_info(FieldID fid, unsigned index,
-                          size_t offset, size_t field_size,
-                          CustomSerdezID serdez_id);
+      bool has_field(FieldID fid) const;
+      void has_fields(std::map<FieldID,bool> &fields) const;
+      void remove_space_fields(std::set<FieldID> &fields) const;
+    public:
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
-      size_t get_layout_size(void) const;
+      size_t get_total_field_size(void) const;
       void get_fields(std::vector<FieldID>& fields) const;
+      void compute_destroyed_fields(
+          std::vector<PhysicalInstance::DestroyedField> &serdez_fields) const;
     public:
-      bool match_shape(const size_t field_size) const;
-      bool match_shape(const std::vector<size_t> &field_sizes, 
-                       const size_t bf) const;
+      bool match_layout(const LayoutConstraintSet &constraints) const;
+      bool match_layout(const LayoutDescription *layout) const;
     public:
-      bool match_layout(const FieldMask &mask, 
-                        const size_t vol, const size_t bf) const;
-      bool match_layout(const FieldMask &mask,
-                        const Domain &d, const size_t bf) const;
-      bool match_layout(LayoutDescription *rhs) const;
-    public:
-      void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
+      void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
-      void unpack_layout_description(Deserializer &derez);
-      void update_known_nodes(AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
-      static size_t compute_layout_volume(const Domain &d);
-    public:
       const FieldMask allocated_fields;
-      const size_t blocking_factor;
-      const size_t volume;
+      LayoutConstraints *const constraints;
       FieldSpaceNode *const owner;
     protected:
-      std::map<FieldID,Domain::CopySrcDstField> field_infos;
-      // Remember these indexes are only good on the local node and
-      // have to be transformed when the manager is sent remotely
-      std::map<unsigned/*index*/,FieldID> field_indexes;
-    protected:
-      // Memoized value for matching physical instances
-      std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
+      // In order by index of bit mask
+#ifdef NEW_INSTANCE_CREATION
+      std::vector<Domain::CopySrcDstFieldInfo> field_infos;
+#else
+      std::vector<Domain::CopySrcDstField> field_infos;
+#endif
+      // A mapping from FieldIDs to indexes into our field_infos
+      std::map<FieldID,unsigned/*index*/> field_indexes;
     protected:
       Reservation layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-               LegionVector<OffsetEntry>::aligned > memoized_offsets;
-      NodeSet known_nodes;
-    };
+               LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
+    }; 
  
     /**
      * \class PhysicalManager
@@ -119,39 +108,117 @@ namespace LegionRuntime {
      */
     class PhysicalManager : public DistributedCollectable {
     public:
-      PhysicalManager(RegionTreeForest *ctx, DistributedID did,
-                      AddressSpaceID owner_space, AddressSpaceID local_space,
-                      Memory mem, RegionNode *node,
-                      PhysicalInstance inst, bool register_now);
+      PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
+                      LayoutDescription *layout, const PointerConstraint &cons,
+                      DistributedID did, AddressSpaceID owner_space, 
+                      AddressSpaceID local_space, RegionNode *node,
+                      PhysicalInstance inst, const Domain &intance_domain,
+                      bool own_domain, RtUserEvent dest, bool register_now);
       virtual ~PhysicalManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const = 0;
-      virtual bool is_reduction_manager(void) const = 0;
-      virtual InstanceManager* as_instance_manager(void) const = 0;
-      virtual ReductionManager* as_reduction_manager(void) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const = 0;
+    public:
+      inline bool is_reduction_manager(void) const;
+      inline bool is_instance_manager(void) const;
+      inline bool is_fold_manager(void) const;
+      inline bool is_list_manager(void) const;
+      inline bool is_virtual_manager(void) const;
+      inline InstanceManager* as_instance_manager(void) const;
+      inline ReductionManager* as_reduction_manager(void) const;
+      inline FoldReductionManager* as_fold_manager(void) const;
+      inline ListReductionManager* as_list_manager(void) const;
+      inline VirtualManager* as_virtual_manager(void) const;
+    public:
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_active(void);
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void) = 0;
-      virtual DistributedID send_manager(AddressSpaceID target) = 0; 
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      virtual void send_manager(AddressSpaceID target) = 0; 
+      static void handle_manager_request(Deserializer &derez, 
+                          Runtime *runtime, AddressSpaceID source);
+    public:
+      // Support for mapper queries
+      virtual bool has_field(FieldID fid) const = 0;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const = 0;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const = 0;
+      inline bool is_normal_instance(void) const 
+        { return is_instance_manager(); }
+      inline bool is_reduction_instance(void) const
+        { return is_reduction_manager(); }
+      inline bool is_virtual_instance(void) const
+        { return is_virtual_manager(); }
+    public:
+      // Methods for creating/finding/destroying logical top views
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner) = 0;
+      void register_active_context(SingleTask *context);
+      void unregister_active_context(SingleTask *context);
+    public:
+      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
+      bool meets_regions(const std::vector<LogicalRegion> &regions,
+                         bool tight_region_bounds = false) const;
+      bool entails(LayoutConstraints *constraints) const;
+      bool entails(const LayoutConstraintSet &constraints) const;
+      bool conflicts(LayoutConstraints *constraints) const;
+      bool conflicts(const LayoutConstraintSet &constraints) const;
     public:
       inline PhysicalInstance get_instance(void) const
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(instance.exists());
 #endif
         return instance;
       }
+      inline Memory get_memory(void) const { return memory_manager->memory; }
+    public:
+      void perform_deletion(RtEvent deferred_event) const;
+      void set_garbage_collection_priority(MapperID mapper_id, Processor p,
+                                           GCPriority priority); 
+      static void delete_physical_manager(PhysicalManager *manager);
+    public:
+      static inline DistributedID encode_instance_did(DistributedID did);
+      static inline DistributedID encode_reduction_fold_did(DistributedID did);
+      static inline DistributedID encode_reduction_list_did(DistributedID did);
+      static inline bool is_instance_did(DistributedID did);
+      static inline bool is_reduction_fold_did(DistributedID did);
+      static inline bool is_reduction_list_did(DistributedID did);
     public:
       RegionTreeForest *const context;
-      const Memory memory;
+      MemoryManager *const memory_manager;
       RegionNode *const region_node;
+      LayoutDescription *const layout;
+      const PhysicalInstance instance;
+      const Domain instance_domain;
+      const bool own_domain;
+      const PointerConstraint pointer_constraint;
     protected:
-      PhysicalInstance instance;
+      std::map<SingleTask*,GenerationID> active_contexts;
+    };
+
+    /**
+     * \class CopyAcrossHelper
+     * A small helper class for performing copies between regions
+     * from diferrent region trees
+     */
+    class CopyAcrossHelper {
+    public:
+      CopyAcrossHelper(const FieldMask &full)
+        : full_mask(full) { }
+    public:
+      const FieldMask &full_mask;
+    public:
+      void compute_across_offsets(const FieldMask &src_mask,
+             std::vector<Domain::CopySrcDstField> &dst_fields);
+    public:
+      std::vector<Domain::CopySrcDstField> offsets; 
+      LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
     };
 
     /**
@@ -169,55 +236,62 @@ namespace LegionRuntime {
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
-                      Memory mem, PhysicalInstance inst, RegionNode *node,
-                      LayoutDescription *desc, Event use_event, 
-                      unsigned depth, bool register_now,
+                      MemoryManager *memory, PhysicalInstance inst, 
+                      const Domain &instance_domain, bool own_domain,
+                      RegionNode *node, LayoutDescription *desc, 
+                      const PointerConstraint &constraint,
+                      RtUserEvent destruction_event,
+                      bool register_now, ApEvent use_event, 
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
       InstanceManager& operator=(const InstanceManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
-      virtual bool is_reduction_manager(void) const;
-      virtual InstanceManager* as_instance_manager(void) const;
-      virtual ReductionManager* as_reduction_manager(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
+    public:
       virtual size_t get_instance_size(void) const;
-      virtual void notify_inactive(void);
-#ifdef DEBUG_HIGH_LEVEL
-      virtual void notify_valid(void);
-#endif
-      virtual void notify_invalid(void);
     public:
-      inline Event get_use_event(void) const { return use_event; }
+      inline ApEvent get_use_event(void) const { return use_event; }
     public:
-      MaterializedView* create_top_view(unsigned depth);
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
+                                std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(FieldID fid, 
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<Domain::CopySrcDstField> &fields);
+      void initialize_across_helper(CopyAcrossHelper *across_helper,
+                                    const FieldMask &mask,
+                                    const std::vector<unsigned> &src_indexes,
+                                    const std::vector<unsigned> &dst_indexes);
+    public:
+      // Interface to the mapper PhysicalInstance
+      virtual bool has_field(FieldID fid) const
+        { return layout->has_field(fid); }
+      virtual void has_fields(std::map<FieldID,bool> &fields) const
+        { return layout->has_fields(fields); } 
+      virtual void remove_space_fields(std::set<FieldID> &fields) const
+        { return layout->remove_space_fields(fields); }
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target); 
-      static void handle_send_manager(Internal *runtime, 
+      virtual void send_manager(AddressSpaceID target);
+      static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      bool match_instance(size_t field_size, const Domain &dom) const;
-      bool match_instance(const std::vector<size_t> &fields_sizes,
-                          const Domain &dom, const size_t bf) const;
-    public:
       bool is_attached_file(void) const;
     public:
-      LayoutDescription *const layout;
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const Event use_event;
-      const unsigned depth;
+      const ApEvent use_event;
     protected:
       // This is monotonic variable that once it becomes true
       // will remain true for the duration of the instance lifetime.
@@ -233,49 +307,55 @@ namespace LegionRuntime {
      */
     class ReductionManager : public PhysicalManager {
     public:
-      ReductionManager(RegionTreeForest *ctx, DistributedID did,
+      ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
-                       Memory mem, PhysicalInstance inst, 
+                       MemoryManager *mem, PhysicalInstance inst, 
+                       LayoutDescription *description,
+                       const PointerConstraint &constraint,
+                       const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op, bool register_now);
+                       const ReductionOp *op, RtUserEvent destruction_event,
+                       bool register_now);
       virtual ~ReductionManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const = 0;
-      virtual bool is_reduction_manager(void) const;
-      virtual InstanceManager* as_instance_manager(void) const;
-      virtual ReductionManager* as_reduction_manager(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const = 0;
+    public:
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_inactive(void);
-      virtual void notify_invalid(void);
     public:
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain) = 0;
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      virtual bool is_list_manager(void) const = 0;
-      virtual ListReductionManager* as_list_manager(void) const = 0;
-      virtual FoldReductionManager* as_fold_manager(void) const = 0;
-      virtual Event get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(void) const = 0;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target); 
+      // Support for mapper queries
+      virtual bool has_field(FieldID fid) const;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const;
     public:
-      static void handle_send_manager(Internal *runtime,
+      virtual void send_manager(AddressSpaceID target);
+    public:
+      static void handle_send_manager(Runtime *runtime,
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      ReductionView* create_view(void);
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
+      const FieldID logical_field;
     };
 
     /**
@@ -286,37 +366,40 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = LIST_MANAGER_ALLOC;
     public:
-      ListReductionManager(RegionTreeForest *ctx, DistributedID did,
+      ListReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
-                           Memory mem, PhysicalInstance inst, 
+                           MemoryManager *mem, PhysicalInstance inst, 
+                           LayoutDescription *description,
+                           const PointerConstraint &constraint,
+                           const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Domain dom, bool reg_now);
+                           const ReductionOp *op, Domain dom,
+                           RtUserEvent dest_event, bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
       ListReductionManager& operator=(const ListReductionManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
       virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain);
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual bool is_list_manager(void) const;
-      virtual ListReductionManager* as_list_manager(void) const;
-      virtual FoldReductionManager* as_fold_manager(void) const;
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -329,43 +412,267 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FOLD_MANAGER_ALLOC;
     public:
-      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
+      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
-                           Memory mem, PhysicalInstance inst, 
+                           MemoryManager *mem, PhysicalInstance inst, 
+                           LayoutDescription *description,
+                           const PointerConstraint &constraint,
+                           const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event,
-                           bool register_now);
+                           const ReductionOp *op, ApEvent use_event,
+                           RtUserEvent dest_event, bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
       FoldReductionManager& operator=(const FoldReductionManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
       virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain);
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual bool is_list_manager(void) const;
-      virtual ListReductionManager* as_list_manager(void) const;
-      virtual FoldReductionManager* as_fold_manager(void) const;
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     public:
-      const Event use_event;
+      const ApEvent use_event;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+    /**
+     * \class VirtualManager
+     * This is a singleton class of which there will be exactly one
+     * on every node in the machine. The virtual manager class will
+     * represent all the virtual virtual/composite instances.
+     */
+    class VirtualManager : public PhysicalManager {
+    public:
+      VirtualManager(RegionTreeForest *ctx, LayoutDescription *desc,
+                     const PointerConstraint &constraint,
+                     DistributedID did, AddressSpaceID local_space);
+      VirtualManager(const VirtualManager &rhs);
+      virtual ~VirtualManager(void);
+    public:
+      VirtualManager& operator=(const VirtualManager &rhs);
+    public:
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
+    public: 
+      virtual size_t get_instance_size(void) const;
+      virtual void send_manager(AddressSpaceID target);
+      virtual bool has_field(FieldID fid) const;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const;
+      virtual InstanceView* create_instance_top_view(SingleTask *context,
+                                            AddressSpaceID logical_owner);
+    public:
+      static inline VirtualManager* get_virtual_instance(void)
+        { return get_singleton(); }
+      static void initialize_virtual_instance(Runtime *runtime,
+                                              DistributedID did);
+    protected:
+      static inline VirtualManager*& get_singleton(void)
+      {
+        static VirtualManager *singleton = NULL;
+        return singleton;
+      }
+    };
+
+    /**
+     * \class InstanceBuilder 
+     * A helper for building physical instances of logical regions
+     */
+    class InstanceBuilder {
+    public:
+      InstanceBuilder(const std::vector<LogicalRegion> &regs,
+                      const LayoutConstraintSet &cons,
+                      MemoryManager *memory, UniqueID cid)
+        : regions(regs), constraints(cons), memory_manager(memory),
+          creator_id(cid), ancestor(NULL), instance_domain(Domain::NO_DOMAIN), 
+          own_domain(false), redop_id(0), reduction_op(NULL), valid(false) { }
+    public:
+      size_t compute_needed_size(RegionTreeForest *forest);
+      PhysicalManager* create_physical_instance(RegionTreeForest *forest);
+    protected:
+      void initialize(RegionTreeForest *forest);
+      void compute_ancestor_and_domain(RegionTreeForest *forest);
+      RegionNode* find_common_ancestor(RegionNode *one, RegionNode *two) const;
+    protected:
+      void compute_new_parameters(void);
+      void compute_old_parameters(void);
+    protected:
+      const std::vector<LogicalRegion> &regions;
+      LayoutConstraintSet constraints;
+      MemoryManager *const memory_manager;
+      const UniqueID creator_id;
+    protected:
+      RegionNode *ancestor;
+      Domain instance_domain;
+      bool own_domain;
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      std::vector<unsigned> mask_index_map;
+      std::vector<CustomSerdezID> serdez;
+      FieldMask instance_mask;
+      ReductionOpID redop_id;
+      const ReductionOp *reduction_op;
+#ifndef NEW_INSTANCE_CREATION
+      std::vector<size_t> sizes_only;
+      size_t block_size;
+#endif
+    public:
+      bool valid;
+    };
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_instance_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_reduction_fold_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_reduction_list_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_instance_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_reduction_fold_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x1);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_reduction_list_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x2);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (is_reduction_fold_did(did) || is_reduction_list_did(did));
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_instance_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_fold_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_reduction_fold_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_list_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_reduction_list_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (did == 0);
+    }
+
+    //--------------------------------------------------------------------------
+    inline InstanceManager* PhysicalManager::as_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_instance_manager());
+#endif
+      return static_cast<InstanceManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ReductionManager* PhysicalManager::as_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_reduction_manager());
+#endif
+      return static_cast<ReductionManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline VirtualManager* PhysicalManager::as_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_virtual_manager());
+#endif
+      return static_cast<VirtualManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ListReductionManager* PhysicalManager::as_list_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_list_manager());
+#endif
+      return static_cast<ListReductionManager*>(
+              const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline FoldReductionManager* PhysicalManager::as_fold_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_fold_manager());
+#endif
+      return static_cast<FoldReductionManager*>(
+              const_cast<PhysicalManager*>(this));
+    }
+
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_INSTANCES_H__

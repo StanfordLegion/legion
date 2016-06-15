@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -968,7 +968,7 @@ void generate_mesh_raw(
 
 static LegionRuntime::Logger::Category log_pennant("pennant");
 
-class PennantMapper : public DefaultMapper
+class PennantMapper : public ShimMapper 
 {
 public:
   PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local);
@@ -1005,7 +1005,7 @@ private:
 };
 
 PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
 {
   local_sysmem =
     machine_interface.find_memory_kind(local_proc, Memory::SYSTEM_MEM);
@@ -1063,7 +1063,7 @@ void PennantMapper::select_task_variant(Task *task)
 {
   // Use the SOA variant for all tasks.
   // task->selected_variant = VARIANT_SOA;
-  DefaultMapper::select_task_variant(task);
+  ShimMapper::select_task_variant(task);
 
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
@@ -1221,7 +1221,7 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
 //                                      bool &create_one,
 //                                      size_t &blocking_factor)
 //{
-//  // DefaultMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
+//  // ShimMapper::rank_copy_targets(mappable, rebuild_region, current_instances,
 //  //                                  complete, max_blocking_factor, to_reuse,
 //  //                                  to_create, create_one, blocking_factor);
 //  // if (create_one) {

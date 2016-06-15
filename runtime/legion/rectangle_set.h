@@ -24,8 +24,8 @@
 #include <cstdio>
 #include <cassert>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     template<typename T>
     class Segment {
@@ -216,7 +216,7 @@ namespace LegionRuntime {
       {
         (*it)->remove_adjacent(this);
       }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(references == 0);
 #endif
     }
@@ -338,7 +338,7 @@ namespace LegionRuntime {
     inline void Segment<T>::add_adjacent(Segment<T> *seg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(seg != NULL);
       if (dir != NONE_DIR)
         assert((seg->a1 == b) || (seg->a2 == b));
@@ -353,7 +353,7 @@ namespace LegionRuntime {
       }
       else if (seg->b == a1)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         if (dir == LEFT_DIR)
         {
           if (seg->a1 == b)
@@ -374,7 +374,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         if (dir == LEFT_DIR)
         {
           if (seg->a1 == b)
@@ -403,7 +403,7 @@ namespace LegionRuntime {
       clear_adjacent();
       add_adjacent(one);
       add_adjacent(two);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
     } 
@@ -414,13 +414,13 @@ namespace LegionRuntime {
                                              Segment<T> *new_seg)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(old_seg != NULL);
       assert(new_seg != NULL);
 #endif
       remove_adjacent(old_seg);
       add_adjacent(new_seg);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
     }
@@ -430,7 +430,7 @@ namespace LegionRuntime {
     inline bool Segment<T>::has_adjacent(Segment<T> *seg) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       sanity_check();
 #endif
       if (adjacent_low[0] == seg)
@@ -488,12 +488,12 @@ namespace LegionRuntime {
     inline Segment<T>* Segment<T>::find_one_adjacent(T value) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert((value == a1) || (value == a2));
 #endif
       if (value == a1)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(((adjacent_low[0] != NULL) && (adjacent_low[1] == NULL)) ||
                ((adjacent_low[0] == NULL) && (adjacent_low[1] != NULL)));
 #endif
@@ -504,7 +504,7 @@ namespace LegionRuntime {
       }
       else
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(((adjacent_high[0] != NULL) && (adjacent_high[1] == NULL)) ||
                ((adjacent_high[0] == NULL) && (adjacent_high[1] != NULL)));
 #endif
@@ -570,7 +570,7 @@ namespace LegionRuntime {
     inline void Segment<T>::sanity_check(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(a1 <= a2);
       if (adjacent_low[0] != NULL)
       {
@@ -670,7 +670,7 @@ namespace LegionRuntime {
       for (typename std::vector<Segment<T>*>::const_iterator it = 
             to_erase.begin(); it != to_erase.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(segments.find(*it) != segments.end());
 #endif
         segments.erase(*it);
@@ -702,7 +702,7 @@ namespace LegionRuntime {
       for (typename std::vector<Segment<T>*>::const_iterator it =
             to_erase.begin(); it != to_erase.end(); it++)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(segments.find(*it) != segments.end());
 #endif
         segments.erase(*it);
@@ -740,7 +740,7 @@ namespace LegionRuntime {
     inline bool Segment<T>::remove_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(references > 0);
 #endif
       references--;
@@ -777,7 +777,7 @@ namespace LegionRuntime {
       {
         if ((*it)->remove_reference())
           delete (*it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         else
           assert(false); // Memory leak
 #endif
@@ -788,7 +788,7 @@ namespace LegionRuntime {
       {
         if ((*it)->remove_reference())
           delete (*it);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         else
           assert(false); // Memory leak
 #endif
@@ -813,7 +813,7 @@ namespace LegionRuntime {
                                                         T upper_x, T upper_y)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(lower_x <= upper_x);
       assert(lower_y <= upper_y);
 #endif
@@ -909,7 +909,7 @@ namespace LegionRuntime {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(lower_y == upper_y);
 #endif
           Segment<T> *new_degenerate = 
@@ -985,7 +985,7 @@ namespace LegionRuntime {
                                                  T upper_x, T upper_y) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(lower_x <= upper_x);
       assert(lower_y <= upper_y);
 #endif
@@ -1076,7 +1076,7 @@ namespace LegionRuntime {
         }
         else
         {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(lower_y == upper_y);
 #endif
           Segment<T> degenerate(lower_x, upper_x, lower_y,
@@ -1299,7 +1299,7 @@ namespace LegionRuntime {
              next->a1 : current->a1;
       max = (current->a2 > next->a2) ?
              next->a2 : current->a2;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(min <= max);
 #endif
       if (min < max)
@@ -1314,13 +1314,13 @@ namespace LegionRuntime {
                  std::vector<Segment<T>*> &next_segments)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       seg->sanity_check();
 #endif
       if ((min <= seg->a1) && (max >= seg->a2))
       {
         // Dominated so we can delete it
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(segments.find(seg) != segments.end());
 #endif
         seg->filter_degenerate(other_segs);
@@ -1346,7 +1346,7 @@ namespace LegionRuntime {
       }
       else if ((seg->a2 > max) && (seg->a1 < max))
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(seg->a1 >= min);
 #endif
         // Condense right
@@ -1357,7 +1357,7 @@ namespace LegionRuntime {
       }
       else if ((seg->a1 < min) && (seg->a2 > min))
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(seg->a2 <= max);
 #endif
         // Condense left
@@ -1398,7 +1398,7 @@ namespace LegionRuntime {
     {
       std::set<Segment<T>*,MergeComparator<T> > sorted_segs(segments.begin(),
                                                             segments.end());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(sorted_segs.size() == segments.size());
 #endif
       bool result = false;
@@ -1415,7 +1415,7 @@ namespace LegionRuntime {
       // Now we have our first batch of segments on the same line
       while (it != sorted_segs.end())
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((*it)->b > current_line);
 #endif
         // Build the next line
@@ -1498,7 +1498,7 @@ namespace LegionRuntime {
                        ((*curr_it)->a2 == (*next_it)->a2))
               {
                 result = true;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((*curr_it)->dir != (*next_it)->dir);
 #endif                
                 // There are four possibilites here
@@ -1514,7 +1514,7 @@ namespace LegionRuntime {
                 {
                   // This is the easy case, everything
                   // gets deleted
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(segments.find(*curr_it) != segments.end());
                   assert(segments.find(*next_it) != segments.end());
                   assert(other_segs.find(adj_left) != other_segs.end());
@@ -1545,7 +1545,7 @@ namespace LegionRuntime {
                     (*curr_it)->find_one_adjacent((*curr_it)->a2);
                   Segment<T> *next_right = 
                     (*next_it)->find_one_adjacent((*next_it)->a2);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(curr_right->dir == next_right->dir);
 #endif
                   // Share the left edge, so merge right
@@ -1553,7 +1553,7 @@ namespace LegionRuntime {
                   curr_right->a2 = next_right->a2;
                   next_right->move_adjacent(curr_right, next_right->a2);
                   next_right->move_degenerate(curr_right);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(segments.find(*curr_it) != segments.end());
                   assert(segments.find(*next_it) != segments.end());
                   assert(other_segs.find(adj_left) != other_segs.end());
@@ -1584,7 +1584,7 @@ namespace LegionRuntime {
                     (*curr_it)->find_one_adjacent((*curr_it)->a1);
                   Segment<T> *next_left = 
                     (*next_it)->find_one_adjacent((*next_it)->a1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(curr_left->dir == next_left->dir);
 #endif
                   // Share the right edge, so merge left
@@ -1592,7 +1592,7 @@ namespace LegionRuntime {
                   curr_left->a2 = next_left->a2;
                   next_left->move_adjacent(curr_left, next_left->a2);
                   next_left->move_degenerate(curr_left);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(segments.find(*curr_it) != segments.end());
                   assert(segments.find(*next_it) != segments.end());
                   assert(other_segs.find(adj_right) != other_segs.end());
@@ -1627,7 +1627,7 @@ namespace LegionRuntime {
                     (*next_it)->find_one_adjacent((*next_it)->a1);
                   Segment<T> *next_right = 
                     (*next_it)->find_one_adjacent((*next_it)->a2);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(curr_left->dir == next_left->dir);
                   assert(curr_right->dir == next_right->dir);
 #endif
@@ -1641,7 +1641,7 @@ namespace LegionRuntime {
                   next_right->move_adjacent(curr_right, next_right->a2);
                   next_right->move_degenerate(curr_right);
                   // Delete everything else
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   assert(segments.find(*curr_it) != segments.end());
                   assert(segments.find(*next_it) != segments.end());
                   assert(other_segs.find(next_left) != other_segs.end());
@@ -1676,7 +1676,7 @@ namespace LegionRuntime {
                        ((*curr_it)->a2 >= (*next_it)->a2))
               {
                 result = true;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((*curr_it)->dir != (*next_it)->dir);
 #endif
                 if ((*curr_it)->a1 == (*next_it)->a1)
@@ -1701,7 +1701,7 @@ namespace LegionRuntime {
                     // and delete adj
                     (*curr_it)->clear_adjacent((*curr_it)->a1);
                     (*curr_it)->replace_adjacent(adj, right_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(adj) != other_segs.end());
 #endif
                     adj->filter_degenerate(segments);
@@ -1716,7 +1716,7 @@ namespace LegionRuntime {
                       (*curr_it)->find_one_adjacent((*curr_it)->a1);
                     Segment<T> *next_left = 
                       (*next_it)->find_one_adjacent((*next_it)->a1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(curr_left->dir == next_left->dir);
 #endif
                     (*curr_it)->clear_adjacent((*curr_it)->a1);
@@ -1726,14 +1726,14 @@ namespace LegionRuntime {
                     next_left->move_adjacent(curr_left, next_left->a2);
                     next_left->move_degenerate(curr_left);
                     // Now we can delete next left
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(next_left) != other_segs.end());
 #endif
                     other_segs.erase(next_left);
                     if (next_left->remove_reference())
                       delete next_left;
                   }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   right_edge->sanity_check();
                   (*curr_it)->sanity_check();
 #endif
@@ -1757,7 +1757,7 @@ namespace LegionRuntime {
                   {
                     (*curr_it)->clear_adjacent((*curr_it)->a2);
                     (*curr_it)->replace_adjacent(adj, left_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(adj) != other_segs.end());
 #endif
                     adj->filter_degenerate(segments);
@@ -1772,7 +1772,7 @@ namespace LegionRuntime {
                       (*curr_it)->find_one_adjacent((*curr_it)->a2);
                     Segment<T> *next_right = 
                       (*next_it)->find_one_adjacent((*next_it)->a2);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(curr_right->dir == next_right->dir);
 #endif
                     (*curr_it)->clear_adjacent((*curr_it)->a2);
@@ -1782,14 +1782,14 @@ namespace LegionRuntime {
                     next_right->move_adjacent(curr_right, next_right->a2);
                     next_right->move_degenerate(curr_right);
                     // Now we can delete next right
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(next_right) != other_segs.end());
 #endif
                     other_segs.erase(next_right);
                     if (next_right->remove_reference())
                       delete next_right;
                   }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   left_edge->sanity_check();
                   (*curr_it)->sanity_check();
 #endif
@@ -1822,7 +1822,7 @@ namespace LegionRuntime {
                   right_edge->replace_adjacent((*next_it), (*curr_it));
                   (*curr_it)->clear_adjacent((*curr_it)->a1);
                   (*curr_it)->add_adjacent(right_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   left_edge->sanity_check();
                   right_edge->sanity_check();
                   (*curr_it)->sanity_check();
@@ -1830,7 +1830,7 @@ namespace LegionRuntime {
 #endif
                 }
                 // In all of these casese we always delete next
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(segments.find(*next_it) != segments.end());
 #endif
                 (*next_it)->filter_degenerate(other_segs);
@@ -1845,7 +1845,7 @@ namespace LegionRuntime {
                        ((*curr_it)->a2 <= (*next_it)->a2))
               {
                 result = true;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((*curr_it)->dir != (*next_it)->dir);
 #endif
                 if ((*curr_it)->a1 == (*next_it)->a1)
@@ -1867,7 +1867,7 @@ namespace LegionRuntime {
                     // Only one adjacent left edge, just need to remove it
                     (*next_it)->clear_adjacent((*next_it)->a1);
                     (*next_it)->replace_adjacent(adj, right_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(adj) != other_segs.end());
 #endif
                     adj->filter_degenerate(segments);
@@ -1882,7 +1882,7 @@ namespace LegionRuntime {
                       (*curr_it)->find_one_adjacent((*curr_it)->a1);
                     Segment<T> *next_left = 
                       (*next_it)->find_one_adjacent((*next_it)->a1);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(curr_left->dir == next_left->dir);
 #endif
                     (*next_it)->clear_adjacent((*next_it)->a1);
@@ -1892,14 +1892,14 @@ namespace LegionRuntime {
                     next_left->move_adjacent(curr_left, next_left->a2);
                     next_left->move_degenerate(curr_left);
                     // Now we can delete next left
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(next_left) != other_segs.end());
 #endif
                     other_segs.erase(next_left);
                     if (next_left->remove_reference())
                       delete next_left;
                   }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   right_edge->sanity_check();
                   (*next_it)->sanity_check();
 #endif
@@ -1922,7 +1922,7 @@ namespace LegionRuntime {
                   {
                     (*next_it)->clear_adjacent((*next_it)->a2);
                     (*next_it)->replace_adjacent(adj, left_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(adj) != other_segs.end());
 #endif
                     adj->filter_degenerate(segments);
@@ -1937,7 +1937,7 @@ namespace LegionRuntime {
                       (*curr_it)->find_one_adjacent((*curr_it)->a2);
                     Segment<T> *next_right = 
                       (*next_it)->find_one_adjacent((*next_it)->a2);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(curr_right->dir == next_right->dir);
 #endif
                     (*next_it)->clear_adjacent((*next_it)->a2);
@@ -1947,14 +1947,14 @@ namespace LegionRuntime {
                     next_right->move_adjacent(curr_right, next_right->a2);
                     next_right->move_degenerate(curr_right);
                     // Now we can delete the next right
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                     assert(other_segs.find(next_right) != other_segs.end());
 #endif
                     other_segs.erase(next_right);
                     if (next_right->remove_reference())
                       delete next_right;
                   }
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   left_edge->sanity_check();
                   (*next_it)->sanity_check();
 #endif
@@ -1986,7 +1986,7 @@ namespace LegionRuntime {
                   right_edge->clear_adjacent(right_edge->a2);
                   right_edge->replace_adjacent((*curr_it), new_seg);
                   new_seg->add_adjacent(right_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                   left_edge->sanity_check();
                   right_edge->sanity_check();
                   (*next_it)->sanity_check();
@@ -1996,7 +1996,7 @@ namespace LegionRuntime {
                   to_add.push_back(new_seg);
                 }
                 // We always delete current in all cases
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert(segments.find(*curr_it) != segments.end());
 #endif
                 (*curr_it)->filter_degenerate(other_segs);
@@ -2012,7 +2012,7 @@ namespace LegionRuntime {
                        ((*curr_it)->a2 > (*next_it)->a1))
               {
                 result = true;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((*curr_it)->dir != (*next_it)->dir);
 #endif
                 Segment<T> *left_edge = 
@@ -2036,7 +2036,7 @@ namespace LegionRuntime {
                 (*next_it)->replace_adjacent(left_edge, right_edge);
                 (*curr_it)->clear_adjacent((*curr_it)->a2);
                 (*curr_it)->replace_adjacent(right_edge, left_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 left_edge->sanity_check();
                 right_edge->sanity_check();
                 (*next_it)->sanity_check();
@@ -2048,7 +2048,7 @@ namespace LegionRuntime {
                        ((*curr_it)->a1 < (*next_it)->a2))
               {
                 result = true;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 assert((*curr_it)->dir != (*next_it)->dir);
 #endif
                 Segment<T> *left_edge = 
@@ -2072,7 +2072,7 @@ namespace LegionRuntime {
                 (*curr_it)->replace_adjacent(left_edge, right_edge);
                 (*next_it)->clear_adjacent((*next_it)->a2);
                 (*next_it)->replace_adjacent(right_edge, left_edge);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
                 left_edge->sanity_check();
                 right_edge->sanity_check();
                 (*next_it)->sanity_check();
@@ -2098,7 +2098,7 @@ namespace LegionRuntime {
           {
             if (to_remove.find(*next_it) == to_remove.end())
             {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
               (*next_it)->sanity_check();
 #endif
               current_segments.push_back(*next_it);
@@ -2247,7 +2247,7 @@ namespace LegionRuntime {
     {
       std::set<Segment<T>*,SegmentComparator<T> > sorted_segments(
                                               segments.begin(), segments.end());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(sorted_segments.size() == segments.size());
 #endif
       Segment<T> *current = NULL;
@@ -2264,7 +2264,7 @@ namespace LegionRuntime {
                     (*it)->points_none() && current->points_none())
           {
             (*it)->a1 = current->a1;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(segments.find(current) != segments.end());
 #endif
             segments.erase(current);
@@ -2274,7 +2274,7 @@ namespace LegionRuntime {
           }
           else if ((*it)->a2 <= current->a2)
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert((*it)->points_none() ||
                    (*it)->dir == current->dir);
             assert(segments.find(*it) != segments.end());
@@ -2288,7 +2288,7 @@ namespace LegionRuntime {
                    ((*it)->dir == current->dir) && !current->points_none())
           {
             current->a2 = (*it)->a2;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(segments.find(*it) != segments.end());
 #endif
             segments.erase(*it);
@@ -2298,7 +2298,7 @@ namespace LegionRuntime {
           }
           else
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(((*it)->a1 > current->a2) ||
                    (((current->a2 == (*it)->a1) &&
                      ((current->dir != (*it)->dir) ||
@@ -2414,8 +2414,8 @@ namespace LegionRuntime {
       }
       return false;
     } 
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_RECTANGLE_SET_H__
 

@@ -30,10 +30,10 @@
 #ifndef __MACH__
 #include <malloc.h>
 #endif
-#include "legion_types.h" // StaticAssert
+#include "legion_template_help.h" // StaticAssert
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     enum AllocationType {
       ARGUMENT_MAP_ALLOC,
@@ -109,8 +109,7 @@ namespace LegionRuntime {
       PHYSICAL_USER_ALLOC,
       PHYSICAL_VERSION_ALLOC,
       MEMORY_INSTANCES_ALLOC,
-      MEMORY_REDUCTION_ALLOC,
-      MEMORY_AVAILABLE_ALLOC,
+      MEMORY_GARBAGE_ALLOC,
       PROCESSOR_GROUP_ALLOC,
       RUNTIME_DISTRIBUTED_ALLOC,
       RUNTIME_DIST_COLLECT_ALLOC,
@@ -118,13 +117,11 @@ namespace LegionRuntime {
       RUNTIME_FUTURE_ALLOC,
       RUNTIME_REMOTE_ALLOC,
       TASK_INSTANCE_REGION_ALLOC,
-      TASK_LOCAL_REGION_ALLOC,
       TASK_INLINE_REGION_ALLOC,
       TASK_TRACES_ALLOC,
       TASK_RESERVATION_ALLOC,
       TASK_BARRIER_ALLOC,
       TASK_LOCAL_FIELD_ALLOC,
-      TASK_INLINE_ALLOC,
       SEMANTIC_INFO_ALLOC,
       DIRECTORY_ALLOC,
       DENSE_INDEX_ALLOC,
@@ -162,7 +159,7 @@ namespace LegionRuntime {
       void *result;
       if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert((alloc_size % ALIGNMENT) == 0);
 #endif
       // memalign is faster than posix_memalign so use it if we have it
@@ -201,9 +198,9 @@ namespace LegionRuntime {
       static void trace_allocation(AllocationType a, size_t size, int elems=1);
       static void trace_free(AllocationType a, size_t size, int elems=1);
       static Internal* find_runtime(void);
-      static void trace_allocation(Internal *&rt, AllocationType a, 
+      static void trace_allocation(Runtime *&rt, AllocationType a, 
                                    size_t size, int elems=1);
-      static void trace_free(Internal *&rt, AllocationType a, 
+      static void trace_free(Runtime *&rt, AllocationType a, 
                              size_t size, int elems=1);
     };
 
@@ -265,7 +262,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      Internal *rt = LegionAllocation::find_runtime(); 
+      Runtime *rt = LegionAllocation::find_runtime(); 
       LegionAllocation::trace_free(rt, a, old_size);
       LegionAllocation::trace_allocation(rt, a, new_size);
 #endif
@@ -296,6 +293,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T>
+    inline T* legion_new_in_place(void *buffer)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T, typename T1>
     inline T* legion_new(const T1 &arg1)
     //--------------------------------------------------------------------------
@@ -304,6 +313,18 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1);
       return result;
     }
@@ -322,6 +343,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T, typename T1, typename T2, typename T3>
     inline T* legion_new(const T1 &arg1, const T2 &arg2, const T3 &arg3)
     //--------------------------------------------------------------------------
@@ -330,6 +363,19 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, 
+                                  const T2 &arg2, const T3 &arg3)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1, arg2, arg3);
       return result;
     }
@@ -349,6 +395,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, typename T4>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T, typename T1, typename T2, typename T3, 
              typename T4, typename T5>
     inline T* legion_new(const T1 &arg1, const T2 &arg2,
@@ -359,6 +418,20 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                 const T3 &arg3, const T4 &arg4, const T5 &arg5)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5);
       return result;
     }
@@ -381,6 +454,21 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
              typename T4, typename T5, typename T6, typename T7>
     inline T* legion_new(const T1 &arg1, const T2 &arg2,
                          const T3 &arg3, const T4 &arg4, 
@@ -391,6 +479,21 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                 const T3 &arg3, const T4 &arg4, 
+                                 const T5 &arg5, const T6 &arg6, const T7 &arg7)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
       return result;
     }
@@ -417,6 +520,24 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<typename T, typename T1, typename T2, typename T3, 
              typename T4, typename T5, typename T6, typename T7,
+             typename T8>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6, 
+                                   arg7, arg8);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
              typename T8, typename T9>
     inline T* legion_new(const T1 &arg1, const T2 &arg2,
                          const T3 &arg3, const T4 &arg4, 
@@ -428,6 +549,24 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                 const T3 &arg3, const T4 &arg4, 
+                                 const T5 &arg5, const T6 &arg6,
+                                 const T7 &arg7, const T8 &arg8, const T9 &arg9)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
                                    arg7, arg8, arg9);
       return result;
@@ -456,6 +595,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<typename T, typename T1, typename T2, typename T3, 
              typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
              typename T8, typename T9, typename T10, typename T11>
     inline T* legion_new(const T1 &arg1, const T2 &arg2,
                          const T3 &arg3, const T4 &arg4, 
@@ -468,6 +626,26 @@ namespace LegionRuntime {
       HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
 #endif
       void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                const T3 &arg3, const T4 &arg4, 
+                                const T5 &arg5, const T6 &arg6,
+                                const T7 &arg7, const T8 &arg8, 
+                                const T9 &arg9, const T10 &arg10, 
+                                const T11 &arg11)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
       T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
                                    arg7, arg8, arg9, arg10, arg11);
       return result;
@@ -495,6 +673,274 @@ namespace LegionRuntime {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12, 
+                                   arg13);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12, 
+                                   arg13);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13, const T14 &arg14)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13, const T14 &arg14)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13, const T14 &arg14,
+                         const T15 &arg15)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13, const T14 &arg14,
+                                  const T15 &arg15)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13, const T14 &arg14,
+                         const T15 &arg15, const T16 &arg16)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13, const T14 &arg14,
+                                  const T15 &arg15, const T16 &arg16)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16, typename T17>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13, const T14 &arg14,
+                         const T15 &arg15, const T16 &arg16,
+                         const T17 &arg17)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16, arg17);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16, typename T17>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13, const T14 &arg14,
+                                  const T15 &arg15, const T16 &arg16,
+                                  const T17 &arg17)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16, arg17);
+      return result;
+    }
+
     template<typename T>
     inline void legion_delete(T *to_free)
     {
@@ -503,7 +949,7 @@ namespace LegionRuntime {
 #endif
       to_free->~T();
       free(to_free);
-    }  
+    }
 
     /**
      * \class AlignedAllocator
@@ -632,7 +1078,7 @@ namespace LegionRuntime {
                                            { return !operator==(a); }
     public:
 #ifdef TRACE_ALLOCATION
-      Internal *runtime;
+      Runtime *runtime;
 #endif
     };
 
@@ -680,7 +1126,7 @@ namespace LegionRuntime {
       typedef std::map<T1, T2, COMPARATOR, LegionAllocator<
                    std::pair<const T1, T2>, A, true/*aligned*/> > track_aligned;
     };
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_ALLOCATION__

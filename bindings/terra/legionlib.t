@@ -21,7 +21,7 @@ legion = {}
 legion.__index = legion
 
 require 'legionlib-terra'
-require 'legionlib-mapper'
+-- require 'legionlib-mapper'
 require 'legionlib-util'
 
 local legion_c = terralib.includec("legion_c.h")
@@ -44,7 +44,6 @@ end
 coerce_machine = make_coercion_op(legion_c.legion_machine_t)
 coerce_processor = make_coercion_op(legion_c.legion_processor_t)
 coerce_domain = make_coercion_op(legion_c.legion_domain_t)
-coerce_domain_split = make_coercion_op(legion_c.legion_domain_split_t)
 
 -- initializing binding library
 
@@ -701,46 +700,6 @@ function DomainPoint:__tostring()
                   self.point_data[1] .. "," ..
                   self.point_data[2] .. ")"
   end
-end
-
--- Lua wrapper for LegionRuntime::HighLevel::DomainSplit
-function DomainSplit:new(domain, proc, recurse, stealable)
-  local ds = { domain = domain, proc = proc,
-               recurse = recurse, stealable = stealable }
-  setmetatable(ds, self)
-  return ds
-end
-
-function DomainSplit:from_cobj(cobj)
-  return DomainSplit:new(Domain:from_cobj(cobj.domain),
-                         Processor:from_cobj(cobj.proc),
-                         cobj.recurse, cobj.stealable)
-end
-
-local terra create_domain_split(domain : legion_c.legion_domain_t,
-                                proc : legion_c.legion_processor_t,
-                                recurse : bool, stealable : bool)
-                                : legion_c.legion_domain_split_t
-  var ds : legion_c.legion_domain_split_t
-  ds.domain = domain
-  ds.proc = proc
-  ds.recurse = recurse
-  ds.stealable = stealable
-  return ds
-end
-
-function DomainSplit:to_cobj()
-  return create_domain_split(self.domain.cobj,
-                             self.proc,
-                             self.recurse,
-                             self.stealable)
-end
-
-function DomainSplit:__tostring()
-  local str = tostring(self.domain) .. " ~> " .. tostring(self.proc)
-  if self.recurse then str = str .. ", recurse" end
-  if self.stealable then str = str .. ", stealable" end
-  return str
 end
 
 -- Lua wrapper for LegionRuntime::LowLevel::IndexSpace

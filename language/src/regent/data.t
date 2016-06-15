@@ -135,6 +135,14 @@ function data.mapi(fn, list)
   return result
 end
 
+function data.flatmap(fn, list)
+  local result = terralib.newlist()
+  for i, elt in ipairs(list) do
+    result:insertall(fn(elt))
+  end
+  return result
+end
+
 function data.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do

@@ -25,7 +25,7 @@ task f() : double
   var a : foo, b : foo, c : foo
   a.{x, y, z} = 3
   b.x, b.y, a.z = 6, 3, 2
-  c.{x, y, z} = a.{x, y, z} * b.{y, x, z}
+  c.{x, y, z,} = a.{x, y, z,} * b.{y, x, z,} -- Note: Test trailing commas.
   c.{x, y, z} = c.{x, y, z} * 2 + a.x
   c.{x, y}, c.z += 100 - c.{z, y}, 100 - c.x
   return c.x + c.y + c.z

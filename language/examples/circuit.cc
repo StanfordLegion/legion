@@ -24,7 +24,8 @@
 
 #include "default_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
+using namespace Legion::Mapping;
 
 ///
 /// Mapper
@@ -35,157 +36,120 @@ static LegionRuntime::Logger::Category log_circuit("circuit");
 class CircuitMapper : public DefaultMapper
 {
 public:
-  CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local);
-  virtual void select_task_options(Task *task);
-  virtual void select_task_variant(Task *task);
-  virtual bool map_task(Task *task);
-  virtual bool map_inline(Inline *inline_operation);
-  virtual void notify_mapping_failed(const Mappable *mappable);
+  CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
+                const char *mapper_name,
+                std::vector<Processor>* procs_list,
+                std::vector<Memory>* sysmems_list,
+                std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+                std::map<Processor, Memory>* proc_sysmems,
+                std::map<Processor, Memory>* proc_regmems);
+  virtual Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task);
+  virtual void default_policy_select_target_processors(
+                                    MapperContext ctx,
+                                    const Task &task,
+                                    std::vector<Processor> &target_procs);
 private:
-  Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
-private:
-  std::map<Processor, Memory> all_sysmems;
+  // std::vector<Processor>& procs_list;
+  // std::vector<Memory>& sysmems_list;
+  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  std::map<Processor, Memory>& proc_sysmems;
+  // std::map<Processor, Memory>& proc_regmems;
 };
 
-CircuitMapper::CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
+                             const char *mapper_name,
+                             std::vector<Processor>* _procs_list,
+                             std::vector<Memory>* _sysmems_list,
+                             std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+                             std::map<Processor, Memory>* _proc_sysmems,
+                             std::map<Processor, Memory>* _proc_regmems)
+  : DefaultMapper(rt, machine, local, mapper_name),
+    // procs_list(*_procs_list),
+    // sysmems_list(*_sysmems_list),
+    sysmem_local_procs(*_sysmem_local_procs),
+    proc_sysmems(*_proc_sysmems)// ,
+    // proc_regmems(*_proc_regmems)
 {
-  std::set<Processor> all_procs;
-	machine.get_all_processors(all_procs);
-  machine_interface.filter_processors(machine, Processor::LOC_PROC, all_procs);
-
-  for (std::set<Processor>::iterator itr = all_procs.begin();
-       itr != all_procs.end(); ++itr) {
-    Memory sysmem = machine_interface.find_memory_kind(*itr, Memory::SYSTEM_MEM);
-    all_sysmems[*itr] = sysmem;
-  }
 }
 
-void CircuitMapper::select_task_options(Task *task)
+Processor CircuitMapper::default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task)
 {
-  // Task options:
-  task->inline_task = false;
-  task->spawn_task = false;
-  task->map_locally = true;
-  task->profile_task = false;
-}
-
-void CircuitMapper::select_task_variant(Task *task)
-{
-  // Use the SOA variant for all tasks.
-  // task->selected_variant = VARIANT_SOA;
-  DefaultMapper::select_task_variant(task);
-
-  std::vector<RegionRequirement> &regions = task->regions;
-  for (std::vector<RegionRequirement>::iterator it = regions.begin();
-        it != regions.end(); it++) {
-    RegionRequirement &req = *it;
-
-    // Select SOA layout for all regions.
-    req.blocking_factor = req.max_blocking_factor;
-  }
-}
-
-bool CircuitMapper::map_task(Task *task)
-{
-  Memory sysmem = all_sysmems[task->target_proc];
-  std::vector<RegionRequirement> &regions = task->regions;
-  for (std::vector<RegionRequirement>::iterator it = regions.begin();
-        it != regions.end(); it++) {
-    RegionRequirement &req = *it;
-
-    // Region options:
-    req.virtual_map = false;
-    req.enable_WAR_optimization = false;
-    req.reduction_list = false;
-
-    // Place all regions in local system memory.
-    req.target_ranking.push_back(sysmem);
-  }
-
-  return false;
-}
-
-bool CircuitMapper::map_inline(Inline *inline_operation)
-{
-  Memory sysmem = all_sysmems[local_proc];
-  RegionRequirement &req = inline_operation->requirement;
-
-  // Region options:
-  req.virtual_map = false;
-  req.enable_WAR_optimization = false;
-  req.reduction_list = false;
-  req.blocking_factor = req.max_blocking_factor;
-
-  // Place all regions in global memory.
-  req.target_ranking.push_back(sysmem);
-
-  log_circuit.debug(
-    "inline mapping region (%d,%d,%d) target ranking front " IDFMT " (size %lu)",
-    req.region.get_index_space().get_id(),
-    req.region.get_field_space().get_id(),
-    req.region.get_tree_id(),
-    req.target_ranking[0].id,
-    req.target_ranking.size());
-
-  return false;
-}
-
-void CircuitMapper::notify_mapping_failed(const Mappable *mappable)
-{
-  switch (mappable->get_mappable_kind()) {
-  case Mappable::TASK_MAPPABLE:
-    {
-      log_circuit.warning("mapping failed on task");
-      break;
-    }
-  case Mappable::COPY_MAPPABLE:
-    {
-      log_circuit.warning("mapping failed on copy");
-      break;
-    }
-  case Mappable::INLINE_MAPPABLE:
-    {
-      Inline *_inline = mappable->as_mappable_inline();
-      RegionRequirement &req = _inline->requirement;
-      LogicalRegion region = req.region;
-      log_circuit.warning(
-        "mapping %s on inline region (%d,%d,%d) memory " IDFMT,
-        (req.mapping_failed ? "failed" : "succeeded"),
-        region.get_index_space().get_id(),
-        region.get_field_space().get_id(),
-        region.get_tree_id(),
-        req.selected_memory.id);
-      break;
-    }
-  case Mappable::ACQUIRE_MAPPABLE:
-    {
-      log_circuit.warning("mapping failed on acquire");
-      break;
-    }
-  case Mappable::RELEASE_MAPPABLE:
-    {
-      log_circuit.warning("mapping failed on release");
-      break;
+  const char* task_name = task.get_task_name();
+  if (strcmp(task_name, "calculate_new_currents") == 0 ||
+      strcmp(task_name, "distribute_charge") == 0 ||
+      strcmp(task_name, "update_voltages") == 0 ||
+      strcmp(task_name, "init_pointers") == 0)
+  {
+    std::vector<Processor> &local_procs =
+      sysmem_local_procs[proc_sysmems[local_proc]];
+    if (local_procs.size() > 1 && task.regions[0].handle_type == SINGULAR) {
+      Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
+      return local_procs[(index % (local_procs.size() - 1)) + 1];
+    } else {
+      return local_proc;
     }
   }
-  assert(0 && "mapping failed");
+
+  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
 }
 
-Color CircuitMapper::get_task_color_by_region(Task *task, const RegionRequirement &requirement)
+void CircuitMapper::default_policy_select_target_processors(
+                                    MapperContext ctx,
+                                    const Task &task,
+                                    std::vector<Processor> &target_procs)
 {
-  if (requirement.handle_type == SINGULAR) {
-    return get_logical_region_color(requirement.region);
-  }
-  return 0;
+  target_procs.push_back(task.target_proc);
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
+  std::vector<Processor>* procs_list = new std::vector<Processor>();
+  std::vector<Memory>* sysmems_list = new std::vector<Memory>();
+  std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
+    new std::map<Memory, std::vector<Processor> >();
+  std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
+  std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
+
+
+  std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
+  machine.get_proc_mem_affinity(proc_mem_affinities);
+
+  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
+    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+    if (affinity.p.kind() == Processor::LOC_PROC) {
+      if (affinity.m.kind() == Memory::SYSTEM_MEM) {
+        (*proc_sysmems)[affinity.p] = affinity.m;
+        if (proc_regmems->find(affinity.p) == proc_regmems->end())
+          (*proc_regmems)[affinity.p] = affinity.m;
+      }
+      else if (affinity.m.kind() == Memory::REGDMA_MEM)
+        (*proc_regmems)[affinity.p] = affinity.m;
+    }
+  }
+
+  for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
+       it != proc_sysmems->end(); ++it) {
+    procs_list->push_back(it->first);
+    (*sysmem_local_procs)[it->second].push_back(it->first);
+  }
+
+  for (std::map<Memory, std::vector<Processor> >::iterator it =
+        sysmem_local_procs->begin(); it != sysmem_local_procs->end(); ++it)
+    sysmems_list->push_back(it->first);
+
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    runtime->replace_default_mapper(new CircuitMapper(machine, runtime, *it), *it);
+    CircuitMapper* mapper = new CircuitMapper(runtime->get_mapper_runtime(),
+                                              machine, *it, "circuit_mapper",
+                                              procs_list,
+                                              sysmems_list,
+                                              sysmem_local_procs,
+                                              proc_sysmems,
+                                              proc_regmems);
+    runtime->replace_default_mapper(mapper, *it);
   }
 }
 

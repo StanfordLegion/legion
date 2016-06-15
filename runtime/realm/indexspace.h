@@ -31,6 +31,10 @@
 #include "layouts.h"
 #include "custom_serdez.h"
 
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+#include "legion_realm.h" // forward declarations for legion types
+#endif
+
 namespace Realm {
 
   class ProfilingRequestSet;
@@ -397,7 +401,7 @@ namespace Realm {
       template <int DIM>
       LegionRuntime::Arrays::Point<DIM> get_point(void) const { assert(dim == DIM); return LegionRuntime::Arrays::Point<DIM>(point_data); }
 
-      bool is_null(void) const { return (dim > -1); }
+      bool is_null(void) const { return (dim == -1); }
 
       static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
       friend std::ostream& operator<< (std::ostream& stream, const DomainPoint& dp);
@@ -963,6 +967,16 @@ namespace Realm {
                                      const ProfilingRequestSet &reqs,
 				     ReductionOpID redop_id = 0) const;
 
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+      // Note that the constraints are not const so that Realm can add
+      // to the set with additional constraints describing the exact 
+      // instance that was created.
+      Event create_instance(RegionInstance &result,
+              const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
+              const Legion::LayoutConstraintSet &constraints, 
+              const ProfilingRequestSet &reqs) const;
+#endif
+
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
@@ -973,15 +987,20 @@ namespace Realm {
       struct CopySrcDstField {
       public:
         CopySrcDstField(void) 
-          : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
+          : inst(RegionInstance::NO_INST), offset(0), size(0), 
+            field_id(0), serdez_id(0) { }
         CopySrcDstField(RegionInstance i, coord_t o, size_t s)
-          : inst(i), offset(o), size(s), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s, CustomSerdezID sid)
-          : inst(i), offset(o), size(s), serdez_id(sid) { }
+          : inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, coord_t o, size_t s, unsigned f)
+          : inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, coord_t o, size_t s, 
+                        unsigned f, CustomSerdezID sid)
+          : inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
       public:
 	RegionInstance inst;
 	coord_t offset;
         size_t size;
+        unsigned field_id;
 	CustomSerdezID serdez_id;
       };
 

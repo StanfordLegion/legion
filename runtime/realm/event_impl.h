@@ -102,6 +102,7 @@ namespace Realm {
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = Event::NO_EVENT, Event ev4 = Event::NO_EVENT,
 				Event ev5 = Event::NO_EVENT, Event ev6 = Event::NO_EVENT);
+      static Event ignorefaults(Event wait_for);
 
       // record that the event has triggered and notify anybody who cares
       void trigger(Event::gen_t gen_triggered, int trigger_node, bool poisoned);

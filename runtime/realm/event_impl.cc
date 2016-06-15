@@ -144,6 +144,12 @@ namespace Realm {
     return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
   }
 
+  /*static*/ Event Event::ignorefaults(Event wait_for)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    return GenEventImpl::ignorefaults(wait_for);
+  }
+
   class EventTriggeredCondition {
   public:
     EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
@@ -782,6 +788,31 @@ namespace Realm {
       if(m->arm())
         delete m;
 
+      return finish_event;
+    }
+
+    /*static*/ Event GenEventImpl::ignorefaults(Event wait_for)
+    {
+      bool poisoned = false;
+      // poisoned or not, we return no event if it is done
+      if(wait_for.has_triggered_faultaware(poisoned))
+        return Event::NO_EVENT;
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      EventMerger *m = new EventMerger(finish_event, true/*ignore faults*/);
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) 1", 
+			   finish_event.id, finish_event.gen);
+#endif
+      log_event.info() << "event merging: event=" << finish_event 
+                       << " wait_on=" << wait_for;
+      m->add_event(wait_for);
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
+                           finish_event.id, finish_event.gen,
+                           wait_for.id, wait_for.gen);
+#endif
+      if(m->arm())
+        delete m;
       return finish_event;
     }
 
@@ -1955,10 +1986,15 @@ static void *bytedup(const void *data, size_t datalen)
 #ifndef DISABLE_BARRIER_MIGRATION
 	  // if there were zero local waiters and a single remote waiter, this barrier is an obvious
 	  //  candidate for migration
-	  if(local_notifications.empty() && (remote_notifications.size() == 1)) {
+          // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
+	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
+             (ID(me).node() == gasnet_mynode())) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
+            // remember that we had up to date information up to this generation so that we don't try to
+            //   subscribe to things we already know about
+            gen_subscribed = generation;
 	  }
 #endif
 	}
@@ -2066,7 +2102,7 @@ static void *bytedup(const void *data, size_t datalen)
 	}
 
 	if(previous_subscription < needed_gen) {
-	  log_barrier.info("subscribing to barrier " IDFMT "/%d", me.id(), needed_gen);
+	  log_barrier.info() << "subscribing to barrier " << me << "/" << needed_gen << " (prev=" << previous_subscription << ")";
 	  BarrierSubscribeMessage::send_request(owner, me.id(), needed_gen, gasnet_mynode(), false/*!forwarded*/);
 	}
       }
@@ -2247,7 +2283,10 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// it's theoretically possible for multiple trigger messages to arrive out
 	//  of order, so check if this message triggers the oldest possible range
-	if(args.previous_gen == impl->generation) {
+	// NOTE: it's ok for previous_gen to be earlier than our current generation - this
+	//  occurs with barrier migration because the new owner may not know which notifications
+	//  have already been performed
+	if(args.previous_gen <= impl->generation) {
 	  // see if we can pick up any of the held triggers too
 	  while(!impl->held_triggers.empty()) {
 	    std::map<Event::gen_t, Event::gen_t>::iterator it = impl->held_triggers.begin();

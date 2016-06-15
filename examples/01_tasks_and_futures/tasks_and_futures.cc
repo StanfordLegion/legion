@@ -18,7 +18,7 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 
 /*
  * To illustrate task launches and futures in Legion
@@ -37,13 +37,13 @@ enum TaskIDs {
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   int num_fibonacci = 7;
   // The command line arguments to a Legion application are
   // available through the runtime 'get_input_args' call.  We'll 
   // use this to get the number of Fibonacci numbers to compute.
-  const InputArgs &command_args = HighLevelRuntime::get_input_args();
+  const InputArgs &command_args = Runtime::get_input_args();
   if (command_args.argc > 1)
   {
     num_fibonacci = atoi(command_args.argv[1]);
@@ -123,7 +123,7 @@ void top_level_task(const Task *task,
 
 int fibonacci_task(const Task *task,
                    const std::vector<PhysicalRegion> &regions,
-                   Context ctx, HighLevelRuntime *runtime)
+                   Context ctx, Runtime *runtime)
 {
   // The 'TaskArgument' value passed to a task and its size
   // in bytes is available in the 'args' and 'arglen' fields
@@ -180,7 +180,7 @@ int fibonacci_task(const Task *task,
 
 int sum_task(const Task *task,
              const std::vector<PhysicalRegion> &regions,
-             Context ctx, HighLevelRuntime *runtime)
+             Context ctx, Runtime *runtime)
 {
   assert(task->futures.size() == 2);
   // Note that even though it looks like we are performing
@@ -198,12 +198,12 @@ int sum_task(const Task *task,
               
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   // Note that tasks which return values must pass the type of
   // the return argument as the first template paramenter.
-  HighLevelRuntime::register_legion_task<int,fibonacci_task>(FIBONACCI_TASK_ID,
+  Runtime::register_legion_task<int,fibonacci_task>(FIBONACCI_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   // The sum-task has a very special property which is that it is
   // guaranteed never to make any runtime calls.  We call these
@@ -214,9 +214,9 @@ int main(int argc, char **argv)
   // execution.  Note that we also tell the runtime to 
   // automatically generate the variant ID for this task
   // with the 'AUTO_GENERATE_ID' argument.
-  HighLevelRuntime::register_legion_task<int,sum_task>(SUM_TASK_ID,
+  Runtime::register_legion_task<int,sum_task>(SUM_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/, 
       AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf*/), "sum_task");
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }

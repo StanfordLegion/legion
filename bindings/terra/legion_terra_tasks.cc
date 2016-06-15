@@ -233,26 +233,26 @@ legion_task_result_t lua_task_wrapper(legion_task_t _task,
 }
 
 void
-vector_legion_domain_split_push_back(vector_legion_domain_split_t slices_,
-                                     legion_domain_split_t slice_)
+vector_legion_task_slice_push_back(vector_legion_task_slice_t slices_,
+                                     legion_task_slice_t slice_)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
-  Mapper::DomainSplit slice = CObjectWrapper::unwrap(slice_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
+  Mapper::TaskSlice slice = CObjectWrapper::unwrap(slice_);
   slices->push_back(slice);
 }
 
 unsigned
-vector_legion_domain_split_size(vector_legion_domain_split_t slices_)
+vector_legion_task_slice_size(vector_legion_task_slice_t slices_)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
   return slices->size();
 }
 
-legion_domain_split_t
-vector_legion_domain_split_get(vector_legion_domain_split_t slices_,
+legion_task_slice_t
+vector_legion_task_slice_get(vector_legion_task_slice_t slices_,
                                unsigned idx)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
   return CObjectWrapper::wrap((*slices)[idx]);
 }
 

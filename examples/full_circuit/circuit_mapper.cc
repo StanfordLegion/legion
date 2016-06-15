@@ -20,7 +20,7 @@ using namespace LegionRuntime::HighLevel;
 LegionRuntime::Logger::Category log_mapper("mapper");
 
 CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
-  : DefaultMapper(m, rt, p)
+  : ShimMapper(m, rt, rt->get_mapper_runtime(), p)
 {
   std::set<Processor> all_procs;
   machine.get_all_processors(all_procs);
@@ -53,7 +53,7 @@ CircuitMapper::CircuitMapper(Machine m, HighLevelRuntime *rt, Processor p)
 void CircuitMapper::select_task_options(Task *task)
 {
   if (map_to_gpus)
-    DefaultMapper::select_task_options(task);
+    ShimMapper::select_task_options(task);
   else
   {
     task->inline_task = false;
@@ -174,7 +174,7 @@ bool CircuitMapper::map_inline(Inline *inline_operation)
 {
   // let the default mapper do its thing, and then override the
   //  blocking factor to force SOA
-  bool ret = DefaultMapper::map_inline(inline_operation);
+  bool ret = ShimMapper::map_inline(inline_operation);
   RegionRequirement& req = inline_operation->requirement;
   req.blocking_factor = req.max_blocking_factor;
   return ret;

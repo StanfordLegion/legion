@@ -67,6 +67,7 @@ context.__index = context
 function context:new_local_scope()
   local cx = {
     var_type = self.var_type:new_local_scope(),
+    subst = self.subst:new_local_scope(),
     expr_type = self.expr_type,
     demanded = self.demanded,
   }
@@ -76,6 +77,7 @@ end
 function context:new_global_scope()
   local cx = {
     var_type = symbol_table:new_global_scope(),
+    subst = symbol_table:new_global_scope(),
     expr_type = {},
     demanded = false,
   }
@@ -110,6 +112,16 @@ function context:report_error_when_demanded(node, error_msg)
   if self.demanded then log.error(node, error_msg) end
 end
 
+function context:add_substitution(from, to)
+  self.subst:insert(nil, from, to)
+end
+
+function context:find_replacement(from)
+  local to = self.subst:safe_lookup(from)
+  assert(to)
+  return to
+end
+
 local flip_types = {}
 
 function flip_types.block(cx, simd_width, symbol, node)
@@ -126,17 +138,20 @@ function flip_types.stat(cx, simd_width, symbol, node)
     return node { block = flip_types.block(cx, simd_width, symbol, node.block) }
 
   elseif node:is(ast.typed.stat.Var) then
+    local symbols = terralib.newlist()
     local types = terralib.newlist()
     local values = terralib.newlist()
 
-    node.types:map(function(ty)
-      types:insert(flip_types.type(simd_width, ty))
-    end)
-    node.values:map(function(exp)
-      values:insert(flip_types.expr(cx, simd_width, symbol, exp))
-    end)
+    for i = 1, #node.symbols do
+      types:insert(flip_types.type(simd_width, node.types[i]))
+      symbols:insert(std.newsymbol(types[i], node.symbols[i]:hasname() and node.symbols[i]:getname() .. "_vectorized"))
+      cx:add_substitution(node.symbols[i], symbols[i])
+      if i <= #node.values then
+        values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
+      end
+    end
 
-    return node { types = types, values = values }
+    return node { symbols = symbols, types = types, values = values }
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
@@ -259,6 +274,10 @@ function flip_types.expr(cx, simd_width, symbol, node)
   elseif node:is(ast.typed.expr.Deref) then
 
   elseif node:is(ast.typed.expr.ID) then
+    if cx:lookup_expr_type(node) == V and not (node.value == symbol) then
+      local sym = cx:find_replacement(node.value)
+      new_node.value = sym
+    end
 
   elseif node:is(ast.typed.expr.Constant) then
 
@@ -768,6 +787,12 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
+    if std.is_bounded_type(node.arg.expr_type) and
+       node.arg.expr_type.dim >= 1 then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a corner case statement not supported for the moment")
+      return false
+    end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
@@ -1016,22 +1041,22 @@ function vectorize_loops.stat(node)
   end
 end
 
-function vectorize_loops.stat_task(node)
+function vectorize_loops.top_task(node)
   local body = vectorize_loops.block(node.body)
 
   return node { body = body }
 end
 
-function vectorize_loops.stat_top(node)
-  if node:is(ast.typed.stat.Task) then
-    return vectorize_loops.stat_task(node)
+function vectorize_loops.top(node)
+  if node:is(ast.typed.top.Task) then
+    return vectorize_loops.top_task(node)
   else
     return node
   end
 end
 
 function vectorize_loops.entry(node)
-  return vectorize_loops.stat_top(node)
+  return vectorize_loops.top(node)
 end
 
 return vectorize_loops

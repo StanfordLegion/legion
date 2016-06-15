@@ -18,13 +18,15 @@
 #define __RUNTIME_H__
 
 #include "legion.h"
+#include "legion_spy.h"
 #include "region_tree.h"
+#include "mapper_manager.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel { 
+namespace Legion {
+  namespace Internal { 
 
     // Special helper for when we need a dummy context
 #define DUMMY_CONTEXT       0
@@ -59,7 +61,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class ArgumentMap::Impl
+     * \class ArgumentMapImpl
      * An argument map implementation that provides
      * the backing store for an argument map handle.
      * Argument maps maintain pairs of domain points
@@ -70,18 +72,19 @@ namespace LegionRuntime {
      * a single backing store to de-duplicate domain
      * points and values.
      */
-    class ArgumentMap::Impl : public Collectable {
+    class ArgumentMapImpl : public Collectable {
     public:
       static const AllocationType alloc_type = ARGUMENT_MAP_ALLOC;
     public:
       FRIEND_ALL_RUNTIME_CLASSES
-      Impl(void);
-      Impl(ArgumentMapStore *st);
-      Impl(ArgumentMapStore *st, const std::map<DomainPoint,TaskArgument> &);
-      Impl(const Impl &impl);
-      ~Impl(void);
+      ArgumentMapImpl(void);
+      ArgumentMapImpl(ArgumentMapStore *st);
+      ArgumentMapImpl(ArgumentMapStore *st, 
+                  const std::map<DomainPoint,TaskArgument> &);
+      ArgumentMapImpl(const ArgumentMapImpl &impl);
+      ~ArgumentMapImpl(void);
     public:
-      Impl& operator=(const Impl &rhs);
+      ArgumentMapImpl& operator=(const ArgumentMapImpl &rhs);
     public:
       bool has_point(const DomainPoint &point);
       void set_point(const DomainPoint &point, const TaskArgument &arg,
@@ -92,11 +95,11 @@ namespace LegionRuntime {
       void pack_arguments(Serializer &rez, const Domain &domain);
       void unpack_arguments(Deserializer &derez);
     protected:
-      Impl* freeze(void);
-      Impl* clone(void);
+      ArgumentMapImpl* freeze(void);
+      ArgumentMapImpl* clone(void);
     private:
       std::map<DomainPoint,TaskArgument> arguments;
-      Impl *next;
+      ArgumentMapImpl *next;
       ArgumentMapStore *const store;
       bool frozen;
     };
@@ -125,7 +128,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Future::Impl
+     * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
      * copy them from one node to another.  Future implementations
@@ -133,31 +136,31 @@ namespace LegionRuntime {
      * remotely.  We use the distributed collectable scheme
      * to manage garbage collection of distributed futures
      */
-    class Future::Impl : public DistributedCollectable {
+    class FutureImpl : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = FUTURE_ALLOC;
     public:
       struct ContributeCollectiveArgs {
       public:
         HLRTaskID hlr_id;
-        Future::Impl *impl;
-        Barrier barrier;
+        FutureImpl *impl;
+        DynamicCollective dc;
         unsigned count;
       };
     public:
-      Impl(Internal *rt, bool register_future, DistributedID did, 
-           AddressSpaceID owner_space, AddressSpaceID local_space,
-           Operation *op = NULL);
-      Impl(const Future::Impl &rhs);
-      virtual ~Impl(void);
+      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
+                 AddressSpaceID owner_space, AddressSpaceID local_space,
+                 RtUserEvent destroy_event, Operation *op = NULL);
+      FutureImpl(const FutureImpl &rhs);
+      virtual ~FutureImpl(void);
     public:
-      Impl& operator=(const Future::Impl &rhs);
+      FutureImpl& operator=(const FutureImpl &rhs);
     public:
       void get_void_result(void);
       void* get_untyped_result(void);
       bool is_empty(bool block);
       size_t get_untyped_size(void);
-      Event get_ready_event(void) const { return ready_event; }
+      ApEvent get_ready_event(void) const { return ready_event; }
     public:
       // This will simply save the value of the future
       void set_result(const void *args, size_t arglen, bool own);
@@ -172,24 +175,22 @@ namespace LegionRuntime {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
     public:
-      virtual void notify_active(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
     public:
-      static void handle_future_send(Deserializer &derez, Internal *rt, 
-                                     AddressSpaceID source);
-      static void handle_future_result(Deserializer &derez, Internal *rt);
-      static void handle_future_subscription(Deserializer &derez, Internal *rt);
+      void record_future_registered(Operation *creator);
+      static void handle_future_result(Deserializer &derez, Runtime *rt);
+      static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
-      void contribute_to_collective(Barrier barrier, unsigned count);
+      void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
     public:
       // These three fields are only valid on the owner node
@@ -200,7 +201,7 @@ namespace LegionRuntime {
 #endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
-      UserEvent ready_event;
+      ApUserEvent ready_event;
       void *result; 
       size_t result_size;
       volatile bool empty;
@@ -210,31 +211,31 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class FutureMap::Impl
+     * \class FutureMapImpl
      * The base implementation of a future map object.  Note
      * that while future objects can move from one node to
      * another, future maps will never leave the node on
      * which they are created.  The futures contained within
      * a future map are permitted to migrate.
      */
-    class FutureMap::Impl : public Collectable {
+    class FutureMapImpl : public Collectable {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      Impl(SingleTask *ctx, TaskOp *task, Internal *rt);
-      Impl(SingleTask *ctx, Event completion_event, Internal *rt);
-      Impl(SingleTask *ctx, Internal *rt); // empty map
-      Impl(const FutureMap::Impl &rhs);
-      ~Impl(void);
+      FutureMapImpl(SingleTask *ctx, TaskOp *task, Runtime *rt);
+      FutureMapImpl(SingleTask *ctx, ApEvent completion_event, Runtime *rt);
+      FutureMapImpl(SingleTask *ctx, Runtime *rt); // empty map
+      FutureMapImpl(const FutureMapImpl &rhs);
+      ~FutureMapImpl(void);
     public:
-      Impl& operator=(const FutureMap::Impl &rhs);
+      FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
       Future get_future(const DomainPoint &point);
       void get_void_result(const DomainPoint &point);
       void wait_all_results(void);
       void complete_all_futures(void);
       bool reset_all_futures(void);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
       void add_valid_point(const DomainPoint &dp);
@@ -244,14 +245,14 @@ namespace LegionRuntime {
       TaskOp *const task;
       const GenerationID task_gen;
       const bool valid;
-      Internal *const runtime;
+      Runtime *const runtime;
     private:
-      Event ready_event;
+      ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
       // Unlike futures, the future map is never used remotely
       // so it can create and destroy its own lock.
       Reservation lock;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
       std::set<DomainPoint> valid_points;
@@ -259,7 +260,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class PhysicalRegion::Impl
+     * \class PhysicalRegionImpl
      * The base implementation of a physical region object.
      * Physical region objects are not allowed to move from the
      * node in which they are created.  Like other objects
@@ -271,35 +272,38 @@ namespace LegionRuntime {
      * will only be manipulated by a single task which is 
      * guaranteed to only be running on one processor.
      */
-    class PhysicalRegion::Impl : public Collectable {
+    class PhysicalRegionImpl : public Collectable {
     public:
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
-      Impl(const RegionRequirement &req, Event ready_event,
-           bool mapped, SingleTask *ctx, MapperID mid,
-           MappingTagID tag, bool leaf, Internal *rt);
-      Impl(const PhysicalRegion::Impl &rhs);
-      ~Impl(void);
+      PhysicalRegionImpl(const RegionRequirement &req, ApEvent ready_event,
+                         bool mapped, SingleTask *ctx, MapperID mid,
+                         MappingTagID tag, bool leaf, Runtime *rt);
+      PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
+      ~PhysicalRegionImpl(void);
     public:
-      Impl& operator=(const PhysicalRegion::Impl &rhs);
+      PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs);
     public:
       void wait_until_valid(void);
       bool is_valid(void) const;
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_accessor(void);
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_field_accessor(FieldID field);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> 
+          get_field_accessor(FieldID field);
     public:
       void unmap_region(void);
-      void remap_region(Event new_ready_event);
+      void remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &ref);
-      void reset_reference(const InstanceRef &ref, 
-                           UserEvent term_event);
-      Event get_ready_event(void) const;
-      const InstanceRef& get_reference(void) const;
+      void set_reference(const InstanceRef &references);
+      void reset_references(const InstanceSet &instances,
+                            ApUserEvent term_event);
+      ApEvent get_ready_event(void) const;
+      bool has_references(void) const;
+      void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories) const;
       void get_fields(std::vector<FieldID>& fields) const;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
@@ -312,23 +316,23 @@ namespace LegionRuntime {
       bool contains_point(const DomainPoint &dp) const;
 #endif
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
       SingleTask *const context;
       const MapperID map_id;
       const MappingTagID tag;
       const bool leaf_region;
     private:
       // Event for when the instance ref is ready
-      Event ready_event;
+      ApEvent ready_event;
       // Instance ref
-      InstanceRef reference;
+      InstanceSet references;
       RegionRequirement req;
       bool mapped; // whether it is currently mapped
       bool valid; // whether it is currently valid
       // whether to trigger the termination event
       // upon unmap
       bool trigger_on_unmap;
-      UserEvent termination_event;
+      ApUserEvent termination_event;
 #ifdef BOUNDS_CHECKS
     private:
       Domain bounds;
@@ -336,7 +340,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Grant::Impl
+     * \class GrantImpl
      * This is the base implementation of a grant object.
      * The grant implementation remembers the locks that
      * must be acquired and gives out an precondition event
@@ -347,7 +351,7 @@ namespace LegionRuntime {
      * locks.  Grants continues accepting registrations
      * until the runtime marks that it is no longer active.
      */
-    class Grant::Impl : public Collectable {
+    class GrantImpl : public Collectable {
     public:
       static const AllocationType alloc_type = GRANT_ALLOC;
     public:
@@ -364,15 +368,15 @@ namespace LegionRuntime {
         bool exclusive;
       };
     public:
-      Impl(void);
-      Impl(const std::vector<ReservationRequest> &requests);
-      Impl(const Grant::Impl &rhs);
-      ~Impl(void);
+      GrantImpl(void);
+      GrantImpl(const std::vector<ReservationRequest> &requests);
+      GrantImpl(const GrantImpl &rhs);
+      ~GrantImpl(void);
     public:
-      Impl& operator=(const Grant::Impl &rhs);
+      GrantImpl& operator=(const GrantImpl &rhs);
     public:
-      void register_operation(Event completion_event);
-      Event acquire_grant(void);
+      void register_operation(ApEvent completion_event);
+      ApEvent acquire_grant(void);
       void release_grant(void);
     public:
       void pack_grant(Serializer &rez);
@@ -380,12 +384,12 @@ namespace LegionRuntime {
     private:
       std::vector<ReservationRequest> requests;
       bool acquired;
-      Event grant_event;
-      std::set<Event> completion_events;
+      ApEvent grant_event;
+      std::set<ApEvent> completion_events;
       Reservation grant_lock;
     };
 
-    class MPILegionHandshake::Impl : public Collectable {
+    class MPILegionHandshakeImpl : public Collectable {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
@@ -394,11 +398,12 @@ namespace LegionRuntime {
         IN_LEGION,
       };
     public:
-      Impl(bool in_mpi, int mpi_participants, int legion_participants);
-      Impl(const Impl &rhs);
-      ~Impl(void);
+      MPILegionHandshakeImpl(bool in_mpi, int mpi_participants, 
+                             int legion_participants);
+      MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
+      ~MPILegionHandshakeImpl(void);
     public:
-      Impl& operator=(const Impl &rhs);
+      MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
     public:
       void mpi_handoff_to_legion(void);
       void mpi_wait_on_legion(void);
@@ -412,7 +417,7 @@ namespace LegionRuntime {
     private:
       int mpi_count, legion_count;
     private:
-      UserEvent mpi_ready, legion_ready;
+      ApUserEvent mpi_ready, legion_ready;
     };
 
     /**
@@ -458,80 +463,17 @@ namespace LegionRuntime {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Internal *rt,
+                       Runtime *rt,
                        unsigned width, unsigned default_mappers,  
-                       bool no_steal, unsigned max_steals);
+                       unsigned max_steals, bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
     public:
       ProcessorManager& operator=(const ProcessorManager &rhs);
     public:
-      void add_mapper(MapperID mid, Mapper *m, bool check);
-      void replace_default_mapper(Mapper *m);
-      Mapper* find_mapper(MapperID mid) const; 
-    public:
-      template<typename MAPPER_CONTINUATION>
-      void invoke_mapper(MapperID map_id, MAPPER_CONTINUATION &continuation,
-                         bool block, bool has_lock);
-      void check_mapper_messages(MapperID map_id, bool need_lock);
-    public:
-      // Functions that perform mapping calls
-      // We really need variadic templates here
-      void invoke_mapper_set_task_options(TaskOp *task);
-      bool invoke_mapper_pre_map_task(TaskOp *task);
-      void invoke_mapper_select_variant(TaskOp *task);
-      bool invoke_mapper_map_task(TaskOp *task);
-      void invoke_mapper_post_map_task(TaskOp *task);
-      void invoke_mapper_failed_mapping(Mappable *mappable);
-      void invoke_mapper_notify_result(Mappable *mappable);
-      void invoke_mapper_slice_domain(TaskOp *task,
-                                      std::vector<Mapper::DomainSplit> &splits);
-      bool invoke_mapper_map_inline(Inline *op);
-      bool invoke_mapper_map_copy(Copy *op);
-      bool invoke_mapper_speculate(Mappable *op, bool &value); 
-      void invoke_mapper_configure_context(TaskOp *task);
-      bool invoke_mapper_rank_copy_targets(Mappable *mappable,
-                                           LogicalRegion handle, 
-                                           const std::set<Memory> &memories,
-                                           bool complete,
-                                           size_t max_blocking_factor,
-                                           std::set<Memory> &to_reuse,
-                                           std::vector<Memory> &to_create,
-                                           bool &create_one,
-                                           size_t &blocking_factor);
-      void invoke_mapper_rank_copy_sources(Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &order);
-      void invoke_mapper_notify_profiling(TaskOp *task);
-      bool invoke_mapper_map_must_epoch(const std::vector<Task*> &tasks,
-          const std::vector<Mapper::MappingConstraint> &constraints,
-          MapperID map_id, MappingTagID tag);
-      int invoke_mapper_get_tunable_value(TaskOp *task, TunableID tid,
-                                          MapperID mid, MappingTagID tag);
-      void invoke_mapper_handle_message(MapperID map_id, Processor source,
-                                        const void *message, size_t length);
-      void invoke_mapper_task_result(MapperID map_id, Event event,
-                                     const void *result, size_t result_size);
-      void invoke_mapper_permit_task_steal(MapperID map_id, Processor thief, 
-                                     const std::vector<const Task*> &stealable,
-                                     std::set<const Task*> &to_steal);
-      // This method cannot support waiting
-      void invoke_mapper_target_task_steal(MapperID map_id,
-                                           const std::set<Processor> &blacklist,
-                                           std::set<Processor> &steal_targets);
-      // This method cannot support waiting
-      void invoke_mapper_select_tasks_to_schedule(MapperID map_id,
-                                           const std::list<Task*> &ready_tasks);
-    public:
-      // Handle mapper messages
-      void defer_mapper_message(Processor target, MapperID map_id,
-                                const void *message, size_t length);
-      void defer_mapper_broadcast(MapperID map_id, const void *message,
-                                  size_t length, int radix);
-      void defer_mapper_call(MapperID map_id, Event wait_on);
-      void send_mapper_messages(MapperID map_id, 
-                                std::vector<MapperMessage> &messages);
+      void add_mapper(MapperID mid, MapperManager *m, bool check, bool own);
+      void replace_default_mapper(MapperManager *m, bool own);
+      MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -547,12 +489,8 @@ namespace LegionRuntime {
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
     public:
-      // Mapper introspection methods
-      unsigned sample_unmapped_tasks(MapperID map_id);
-#ifdef HANG_TRACE
-    public:
-      void dump_state(FILE *target);
-#endif
+      inline void find_visible_memories(std::set<Memory> &visible) const
+        { visible = visible_memories; }
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);
@@ -561,20 +499,22 @@ namespace LegionRuntime {
       void decrement_active_contexts(void);
     public:
       // Immutable state
-      Internal *const runtime;
+      Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
-      // Is stealing disabled 
-      const bool stealing_disabled;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
+      // Is stealing disabled 
+      const bool stealing_disabled;
+      // are we doing replay execution
+      const bool replay_execution;
     protected:
       // Local queue state
       Reservation local_queue_lock;
       unsigned next_local_index;
-      std::vector<Event> local_scheduler_preconditions;
+      std::vector<RtEvent> local_scheduler_preconditions;
     protected:
       // Scheduling state
       Reservation queue_lock;
@@ -590,29 +530,22 @@ namespace LegionRuntime {
       };
       std::vector<ContextState> context_states;
     protected:
-      // Reservation for protecting the list of messages that
-      // need to be sent
-      Reservation message_lock;
       // For each mapper, a list of tasks that are ready to map
-      std::vector<std::list<TaskOp*> > ready_queues;
+      std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
-      std::vector<Mapper*> mapper_objects;
-      // Mapper locks
-      std::vector<Reservation> mapper_locks;
-      // Pending mapper messages
-      std::vector<std::vector<MapperMessage> > mapper_messages;
-      // Keep track of whether we are inside of a mapper call
-      std::vector<bool> inside_mapper_call;
-      // Events to wait on before retrying the mapper call
-      std::vector<Event> defer_mapper_event;
+      std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
       // Failed thiefs to notify when tasks become available
       std::multimap<MapperID,Processor> failed_thiefs;
+      // Reservations for accessing mappers
+      Reservation mapper_lock;
       // Reservations for stealing and thieving
       Reservation stealing_lock;
       Reservation thieving_lock;
+      // The set of visible memories from this processor
+      std::set<Memory> visible_memories;
     };
 
     /**
@@ -625,38 +558,191 @@ namespace LegionRuntime {
      */
     class MemoryManager {
     public:
-      MemoryManager(Memory mem, Internal *rt);
+      enum RequestKind {
+        CREATE_INSTANCE_CONSTRAINTS,
+        CREATE_INSTANCE_LAYOUT,
+        FIND_OR_CREATE_CONSTRAINTS,
+        FIND_OR_CREATE_LAYOUT,
+        FIND_ONLY_CONSTRAINTS,
+        FIND_ONLY_LAYOUT,
+      };
+      enum InstanceState {
+        COLLECTABLE_STATE = 0,
+        ACTIVE_STATE = 1,
+        ACTIVE_COLLECTED_STATE = 2,
+        VALID_STATE = 3,
+      };
+    public:
+      struct InstanceInfo {
+      public:
+        InstanceInfo(void)
+          : current_state(COLLECTABLE_STATE), 
+            deferred_collect(RtUserEvent::NO_RT_USER_EVENT),
+            instance_size(0), min_priority(0) { }
+      public:
+        InstanceState current_state;
+        RtUserEvent deferred_collect;
+        size_t instance_size;
+        GCPriority min_priority;
+        std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
+      };
+      template<bool SMALLER>
+      struct CollectableInfo {
+      public:
+        CollectableInfo(void)
+          : manager(NULL), instance_size(0), priority(0) { }
+        CollectableInfo(PhysicalManager *m, size_t size, GCPriority p)
+          : manager(m), instance_size(size), priority(p) { }
+      public:
+        bool operator<(const CollectableInfo &rhs) const;
+        bool operator==(const CollectableInfo &rhs) const;
+      public:
+        PhysicalManager *manager;
+        size_t instance_size;
+        GCPriority priority;
+      };
+    public:
+      MemoryManager(Memory mem, Runtime *rt);
       MemoryManager(const MemoryManager &rhs);
       ~MemoryManager(void);
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
-      // Update the manager with information about physical instances
-      void allocate_physical_instance(PhysicalManager *manager);
-      void free_physical_instance(PhysicalManager *manager);
+      void register_remote_instance(PhysicalManager *manager);
+      void unregister_remote_instance(PhysicalManager *manager);
     public:
-      // Method for mapper introspection
-      size_t sample_allocated_space(void);
-      size_t sample_free_space(void);
-      unsigned sample_allocated_instances(void);
+      void activate_instance(PhysicalManager *manager);
+      void deactivate_instance(PhysicalManager *manager);
+      void validate_instance(PhysicalManager *manager);
+      void invalidate_instance(PhysicalManager *manager);
+    public:
+      bool create_physical_instance(const LayoutConstraintSet &contraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, MapperID mapper_id,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, UniqueID creator_id,
+                                    bool remote = false);
+      bool create_physical_instance(LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, MapperID mapper_id,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, UniqueID creator_id,
+                                    bool remote = false);
+      bool find_or_create_physical_instance(
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
+                                    UniqueID creator_id, bool remote = false);
+      bool find_or_create_physical_instance(
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
+                                    UniqueID creator_id, bool remote = false);
+      bool find_physical_instance(  const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_bounds, bool remote = false);
+      bool find_physical_instance(  LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_bounds, bool remote = false);
+      void set_garbage_collection_priority(PhysicalManager *manager,
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority);
+      RtEvent acquire_instances(const std::set<PhysicalManager*> &managers,
+                                    std::vector<bool> &results);
+    public:
+      void process_instance_request(Deserializer &derez, AddressSpaceID source);
+      void process_instance_response(Deserializer &derez,AddressSpaceID source);
+      void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
+      void process_never_gc_response(Deserializer &derez);
+      void process_acquire_request(Deserializer &derez, AddressSpaceID source);
+      void process_acquire_response(Deserializer &derez);
     protected:
+      bool find_satisfying_instance(const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
+      bool find_satisfying_instance(LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
+      bool find_satisfying_instance(const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
+                                    std::set<PhysicalManager*> &candidates,
+                                    bool acquire,bool tight_bounds,bool remote);
+      bool find_satisfying_instance(LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
+                                    std::set<PhysicalManager*> &candidates,
+                                    bool acquire,bool tight_bounds,bool remote);
+      bool find_valid_instance(     const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
+      bool find_valid_instance(     LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
+    protected:
+      PhysicalManager* allocate_physical_instance(
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    UniqueID creator_id);
+      PhysicalManager* find_and_record(PhysicalManager *manager, 
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    const std::set<PhysicalManager*> &cands,
+                                    bool acquire, MapperID mapper_id, 
+                                    Processor proc, GCPriority priority,
+                                    bool tight_region_bounds, bool remote);
+      PhysicalManager* find_and_record(PhysicalManager *manager, 
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    const std::set<PhysicalManager*> &cands,
+                                    bool acquire, MapperID mapper_id, 
+                                    Processor proc, GCPriority priority,
+                                    bool tight_region_bounds, bool remote);
+      void record_created_instance( PhysicalManager *manager, bool acquire,
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority, bool remote);
+      RtEvent record_deleted_instance(PhysicalManager *manager); 
+      void find_instances_by_state(size_t needed_size, InstanceState state, 
+                     std::set<CollectableInfo<true> > &smaller_instances,
+                     std::set<CollectableInfo<false> > &larger_instances) const;
+      template<bool SMALLER>
+      PhysicalManager* delete_and_allocate(InstanceBuilder &builder, 
+                            size_t needed_size, size_t &total_bytes_deleted,
+                      const std::set<CollectableInfo<SMALLER> > &instances);
+    public:
       // The memory that we are managing
       const Memory memory;
+      // The owner address space
+      const AddressSpaceID owner_space;
+      // Is this the owner memory or not
+      const bool is_owner;
       // The capacity in bytes of this memory
       const size_t capacity;
       // The remaining capacity in this memory
       size_t remaining_capacity;
       // The runtime we are associate with
-      Internal *const runtime;
+      Runtime *const runtime;
+    protected:
       // Reservation for controlling access to the data
       // structures in this memory manager
       Reservation manager_lock;
-      // Current set of physical instances and their sizes
-      LegionMap<InstanceManager*, size_t, 
-                MEMORY_INSTANCES_ALLOC>::tracked physical_instances;
-      // Current set of reduction instances and their sizes
-      LegionMap<ReductionManager*, size_t,
-                MEMORY_REDUCTION_ALLOC>::tracked reduction_instances;
+      // We maintain several sets of instances here
+      // This is a generic list that tracks all the allocated instances
+      // It is only valid on the owner node
+      LegionMap<PhysicalManager*,InstanceInfo,
+                MEMORY_INSTANCES_ALLOC>::tracked current_instances;
     };
 
     /**
@@ -684,18 +770,18 @@ namespace LegionRuntime {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Internal *runtime, Processor target);
+                           Runtime *runtime, Processor target);
       void process_message(const void *args, size_t arglen, 
-                        Internal *runtime, AddressSpaceID remote_address_space);
+                        Runtime *runtime, AddressSpaceID remote_address_space);
     private:
-      void send_message(bool complete, Internal *runtime, Processor target);
-      void handle_messages(unsigned num_messages, Internal *runtime, 
+      void send_message(bool complete, Runtime *runtime, Processor target);
+      void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
                            const void *args, size_t arglen);
     public:
-      Event notify_pending_shutdown(void);
+      RtEvent notify_pending_shutdown(void);
       bool has_recent_messages(void) const;
       void clear_recent_messages(void);
     private:
@@ -703,7 +789,7 @@ namespace LegionRuntime {
       char *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
-      Event last_message_event;
+      RtEvent last_message_event;
       MessageHeader header;
       unsigned packaged_messages;
       bool partial;
@@ -740,14 +826,14 @@ namespace LegionRuntime {
     class MessageManager { 
     public:
       MessageManager(AddressSpaceID remote, 
-                     Internal *rt, size_t max,
+                     Runtime *rt, size_t max,
                      const std::set<Processor> &procs);
       MessageManager(const MessageManager &rhs);
       ~MessageManager(void);
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      Event notify_pending_shutdown(void);
+      RtEvent notify_pending_shutdown(void);
       bool has_recent_messages(void) const;
       void clear_recent_messages(void);
     public:
@@ -758,7 +844,7 @@ namespace LegionRuntime {
     public:
       const AddressSpaceID remote_address_space;
     private:
-      Internal *const runtime;
+      Runtime *const runtime;
       // State for sending messages
       Processor target;
       VirtualChannel *const channels; 
@@ -783,7 +869,7 @@ namespace LegionRuntime {
         bool result;
       };
     public:
-      ShutdownManager(Internal *rt, AddressSpaceID source, MessageManager *man);
+      ShutdownManager(Runtime *rt, AddressSpaceID source, MessageManager *man);
       ShutdownManager(const ShutdownManager &rhs);
       ~ShutdownManager(void);
     public:
@@ -799,7 +885,7 @@ namespace LegionRuntime {
       void record_outstanding_profiling_requests(void);
       void finalize(void);
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
       const AddressSpaceID source; 
       MessageManager *const source_manager;
     protected:
@@ -822,19 +908,20 @@ namespace LegionRuntime {
         LogicalView *view;
       };
     public:
-      GarbageCollectionEpoch(Internal *runtime);
+      GarbageCollectionEpoch(Runtime *runtime);
       GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
       ~GarbageCollectionEpoch(void);
     public:
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
-      void add_collection(LogicalView *view, Event term_event);
-      Event launch(int priority);
+      void add_collection(LogicalView *view, ApEvent term_event,
+                          ReferenceMutator *mutator);
+      RtEvent launch(void);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
-      Internal *const runtime;
+      Runtime *const runtime;
       int remaining;
-      std::map<LogicalView*,std::set<Event> > collections;
+      std::map<LogicalView*,std::set<ApEvent> > collections;
     };
 
     /**
@@ -852,7 +939,7 @@ namespace LegionRuntime {
       inline bool exists(void) const { return (ctx >= 0); }
       inline ContextID get_id(void) const 
       {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(exists());
 #endif
         return ContextID(ctx);
@@ -880,7 +967,8 @@ namespace LegionRuntime {
         LegionContinuation *continuation;
       };
     public:
-      Event defer(Internal *runtime, Event precondition = Event::NO_EVENT);
+      RtEvent defer(Runtime *runtime, 
+                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       virtual void execute(void) = 0;
     public:
@@ -905,7 +993,7 @@ namespace LegionRuntime {
       PendingVariantRegistration& operator=(
                                       const PendingVariantRegistration &rhs);
     public:
-      void perform_registration(Internal *runtime);
+      void perform_registration(Runtime *runtime);
     private:
       VariantID vid;
       bool has_return;
@@ -932,7 +1020,7 @@ namespace LegionRuntime {
         AddressSpaceID source;
       };
     public:
-      TaskImpl(TaskID tid, Internal *rt, const char *name = NULL);
+      TaskImpl(TaskID tid, Runtime *rt, const char *name = NULL);
       TaskImpl(const TaskImpl &rhs);
       ~TaskImpl(void);
     public:
@@ -941,10 +1029,9 @@ namespace LegionRuntime {
       inline bool returns_value(void) const { return has_return_type; }
     public:
       void add_variant(VariantImpl *impl);
-      VariantImpl* find_variant_impl(VariantID variant_id);
-    public:
-      // For backwards compatibility only
-      TaskVariantCollection* get_collection(void); 
+      VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
+      void find_valid_variants(std::vector<VariantID> &valid_variants, 
+                               Processor::Kind kind) const;
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -955,34 +1042,32 @@ namespace LegionRuntime {
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                               const void *value, size_t size, bool is_mutable);
       void send_semantic_request(AddressSpaceID target, SemanticTag tag, 
-                               bool can_fail, bool wait_until, UserEvent ready);
+                             bool can_fail, bool wait_until, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID target, 
-                               bool can_fail, bool wait_until, UserEvent ready);
+                             bool can_fail, bool wait_until, RtUserEvent ready);
     public:
       inline AddressSpaceID get_owner_space(void) const
         { return get_owner_space(task_id, runtime); }
-      static AddressSpaceID get_owner_space(TaskID task_id, Internal *runtime);
+      static AddressSpaceID get_owner_space(TaskID task_id, Runtime *runtime);
     public:
-      static void handle_semantic_request(Internal *runtime, 
+      static void handle_semantic_request(Runtime *runtime, 
                           Deserializer &derez, AddressSpaceID source);
-      static void handle_semantic_info(Internal *runtime,
+      static void handle_semantic_info(Runtime *runtime,
                           Deserializer &derez, AddressSpaceID source);
-      static void handle_variant_request(Internal *runtime,
+      static void handle_variant_request(Runtime *runtime,
                           Deserializer &derez, AddressSpaceID source);
     public:
       const TaskID task_id;
-      Internal *const runtime;
+      Runtime *const runtime;
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
+      std::map<VariantID,RtEvent> outstanding_requests;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
       // Track whether all these variants have a return type or not
       bool has_return_type;
       // Track whether all these variants are idempotent or not
       bool all_idempotent;
-    private:
-      // This is for backwards compatibility only
-      TaskVariantCollection *collection;
     };
 
     /**
@@ -994,7 +1079,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
-      VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
+      VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, bool ret_val, 
                   CodeDescriptor *realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
@@ -1007,23 +1092,27 @@ namespace LegionRuntime {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool returns_value(void) const { return has_return_value; }
+      inline const ExecutionConstraintSet&
+        get_execution_constraints(void) const { return execution_constraints; }
+      inline const TaskLayoutConstraintSet& 
+        get_layout_constraints(void) const { return layout_constraints; } 
     public:
-      Event dispatch_task(Processor target, SingleTask *task, 
-                          Event precondition, int priority,
+      ApEvent dispatch_task(Processor target, SingleTask *task, 
+                          ApEvent precondition, int priority,
                           Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, TaskOp *task);
     public:
       Processor::Kind get_processor_kind(bool warn) const;
     public:
-      void send_variant_response(AddressSpaceID source, UserEvent done_event);
+      void send_variant_response(AddressSpaceID source, RtUserEvent done_event);
     public:
-      static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
-      static void handle_variant_response(Internal *runtime, 
+      static AddressSpaceID get_owner_space(VariantID vid, Runtime *runtime);
+      static void handle_variant_response(Runtime *runtime, 
                                           Deserializer &derez);
     public:
       const VariantID vid;
       TaskImpl *const owner;
-      Internal *const runtime;
+      Runtime *const runtime;
       const bool global; // globally valid variant
       const bool has_return_value; // has a return value
     public:
@@ -1034,7 +1123,7 @@ namespace LegionRuntime {
     private:
       void *user_data;
       size_t user_data_size;
-      Event ready_event;
+      ApEvent ready_event;
     private: // properties
       bool leaf_variant;
       bool inner_variant;
@@ -1046,62 +1135,80 @@ namespace LegionRuntime {
     /**
      * \class LayoutConstraints
      * A class for tracking a long-lived set of constraints
+     * These can be moved around the system and referred to in 
+     * variout places so we make it a distributed collectable
      */
-    class LayoutConstraints : public LayoutConstraintSet {
+    class LayoutConstraints : 
+      public LayoutConstraintSet, public Collectable {
     public:
       static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
-    public:
-      struct ReleaseFunctor {
+    protected:
+      struct RemoveFunctor {
       public:
-        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Internal *rt) 
-          : rez(r), to_skip(skip), runtime(rt) { }
+        RemoveFunctor(Serializer &r, Runtime *rt)
+          : rez(r), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
         Serializer &rez;
-        AddressSpaceID to_skip;
-        Internal *runtime;
+        Runtime *runtime;
       };
     public:
-      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime, 
+      LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
+                        Runtime *runtime, 
+                        AddressSpace owner_space, AddressSpaceID local_space);
+      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
-      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime);
+      LayoutConstraints(LayoutConstraintID layout_id,
+                        Runtime *runtime, const LayoutConstraintSet &cons,
+                        FieldSpace handle);
       LayoutConstraints(const LayoutConstraints &rhs);
-      ~LayoutConstraints(void);
+      virtual ~LayoutConstraints(void);
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
     public:
       inline FieldSpace get_field_space(void) const { return handle; }
-      inline Event get_ready_event(void) const { return ready_event; }
       inline const char* get_name(void) const { return constraints_name; }
+      inline bool is_owner(void) const { return (owner_space == local_space); }
     public:
-      void release_constraints(AddressSpaceID source);
-      void send_constraints(AddressSpaceID source, UserEvent done_event);
+      void send_constraint_response(AddressSpaceID source,
+                                    RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
+      void release_remote_instances(void);
     public:
-      AddressSpaceID get_owner(void) const;
-      static AddressSpaceID get_owner(LayoutConstraintID layout_id,
-                                      Internal *runtime);
+      bool entails(LayoutConstraints *other_constraints);
+      bool entails(const LayoutConstraintSet &other) const;
+      bool conflicts(LayoutConstraints *other_constraints);
+      bool conflicts(const LayoutConstraintSet &other) const;
+      bool entails_without_pointer(LayoutConstraints *other);
+      bool entails_without_pointer(const LayoutConstraintSet &other) const;
     public:
-      static void process_request(Internal *runtime, Deserializer &derez,
+      static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
+                                            Runtime *runtime);
+    public:
+      static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static void process_response(Internal *runtime, Deserializer &derez);
-      static void process_release(Internal *runtime, Deserializer &derez,
-                                  AddressSpaceID source);
+      static LayoutConstraintID process_response(Runtime *runtime, 
+                          Deserializer &derez, AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
-      Internal *const runtime;
+      const FieldSpace handle;
+      const AddressSpace owner_space;
+      const AddressSpace local_space;
+      Runtime *const runtime;
     protected:
-      FieldSpace handle;
-      Event ready_event;
       char *constraints_name;
-    protected:
       Reservation layout_lock;
-      NodeSet remote_instances; // only valid on the owner node
+    protected:
+      std::map<LayoutConstraintID,bool> conflict_cache;
+      std::map<LayoutConstraintID,bool> entailment_cache;
+      std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
+    protected:
+      NodeSet remote_instances;
     };
 
     /**
-     * \class Internal 
+     * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 
      * objects.  Most of the calls in the Runtime class translate
@@ -1109,7 +1216,7 @@ namespace LegionRuntime {
      * an extra function call overhead to every runtime call because C++
      * is terrible and doesn't have mix-in classes.
      */
-    class Internal {
+    class Runtime {
     public:
       struct DeferredRecycleArgs {
       public:
@@ -1118,16 +1225,22 @@ namespace LegionRuntime {
       };
       struct DeferredFutureSetArgs {
         HLRTaskID hlr_id;
-        Future::Impl *target;
-        Future::Impl *result;
+        FutureImpl *target;
+        FutureImpl *result;
         TaskOp *task_op;
       };
       struct DeferredFutureMapSetArgs {
         HLRTaskID hlr_id;
-        FutureMap::Impl *future_map;
-        Future::Impl *result;
+        FutureMapImpl *future_map;
+        FutureImpl *result;
         Domain domain;
         TaskOp *task_op;
+      };
+      struct DeferredEnqueueArgs {
+        HLRTaskID hlr_id;
+        ProcessorManager *manager;
+        TaskOp *task;
+        bool prev_fail;
       };
       struct MPIRankArgs {
         HLRTaskID hlr_id;
@@ -1137,17 +1250,25 @@ namespace LegionRuntime {
       struct CollectiveFutureArgs {
         HLRTaskID hlr_id;
         ReductionOpID redop;
-        Future::Impl *future;
-        Barrier barrier;
+        FutureImpl *future;
+        ApBarrier barrier;
       };
       struct MapperTaskArgs {
         HLRTaskID hlr_id;
-        Future::Impl *future;
+        FutureImpl *future;
         MapperID map_id;
         Processor proc;
-        Event event;
+        ApEvent event;
         RemoteTask *context;
       }; 
+      struct SelectTunableArgs {
+        HLRTaskID hlr_id;
+        MapperID mapper_id;
+        MappingTagID tag;
+        TunableID tunable_id;
+        SingleTask *task;
+        FutureImpl *result;
+      };
     public:
       struct ProcessorGroupInfo {
       public:
@@ -1160,21 +1281,26 @@ namespace LegionRuntime {
         ProcessorMask       processor_mask;
       };
     public:
-      Internal(Machine m, AddressSpaceID space_id,
-               const std::set<Processor> &local_procs,
-               const std::set<Processor> &local_util_procs,
-               const std::set<AddressSpaceID> &address_spaces,
-               const std::map<Processor,AddressSpaceID> &proc_spaces);
-      Internal(const Internal &rhs);
-      ~Internal(void);
+      Runtime(Machine m, AddressSpaceID space_id,
+              const std::set<Processor> &local_procs,
+              const std::set<Processor> &local_util_procs,
+              const std::set<AddressSpaceID> &address_spaces,
+              const std::map<Processor,AddressSpaceID> &proc_spaces);
+      Runtime(const Runtime &rhs);
+      ~Runtime(void);
     public:
-      Internal& operator=(const Internal&rhs);
+      Runtime& operator=(const Runtime &rhs);
     public:
+      void register_static_variants(void);
+      void register_static_constraints(void);
+      void initialize_legion_prof(void);
+      void initialize_mappers(void);
       void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor target);
-      Event launch_mapper_task(Mapper *mapper, Processor proc, 
-                               Processor::TaskFuncID tid,
-                               const TaskArgument &arg, MapperID map_id);
+      ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
+                                 Processor::TaskFuncID tid,
+                                 const TaskArgument &arg, MapperID map_id);
+      void process_mapper_task_result(const MapperTaskArgs *args);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
@@ -1182,7 +1308,7 @@ namespace LegionRuntime {
                                     const std::set<Domain> &domains);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
-      bool finalize_index_space_destroy(IndexSpace handle);
+      void finalize_index_space_destroy(IndexSpace handle);
     public:
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             const Domain &color_space,
@@ -1212,8 +1338,9 @@ namespace LegionRuntime {
                                             bool disjoint, 
                                             int part_color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                                        int part_color);
       void destroy_index_partition(Context ctx, IndexPartition handle);
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);
@@ -1310,7 +1437,11 @@ namespace LegionRuntime {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      IndexPartition get_index_partition(IndexSpace parent,
+                                         const DomainPoint &color);
       bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
+      bool has_index_partition(IndexSpace parent, 
                                const DomainPoint &color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
@@ -1319,6 +1450,8 @@ namespace LegionRuntime {
                                     const DomainPoint &color);
       IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
       bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
+      bool has_index_subspace(IndexPartition p, 
                               const DomainPoint &color);
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       bool has_multiple_domains(IndexSpace handle);
@@ -1336,22 +1469,31 @@ namespace LegionRuntime {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
                                             std::set<DomainPoint> &colors);
+      void get_index_space_partition_colors(IndexSpace handle,
+                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(Context ctx, IndexPartition p);
+      bool is_index_partition_complete(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
+      DomainPoint get_index_space_color_point(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(Context ctx, 
                                                   IndexPartition handle);
+      DomainPoint get_index_partition_color_point(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
       bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      unsigned get_index_space_depth(Context ctx, IndexSpace handle);
+      unsigned get_index_space_depth(IndexSpace handle);
+      unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
+      unsigned get_index_partition_depth(IndexPartition handle);
     public:
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       DomainPoint safe_cast(Context ctx, DomainPoint point, 
@@ -1362,8 +1504,9 @@ namespace LegionRuntime {
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
-                                  std::set<FieldID> &fields);
-      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
+                                  std::vector<FieldID> &fields);
+      void get_field_space_fields(FieldSpace handle, 
+                                  std::vector<FieldID> &fields);
       // Called from deletion op
       void finalize_field_space_destroy(FieldSpace handle);
       void finalize_field_destroy(FieldSpace handle, FieldID fid);
@@ -1375,7 +1518,7 @@ namespace LegionRuntime {
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
       // Called from deletion ops
-      bool finalize_logical_region_destroy(LogicalRegion handle);
+      void finalize_logical_region_destroy(LogicalRegion handle);
       void finalize_logical_partition_destroy(LogicalPartition handle);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
@@ -1390,7 +1533,11 @@ namespace LegionRuntime {
                                                       const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
+                                                      const DomainPoint &c);
       bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
+                                          const DomainPoint &color);
+      bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
@@ -1411,7 +1558,11 @@ namespace LegionRuntime {
                                                    const DomainPoint &c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
+                                                   const DomainPoint &c);
       bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
+                                          const DomainPoint &color);
+      bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
@@ -1422,8 +1573,14 @@ namespace LegionRuntime {
                                                   RegionTreeID tid);
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
       Color get_logical_region_color(LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(Context ctx, 
+                                                 LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(Context ctx, 
+                                                    LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
@@ -1438,9 +1595,10 @@ namespace LegionRuntime {
       ArgumentMap create_argument_map(Context ctx);
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
-      FutureMap execute_index_space(Context ctx, const IndexLauncher &launcher);
-      Future execute_index_space(Context ctx, const IndexLauncher &launcher,
-                                 ReductionOpID redop);
+      FutureMap execute_index_space(Context ctx, 
+                                            const IndexLauncher &launcher);
+      Future execute_index_space(Context ctx, 
+                        const IndexLauncher &launcher, ReductionOpID redop);
       Future execute_task(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
@@ -1477,8 +1635,10 @@ namespace LegionRuntime {
                           MapperID id = 0, 
                           MappingTagID tag = 0);
     public:
-      PhysicalRegion map_region(Context ctx, const InlineLauncher &launcher);
-      PhysicalRegion map_region(Context ctx, const RegionRequirement &req, 
+      PhysicalRegion map_region(Context ctx, 
+                                const InlineLauncher &launcher);
+      PhysicalRegion map_region(Context ctx, 
+                                const RegionRequirement &req, 
                                 MapperID id = 0, MappingTagID tag = 0);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
                                 MapperID id = 0, MappingTagID tag = 0);
@@ -1518,10 +1678,10 @@ namespace LegionRuntime {
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
-      Predicate predicate_not(Context ctx, const Predicate &p); 
+      Predicate predicate_not(Context ctx, const Predicate &p);
       Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2); 
-      Predicate predicate_or(Context ctx, const Predicate &p1, 
+                                           const Predicate &p2);
+      Predicate predicate_or(Context ctx, const Predicate &p1,
                                           const Predicate &p2);  
     public:
       Lock create_lock(Context ctx);
@@ -1559,8 +1719,12 @@ namespace LegionRuntime {
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
+    public:
+      Future select_tunable_value(Context ctx, TunableID tid,
+                                  MapperID mid, MappingTagID tag);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
+      void perform_tunable_selection(const SelectTunableArgs *args);
     public:
       Future get_current_time(Context ctx, const Future &precondition);
       Future get_current_time_in_microseconds(Context ctx, const Future &pre);
@@ -1574,11 +1738,15 @@ namespace LegionRuntime {
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
+      Mapping::MapperRuntime* get_mapper_runtime(void);
       MapperID generate_dynamic_mapper_id(void);
       static MapperID& get_current_static_mapper_id(void);
       static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
+      MapperManager* find_mapper(Processor target, MapperID map_id);
+      static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
+                                        MapperID map_id, Processor proc);
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
@@ -1646,27 +1814,24 @@ namespace LegionRuntime {
                                  bool check_task_id = true);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
-      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
-      // For backwards compatiblity only
-      TaskVariantCollection* get_collection(TaskID task_id);
+      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
+                                     bool can_fail = false);
     public:
       // Memory manager functions
-      MemoryManager* find_memory(Memory mem);
-      void allocate_physical_instance(PhysicalManager *instance);
-      void free_physical_instance(PhysicalManager *instance);
+      MemoryManager* find_memory_manager(Memory mem);
       AddressSpaceID find_address_space(Memory handle) const;
-    public:
-      // Mapper introspection methods
-      size_t sample_allocated_space(Memory mem);
-      size_t sample_free_space(Memory mem);
-      unsigned sample_allocated_instances(Memory mem);
-      unsigned sample_unmapped_tasks(Processor proc, Mapper *mapper);
     public:
       // Messaging functions
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
-      void send_task(Processor target, TaskOp *task);
+    public:
+      void process_mapper_message(Processor target, MapperID map_id,
+                Processor source, const void *message, size_t message_size);
+      void process_mapper_broadcast(MapperID map_id, Processor source,
+                const void *message, size_t message_size, int radix, int index);
+    public:
+      void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,
                               Processor thief);
@@ -1677,11 +1842,21 @@ namespace LegionRuntime {
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
+      void send_index_space_child_response(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_index_space_colors_request(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_index_space_colors_response(AddressSpaceID target,
+                                            Serializer &rez);
+      void send_index_partition_notification(AddressSpaceID target, 
+                                             Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
       void send_index_partition_return(AddressSpaceID target, Serializer &rez);
       void send_index_partition_child_request(AddressSpaceID target,
                                               Serializer &rez);
+      void send_index_partition_child_response(AddressSpaceID target,
+                                               Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
@@ -1690,7 +1865,7 @@ namespace LegionRuntime {
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
-      void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
+      void send_top_level_region_return(AddressSpaceID target, Serializer &rez); 
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -1717,22 +1892,27 @@ namespace LegionRuntime {
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
-      void send_view_remote_registration(AddressSpaceID target,Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
+      void send_atomic_reservation_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_atomic_reservation_response(AddressSpaceID target, 
+                                            Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_materialized_update(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
-      void send_deferred_update(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
-      void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
-      void send_future(AddressSpaceID target, Serializer &rez);
+      void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
+      void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
+      void send_subview_did_request(AddressSpaceID target, Serializer &rez);
+      void send_subview_did_response(AddressSpaceID target, Serializer &rez);
+      void send_view_update_request(AddressSpaceID target, Serializer &rez);
+      void send_view_update_response(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
-      void send_make_persistent(AddressSpaceID target, Serializer &rez);
-      void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -1761,24 +1941,29 @@ namespace LegionRuntime {
                                              Serializer &rez);
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
-      void send_subscribe_remote_context(AddressSpaceID target,Serializer &rez);
-      void send_free_remote_context(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_request(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_free(AddressSpaceID target, Serializer &rez);
+      void send_remote_convert_virtual_instances(AddressSpaceID target, 
+                                                 Serializer &rez);
       void send_version_state_path_only(AddressSpaceID target, Serializer &rez);
       void send_version_state_initialization(AddressSpaceID target, 
                                              Serializer &rez);
       void send_version_state_request(AddressSpaceID target, Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
-      void send_remote_instance_creation_request(AddressSpaceID target,
-                                                 Serializer &rez);
-      void send_remote_reduction_creation_request(AddressSpaceID target,
-                                                  Serializer &rez);
-      void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
+      void send_instance_request(AddressSpaceID target, Serializer &rez);
+      void send_instance_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
+      void send_never_gc_response(AddressSpaceID target, Serializer &rez);
+      void send_acquire_request(AddressSpaceID target, Serializer &rez);
+      void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
+      void send_constraint_removal(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1788,13 +1973,21 @@ namespace LegionRuntime {
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez); 
-      void handle_index_space_child_request(Deserializer &derez); 
+      void handle_index_space_child_request(Deserializer &derez, 
+                                            AddressSpaceID source); 
+      void handle_index_space_child_response(Deserializer &derez);
+      void handle_index_space_colors_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_index_space_colors_response(Deserializer &derez);
+      void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_index_partition_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_index_partition_return(Deserializer &derez);
-      void handle_index_partition_child_request(Deserializer &derez);
+      void handle_index_partition_child_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_index_partition_child_response(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
@@ -1833,31 +2026,36 @@ namespace LegionRuntime {
       void handle_did_remote_resource_update(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
-      void handle_view_remote_registration(Deserializer &derez, 
-                                           AddressSpaceID source);
-      void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
+      void handle_send_atomic_reservation_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_materialized_update(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
-      void handle_send_deferred_update(Deserializer &derez, 
-                                       AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
-      void handle_send_reduction_update(Deserializer &derez,
-                                        AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_future_send(Deserializer &derez, AddressSpaceID source);
+      void handle_create_top_view_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_create_top_view_response(Deserializer &derez);
+      void handle_subview_did_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_subview_did_response(Deserializer &derez);
+      void handle_view_request(Deserializer &derez, AddressSpaceID source);
+      void handle_view_update_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_view_update_response(Deserializer &derez);
+      void handle_view_remote_update(Deserializer &derez,
+                                     AddressSpaceID source);
+      void handle_view_remote_invalidate(Deserializer &derez);
+      void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
-      void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
-      void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,
@@ -1888,9 +2086,11 @@ namespace LegionRuntime {
                                                AddressSpaceID source);
       void handle_logical_partition_semantic_info(Deserializer &derez,
                                                   AddressSpaceID source);
-      void handle_subscribe_remote_context(Deserializer &derez,
-                                           AddressSpaceID source);
-      void handle_free_remote_context(Deserializer &derez);
+      void handle_remote_context_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_remote_context_response(Deserializer &derez);
+      void handle_remote_context_free(Deserializer &derez);
+      void handle_remote_convert_virtual_instances(Deserializer &derez);
       void handle_version_state_path_only(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_version_state_initialization(Deserializer &derez,
@@ -1898,31 +2098,66 @@ namespace LegionRuntime {
       void handle_version_state_request(Deserializer &derez);
       void handle_version_state_response(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_remote_instance_creation(Deserializer &derez, 
-                                           AddressSpaceID source);
-      void handle_remote_reduction_creation(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_creation_response(Deserializer &derez);
+      void handle_instance_request(Deserializer &derez, AddressSpaceID source);
+      void handle_instance_response(Deserializer &derez,AddressSpaceID source);
+      void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
+      void handle_never_gc_response(Deserializer &derez);
+      void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
+      void handle_acquire_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
-      void handle_constraint_response(Deserializer &derez);
-      void handle_constraint_release(Deserializer &derez,AddressSpaceID source);
+      void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
+      void handle_constraint_release(Deserializer &derez);
+      void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
+    public: // Calls to handle mapper requests
+      bool create_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, MapperID mapper_id,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, UniqueID creator_id);
+      bool create_physical_instance(Memory target_memory, 
+                                    LayoutConstraintID layout_id,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, MapperID mapper_id,
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, UniqueID creator_id);
+      bool find_or_create_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority,
+                                    bool tight_bounds, UniqueID creator_id);
+      bool find_or_create_physical_instance(Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority,
+                                    bool tight_bounds, UniqueID creator_id);
+      bool find_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
+      bool find_physical_instance(Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef HANG_TRACE
-    public:
-      void dump_processor_states(FILE *target);
-#endif
     public:
       // Manage the execution of tasks within a context
       void activate_context(SingleTask *context);
@@ -1930,83 +2165,24 @@ namespace LegionRuntime {
     public:
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
-      void add_to_ready_queue(Processor p, TaskOp *task_op, bool prev_fail);
+      void add_to_ready_queue(Processor p, TaskOp *task_op, 
+                  bool prev_fail, RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
     public:
-      // These methods must be called before and after
-      // pre-empting a task for any reason to update
-      // the necessary processor manager to indicate
-      // that there is one fewer task running on the processor
-      void pre_wait(Processor proc);
-      void post_wait(Processor proc);
-    public:
-      // Invoke the mapper for a given processor
-      bool invoke_mapper_pre_map_task(Processor target, TaskOp *task);
-      void invoke_mapper_select_variant(Processor target, TaskOp *task);
-      bool invoke_mapper_map_task(Processor target, SingleTask *task);
-      void invoke_mapper_post_map_task(Processor target, TaskOp *task);
-      void invoke_mapper_failed_mapping(Processor target, Mappable *mappable);
-      void invoke_mapper_notify_result(Processor target, Mappable *mappable);
-      void invoke_mapper_slice_domain(Processor target, MultiTask *task,
-                                      std::vector<Mapper::DomainSplit> &splits);
-      bool invoke_mapper_map_inline(Processor target, Inline *op);
-      bool invoke_mapper_map_copy(Processor target, Copy *op);
-      bool invoke_mapper_speculate(Processor target, 
-                                   Mappable *mappable, bool &value);
-      void invoke_mapper_configure_context(Processor target, TaskOp *task);
-      bool invoke_mapper_rank_copy_targets(Processor target, Mappable *mappable,
-                                           LogicalRegion handle, 
-                                           const std::set<Memory> &memories,
-                                           bool complete,
-                                           size_t max_blocking_factor,
-                                           std::set<Memory> &to_reuse,
-                                           std::vector<Memory> &to_create,
-                                           bool &create_one,
-                                           size_t &blocking_factor);
-      void invoke_mapper_rank_copy_sources(Processor target, Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &chosen_order);
-      void invoke_mapper_notify_profiling(Processor target, TaskOp *task);
-      bool invoke_mapper_map_must_epoch(Processor target, 
-                                        const std::vector<Task*> &tasks,
-                      const std::vector<Mapper::MappingConstraint> &constraints,
-                                        MapperID map_id, MappingTagID tag);
-      void invoke_mapper_handle_message(Processor target, MapperID map_id,
-                          Processor source, const void *message, size_t length);
-      void invoke_mapper_broadcast(MapperID map_id, Processor source,
-                                   const void *message, size_t length,
-                                   int radix, int index);
-      void invoke_mapper_task_result(MapperID map_id, Processor source,
-                                     Event event, const void *result,
-                                     size_t result_size);
-    public:
-      // Handle directions and query requests from the mapper
-      Processor locate_mapper_info(Mapper *mapper, MapperID &map_id);
-      void handle_mapper_send_message(Mapper *mapper, Processor target, 
-                                      const void *message, size_t length);
-      void handle_mapper_broadcast(Mapper *mapper, const void *message,
-                                   size_t length, int radix);
-      Event launch_mapper_task(Mapper *mapper, Processor::TaskFuncID tid,
-                               const TaskArgument &arg);
-      void defer_mapper_call(Mapper *mapper, Event wait_on);
-    public:
       inline Processor find_utility_group(void) { return utility_group; }
-      Processor find_processor_group(const std::set<Processor> &procs);
-      Event issue_runtime_meta_task(const void *args, size_t arglen,
-                                    HLRTaskID tid, Operation *op = NULL,
-                                    Event precondition = Event::NO_EVENT, 
-                                    int priority = 0, 
-                                    bool holds_reservation = false,
-                                    Processor proc = Processor::NO_PROC);
-    public:
-      void allocate_context(SingleTask *task);
-      void free_context(SingleTask *task);
+      Processor find_processor_group(const std::vector<Processor> &procs);
+      ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
+      RtEvent issue_runtime_meta_task(const void *args, size_t arglen,
+                                  HLRTaskID tid, HLRPriority hlr_priority,
+                                  Operation *op = NULL,
+                                  RtEvent precondition = RtEvent::NO_RT_EVENT, 
+                                  Processor proc = Processor::NO_PROC); 
     public:
       DistributedID get_available_distributed_id(bool need_cont, 
                                                  bool has_lock = false);
       void free_distributed_id(DistributedID did);
-      void recycle_distributed_id(DistributedID did, Event recycle_event);
+      void recycle_distributed_id(DistributedID did, RtEvent recycle_event);
+      AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc,
@@ -2016,15 +2192,21 @@ namespace LegionRuntime {
       DistributedCollectable* find_distributed_collectable(DistributedID did);
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
+      bool find_pending_collectable_location(DistributedID did,void *&location);
     public:
-      void register_future(DistributedID did, Future::Impl *impl);
-      void unregister_future(DistributedID did);
-      bool has_future(DistributedID did);
-      Future::Impl* find_future(DistributedID did);
-      Future::Impl* find_or_create_future(DistributedID did,
-                                          AddressSpaceID owner_space);
+      LogicalView* find_or_request_logical_view(DistributedID did,
+                                                RtEvent &ready);
+      PhysicalManager* find_or_request_physical_manager(DistributedID did, 
+                                                        RtEvent &ready);
+    protected:
+      template<typename T, MessageKind MK, VirtualChannelKind VC>
+      DistributedCollectable* find_or_request_distributed_collectable(
+                                            DistributedID did, RtEvent &ready);
     public:
-      void defer_collect_user(LogicalView *view, Event term_event);
+      FutureImpl* find_or_create_future(DistributedID did,Operation *requestor);
+    public:
+      void defer_collect_user(LogicalView *view, ApEvent term_event, 
+                              ReferenceMutator *mutator);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
       void increment_outstanding_top_level_tasks(void);
@@ -2036,10 +2218,15 @@ namespace LegionRuntime {
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
+#ifdef DEBUG_LEGION
+      void increment_total_outstanding_tasks(unsigned tid, bool meta);
+      void decrement_total_outstanding_tasks(unsigned tid, bool meta);
+#else
       inline void increment_total_outstanding_tasks(void)
         { __sync_fetch_and_add(&total_outstanding_tasks,1); }
       inline void decrement_total_outstanding_tasks(void)
         { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
+#endif
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -2140,13 +2327,15 @@ namespace LegionRuntime {
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
     public:
-      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
-                                              SingleTask *remote_parent_ctx); 
-      SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
-      void release_remote_context(UniqueID remote_owner_uid);
+      void allocate_local_context(SingleTask *task);
+      void free_local_context(SingleTask *task);
+      void register_remote_context(UniqueID context_uid, RemoteTask *context);
+      void unregister_remote_context(UniqueID context_uid);
+      SingleTask* find_context(UniqueID context_uid, 
+                               bool return_null_if_not_found = false);
     public:
       bool is_local(Processor proc) const;
-      Processor find_utility_processor(Processor proc);
+      void find_visible_memories(Processor proc, std::set<Memory> &visible);
     public:
       IndexSpaceID       get_unique_index_space_id(void);
       IndexPartitionID   get_unique_index_partition_id(void);
@@ -2210,7 +2399,9 @@ namespace LegionRuntime {
       void process_message_task(const void *args, size_t arglen);
     public:
       // The Runtime wrapper for this class
-      Runtime *const high_level;
+      Legion::Runtime *const external;
+      // The Mapper Runtime for this class
+      Legion::Mapping::MapperRuntime *const mapper_runtime;
       // The machine object for this runtime
       const Machine machine;
       const AddressSpaceID address_space; 
@@ -2220,6 +2411,10 @@ namespace LegionRuntime {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
+#ifdef DEBUG_LEGION
+      Reservation outstanding_task_lock;
+      std::map<std::pair<unsigned,bool>,unsigned> outstanding_task_counts;
+#endif
       unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
@@ -2255,6 +2450,7 @@ namespace LegionRuntime {
       // Constraint sets
       Reservation layout_constraints_lock;
       std::map<LayoutConstraintID,LayoutConstraints*> layout_constraints_table;
+      std::map<LayoutConstraintID,RtEvent> pending_constraint_requests;
     protected:
       struct MapperInfo {
         MapperInfo(void)
@@ -2268,7 +2464,7 @@ namespace LegionRuntime {
       Reservation mapper_info_lock;
       // For every mapper remember its mapper ID and processor
       std::map<Mapper*,MapperInfo> mapper_infos;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
     protected:
       friend class TreeStateLogger;
       TreeStateLogger *get_tree_state_logger(void) { return tree_state_logger; }
@@ -2290,15 +2486,14 @@ namespace LegionRuntime {
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;
-      std::map<AddressSpace,int> reverse_mpi_mapping;
-    protected:
-      Reservation available_lock;
-      unsigned total_contexts;
-      std::deque<RegionTreeContext> available_contexts;
+      std::map<AddressSpace,int> reverse_mpi_mapping; 
     protected:
       Reservation group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
+    protected:
+      Reservation processor_mapping_lock;
+      std::map<Processor,unsigned> processor_mapping;
     protected:
       Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
@@ -2308,6 +2503,8 @@ namespace LegionRuntime {
       Reservation distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
                 RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
+      std::map<DistributedID,
+        std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;
@@ -2315,16 +2512,15 @@ namespace LegionRuntime {
                 RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
       unsigned gc_epoch_counter;
     protected:
-      // Keep track of futures
-      Reservation future_lock;
-      LegionMap<DistributedID,Future::Impl*,
-                RUNTIME_FUTURE_ALLOC>::tracked local_futures;
-    protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
-      Reservation remote_lock;
+      Reservation context_lock;
+      std::map<UniqueID,SingleTask*> local_contexts;
       LegionMap<UniqueID,RemoteTask*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+      std::map<UniqueID,RtUserEvent> pending_remote_contexts;
+      unsigned total_contexts;
+      std::deque<RegionTreeContext> available_contexts;
     protected:
       // For generating random numbers
       Reservation random_lock;
@@ -2410,7 +2606,7 @@ namespace LegionRuntime {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-#if defined(DEBUG_HIGH_LEVEL) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -2433,7 +2629,11 @@ namespace LegionRuntime {
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
           LayoutConstraintID id);
-      void release_layout(LayoutConstraintID layout_id, AddressSpaceID source);
+      LayoutConstraints* register_layout(FieldSpace handle,
+                                         const LayoutConstraintSet &cons);
+      bool register_layout(LayoutConstraints *new_constraints, bool needs_lock);
+      void release_layout(LayoutConstraintID layout_id);
+      void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(
                                      const LayoutConstraintRegistrar &registrar,
                                      LayoutConstraintID layout_id);
@@ -2441,7 +2641,8 @@ namespace LegionRuntime {
       void get_layout_constraints(LayoutConstraintID layout_id,
                                   LayoutConstraintSet &layout_constraints);
       const char* get_layout_constraints_name(LayoutConstraintID layout_id);
-      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id);
+      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id,
+                                                 bool can_fail = false);
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
@@ -2453,7 +2654,7 @@ namespace LegionRuntime {
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
-      static Internal* get_runtime(Processor p);
+      static Runtime* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
@@ -2488,12 +2689,14 @@ namespace LegionRuntime {
     private:
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
-      static Event register_runtime_tasks(RealmRuntime &realm);
+      static RtEvent register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
     public:
       // Static member variables
-      static Internal *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
+      static Runtime *the_runtime;
+      // the runtime map is only valid when running with -hl:separate
+      static std::map<Processor,Runtime*> *runtime_map;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
@@ -2509,13 +2712,17 @@ namespace LegionRuntime {
       static bool stealing_disabled;
       static bool resilient_mode;
       static bool unsafe_launch;
+      static bool unsafe_mapper;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
+      static bool enable_test_mapper;
+      static bool legion_ldb_enabled;
+      static const char* replay_file;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;
-      static UserEvent mpi_rank_event;
-#ifdef DEBUG_HIGH_LEVEL
+      static RtUserEvent mpi_rank_event;
+#ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
       static bool verbose_logging;
       static bool logical_logging_only;
@@ -2524,42 +2731,72 @@ namespace LegionRuntime {
       static bool verify_disjointness;
       static bool bit_mask_logging;
 #endif
-#ifdef INORDER_EXECUTION
       static bool program_order_execution;
-#endif
-#ifdef DEBUG_PERF
-    public:
-      static unsigned long long perf_trace_tolerance;
-#endif
     public:
       static unsigned num_profiling_nodes;
+    public:
+      static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
+      static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
+      static inline ApEvent merge_events(const std::set<ApEvent> &events);
+    public:
+      static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
+      static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
+      static inline RtEvent merge_events(const std::set<RtEvent> &events);
+    public:
+      static inline ApUserEvent create_ap_user_event(void);
+      static inline void trigger_event(ApUserEvent to_trigger,
+                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline RtUserEvent create_rt_user_event(void);
+      static inline void trigger_event(RtUserEvent to_trigger,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+    public:
+      static inline RtEvent protect_event(ApEvent to_protect);
+      static inline RtEvent protect_merge_events(
+                                          const std::set<ApEvent> &events);
+    public:
+      static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
+                unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
+                const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
+      static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
+      static inline void advance_barrier(PhaseBarrier &bar);
+      static inline bool get_barrier_result(ApBarrier bar, void *result,
+                                            size_t result_size);
+    public:
+      static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
+                                   ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline RtEvent acquire_rt_reservation(Reservation r,bool exclusive,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT);
+      static inline void release_reservation(Reservation r,
+                                   LgEvent precondition = LgEvent::NO_LG_EVENT);
     };
 
     /**
      * \class GetAvailableContinuation
      * Continuation class for obtaining resources from the runtime
      */
-    template<typename T, T (Internal::*FUNC_PTR)(bool,bool)>
+    template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
     class GetAvailableContinuation : public LegionContinuation {
     public:
-      GetAvailableContinuation(Internal *rt, Reservation r)
+      GetAvailableContinuation(Runtime *rt, Reservation r)
         : runtime(rt), reservation(r) { }
     public:
       inline T get_result(void)
       {
         // Try to take the reservation, see if we get it
-        Event acquire_event = reservation.acquire();
+        RtEvent acquire_event = 
+          Runtime::acquire_rt_reservation(reservation, true/*exclusive*/);
         if (acquire_event.has_triggered())
         {
           // We got it! Do it now!
           result = (runtime->*FUNC_PTR)(false/*do continuation*/,
                                         true/*has lock*/);
-          reservation.release();
+          Runtime::release_reservation(reservation);
           return result;
         }
         // Otherwise we didn't get so issue the deferred task
         // to avoid waiting for a reservation in an application task
-        Event done_event = defer(runtime, acquire_event);
+        RtEvent done_event = defer(runtime, acquire_event);
         done_event.wait();
         return result;
       }
@@ -2569,10 +2806,10 @@ namespace LegionRuntime {
         result = (runtime->*FUNC_PTR)(false/*do continuation*/,
                                       true/*has lock*/); 
         // Now release the reservation 
-        reservation.release();
+        Runtime::release_reservation(reservation);
       }
     protected:
-      Internal *const runtime;
+      Runtime *const runtime;
       Reservation reservation;
       T result;
     };
@@ -2585,7 +2822,7 @@ namespace LegionRuntime {
     public:
       RegisterDistributedContinuation(DistributedID id,
                                       DistributedCollectable *d,
-                                      Internal *rt)
+                                      Runtime *rt)
         : did(id), dc(d), runtime(rt) { }
     public:
       virtual void execute(void)
@@ -2595,284 +2832,49 @@ namespace LegionRuntime {
     protected:
       const DistributedID did;
       DistributedCollectable *const dc;
-      Internal *const runtime;
+      Runtime *const runtime;
     };
 
     /**
-     * \class CheckMessagesContinuation
-     * A helper class for doing continuation for checking mapper messages
+     * \class FindMapperContinuation
      */
-    class CheckMessagesContinuation : public LegionContinuation {
+    class FindMapperContinuation : public LegionContinuation {
     public:
-      CheckMessagesContinuation(ProcessorManager *m, MapperID mid)
-        : manager(m), map_id(mid) { }
+      FindMapperContinuation(const ProcessorManager *man, MapperID mid)
+        : manager(man), map_id(mid), result(NULL) {  }
     public:
       virtual void execute(void)
       {
-        manager->check_mapper_messages(map_id, false/*need lock*/);
+        result = manager->find_mapper(map_id, false/*need lock*/); 
       }
+    public:
+      inline MapperManager* get_result(void) const { return result; }
     protected:
-      ProcessorManager *const manager;
-      MapperID map_id;
+      const ProcessorManager *const manager;
+      const MapperID map_id;
+      MapperManager *result;
     };
 
     /**
-     * \class MapperContinuation
-     * A series of templated classes for mapper calls with varying
-     * numbers of arguments. It would be really nice to use 
-     * variadic templates here.
+     * \class RegisterConstraintsContinuation
      */
-    class MapperContinuation : public LegionContinuation {
+    class RegisterConstraintsContinuation : public LegionContinuation {
     public:
-      MapperContinuation(ProcessorManager *m, MapperID mid)
-        : manager(m), map_id(mid) 
-      { done_event = UserEvent::create_user_event(); }
+      RegisterConstraintsContinuation(LayoutConstraints *cons, Runtime *rt)
+        : constraints(cons), runtime(rt) { }
     public:
-      inline void complete_mapping(void)
-      {
-        done_event.trigger();
-      }
-      virtual void execute(void) = 0;
-    protected:
-      ProcessorManager *const manager;
-      MapperID map_id;
-      UserEvent done_event;
-    };
-
-    template<typename T1, void (Mapper::*CALL)(T1), bool BLOCK>
-    class MapperContinuation1NoRet : public MapperContinuation {
-    public:
-      MapperContinuation1NoRet(ProcessorManager *m, MapperID mid,
-                               const T1 &a1)
-        : MapperContinuation(m, mid), arg1(a1) { }
-    public:
-      inline void perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        (mapper->*CALL)(arg1);
-      }
       virtual void execute(void)
       {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
+        runtime->register_layout(constraints, false/*need lock*/);
       }
     protected:
-      const T1 &arg1;
-    };
-
-    template<typename T, typename T1, T (Mapper::*CALL)(T1), bool BLOCK>
-    class MapperContinuation1Ret : public MapperContinuation {
-    public:
-      MapperContinuation1Ret(ProcessorManager *m, MapperID mid,
-                             T init, const T1 &a1)
-        : MapperContinuation(m, mid), arg1(a1), result(init) { }
-    public:
-      inline T perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-        return result;
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        result = (mapper->*CALL)(arg1);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      T result;
-    };
-
-    template<typename T1, typename T2, void (Mapper::*CALL)(T1,T2), bool BLOCK>
-    class MapperContinuation2NoRet : public MapperContinuation {
-    public:
-      MapperContinuation2NoRet(ProcessorManager *m, MapperID mid,
-                               const T1 &a1, const T2 &a2)
-        : MapperContinuation(m, mid), arg1(a1), arg2(a2) { }
-    public:
-      inline void perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        (mapper->*CALL)(arg1, arg2);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-    };
-
-    template<typename T, typename T1, typename T2, 
-             T (Mapper::*CALL)(T1,T2), bool BLOCK>
-    class MapperContinuation2Ret : public MapperContinuation {
-    public:
-      MapperContinuation2Ret(ProcessorManager *m, MapperID mid,
-                             T init, const T1 &a1, const T2 &a2)
-        : MapperContinuation(m, mid), arg1(a1), arg2(a2), result(init) { }
-    public:
-      inline T perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-        return result;
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        result = (mapper->*CALL)(arg1, arg2);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-      T result;
-    };
-
-    template<typename T1, typename T2, typename T3,
-             void (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-    class MapperContinuation3NoRet : public MapperContinuation {
-    public:
-      MapperContinuation3NoRet(ProcessorManager *m, MapperID mid,
-                               const T1 &a1, const T2 &a2, const T3 &a3)
-        : MapperContinuation(m, mid), arg1(a1), arg2(a2), arg3(a3) { }
-    public:
-      inline void perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        (mapper->*CALL)(arg1, arg2, arg3);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-      const T3 &arg3;
-    };
-
-    template<typename T, typename T1, typename T2, typename T3, 
-             T (Mapper::*CALL)(T1,T2,T3), bool BLOCK>
-    class MapperContinuation3Ret : public MapperContinuation {
-    public:
-      MapperContinuation3Ret(ProcessorManager *m, MapperID mid, T init,
-                             const T1 &a1, const T2 &a2, const T3 &a3)
-        : MapperContinuation(m, mid), 
-          arg1(a1), arg2(a2), arg3(a3), result(init) { }
-    public:
-      inline T perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-        return result;
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        result = (mapper->*CALL)(arg1, arg2, arg3);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-      const T3 &arg3;
-      T result;
-    };
-
-    template<typename T1, typename T2, typename T3, typename T4,
-             void (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-    class MapperContinuation4NoRet : public MapperContinuation {
-    public:
-      MapperContinuation4NoRet(ProcessorManager *m, MapperID mid,
-                               const T1 &a1, const T2 &a2, 
-                               const T3 &a3, const T4 &a4)
-        : MapperContinuation(m, mid), 
-          arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
-    public:
-      inline void perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        (mapper->*CALL)(arg1, arg2, arg3, arg4);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-      const T3 &arg3;
-      const T4 &arg4;
-    };
-
-    template<typename T, typename T1, typename T2, 
-             typename T3, typename T4,
-             T (Mapper::*CALL)(T1,T2,T3,T4), bool BLOCK>
-    class MapperContinuation4Ret : public MapperContinuation {
-    public:
-      MapperContinuation4Ret(ProcessorManager *m, MapperID mid,
-                             T init, const T1 &a1, const T2 &a2, 
-                             const T3 &a3, const T4 &a4)
-        : MapperContinuation(m, mid), 
-          arg1(a1), arg2(a2), arg3(a3), arg4(a4), result(init) { }
-    public:
-      inline T perform_mapping(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, false/*has lock*/);
-        if (!done_event.has_triggered())
-          done_event.wait();
-        return result;
-      }
-      inline void invoke_mapper(Mapper *mapper)
-      {
-        result = (mapper->*CALL)(arg1, arg2, arg3, arg4);
-      }
-      virtual void execute(void)
-      {
-        manager->invoke_mapper(map_id, *this, BLOCK, true/*has lock*/);
-      }
-    protected:
-      const T1 &arg1;
-      const T2 &arg2;
-      const T3 &arg3;
-      const T4 &arg4;
-      T result;
+      LayoutConstraints *const constraints;
+      Runtime *const runtime;
     };
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T* Internal::get_available(Reservation reservation, 
+    inline T* Runtime::get_available(Reservation reservation, 
                                       std::deque<T*> &queue, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -2897,15 +2899,271 @@ namespace LegionRuntime {
       // Couldn't find one so make one
       if (result == NULL)
         result = legion_new<T>(this);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       result->activate();
       return result;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, ApEvent e2)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::merge_events(e1, e2)); 
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      LegionSpy::log_event_dependence(e1, result);
+      LegionSpy::log_event_dependence(e2, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events(ApEvent e1, 
+                                                    ApEvent e2, ApEvent e3) 
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      LegionSpy::log_event_dependence(e1, result);
+      LegionSpy::log_event_dependence(e2, result);
+      LegionSpy::log_event_dependence(e3, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events(
+                                                const std::set<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return ApEvent::NO_AP_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      ApEvent result(Realm::Event::merge_events(*realm_events));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, RtEvent e2)
+    //--------------------------------------------------------------------------
+    {
+      // No logging for runtime operations currently
+      return RtEvent(Realm::Event::merge_events(e1, e2)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, 
+                                                    RtEvent e2, RtEvent e3) 
+    //--------------------------------------------------------------------------
+    {
+      // No logging for runtime operations currently
+      return RtEvent(Realm::Event::merge_events(e1, e2, e3)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::merge_events(
+                                                const std::set<RtEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
+      // No logging for runtime operations currently
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events(*realm_events));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      ApUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_ap_user_event(result);
+      return result;
+#else
+      return ApUserEvent(Realm::UserEvent::create_user_event());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(ApUserEvent to_trigger,
+                                                  ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_ap_user_event_trigger(to_trigger);
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      RtUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_rt_user_event(result);
+      return result;
+#else
+      return RtUserEvent(Realm::UserEvent::create_user_event());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(RtUserEvent to_trigger,
+                                                  RtEvent precondition) 
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_rt_user_event_trigger(to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::protect_event(ApEvent to_protect)
+    //--------------------------------------------------------------------------
+    {
+      if (to_protect.exists())
+        return RtEvent(Realm::Event::ignorefaults(to_protect));
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::protect_merge_events(
+                                                const std::set<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::phase_barrier_arrive(
+                  const PhaseBarrier &bar, unsigned count, ApEvent precondition,
+                  const void *reduce_value, size_t reduce_value_size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      copy.arrive(count, precondition, reduce_value, reduce_value_size);
+#ifdef LEGION_SPY
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApBarrier Runtime::get_previous_phase(
+                                                        const PhaseBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      return ApBarrier(copy.get_previous_phase());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::alter_arrival_count(PhaseBarrier &bar,
+                                                        int delta)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      bar.phase_barrier = ApBarrier(copy.alter_arrival_count(delta));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::advance_barrier(PhaseBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar.phase_barrier;
+      bar.phase_barrier = ApBarrier(copy.advance_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool Runtime::get_barrier_result(ApBarrier bar,
+                                               void *result, size_t result_size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      return copy.get_result(result, result_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::acquire_ap_reservation(Reservation r,
+                                           bool exclusive, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(r.acquire(exclusive ? 0 : 1, exclusive, precondition));
+#ifdef LEGION_SPY
+      if (precondition.exists() && !result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      if (precondition.exists())
+        LegionSpy::log_event_dependence(precondition, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtEvent Runtime::acquire_rt_reservation(Reservation r,
+                                           bool exclusive, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      return RtEvent(r.acquire(exclusive ? 0 : 1, exclusive, precondition)); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::release_reservation(Reservation r,
+                                                           LgEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      r.release(precondition);
+    }
+
+  }; // namespace Internal 
+}; // namespace Legion 
 
 #endif // __RUNTIME_H__
 

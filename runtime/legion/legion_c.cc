@@ -17,7 +17,6 @@
 #include "legion_c.h"
 #include "legion_c_util.h"
 #include "utilities.h"
-#include "default_mapper.h"
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
 #endif
@@ -31,9 +30,9 @@
 #endif
 #endif
 
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::MappingUtilities;
+using namespace Legion;
+using namespace Legion::Mapping;
+using namespace Legion::Mapping::Utilities;
 typedef CObjectWrapper::Generic Generic;
 typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
@@ -120,14 +119,12 @@ legion_domain_get_volume(legion_domain_t d_)
 
 legion_domain_t
 legion_domain_from_index_space(legion_runtime_t runtime_,
-                               legion_context_t ctx_,
                                legion_index_space_t is_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
-  return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, is));
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(is));
 }
 
 // -----------------------------------------------------------------------
@@ -156,6 +153,20 @@ legion_domain_point_from_point_3d(legion_point_3d_t p_)
   Point<3> p = CObjectWrapper::unwrap(p_);
 
   return CObjectWrapper::wrap(DomainPoint::from_point<3>(p));
+}
+
+legion_domain_point_t
+legion_domain_point_nil()
+{
+  return CObjectWrapper::wrap(DomainPoint::nil());
+}
+
+bool
+legion_domain_point_is_null(legion_domain_point_t point_)
+{
+  DomainPoint point = CObjectWrapper::unwrap(point_);
+
+  return point.is_null();
 }
 
 legion_domain_point_t
@@ -291,6 +302,49 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
 }
 
 // -----------------------------------------------------------------------
+// Point Coloring Operations
+// -----------------------------------------------------------------------
+
+legion_point_coloring_t
+legion_point_coloring_create(void)
+{
+  return CObjectWrapper::wrap(new PointColoring());
+}
+
+void
+legion_point_coloring_destroy(
+  legion_point_coloring_t handle_)
+{
+  delete CObjectWrapper::unwrap(handle_);
+}
+
+void
+legion_point_coloring_add_point(legion_point_coloring_t handle_,
+                                legion_domain_point_t color_,
+                                legion_ptr_t point_)
+{
+  PointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  ptr_t point = CObjectWrapper::unwrap(point_);
+
+  (*handle)[color].points.insert(point);
+}
+
+void
+legion_point_coloring_add_range(legion_point_coloring_t handle_,
+                                legion_domain_point_t color_,
+                                legion_ptr_t start_,
+                                legion_ptr_t end_ /**< inclusive */)
+{
+  PointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  ptr_t start = CObjectWrapper::unwrap(start_);
+  ptr_t end = CObjectWrapper::unwrap(end_);
+
+  (*handle)[color].ranges.insert(std::pair<ptr_t, ptr_t>(start, end));
+}
+
+// -----------------------------------------------------------------------
 // Domain Point Coloring Operations
 // -----------------------------------------------------------------------
 
@@ -392,14 +446,12 @@ legion_index_space_destroy(legion_runtime_t runtime_,
 
 legion_domain_t
 legion_index_space_get_domain(legion_runtime_t runtime_,
-                              legion_context_t ctx_,
                               legion_index_space_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, handle));
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(handle));
 }
 
 void
@@ -468,6 +520,28 @@ legion_index_partition_create_domain_coloring(
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     disjoint, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_point_coloring(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_t color_space_,
+  legion_point_coloring_t coloring_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+  PointColoring *coloring = CObjectWrapper::unwrap(coloring_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, color_space, *coloring,
+                                    part_kind, color);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -667,7 +741,7 @@ PartitionEqualShim::task(const Task *task,
     ptr_t start = it.next_span(count);
     size_t chunk = chunksize + (leftover > 0 ? 1 : 0);
 
-    while (elt + count >= chunk) {
+    while (count > 0 && elt + count >= chunk) {
       size_t rest = chunk - elt;
       assert(c);
       coloring[upgrade_point(c.p)].ranges.insert(std::pair<ptr_t, ptr_t>(start, start.value + rest - 1));
@@ -1196,7 +1270,7 @@ PartitionByFieldShim::task(const Task *task,
   PointColoring coloring;
   assert(args.color_space.get_dim() == 1);
 
-  Accessor::RegionAccessor<SOA, Color> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, Color> accessor =
     regions[0].get_field_accessor(args.fid).typeify<Color>().convert<SOA>();
   for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
        it.has_next();) {
@@ -1328,7 +1402,7 @@ PartitionByImageShim::task(const Task *task,
   Args &args = *(Args *)task->args;
 
   PointColoring coloring;
-  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     LogicalRegion r =
@@ -1468,7 +1542,7 @@ PartitionByPreimageShim::task(const Task *task,
   Args &args = *(Args *)task->args;
 
   PointColoring coloring;
-  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c.p);
@@ -1539,39 +1613,33 @@ legion_index_partition_create_by_preimage(
 
 bool
 legion_index_partition_is_disjoint(legion_runtime_t runtime_,
-                                   legion_context_t ctx_,
                                    legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->is_index_partition_disjoint(ctx, handle);
+  return runtime->is_index_partition_disjoint(handle);
 }
 
 bool
 legion_index_partition_is_complete(legion_runtime_t runtime_,
-                                   legion_context_t ctx_,
                                    legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->is_index_partition_complete(ctx, handle);
+  return runtime->is_index_partition_complete(handle);
 }
 
 legion_index_space_t
 legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
-                                          legion_context_t ctx_,
                                           legion_index_partition_t handle_,
                                           legion_color_t color)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+  IndexSpace is = runtime->get_index_subspace(handle, color);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1579,16 +1647,14 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
 legion_index_space_t
 legion_index_partition_get_index_subspace_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_partition_t handle_,
   legion_domain_point_t color_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
   DomainPoint color = CObjectWrapper::unwrap(color_);
 
-  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+  IndexSpace is = runtime->get_index_subspace(handle, color);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1596,56 +1662,48 @@ legion_index_partition_get_index_subspace_domain_point(
 bool
 legion_index_partition_has_index_subspace_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_partition_t handle_,
   legion_domain_point_t color_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
   DomainPoint color = CObjectWrapper::unwrap(color_);
 
-  return runtime->has_index_subspace(ctx, handle, color);
+  return runtime->has_index_subspace(handle, color);
 }
 
 legion_domain_t
 legion_index_partition_get_color_space(legion_runtime_t runtime_,
-                                       legion_context_t ctx_,
                                        legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  Domain d = runtime->get_index_partition_color_space(ctx, handle);
+  Domain d = runtime->get_index_partition_color_space(handle);
 
   return CObjectWrapper::wrap(d);
 }
 
 legion_color_t
 legion_index_partition_get_color(legion_runtime_t runtime_,
-                                 legion_context_t ctx_,
                                  legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  Color c = runtime->get_index_partition_color(ctx, handle);
+  Color c = runtime->get_index_partition_color(handle);
 
   return c;
 }
 
 legion_index_space_t
 legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
-                                              legion_context_t ctx_,
                                               legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  IndexSpace is = runtime->get_parent_index_space(ctx, handle);
+  IndexSpace is = runtime->get_parent_index_space(handle);
 
   return CObjectWrapper::wrap(is);
 }
@@ -1793,40 +1851,34 @@ legion_logical_region_destroy(legion_runtime_t runtime_,
 
 legion_color_t
 legion_logical_region_get_color(legion_runtime_t runtime_,
-                                legion_context_t ctx_,
                                 legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->get_logical_region_color(ctx, handle);
+  return runtime->get_logical_region_color(handle);
 }
 
 bool
 legion_logical_region_has_parent_logical_partition(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  return runtime->has_parent_logical_partition(ctx, handle);
+  return runtime->has_parent_logical_partition(handle);
 }
 
 legion_logical_partition_t
 legion_logical_region_get_parent_logical_partition(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_region_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalPartition p = runtime->get_parent_logical_partition(ctx, handle);
+  LogicalPartition p = runtime->get_parent_logical_partition(handle);
   return CObjectWrapper::wrap(p);
 }
 
@@ -1904,93 +1956,81 @@ legion_logical_partition_destroy(legion_runtime_t runtime_,
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_index_space_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalRegion r = runtime->get_logical_subregion(ctx, parent, handle);
+  LogicalRegion r = runtime->get_logical_subregion(parent, handle);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_color(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_color_t c)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  LogicalRegion r = runtime->get_logical_subregion_by_color(parent, c);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_color_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_domain_point_t c_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   DomainPoint c = CObjectWrapper::unwrap(c_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  LogicalRegion r = runtime->get_logical_subregion_by_color(parent, c);
   return CObjectWrapper::wrap(r);
 }
 
 bool
 legion_logical_partition_has_logical_subregion_by_color_domain_point(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t parent_,
   legion_domain_point_t c_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition parent = CObjectWrapper::unwrap(parent_);
   DomainPoint c = CObjectWrapper::unwrap(c_);
 
-  return runtime->has_logical_subregion_by_color(ctx, parent, c);
+  return runtime->has_logical_subregion_by_color(parent, c);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_tree(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_index_space_t handle_,
   legion_field_space_t fspace_,
   legion_region_tree_id_t tid)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
   FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
 
-  LogicalRegion r = runtime->get_logical_subregion_by_tree(ctx, handle, fspace, tid);
+  LogicalRegion r = runtime->get_logical_subregion_by_tree(handle, fspace, tid);
   return CObjectWrapper::wrap(r);
 }
 
 legion_logical_region_t
 legion_logical_partition_get_parent_logical_region(
   legion_runtime_t runtime_,
-  legion_context_t ctx_,
   legion_logical_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  LogicalRegion r = runtime->get_parent_logical_region(ctx, handle);
+  LogicalRegion r = runtime->get_parent_logical_region(handle);
   return CObjectWrapper::wrap(r);
 }
 
@@ -2167,137 +2207,6 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
   RegionRequirement *req = CObjectWrapper::unwrap(req_);
 
   return req->projection;
-}
-
-bool
-legion_region_requirement_get_virtual_map(legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->virtual_map;
-}
-
-void
-legion_region_requirement_set_virtual_map(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->virtual_map = value;
-}
-
-bool
-legion_region_requirement_get_early_map(legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->early_map;
-}
-
-void
-legion_region_requirement_set_early_map(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->early_map = value;
-}
-
-bool
-legion_region_requirement_get_enable_WAR_optimization(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->enable_WAR_optimization;
-}
-
-void
-legion_region_requirement_set_enable_WAR_optimization(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->enable_WAR_optimization = value;
-}
-
-bool
-legion_region_requirement_get_reduction_list(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->reduction_list;
-}
-
-void
-legion_region_requirement_set_reduction_list(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->reduction_list = value;
-}
-
-unsigned
-legion_region_requirement_get_make_persistent(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->make_persistent;
-}
-
-void
-legion_region_requirement_set_make_persistent(
-  legion_region_requirement_t req_,
-  unsigned value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->make_persistent = value;
-}
-
-unsigned
-legion_region_requirement_get_blocking_factor(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->blocking_factor;
-}
-
-void
-legion_region_requirement_set_blocking_factor(
-  legion_region_requirement_t req_,
-  unsigned value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->blocking_factor = value;
-}
-
-unsigned
-legion_region_requirement_get_max_blocking_factor(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->max_blocking_factor;
-}
-
-void
-legion_region_requirement_add_target_ranking(
-  legion_region_requirement_t req_,
-  legion_memory_t memory)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->target_ranking.push_back(CObjectWrapper::unwrap(memory));
 }
 
 // -------------------------------------------------------
@@ -2711,6 +2620,10 @@ legion_future_get_untyped_pointer(legion_future_t handle_)
   return handle->get_untyped_pointer();
 }
 
+// -----------------------------------------------------------------------
+// Task Result Operations
+// -----------------------------------------------------------------------
+
 legion_task_result_t
 legion_task_result_create(const void *handle, size_t size)
 {
@@ -2726,6 +2639,32 @@ void
 legion_task_result_destroy(legion_task_result_t handle)
 {
   free(handle.value);
+}
+
+size_t
+legion_task_result_serialize(legion_task_result_t handle_,
+                             void *buffer)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_serialize(buffer);
+}
+
+size_t
+legion_task_result_buffer_size(legion_task_result_t handle_)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_buffer_size();
+}
+
+size_t
+legion_task_result_deserialize(legion_task_result_t handle_,
+                               const void *buffer)
+{
+  TaskResult handle = CObjectWrapper::unwrap(handle_);
+
+  return handle.legion_deserialize(buffer);
 }
 
 // -----------------------------------------------------------------------
@@ -3723,7 +3662,7 @@ legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle_,
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
   ptr_t ptr = CObjectWrapper::unwrap(ptr_);
 
-  Accessor::ByteOffset stride;
+  LegionRuntime::Accessor::ByteOffset stride;
   void *data = handle->raw_span_ptr(ptr, req_count, *act_count, stride);
   *stride_ = CObjectWrapper::wrap(stride);
   return data;
@@ -3739,7 +3678,7 @@ legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle_,
   Rect<1> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<1> subrect;
-  Accessor::ByteOffset offsets[1];
+  LegionRuntime::Accessor::ByteOffset offsets[1];
   void *data = handle->raw_rect_ptr<1>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);
@@ -3756,7 +3695,7 @@ legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle_,
   Rect<2> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<2> subrect;
-  Accessor::ByteOffset offsets[2];
+  LegionRuntime::Accessor::ByteOffset offsets[2];
   void *data = handle->raw_rect_ptr<2>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);
@@ -3774,7 +3713,7 @@ legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle_,
   Rect<3> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<3> subrect;
-  Accessor::ByteOffset offsets[3];
+  LegionRuntime::Accessor::ByteOffset offsets[3];
   void *data = handle->raw_rect_ptr<3>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);
@@ -4010,7 +3949,7 @@ legion_task_get_task_id(legion_task_t task_)
 }
 
 legion_processor_t
-legion_task_get_target_proc(legion_task_t task_)
+legion_task_get_target_pro(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
@@ -4018,29 +3957,11 @@ legion_task_get_target_proc(legion_task_t task_)
 }
 
 const char *
-legion_task_get_name(legion_task_t task_)
+legion_task_get_task_name(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
-  return task->variants->name;
-}
-
-void
-legion_task_set_target_proc(legion_task_t task_, legion_processor_t proc_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-  Processor proc = CObjectWrapper::unwrap(proc_);
-
-  task->target_proc = proc;
-}
-
-void
-legion_task_add_additional_proc(legion_task_t task_, legion_processor_t proc_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-  Processor proc = CObjectWrapper::unwrap(proc_);
-
-  task->additional_procs.insert(proc);
+  return task->get_task_name();
 }
 
 // -----------------------------------------------------------------------
@@ -4050,9 +3971,317 @@ legion_task_add_additional_proc(legion_task_t task_, legion_processor_t proc_)
 legion_region_requirement_t
 legion_inline_get_requirement(legion_inline_t inline_operation_)
 {
-  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
+  InlineMapping *inline_operation = 
+    CObjectWrapper::unwrap(inline_operation_);
 
   return CObjectWrapper::wrap(&inline_operation->requirement);
+}
+
+//------------------------------------------------------------------------
+// Execution Constraints
+//------------------------------------------------------------------------
+
+legion_execution_constraint_set_t
+legion_execution_constraint_set_create(void)
+{
+  ExecutionConstraintSet *constraints = new ExecutionConstraintSet();
+
+  return CObjectWrapper::wrap(constraints);
+}
+
+void
+legion_execution_constraint_set_destroy(
+  legion_execution_constraint_set_t handle_)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  delete constraints;
+}
+
+void
+legion_execution_constraint_set_add_isa_constraint(
+  legion_execution_constraint_set_t handle_,
+  uint64_t prop)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(ISAConstraint(prop));
+}
+
+void
+legion_execution_constraint_set_add_processor_constraint(
+  legion_execution_constraint_set_t handle_,
+  legion_processor_kind_t proc_kind_)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+
+  constraints->add_constraint(ProcessorConstraint(proc_kind));
+}
+
+void
+legion_execution_constraint_set_add_resource_constraint(
+  legion_execution_constraint_set_t handle_,
+  legion_resource_constraint_t resource,
+  legion_equality_kind_t eq,
+  size_t value)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(ResourceConstraint(resource, eq, value));
+}
+
+void
+legion_execution_constraint_set_add_launch_constraint(
+  legion_execution_constraint_set_t handle_,
+  legion_launch_constraint_t kind,
+  size_t value)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(LaunchConstraint(kind, value));
+}
+
+void
+legion_execution_constraint_set_add_launch_constraint_multi_dim(
+  legion_execution_constraint_set_t handle_,
+  legion_launch_constraint_t kind,
+  const size_t *values,
+  int dims)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(LaunchConstraint(kind, values, dims));
+}
+
+void
+legion_execution_constraint_set_add_colocation_constraints(
+  legion_execution_constraint_set_t handle_,
+  const unsigned *indexes,
+  size_t num_indexes,
+  const legion_field_id_t *fields,
+  size_t num_fields)
+{
+  ExecutionConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<unsigned> actual_indexes(num_indexes);
+  for (unsigned idx = 0; idx < num_indexes; idx++)
+    actual_indexes[idx] = indexes[idx];
+  std::set<FieldID> all_fields;
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    all_fields.insert(fields[idx]);
+
+  constraints->add_constraint(ColocationConstraint(actual_indexes, all_fields));
+}
+
+//------------------------------------------------------------------------
+// Layout Constraints
+//------------------------------------------------------------------------
+
+legion_layout_constraint_set_t
+legion_layout_constraint_set_create(void)
+{
+  LayoutConstraintSet *constraints = new LayoutConstraintSet();
+
+  return CObjectWrapper::wrap(constraints);
+}
+
+void
+legion_layout_constraint_set_destroy(legion_layout_constraint_set_t handle_)
+{
+  LayoutConstraintSet *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+legion_layout_constraint_id_t
+legion_layout_constraint_set_register(
+  legion_runtime_t runtime_,
+  legion_field_space_t fspace_,
+  legion_layout_constraint_set_t handle_,
+  const char *layout_name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  LayoutConstraintRegistrar registrar(fspace, layout_name);
+  registrar.layout_constraints = *constraints;
+
+  return runtime->register_layout(registrar);
+}
+
+legion_layout_constraint_id_t
+legion_layout_constraint_set_preregister(
+  legion_layout_constraint_set_t handle_,
+  const char *set_name)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  LayoutConstraintRegistrar registrar(FieldSpace::NO_SPACE, set_name);
+  registrar.layout_constraints = *constraints;
+
+  return Runtime::preregister_layout(registrar);
+}
+
+void
+legion_layout_constraint_set_release(
+  legion_runtime_t runtime_,
+  legion_layout_constraint_id_t handle)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  runtime->release_layout(handle);
+}
+
+void
+legion_layout_constraint_set_add_specialized_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_specialized_constraint_t specialized,
+  legion_reduction_op_id_t redop)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SpecializedConstraint(specialized, redop));
+}
+
+void
+legion_layout_constraint_set_add_memory_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_memory_kind_t kind_)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  constraints->add_constraint(MemoryConstraint(kind));
+}
+
+void
+legion_layout_constraint_set_add_field_constraint(
+  legion_layout_constraint_set_t handle_,
+  const legion_field_id_t *fields, size_t num_fields,
+  bool contiguous,
+  bool inorder)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> field_ids(num_fields);
+  for (unsigned idx = 0; idx < num_fields; idx++)
+    field_ids[idx] = fields[idx];
+  
+  constraints->add_constraint(FieldConstraint(field_ids, contiguous, inorder));
+}
+
+void
+legion_layout_constraint_set_add_ordering_constraint(
+ legion_layout_constraint_set_t handle_,
+ const legion_dimension_kind_t *dims,
+ size_t num_dims,
+ bool contiguous)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  std::vector<DimensionKind> ordering(num_dims);
+  for (unsigned idx = 0; idx < num_dims; idx++)
+    ordering[idx] = dims[idx];
+
+  constraints->add_constraint(OrderingConstraint(ordering, contiguous));
+}
+
+void
+legion_layout_constraint_set_add_splitting_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_dimension_kind_t dim)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SplittingConstraint(dim));
+}
+
+void
+legion_layout_constraint_set_add_full_splitting_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_dimension_kind_t dim,
+  size_t value)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(SplittingConstraint(dim, value));
+}
+
+void
+legion_layout_constraint_set_add_dimension_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_dimension_kind_t dim,
+  legion_equality_kind_t eq, size_t value)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(DimensionConstraint(dim, eq, value));
+}
+
+void
+legion_layout_constraint_set_add_alignment_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_field_id_t field,
+  legion_equality_kind_t eq,
+  size_t byte_boundary)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(AlignmentConstraint(field, eq, byte_boundary));
+}
+
+void
+legion_layout_constraint_set_add_offset_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_field_id_t field,
+  size_t offset)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+
+  constraints->add_constraint(OffsetConstraint(field, offset));
+}
+
+void
+legion_layout_constraint_set_add_pointer_constraint(
+  legion_layout_constraint_set_t handle_,
+  legion_memory_t mem_,
+  uintptr_t ptr)
+{
+  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  constraints->add_constraint(PointerConstraint(mem, ptr)); 
+}
+
+// -----------------------------------------------------------------------
+// Task Layout Constraints
+// -----------------------------------------------------------------------
+
+legion_task_layout_constraint_set_t
+legion_task_layout_constraint_set_create(void)
+{
+  TaskLayoutConstraintSet *constraints = new TaskLayoutConstraintSet();
+
+  return CObjectWrapper::wrap(constraints);
+}
+
+void
+legion_task_layout_constraint_set_destroy(
+  legion_task_layout_constraint_set_t handle_)
+{
+  TaskLayoutConstraintSet *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_task_layout_constraint_set_add_layout_constraint(
+  legion_task_layout_constraint_set_t handle_,
+  unsigned idx,
+  legion_layout_constraint_id_t layout)
+{
+  TaskLayoutConstraintSet *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->add_layout_constraint(idx, layout);
 }
 
 //------------------------------------------------------------------------
@@ -4273,65 +4502,79 @@ legion_runtime_register_task_uint64(
 legion_task_id_t
 legion_runtime_register_task_variant_fnptr(
   legion_runtime_t runtime_,
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  legion_task_config_options_t options,
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  bool global,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  legion_task_pointer_wrapped_t wrapped_task_pointer,
   const void *userdata,
-  size_t userlen,
-  legion_task_pointer_wrapped_t wrapped_task_pointer)
+  size_t userlen)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
 
-  if(id == AUTO_GENERATE_ID)
-    id = Runtime::generate_static_task_id();
-  TaskVariantRegistrar registrar(id,
-				 task_name,
-				 false /*!global*/);
+  if (id == AUTO_GENERATE_ID)
+    id = runtime->generate_dynamic_task_id();
+
+  TaskVariantRegistrar registrar(id, task_name, global);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
-  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
   code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
-  /*VariantID vid =*/ runtime->register_task_variant(registrar,
-						     code_desc,
-						     userdata,
-						     userlen);
-  if(task_name)
+
+  /*VariantID vid =*/ runtime->register_task_variant(
+    registrar, code_desc, userdata, userlen);
+
+  if (task_name)
     runtime->attach_name(id, task_name);
   return id;
 }
 
 legion_task_id_t
 legion_runtime_preregister_task_variant_fnptr(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  legion_task_config_options_t options,
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
+  legion_task_pointer_wrapped_t wrapped_task_pointer,
   const void *userdata,
-  size_t userlen,
-  legion_task_pointer_wrapped_t wrapped_task_pointer)
+  size_t userlen)
 {
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
 
-  if(id == AUTO_GENERATE_ID)
+  if (id == AUTO_GENERATE_ID)
     id = Runtime::generate_static_task_id();
-  TaskVariantRegistrar registrar(id,
-				 task_name,
-				 false /*!global*/);
+
+  TaskVariantRegistrar registrar(id, task_name);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
-  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
   code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
-  /*VariantID vid =*/ Runtime::preregister_task_variant(registrar,
-							code_desc,
-							userdata,
-							userlen,
-							task_name);
+
+  /*VariantID vid =*/ Runtime::preregister_task_variant(
+    registrar, code_desc, userdata, userlen, task_name);
+
   return id;
 }
 
@@ -4339,68 +4582,80 @@ legion_runtime_preregister_task_variant_fnptr(
 legion_task_id_t
 legion_runtime_register_task_variant_llvmir(
   legion_runtime_t runtime_,
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  bool global,
-  legion_task_config_options_t options,
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
-  const void *userdata,
-  size_t userlen,
+  bool global,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
   const char *llvmir,
-  const char *entry_symbol)
+  const char *entry_symbol,
+  const void *userdata,
+  size_t userlen)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
 
-  if(id == AUTO_GENERATE_ID)
-    id = Runtime::generate_static_task_id();
-  TaskVariantRegistrar registrar(id,
-				 task_name,
-				 global);
+  if (id == AUTO_GENERATE_ID)
+    id = runtime->generate_dynamic_task_id();
+
+  TaskVariantRegistrar registrar(id, task_name, global);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
-  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
   code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
-  /*VariantID vid =*/ runtime->register_task_variant(registrar,
-						     code_desc,
-						     userdata,
-						     userlen);
-  if(task_name)
+
+  /*VariantID vid =*/ runtime->register_task_variant(
+    registrar, code_desc, userdata, userlen);
+
+  if (task_name)
     runtime->attach_name(id, task_name);
   return id;
 }
 
 legion_task_id_t
 legion_runtime_preregister_task_variant_llvmir(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  legion_task_config_options_t options,
+  legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
-  const void *userdata,
-  size_t userlen,
+  legion_execution_constraint_set_t execution_constraints_,
+  legion_task_layout_constraint_set_t layout_constraints_,
+  legion_task_config_options_t options,
   const char *llvmir,
-  const char *entry_symbol)
+  const char *entry_symbol,
+  const void *userdata,
+  size_t userlen)
 {
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+  ExecutionConstraintSet *execution_constraints =
+    CObjectWrapper::unwrap(execution_constraints_);
+  TaskLayoutConstraintSet *layout_constraints =
+    CObjectWrapper::unwrap(layout_constraints_);
 
-  if(id == AUTO_GENERATE_ID)
+  if (id == AUTO_GENERATE_ID)
     id = Runtime::generate_static_task_id();
-  TaskVariantRegistrar registrar(id,
-				 task_name,
-				 false /*!global*/);
+
+  TaskVariantRegistrar registrar(id, task_name);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
-  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  if (layout_constraints)
+    registrar.layout_constraints = *layout_constraints;
+  if (execution_constraints)
+    registrar.execution_constraints = *execution_constraints;
+
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
   code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
-  /*VariantID vid =*/ Runtime::preregister_task_variant(registrar,
-							code_desc,
-							userdata,
-							userlen,
-							task_name);
+
+  /*VariantID vid =*/ Runtime::preregister_task_variant(
+    registrar, code_desc, userdata, userlen, task_name);
   return id;
 }
 #endif
@@ -4933,28 +5188,3 @@ legion_memory_query_random(legion_memory_query_t query_)
   return CObjectWrapper::wrap(result);
 }
 
-// -----------------------------------------------------------------------
-// Default Mapper Operations
-// -----------------------------------------------------------------------
-
-bool
-legion_default_mapper_map_task(
-  legion_default_mapper_t mapper_,
-  legion_task_t task_)
-{
-  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
-  Task *task = CObjectWrapper::unwrap(task_);
-
-  return mapper->DefaultMapper::map_task(task);
-}
-
-bool
-legion_default_mapper_map_inline(
-  legion_default_mapper_t mapper_,
-  legion_inline_t inline_operation_)
-{
-  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
-  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
-
-  return mapper->DefaultMapper::map_inline(inline_operation);
-}

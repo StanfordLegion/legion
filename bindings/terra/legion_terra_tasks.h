@@ -48,24 +48,24 @@ legion_task_result_t lua_task_wrapper(legion_task_t,
 
 
 typedef
-  struct vector_legion_domain_split_t { void *impl; }
-vector_legion_domain_split_t;
+  struct vector_legion_task_slice_t { void *impl; }
+vector_legion_task_slice_t;
 
 void
-vector_legion_domain_split_push_back(vector_legion_domain_split_t,
-                                     legion_domain_split_t);
+vector_legion_task_slice_push_back(vector_legion_task_slice_t,
+                                     legion_task_slice_t);
 
 unsigned
-vector_legion_domain_split_size(vector_legion_domain_split_t);
+vector_legion_task_slice_size(vector_legion_task_slice_t);
 
-legion_domain_split_t
-vector_legion_domain_split_get(vector_legion_domain_split_t,
+legion_task_slice_t
+vector_legion_task_slice_get(vector_legion_task_slice_t,
                                unsigned);
 
 void decompose_index_space(legion_domain_t,
                            legion_processor_t*,
                            unsigned, unsigned,
-                           vector_legion_domain_split_t);
+                           vector_legion_task_slice_t);
 
 #ifdef __cplusplus
 }

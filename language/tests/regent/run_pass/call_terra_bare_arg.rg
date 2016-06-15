@@ -14,7 +14,7 @@
 
 import "regent"
 
-cstdio = terralib.includec("stdio.h")
+local cstdio = terralib.includec("stdio.h")
 
 struct s {
   x : int
@@ -25,7 +25,7 @@ terra f(t : s)
 end
 
 task main()
-  [cstdio.printf] "hello, world!\n"
+  cstdio.printf "hello, world!\n"
   regentlib.assert(f { x = 5 } == 6, "test failed")
 end
 regentlib.start(main)

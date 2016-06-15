@@ -41,6 +41,13 @@ enum LuaMapperResult
   UNDEFINED,
 };
 
+LuaMapperWrapper::LuaMapperWrapper(Machine machine, Processor local,
+                                   const char *name)
+  : DefaultMapper(machine, local, name)
+{
+}
+
+#if 0
 // the resulting stack will have the method on top of its class
 // if the return value was 0. Once the method call is returned,
 // callers should pop out the remaining class from the stack.
@@ -270,3 +277,4 @@ void decompose_index_space(legion_domain_t domain_,
 }
 
 }
+#endif

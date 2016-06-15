@@ -486,7 +486,7 @@ namespace Realm {
       log_reservation.debug(          "reservation request granted: reservation=" IDFMT " mode=%d", // mask=%lx",
 	       args.lock.id, args.mode); //, args.remote_waiter_mask);
 
-      std::deque<Event> to_wake;
+      ReservationImpl::WaiterList to_wake;
 
       ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
       {
@@ -521,7 +521,7 @@ namespace Realm {
 	assert(any_local);
       }
 
-      for(std::deque<Event>::iterator it = to_wake.begin();
+      for(ReservationImpl::WaiterList::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
 	log_reservation.debug() << "release trigger: reservation=" << args.lock << " event=" << (*it);
@@ -544,7 +544,7 @@ namespace Realm {
 
       bool got_lock = false;
       int lock_request_target = -1;
-      std::deque<Event> bonus_grants;
+      WaiterList bonus_grants;
 
       {
 	AutoHSLLock a(mutex); // hold mutex on lock while we check things
@@ -584,7 +584,7 @@ namespace Realm {
 	    //  a retry event for that mode, we can trigger them to see if they want to come along
 	    //  for the ride
 	    if(new_mode != MODE_EXCL) {
-	      std::map<unsigned, std::deque<Event> >::iterator it = local_waiters.find(new_mode);
+	      std::map<unsigned, WaiterList>::iterator it = local_waiters.find(new_mode);
 	      if(it != local_waiters.end()) {
 		bonus_grants.swap(it->second);
 		local_waiters.erase(it);
@@ -723,7 +723,7 @@ namespace Realm {
 
       // trigger any bonus grants too
       if(!bonus_grants.empty()) {
-	for(std::deque<Event>::iterator it = bonus_grants.begin();
+	for(WaiterList::iterator it = bonus_grants.begin();
 	    it != bonus_grants.end();
 	    it++) {
 	  log_reservation.debug() << "acquire bonus grant: reservation=" << me << " event=" << (*it);
@@ -739,14 +739,14 @@ namespace Realm {
     //  found - NOTE: ASSUMES LOCK IS ALREADY HELD!
     // also looks at retry_events and triggers one of those if it's higher
     //  priority than any blocking waiter
-    bool ReservationImpl::select_local_waiters(std::deque<Event>& to_wake)
+    bool ReservationImpl::select_local_waiters(WaiterList& to_wake)
     {
       if(local_waiters.empty() && retry_events.empty())
 	return false;
 
       // further favor exclusive waiters
       if(local_waiters.find(MODE_EXCL) != local_waiters.end()) {
-	std::deque<Event>& excl_waiters = local_waiters[MODE_EXCL];
+	WaiterList& excl_waiters = local_waiters[MODE_EXCL];
 	to_wake.push_back(excl_waiters.front());
 	excl_waiters.pop_front();
 	  
@@ -759,7 +759,7 @@ namespace Realm {
 	log_reservation.spew("count <-1 [%p]=%d", &count, count);
       } else {
 	// find the highest priority retry event and also the highest priority shared blocking waiters
-	std::map<unsigned, std::deque<Event> >::iterator it = local_waiters.begin();
+	std::map<unsigned, WaiterList>::iterator it = local_waiters.begin();
 	std::map<unsigned, Event>::iterator it2 = retry_events.begin();
 
 	if((it != local_waiters.end()) &&
@@ -794,15 +794,17 @@ namespace Realm {
     {
       // make a list of events that we be woken - can't do it while holding the
       //  lock's mutex (because the event we trigger might try to take the lock)
-      std::deque<Event> to_wake;
+      WaiterList to_wake;
 
       int release_target = -1;
       int grant_target = -1;
       NodeSet copy_waiters;
 
       do {
+#ifdef RSRV_DEBUG_MSGS
 	log_reservation.debug(            "release: reservation=" IDFMT " count=%d mode=%d owner=%d", // share=%lx wait=%lx",
 			me.id, count, mode, owner); //, remote_sharer_mask, remote_waiter_mask);
+#endif
 	AutoHSLLock a(mutex); // hold mutex on lock for entire function
 
 	assert(count > ZERO_COUNT);
@@ -810,9 +812,11 @@ namespace Realm {
 	// if this isn't the last holder of the lock, just decrement count
 	//  and return
 	count--;
+#ifdef RSRV_DEBUG_MSGS
 	log_reservation.spew("count -- [%p]=%d", &count, count);
 	log_reservation.debug(            "post-release: reservation=" IDFMT " count=%d mode=%d", // share=%lx wait=%lx",
 		 me.id, count, mode); //, remote_sharer_mask, remote_waiter_mask);
+#endif
 	if(count > ZERO_COUNT) break;
 
 	// case 1: if we were sharing somebody else's lock, tell them we're
@@ -841,8 +845,10 @@ namespace Realm {
           int new_owner = 0;  while(!remote_waiter_mask.contains(new_owner)) new_owner++;
           remote_waiter_mask.remove(new_owner);
 
+#ifdef RSRV_DEBUG_MSGS
 	  log_reservation.debug(              "reservation going to remote waiter: new=%d", // mask=%lx",
 		   new_owner); //, remote_waiter_mask);
+#endif
 
 	  grant_target = new_owner;
           copy_waiters = remote_waiter_mask;
@@ -901,11 +907,15 @@ namespace Realm {
 #endif
       }
 
-      for(std::deque<Event>::iterator it = to_wake.begin();
-	  it != to_wake.end();
-	  it++) {
-	log_reservation.debug() << "release trigger: reservation=" << me << " event=" << (*it);
-	GenEventImpl::trigger(*it, false /*!poisoned*/);
+      if(!to_wake.empty()) {
+	for(WaiterList::iterator it = to_wake.begin();
+	    it != to_wake.end();
+	    it++) {
+#ifdef RSRV_DEBUG_MSGS
+	  log_reservation.debug() << "release trigger: reservation=" << me << " event=" << (*it);
+#endif
+	  GenEventImpl::trigger(*it, false /*!poisoned*/);
+	}
       }
     }
 

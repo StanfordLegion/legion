@@ -15,7 +15,7 @@
 -- Typed AST Pretty Printer
 
 local ast = require("regent/ast")
-local std = require("regent/std")
+local std = require("regent/std_base")
 
 local context = {}
 context.__index = context
@@ -731,7 +731,9 @@ end
 
 function pretty.stat_for_num(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "=", pretty.expr_list(cx, node.values), "do"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "=", pretty.expr_list(cx, node.values), "do"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -739,7 +741,9 @@ end
 
 function pretty.stat_for_list(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "in", pretty.expr(cx, node.value), "do"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "in", pretty.expr(cx, node.value), "do"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -747,7 +751,9 @@ end
 
 function pretty.stat_for_list_vectorized(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "in", pretty.expr(cx, node.value), "do -- vectorized"}, true))
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "in", pretty.expr(cx, node.value), "do -- vectorized"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -921,11 +927,11 @@ function pretty.stat(cx, node)
   end
 end
 
-function pretty.stat_task_param(cx, node)
+function pretty.top_task_param(cx, node)
   return tostring(node.symbol) .. " : " .. tostring(node.param_type)
 end
 
-function pretty.stat_task_privileges(cx, node)
+function pretty.top_task_privileges(cx, node)
   local result = terralib.newlist()
   for _, privileges in ipairs(node) do
     for _, privilege in ipairs(privileges) do
@@ -941,15 +947,15 @@ function pretty.stat_task_privileges(cx, node)
   return result
 end
 
-function pretty.stat_task_coherence_modes(cx, node)
+function pretty.top_task_coherence_modes(cx, node)
   return node:map(function(coherence_mode) tostring(coherence_mode) end)
 end
 
-function pretty.stat_task_flags(cx, node)
+function pretty.top_task_flags(cx, node)
   return node:map(function(flag) return tostring(flag) end)
 end
 
-function pretty.stat_task_conditions(cx, node)
+function pretty.top_task_conditions(cx, node)
   local result = terralib.newlist()
   for condition, values in pairs(node) do
     for _, value in pairs(values) do
@@ -959,29 +965,39 @@ function pretty.stat_task_conditions(cx, node)
   return result
 end
 
-function pretty.stat_task_constraints(cx, node)
+function pretty.top_task_constraints(cx, node)
   if not node then return terralib.newlist() end
   return node:map(
     function(constraint) return text.Line { value = tostring(constraint) } end)
 end
 
-function pretty.stat_task(cx, node)
+function pretty.task_config_options(cx, node)
+  return terralib.newlist({
+      join({"leaf (", tostring(node.leaf), ")"}),
+      join({"inner (", tostring(node.inner), ")"}),
+      join({"idempotent (", tostring(node.idempotent), ")"}),
+  })
+end
+
+function pretty.top_task(cx, node)
   local name = node.name:concat(".")
   local params = commas(node.params:map(
-                          function(param) return pretty.stat_task_param(cx, param) end))
+                          function(param) return pretty.top_task_param(cx, param) end))
   local return_type = ""
   if node.return_type ~= terralib.types.unit then
     return_type = " : " .. tostring(node.return_type)
   end
   local meta = terralib.newlist()
-  meta:insertall(pretty.stat_task_privileges(cx, node.privileges))
-  meta:insertall(pretty.stat_task_coherence_modes(cx, node.coherence_modes))
-  meta:insertall(pretty.stat_task_flags(cx, node.flags))
-  meta:insertall(pretty.stat_task_conditions(cx, node.conditions))
-  meta:insertall(pretty.stat_task_constraints(cx, node.constraints))
+  meta:insertall(pretty.top_task_privileges(cx, node.privileges))
+  meta:insertall(pretty.top_task_coherence_modes(cx, node.coherence_modes))
+  meta:insertall(pretty.top_task_flags(cx, node.flags))
+  meta:insertall(pretty.top_task_conditions(cx, node.conditions))
+  meta:insertall(pretty.top_task_constraints(cx, node.constraints))
+  local config_options = pretty.task_config_options(cx, node.config_options)
 
   local lines = terralib.newlist()
   lines:insert(join({"task " .. name, "(", params, ")", return_type }))
+  lines:insert(join({"-- ", commas(config_options) }))
   if #meta > 0 then
     lines:insert(text.Line { value = "where" })
     lines:insert(text.Indent { value = commas(meta) })
@@ -993,17 +1009,17 @@ function pretty.stat_task(cx, node)
   return text.Lines { lines = lines }
 end
 
-function pretty.stat_fspace(cx, node)
+function pretty.top_fspace(cx, node)
   -- TODO: Pretty-print fspaces
   return text.Line { value = "" }
 end
 
-function pretty.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return pretty.stat_task(cx, node)
+function pretty.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return pretty.top_task(cx, node)
 
-  elseif node:is(ast.typed.stat.Fspace) then
-    return pretty.stat_fspace(cx, node)
+  elseif node:is(ast.typed.top.Fspace) then
+    return pretty.top_fspace(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -1012,7 +1028,7 @@ end
 
 function pretty.entry(node)
   local cx = context.new_global_scope()
-  return render.entry(cx:new_render_scope(), pretty.stat_top(cx, node))
+  return render.entry(cx:new_render_scope(), pretty.top(cx, node))
 end
 
 return pretty

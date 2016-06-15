@@ -107,7 +107,7 @@ end
 
 local optimize_config_options = {}
 
-function optimize_config_options.stat_task(cx, node)
+function optimize_config_options.top_task(cx, node)
   local leaf = analyze_leaf(cx, node.body)
   local inner = not leaf and analyze_inner(cx, node.body)
 
@@ -120,9 +120,9 @@ function optimize_config_options.stat_task(cx, node)
   }
 end
 
-function optimize_config_options.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
-    return optimize_config_options.stat_task(cx, node)
+function optimize_config_options.top(cx, node)
+  if node:is(ast.typed.top.Task) then
+    return optimize_config_options.top_task(cx, node)
 
   else
     return node
@@ -131,7 +131,7 @@ end
 
 function optimize_config_options.entry(node)
   local cx = context.new_global_scope()
-  return optimize_config_options.stat_top(cx, node)
+  return optimize_config_options.top(cx, node)
 end
 
 return optimize_config_options

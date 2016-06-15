@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_region_partition_access1.rg:31: type mismatch: expected int32 but got bool
+-- type_mismatch_region_partition_access1.rg:31: type mismatch: expected ptr but got bool
 --   var r0 = p[true]
 --            ^
 

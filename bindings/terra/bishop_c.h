@@ -68,10 +68,7 @@ typedef struct bishop_region_rule_t {
   bishop_region_callback_fn_t map_task;
 } bishop_region_rule_t;
 
-typedef enum bishop_isa_t {
-  X86_ISA = 1,
-  CUDA_ISA
-} bishop_isa_t;
+typedef legion_isa_kind_t bishop_isa_t;
 
 void register_bishop_mappers(bishop_task_rule_t*, unsigned,
                              bishop_region_rule_t*, unsigned,

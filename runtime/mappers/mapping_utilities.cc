@@ -19,9 +19,9 @@
 #include <algorithm>
 #include <limits>
 
-namespace LegionRuntime {
-  namespace HighLevel {
-    namespace MappingUtilities {
+namespace Legion {
+  namespace Mapping {
+    namespace Utilities {
 
       /**************************
        * Machine Query Interface
@@ -767,32 +767,6 @@ namespace LegionRuntime {
       }
 
       //------------------------------------------------------------------------
-      Processor::Kind MappingProfiler::next_processor_kind(
-                                                        const Task *task) const
-      //------------------------------------------------------------------------
-      {
-        TaskMap::const_iterator finder = task_profiles.find(task->task_id);
-        if (finder == task_profiles.end() || finder->second.size() == 0)
-        {
-          const std::map<VariantID, TaskVariantCollection::Variant>&
-            all_variants = task->variants->get_all_variants();
-          if (all_variants.size() > 0)
-            return all_variants.begin()->second.proc_kind;
-          else
-            // if there is no variant registered yet, pick a processor kind
-            // that should always exist
-            return Processor::LOC_PROC;
-        }
-        for (VariantMap::const_iterator it = finder->second.begin();
-              it != finder->second.end(); it++)
-        {
-          if (it->second.samples.size() < max_samples)
-            return it->first;
-        }
-        return best_processor_kind(task);
-      }
-
-      //------------------------------------------------------------------------
       void MappingProfiler::add_profiling_sample(Processor::TaskFuncID task_id,
                                          const MappingProfiler::Profile& sample)
       //------------------------------------------------------------------------
@@ -1069,9 +1043,9 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       {
       }
-    };
-  };
-};
+    }; // namespace Utilities
+  }; // namespace Mapping
+}; // namespace Legion
 
 // EOF
 

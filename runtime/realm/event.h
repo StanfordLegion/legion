@@ -48,7 +48,7 @@ namespace Realm {
 
       static const Event NO_EVENT;
 
-      bool exists(void) const { return id != 0; }
+      inline bool exists(void) const { return id != 0; }
 
       // test whether an event has triggered without waiting
       bool has_triggered(void) const;
@@ -78,6 +78,7 @@ namespace Realm {
       // normal merged events propagate poison - this version ignores poison on
       //  inputs - use carefully!
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
+      static Event ignorefaults(Event wait_for);
 
       // the following calls are used to give Realm bounds on when the UserEvent
       //  will be triggered - in addition to being useful for diagnostic purposes

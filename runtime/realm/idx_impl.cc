@@ -1478,7 +1478,7 @@ namespace Realm {
 	  if(((first_element - other.first_element) & 63) == 0) {
 	    const uint64_t *bits1 = i1->bits + ((first - first_element) >> 6);
 	    const uint64_t *bits2 = i2->bits + ((first - other.first_element) >> 6);
-	    size_t count = (last - (first & ~63ULL) + 63) >> 6;
+	    size_t count = (last - (first & ~63ULL) + 64) >> 6;
 	    for(size_t i = 0; i < count; i++)
 	      if((*bits1++ & *bits2++) != 0)
 		return ElementMask::OVERLAP_YES;
@@ -1488,7 +1488,7 @@ namespace Realm {
 	    assert(((first_element - other.first_element) & 7) == 0);
 	    const unsigned char *bits1 = ((const unsigned char *)(i1->bits)) + ((first - first_element) >> 3);
 	    const unsigned char *bits2 = ((const unsigned char *)(i2->bits)) + ((first - other.first_element) >> 3);
-	    size_t count = (last - (first & ~7ULL) + 7) >> 3;
+	    size_t count = (last - (first & ~7ULL) + 8) >> 3;
 	    for(size_t i = 0; i < count; i++)
 	      if((*bits1++ & *bits2++) != 0)
 		return ElementMask::OVERLAP_YES;

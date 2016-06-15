@@ -20,8 +20,8 @@
 #include "legion_trace.h"
 #include "legion_tasks.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -64,7 +64,7 @@ namespace LegionRuntime {
     void LegionTrace::fix_trace(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!fixed);
 #endif
       fixed = true;
@@ -74,7 +74,7 @@ namespace LegionRuntime {
     void LegionTrace::end_trace_capture(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(tracing);
 #endif
       operations.clear();
@@ -91,7 +91,7 @@ namespace LegionRuntime {
     void LegionTrace::end_trace_execution(Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!tracing);
 #endif
       // Register for this fence on every one of the operations in
@@ -151,9 +151,8 @@ namespace LegionRuntime {
             log_run.error("Trace violation! Recorded %ld operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
-                          ctx->variants->name, 
-                          ctx->get_unique_task_id(), index+1);
-#ifdef DEBUG_HIGH_LEVEL
+                          ctx->get_task_name(), ctx->get_unique_id(), index+1);
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_TRACE_VIOLATION);
@@ -166,11 +165,10 @@ namespace LegionRuntime {
             log_run.error("Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
-                          index, tid, ctx->variants->name, 
-                          ctx->get_unique_task_id(), 
+                          index, tid, ctx->get_task_name(),ctx->get_unique_id(),
                           Operation::get_string_rep(info.kind),
                           Operation::get_string_rep(op->get_operation_kind()));
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_TRACE_VIOLATION);
@@ -181,10 +179,10 @@ namespace LegionRuntime {
             log_run.error("Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %ld regions in replay.",
-                          index, tid, ctx->variants->name,
-                          ctx->get_unique_task_id(), info.count,
+                          index, tid, ctx->get_task_name(),
+                          ctx->get_unique_id(), info.count,
                           op->get_region_count());
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_TRACE_VIOLATION);
@@ -205,7 +203,7 @@ namespace LegionRuntime {
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert((it->operation_idx >= 0) &&
                    ((size_t)it->operation_idx < operations.size()));
 #endif
@@ -243,7 +241,7 @@ namespace LegionRuntime {
         {
           // We already added our creator to the list of operations
           // so the set of dependences is index-1
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(index > 0);
 #endif
           const LegionVector<DependenceRecord>::aligned &deps = 
@@ -255,7 +253,7 @@ namespace LegionRuntime {
           // operation we are currently performing dependence analysis
           // has dependences.
           TraceCloseOp *close_op = static_cast<TraceCloseOp*>(op);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
           assert(close_op == dynamic_cast<TraceCloseOp*>(op));
 #endif
           int closing_index = close_op->get_close_index();
@@ -266,7 +264,7 @@ namespace LegionRuntime {
             // the indexes for which this close operation is being done
             if (closing_index != it->next_idx)
               continue;
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert((it->operation_idx >= 0) &&
                    ((size_t)it->operation_idx < operations.size()));
 #endif
@@ -322,7 +320,7 @@ namespace LegionRuntime {
                                         Operation *source, GenerationID src_gen)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(tracing);
       if (!source->is_close_op())
       {
@@ -349,7 +347,7 @@ namespace LegionRuntime {
           if (target_key != operations.back())
           {
             std::pair<Operation*,GenerationID> src_key(source, src_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(close_dependences.find(src_key) != close_dependences.end());
 #endif
             close_dependences[src_key].push_back(
@@ -362,7 +360,7 @@ namespace LegionRuntime {
         // They shouldn't both be close operations, if they are, then
         // they should be going through the other path that tracks
         // dependences based on specific region requirements
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
         assert(!source->is_close_op());
 #endif
         // First check to see if the close op is one of ours
@@ -396,7 +394,7 @@ namespace LegionRuntime {
                                                const FieldMask &dep_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(tracing);
       if (!source->is_close_op())
       {
@@ -425,7 +423,7 @@ namespace LegionRuntime {
           if (target_key != operations.back())
           { 
             std::pair<Operation*,GenerationID> src_key(source, src_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(close_dependences.find(src_key) != close_dependences.end());
 #endif
             close_dependences[src_key].push_back(
@@ -464,7 +462,7 @@ namespace LegionRuntime {
             // Iterate over the close operation dependences
             // and translate them to our dependences
             std::pair<Operation*,GenerationID> src_key(source, src_gen);
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
             assert(close_dependences.find(src_key) != close_dependences.end());
 #endif
             LegionVector<DependenceRecord>::aligned &close_deps = 
@@ -489,7 +487,7 @@ namespace LegionRuntime {
     void LegionTrace::record_aliased_requirements(unsigned idx1, unsigned idx2)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(idx1 < idx2);
 #endif
       unsigned index = operations.size() - 1;
@@ -501,7 +499,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(Internal *rt)
+    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -571,7 +569,7 @@ namespace LegionRuntime {
     void TraceCaptureOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
       LegionTrace *local_trace = trace;
@@ -589,7 +587,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp::TraceCompleteOp(Internal *rt)
+    TraceCompleteOp::TraceCompleteOp(Runtime *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -659,7 +657,7 @@ namespace LegionRuntime {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
       LegionTrace *local_trace = trace;
@@ -676,6 +674,6 @@ namespace LegionRuntime {
       end_dependence_analysis();
     }
     
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
