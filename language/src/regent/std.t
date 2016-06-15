@@ -1592,7 +1592,11 @@ end
 
 function symbol:__tostring()
   if self:hasname() then
-    return "$" .. tostring(self:getname())
+    if std.config["debug"] then
+      return "$" .. tostring(self:getname()) .. "#" .. tostring(self.symbol_id)
+    else
+      return "$" .. tostring(self:getname())
+    end
   else
     return "$" .. tostring(self.symbol_id)
   end
