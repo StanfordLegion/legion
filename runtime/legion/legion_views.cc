@@ -4009,6 +4009,9 @@ namespace Legion {
     void CompositeNode::add_child(CompositeNode *child)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(child->logical_node->get_depth() == (logical_node->get_depth()+1));
+#endif
       // Referencing it should instantiate it
       children[child];
     }
@@ -4242,9 +4245,16 @@ namespace Legion {
       // If the set of captured nodes changed then we changed
       if (!capture_mask)
         return true;
-      CompositeNode *new_node = legion_new<CompositeNode>(logical_node, 
-                                                          new_parent);
-      new_parent->update_child(new_node, capture_mask);
+      CompositeNode *new_node = NULL;
+      // If we are the top-node the 'new_parent' is actually what we 
+      // should use instead of making a new node
+      if (new_parent->logical_node != this->logical_node)
+      {
+        new_node = legion_new<CompositeNode>(logical_node, new_parent);
+        new_parent->update_child(new_node, capture_mask);
+      }
+      else
+        new_node = new_parent;
       // Simplify any of our children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -4734,7 +4744,7 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        it->first->logical_node->get_color().serialize(rez);
+        rez.serialize(it->first->logical_node->get_color());
         rez.serialize(it->second);
         it->first->pack_composite_tree(rez, target);
       }
@@ -4759,7 +4769,7 @@ namespace Legion {
         RtEvent ready;
         LogicalView *view = 
           runtime->find_or_request_logical_view(view_did, ready);
-        derez.deserialize(valid_views[view]);
+        derez.deserialize<FieldMask>(valid_views[view]);
         if (ready.exists())
         {
           std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
@@ -4783,7 +4793,7 @@ namespace Legion {
           runtime->find_or_request_logical_view(reduc_did, ready);
         // Have to static cast since it might not be ready yet
         ReductionView *red_view = static_cast<ReductionView*>(view);
-        derez.deserialize(reduction_views[red_view]);
+        derez.deserialize<FieldMask>(reduction_views[red_view]);
         if (ready.exists())
         {
           std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
@@ -4801,10 +4811,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_children; idx++)
       {
         ColorPoint child_color;
-        child_color.deserialize(derez);
+        derez.deserialize(child_color);
         RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
         CompositeNode *child = legion_new<CompositeNode>(child_node, this);
-        derez.deserialize(children[child]);
+        derez.deserialize<FieldMask>(children[child]);
         child->unpack_composite_tree(derez, source, runtime, pending_refs);
       }
     }
