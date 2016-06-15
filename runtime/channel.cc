@@ -2354,7 +2354,7 @@ namespace LegionRuntime {
           for (int i = 0; i < _oas_vec.size(); i++) {
             total_field_size += _oas_vec[i].size;
           }
-          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d), domain(%d), total_field_size(%d)",
+          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d), domain(%lu), total_field_size(%lu)",
                            _guid, _pre_xd_guid, _next_xd_guid, _kind, _domain.get_volume(), total_field_size);
           XferDes* xd;
           switch (_kind) {
