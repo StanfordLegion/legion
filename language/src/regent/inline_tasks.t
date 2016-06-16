@@ -219,10 +219,9 @@ function inline_tasks.expr(cx, node)
     local params = task_ast.params:map(function(param) return param.symbol end)
     local param_types = params:map(function(param) return param:gettype() end)
     local task_body = task_ast.body
-    local return_var = std.newsymbol(task_ast.return_type)
-    local return_var_expr = expr_id(return_var, node)
+    local return_var
+    local return_var_expr
 
-    stats:insert(stat_var(return_var, nil, node))
     local new_block
     do
       local stats = terralib.newlist()
@@ -292,6 +291,11 @@ function inline_tasks.expr(cx, node)
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
             else node = node { value = tgt } end
+          elseif node:is(ast.typed.expr.New) then
+            return node {
+              expr_type = std.type_sub(node.expr_type, type_mapping),
+              pointer_type = std.type_sub(node.pointer_type, type_mapping),
+            }
           elseif node:is(ast.typed.expr.Ispace) then
             local ispace = std.as_read(node.expr_type)
             local new_ispace = std.ispace(ispace.index_type)
@@ -334,6 +338,8 @@ function inline_tasks.expr(cx, node)
           return node
         end
       end
+      return_var = std.newsymbol(std.type_sub(task_ast.return_type, type_mapping))
+      return_var_expr = expr_id(return_var, node)
       stats:insertall(task_body.stats)
       if stats[#stats]:is(ast.typed.stat.Return) then
         local num_stats = #stats
@@ -343,6 +349,7 @@ function inline_tasks.expr(cx, node)
       stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
       new_block = make_block(stats, node.options, node.span)
     end
+    stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
 
     return stats, return_var_expr
