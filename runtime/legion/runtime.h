@@ -186,7 +186,7 @@ namespace Legion {
       void broadcast_result(void);
       void register_waiter(AddressSpaceID sid);
     public:
-      void record_future_registered(Operation *creator);
+      void record_future_registered(ReferenceMutator *creator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -2203,7 +2203,8 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did,Operation *requestor);
+      FutureImpl* find_or_create_future(DistributedID did,
+                                        ReferenceMutator *mutator);
     public:
       void defer_collect_user(LogicalView *view, ApEvent term_event, 
                               ReferenceMutator *mutator);

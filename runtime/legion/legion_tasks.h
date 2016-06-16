@@ -68,7 +68,8 @@ namespace Legion {
       void unpack_base_task(Deserializer &derez, 
                             std::set<RtEvent> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_external_task(Deserializer &derez); 
+      void unpack_base_external_task(Deserializer &derez,
+                                     ReferenceMutator *mutator); 
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 

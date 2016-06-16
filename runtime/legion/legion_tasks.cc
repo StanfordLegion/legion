@@ -215,7 +215,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
-      unpack_base_external_task(derez); 
+      unpack_base_external_task(derez, this); 
       DerezCheck z(derez);
       derez.deserialize(map_locally);
       if (map_locally)
@@ -284,7 +284,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::unpack_base_external_task(Deserializer &derez)
+    void TaskOp::unpack_base_external_task(Deserializer &derez, 
+                                           ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -307,7 +308,7 @@ namespace Legion {
         DistributedID future_did;
         derez.deserialize(future_did);
         futures[idx] = Future(
-            runtime->find_or_create_future(future_did, this));
+            runtime->find_or_create_future(future_did, mutator));
       }
       size_t num_grants;
       derez.deserialize(num_grants);
@@ -9942,7 +9943,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
       derez.deserialize(depth);
-      unpack_base_external_task(derez);
+      LocalReferenceMutator mutator;
+      unpack_base_external_task(derez, &mutator);
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         version_infos[idx].unpack_version_numbers(derez, runtime->forest);

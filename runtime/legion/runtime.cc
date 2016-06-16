@@ -727,7 +727,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(Operation *creator)
+    void FutureImpl::record_future_registered(ReferenceMutator *creator)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -16298,7 +16298,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
-                                               Operation *requestor)
+                                               ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -16340,7 +16340,7 @@ namespace Legion {
         }
         dist_collectables[did] = result;
       }
-      result->record_future_registered(requestor);
+      result->record_future_registered(mutator);
       return result;
     }
 
