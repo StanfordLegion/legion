@@ -543,7 +543,8 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
       void send_back_created_state(AddressSpaceID target, unsigned start,
                                    RegionTreeContext remote_outermost_context);
     public:
@@ -1091,7 +1092,8 @@ namespace Legion {
     public:
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
     public:
       void add_top_region(LogicalRegion handle);
     public:
