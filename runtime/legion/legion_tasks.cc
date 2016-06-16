@@ -2037,8 +2037,14 @@ namespace Legion {
         {
           // Since we know we are on the owner node, we know we can
           // always ask our parent context to find the restricted instances
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(
-              parent_req_indexes[*it], chosen_instances);
+              parent_req_indexes[*it], restricted_instances);
+          // Now do the conversion to get the instances that we should
+          // actually use, no need to check for errors since we know
+          // that the parent task is keeping hold of these regions
+          runtime->forest->physical_convert_restricted(this, regions[*it],
+                                   restricted_instances, chosen_instances);
         }
         else
         {

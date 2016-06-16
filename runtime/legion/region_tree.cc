@@ -2840,6 +2840,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_convert_restricted(Operation *op,
+                                        const RegionRequirement &req,
+                                        const InstanceSet &restricted_instances,
+                                              InstanceSet &result)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
+#ifdef DEBUG_LEGION
+      // Can be a part projection if we are closing to a partition node
+      assert((req.handle_type == SINGULAR) || 
+              (req.handle_type == PART_PROJECTION));
+#endif
+      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
+        static_cast<RegionTreeNode*>(get_node(req.region)) : 
+        static_cast<RegionTreeNode*>(get_node(req.partition));      
+      // Get the field mask for the fields we need
+      FieldMask needed_fields = 
+                tree_node->column_source->get_field_mask(req.privilege_fields);
+      for (unsigned idx = 0; idx < restricted_instances.size(); idx++)
+      {
+        const InstanceRef &ref = restricted_instances[idx];
+        const FieldMask &valid_fields = ref.get_valid_fields();
+        FieldMask inst_fields = needed_fields & valid_fields;
+        if (!inst_fields)
+          continue;
+        result.add_instance(InstanceRef(ref.get_manager(), inst_fields));
+        needed_fields -= inst_fields;
+        if (!needed_fields)
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(!needed_fields); // should be empty at this point
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
                                                 const RegionRequirement &req,
                                                 const InstanceSet &targets)
