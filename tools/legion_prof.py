@@ -1328,6 +1328,7 @@ class State(object):
         self.mapper_calls = {}
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
+        self.instances = {}
 
     def parse_log_file(self, file_name, verbose):
         skipped = 0
@@ -1811,7 +1812,12 @@ class State(object):
         return Fill(dst, op)
 
     def create_instance(self, inst_id, mem, op, size):
-        return Instance(inst_id, mem, op, size)
+        if inst_id not in self.instances:
+            inst = Instance(inst_id, mem, op, size)
+            self.instances[inst_id] = inst
+        else:
+            inst = self.instances[inst_id]
+        return inst
 
     def create_user_marker(self, name):
         return UserMarker(name)

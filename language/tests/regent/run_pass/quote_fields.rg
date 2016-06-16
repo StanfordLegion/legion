@@ -16,7 +16,7 @@ import "regent"
 
 local fields = terralib.newlist({"a", "b", "c"})
 
-local elt = terralib.types.newstruct()
+local elt = terralib.types.newstruct("elt")
 elt.entries = fields:map(function(field) return { field, int } end)
 
 function make_inc(fields)
@@ -35,7 +35,7 @@ local inc_bc = make_inc(terralib.newlist({"b", "c"}))
 
 task main()
   var r = region(ispace(ptr, 5), elt)
-  new(ptr(int, r), 3)
+  new(ptr(elt, r), 3)
 
   fill(r.{a, b, c}, 1000)
   inc_a(r, 500)
