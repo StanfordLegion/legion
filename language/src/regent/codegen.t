@@ -6063,6 +6063,7 @@ function codegen.stat_index_launch(cx, node)
   local cx = cx:new_local_scope()
   local domain = codegen.expr_list(cx, node.domain):map(function(value) return value:read(cx) end)
   local domain_types = node.domain:map(function(domain) return std.as_read(domain.expr_type) end)
+  local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
@@ -6154,6 +6155,7 @@ function codegen.stat_index_launch(cx, node)
   local task_args = terralib.newsymbol(c.legion_task_argument_t, "task_args")
   local task_args_setup = terralib.newlist()
   local task_args_cleanup = terralib.newlist()
+  task_args_setup:insertall(preamble)
   for i, arg in ipairs(args) do
     local invariant = node.args_provably.invariant[i]
     if not invariant then

@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_loops3.rg:68: loop optimization failed: body has multiple statements
---   for i = 0, n do
+-- optimize_loops3.rg:69: loop optimization failed: preamble statement is not a variable
+--     f(p_disjoint[i])
 --     ^
 
 import "regent"

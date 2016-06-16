@@ -200,6 +200,7 @@ local function validate_vars_node(cx)
 
       cx:push_local_scope()
       cx:intern_variable(node, node.symbol)
+      continuation(node.preamble)
       continuation(node.reduce_lhs)
       continuation(node.call)
       cx:pop_local_scope()
