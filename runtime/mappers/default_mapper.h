@@ -302,6 +302,8 @@ namespace Legion {
       Processor default_get_next_global_gpu(void);
       Processor default_get_next_local_io(void);
       Processor default_get_next_global_io(void);
+      Processor default_get_next_local_procset(void);
+      Processor default_get_next_global_procset(void);
       VariantInfo default_find_preferred_variant(
                                  const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
@@ -373,19 +375,23 @@ namespace Legion {
       std::vector<Processor> local_ios;
       std::vector<Processor> local_cpus;
       std::vector<Processor> local_gpus;
+      std::vector<Processor> local_procsets;
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_gpus;
+      std::vector<Processor> remote_procsets;
     protected:
       // For doing round-robining of tasks onto processors
-      unsigned next_local_io, next_local_cpu, next_local_gpu;
-      Processor next_global_io,next_global_cpu,next_global_gpu;
+      unsigned next_local_io, next_local_cpu, next_local_gpu, next_local_procset;
+      Processor next_global_io,next_global_cpu,next_global_gpu,next_global_procset;
       Machine::ProcessorQuery *global_io_query, *global_cpu_query,
-                              *global_gpu_query;
+                              *global_gpu_query, *global_procset_query;
     protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,
-                                               gpu_slices_cache,io_slices_cache;
+                                               gpu_slices_cache,
+                                               io_slices_cache,
+                                               procset_slices_cache;
       std::map<TaskID,VariantInfo>             preferred_variants; 
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;

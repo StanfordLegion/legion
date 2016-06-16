@@ -19575,9 +19575,10 @@ namespace Legion {
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
-      Processor::Kind kinds[4] = { Processor::TOC_PROC, Processor::LOC_PROC,
-                                   Processor::UTIL_PROC, Processor::IO_PROC };
-      for (unsigned idx = 0; idx < 4; idx++)
+      Processor::Kind kinds[5] = { Processor::TOC_PROC, Processor::LOC_PROC,
+                                   Processor::UTIL_PROC, Processor::IO_PROC,
+                                   Processor::PROC_SET };
+      for (unsigned idx = 0; idx < 5; idx++)
       {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
