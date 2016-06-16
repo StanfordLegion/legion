@@ -26,6 +26,7 @@ branches:
     - stable
     - master
 before_install:
+  - git submodule update --init
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
