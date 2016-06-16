@@ -259,13 +259,11 @@ namespace Realm {
       // Employ some fancy struct packing here to fit in 64 bytes
       struct RequestArgs : public BaseMedium {
 	Processor proc;
-	Event::id_t start_id;
-	Event::id_t finish_id;
+	Event start_event;
+	Event finish_event;
 	size_t user_arglen;
 	int priority;
 	Processor::TaskFuncID func_id;
-	Event::gen_t start_gen;
-	Event::gen_t finish_gen;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);

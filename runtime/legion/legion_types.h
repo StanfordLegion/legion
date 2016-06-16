@@ -1519,12 +1519,12 @@ namespace Legion {
   public:
     static const LgEvent NO_LG_EVENT;
   public:
-    LgEvent(void) { id = 0; gen = 0; }
-    LgEvent(const LgEvent &rhs) { id = rhs.id; gen = rhs.gen; }
-    explicit LgEvent(const Realm::Event e) { id = e.id; gen = e.gen; }
+    LgEvent(void) { id = 0; }
+    LgEvent(const LgEvent &rhs) { id = rhs.id; }
+    explicit LgEvent(const Realm::Event e) { id = e.id; }
   public:
     inline LgEvent& operator=(const LgEvent &rhs)
-      { id = rhs.id; gen = rhs.gen; return *this; }
+      { id = rhs.id; return *this; }
   };
 
   class ApEvent : public LgEvent {
@@ -1532,11 +1532,11 @@ namespace Legion {
     static const ApEvent NO_AP_EVENT;
   public:
     ApEvent(void) : LgEvent() { }
-    ApEvent(const ApEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    ApEvent(const ApEvent &rhs) { id = rhs.id; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
-      { id = rhs.id; gen = rhs.gen; return *this; }
+      { id = rhs.id; return *this; }
   };
 
   class ApUserEvent : public ApEvent {
@@ -1548,9 +1548,9 @@ namespace Legion {
     explicit ApUserEvent(const Realm::UserEvent &e) : ApEvent(e) { }
   public:
     inline ApUserEvent& operator=(const ApUserEvent &rhs)
-      { id = rhs.id; gen = rhs.gen; return *this; }
+      { id = rhs.id; return *this; }
     inline operator Realm::UserEvent() const
-      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+      { Realm::UserEvent e; e.id = id; return e; }
   };
 
   class ApBarrier : public ApEvent {
@@ -1564,9 +1564,9 @@ namespace Legion {
       : ApEvent(b), timestamp(b.timestamp) { }
   public:
     inline ApBarrier& operator=(const ApBarrier &rhs)
-      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+      { id = rhs.id; timestamp = rhs.timestamp; return *this; }
     inline operator Realm::Barrier() const
-      { Realm::Barrier b; b.id = id; b.gen = gen; 
+      { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; }
   public:
     Realm::Barrier::timestamp_t timestamp;
@@ -1577,11 +1577,11 @@ namespace Legion {
     static const RtEvent NO_RT_EVENT;
   public:
     RtEvent(void) : LgEvent() { }
-    RtEvent(const RtEvent &rhs) { id = rhs.id; gen = rhs.gen; }
+    RtEvent(const RtEvent &rhs) { id = rhs.id; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
-      { id = rhs.id; gen = rhs.gen; return *this; }
+      { id = rhs.id; return *this; }
   };
 
   class RtUserEvent : public RtEvent {
@@ -1593,9 +1593,9 @@ namespace Legion {
     explicit RtUserEvent(const Realm::UserEvent &e) : RtEvent(e) { }
   public:
     inline RtUserEvent& operator=(const RtUserEvent &rhs)
-      { id = rhs.id; gen = rhs.gen; return *this; }
+      { id = rhs.id; return *this; }
     inline operator Realm::UserEvent() const
-      { Realm::UserEvent e; e.id = id; e.gen = gen; return e; }
+      { Realm::UserEvent e; e.id = id; return e; }
   };
 
   class RtBarrier : public RtEvent {
@@ -1609,9 +1609,9 @@ namespace Legion {
       : RtEvent(b), timestamp(b.timestamp) { }
   public:
     inline RtBarrier& operator=(const RtBarrier &rhs)
-      { id = rhs.id; gen = rhs.gen; timestamp = rhs.timestamp; return *this; }
+      { id = rhs.id; timestamp = rhs.timestamp; return *this; }
     inline operator Realm::Barrier() const
-      { Realm::Barrier b; b.id = id; b.gen = gen; 
+      { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; } 
   public:
     Realm::Barrier::timestamp_t timestamp;
