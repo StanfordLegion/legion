@@ -2604,6 +2604,9 @@ namespace Legion {
       inner_cached = false;
       has_virtual_instances_result = false;
       has_virtual_instances_cached = false;
+#ifdef LEGION_SPY
+      previous_mapped_event = RtEvent::NO_RT_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7219,6 +7222,17 @@ namespace Legion {
           it->impl->unmap_region();
       }
     }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    RtEvent SingleTask::update_previous_mapped_event(RtEvent next)
+    ///--------------------------------------------------------------------------
+    {
+      RtEvent result = previous_mapped_event;
+      previous_mapped_event = next;
+      return result;
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Multi Task 

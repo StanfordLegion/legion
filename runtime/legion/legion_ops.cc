@@ -665,6 +665,7 @@ namespace Legion {
         trace->register_operation(this, gen);
       // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
+
     }
 
     //--------------------------------------------------------------------------
@@ -677,6 +678,16 @@ namespace Legion {
       MappingDependenceTracker *tracker = dependence_tracker.mapping;
       // Now make a commit tracker
       dependence_tracker.commit = new CommitDependenceTracker();
+#ifdef LEGION_SPY
+      // Enforce serial mapping dependences for validating runtime analysis
+      // Don't record it though to avoid confusing legion spy
+      // Do this after all the rest of the dependence analysis to catch
+      // dependences on any close operations that were generated
+      RtEvent previous_mapped = 
+        parent_ctx->update_previous_mapped_event(mapped_event);
+      if (previous_mapped.exists())
+        dependence_tracker.mapping->add_mapping_dependence(previous_mapped);
+#endif
       // Cannot touch anything not on our stack after this call
       tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
