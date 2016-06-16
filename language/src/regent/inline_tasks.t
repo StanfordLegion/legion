@@ -269,7 +269,24 @@ function inline_tasks.expr(cx, node)
           span = node.span
         })
       end
-      local function subst(node)
+      local function subst_pre(node)
+        if node:is(ast.typed.stat.ForList) then
+          local old_type = node.symbol:gettype()
+          local new_type = std.type_sub(old_type, type_mapping)
+
+          if old_type ~= new_type then
+            local new_symbol = std.newsymbol(new_type, node.symbol:hasname())
+            expr_mapping[node.symbol] = new_symbol
+            return node { symbol = new_symbol }
+          else
+            return node
+          end
+        else
+          return node
+        end
+      end
+
+      local function subst_post(node)
         if rawget(node, "expr_type") then
           if node:is(ast.typed.expr.ID) and expr_mapping[node.value] then
             local tgt = expr_mapping[node.value]
@@ -323,7 +340,7 @@ function inline_tasks.expr(cx, node)
         local return_stat = stats[num_stats]
         stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
       end
-      stats = ast.map_node_postorder(subst, stats)
+      stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
       new_block = make_block(stats, node.options, node.span)
     end
     stats:insert(new_block)
