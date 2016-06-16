@@ -15419,8 +15419,8 @@ namespace Legion {
       {
         const InstanceRef &ref = targets[idx];
         const FieldMask &valid_fields = ref.get_valid_fields();
-        assert(FieldMask::pop_count(valid_fields) <= 
-                    info.req.privilege_fields.size());
+        assert(unsigned(FieldMask::pop_count(valid_fields)) <= 
+                              info.req.privilege_fields.size());
       }
 #endif
       if (IS_REDUCE(info.req))
