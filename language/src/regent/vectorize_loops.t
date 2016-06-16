@@ -955,7 +955,7 @@ function vectorize_loops.stat_for_list(node)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
-    return node { block = node.block }
+    return node { block = vectorize_loops.block(node.block) }
   end
 end
 
