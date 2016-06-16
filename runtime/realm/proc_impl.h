@@ -39,7 +39,7 @@ namespace Realm {
 
     class ProcessorImpl {
     public:
-      ProcessorImpl(Processor _me, Processor::Kind _kind);
+      ProcessorImpl(Processor _me, Processor::Kind _kind, int _num_cores=1);
 
       virtual ~ProcessorImpl(void);
 
@@ -69,13 +69,14 @@ namespace Realm {
     public:
       Processor me;
       Processor::Kind kind;
+      int num_cores;
     }; 
 
     // generic local task processor - subclasses must create and configure a task
     // scheduler and pass in with the set_scheduler() method
     class LocalTaskProcessor : public ProcessorImpl {
     public:
-      LocalTaskProcessor(Processor _me, Processor::Kind _kind);
+      LocalTaskProcessor(Processor _me, Processor::Kind _kind, int num_cores=1);
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
@@ -151,7 +152,7 @@ namespace Realm {
 
     class RemoteProcessor : public ProcessorImpl {
     public:
-      RemoteProcessor(Processor _me, Processor::Kind _kind);
+      RemoteProcessor(Processor _me, Processor::Kind _kind, int _num_cores=1);
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);

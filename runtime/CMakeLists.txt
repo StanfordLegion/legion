@@ -51,6 +51,7 @@ else()
     realm/operation.h         realm/operation.cc
     realm/operation.inl
     realm/proc_impl.h         realm/proc_impl.cc
+    realm/procset/procset_module.h realm/procset/procset_module.cc
     realm/rsrv_impl.h         realm/rsrv_impl.cc
     realm/runtime_impl.h      realm/runtime_impl.cc
     realm/sampling_impl.h     realm/sampling_impl.cc

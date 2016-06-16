@@ -156,9 +156,11 @@ namespace Realm {
 	    Processor p = id.convert<Processor>();
 	    assert(id.index() < num_procs);
 	    Processor::Kind kind = (Processor::Kind)(*cur++);
-	    log_annc.debug() << "adding proc " << p << " (kind = " << kind << ")";
+            int num_cores = (int)(*cur++);
+            log_annc.debug() << "adding proc " << p << " (kind = " << kind << 
+                                " num_cores = " << num_cores << ")";
 	    if(remote) {
-	      RemoteProcessor *proc = new RemoteProcessor(p, kind);
+	      RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
 	      get_runtime()->nodes[ID(p).node()].processors[ID(p).index()] = proc;
 	    }
 	  }
