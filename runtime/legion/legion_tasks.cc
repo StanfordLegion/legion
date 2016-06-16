@@ -3075,7 +3075,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::unpack_remote_context(Deserializer &derez)
+    void SingleTask::unpack_remote_context(Deserializer &derez,
+                                           std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       assert(false); // should only be called for RemoteTask
@@ -9938,12 +9939,13 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void RemoteTask::unpack_remote_context(Deserializer &derez)
+    void RemoteTask::unpack_remote_context(Deserializer &derez,
+                                           std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
       derez.deserialize(depth);
-      LocalReferenceMutator mutator;
+      WrapperReferenceMutator mutator(preconditions);
       unpack_base_external_task(derez, &mutator);
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)

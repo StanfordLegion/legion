@@ -824,7 +824,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::clone_from(const VersionInfo &rhs)
+    void VersionInfo::clone_version_numbers(const VersionInfo &rhs, 
+                                            const CompositeCloser &closer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -832,78 +833,25 @@ namespace Legion {
       assert(!rhs.packed);
 #endif
       upper_bound_node = rhs.upper_bound_node;
-      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator nit = 
-            rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
+      for (std::map<RegionTreeNode*,CompositeNode*>::const_iterator it = 
+            closer.constructed_nodes.begin(); it != 
+            closer.constructed_nodes.end(); it++)
       {
-        const NodeInfo &current = nit->second;
+        std::map<RegionTreeNode*,NodeInfo>::const_iterator finder = 
+          rhs.node_infos.find(it->first);
 #ifdef DEBUG_LEGION
-        assert(current.field_versions != NULL);
-#endif
-        NodeInfo &next = node_infos[nit->first];
-#ifdef DEBUG_LEGION
-        assert(next.physical_state == NULL);
+        assert(finder != rhs.node_infos.end());
 #endif
 #ifdef DEBUG_LEGION
-        assert(next.physical_state == NULL); 
+        assert(finder->second.field_versions != NULL);
 #endif
-        // Capture the physical state versions, but not the actual state
-        if (current.physical_state != NULL)
-          next.physical_state = current.physical_state->clone(
-              false/*capture state*/, false/*need advance*/);
-        next.advance_mask = current.advance_mask;
-        next.field_versions = current.field_versions;
-        next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & NodeInfo::BASE_FIELDS_MASK;
-        // Needs capture is already set
+        NodeInfo &next = node_infos[it->first];
+#ifdef DEBUG_LEGION
+        assert(next.field_versions == NULL);
+#endif
+        finder->second.field_versions->add_reference();
+        next.field_versions = finder->second.field_versions;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::clone_from(const VersionInfo &rhs,CompositeCloser &closer)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!packed);
-      assert(!rhs.packed);
-#endif
-      upper_bound_node = rhs.upper_bound_node;
-      // Capture all region tree nodes that have not already been
-      // captured by the closer
-      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::const_iterator nit = 
-            rhs.node_infos.begin(); nit != rhs.node_infos.end(); nit++)
-      {
-        const NodeInfo &current = nit->second;
-#ifdef DEBUG_LEGION
-        assert(current.field_versions != NULL);
-#endif
-        FieldMask clone_mask;         
-        const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
-          current.field_versions->get_field_versions();
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++) 
-        {
-          clone_mask |= it->second;
-        }
-        // Filter this node from the closer
-        closer.filter_capture_mask(nit->first, clone_mask);
-        if (!clone_mask)
-          continue;
-        NodeInfo &next = node_infos[nit->first];
-#ifdef DEBUG_LEGION
-        assert(next.physical_state == NULL); 
-#endif
-        if (current.physical_state != NULL)
-          next.physical_state = current.physical_state->clone(
-              clone_mask, false/*capture state*/, false/*need advance*/);
-        next.advance_mask = current.advance_mask & clone_mask;
-        next.field_versions = current.field_versions;
-        next.field_versions->add_reference();
-        next.bit_mask = current.bit_mask & NodeInfo::BASE_FIELDS_MASK;
-        // Needs capture is already set
-      }
-#ifdef DEBUG_LEGION
-      assert(node_infos.find(upper_bound_node) != node_infos.end());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3652,7 +3600,10 @@ namespace Legion {
       DistributedID did = 
                     node->context->runtime->get_available_distributed_id(false);
       CompositeVersionInfo *composite_info = new CompositeVersionInfo();
-      //composite_info->get_version_info().clone_from(version_info);
+      // Clone the version info so we know the version numbers to use in 
+      // the future when issuing copies from this composite instance
+      VersionInfo &new_versions = composite_info->get_version_info();
+      new_versions.clone_version_numbers(version_info, *this);
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 

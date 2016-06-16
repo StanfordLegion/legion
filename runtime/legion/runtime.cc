@@ -15393,10 +15393,11 @@ namespace Legion {
       RemoteTask *context;
       derez.deserialize(context);
       // Unpack the result
-      context->unpack_remote_context(derez);
+      std::set<RtEvent> preconditions;
+      context->unpack_remote_context(derez, preconditions);
       // Then register it
       UniqueID context_uid = context->get_context_uid();
-      register_remote_context(context_uid, context);
+      register_remote_context(context_uid, context, preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -17595,7 +17596,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_remote_context(UniqueID context_uid, 
-                                          RemoteTask *context)
+                          RemoteTask *context, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
@@ -17614,7 +17615,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(to_trigger.exists());
 #endif
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
