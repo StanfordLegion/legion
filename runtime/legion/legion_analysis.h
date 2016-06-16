@@ -175,9 +175,8 @@ namespace Legion {
                       Operation *owner_op, RegionTreeForest *forest);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
-      // TODO: delete these with versioning fix
-      void clone_from(const VersionInfo &rhs);
-      void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
+      void clone_version_numbers(const VersionInfo &rhs, 
+                                 const CompositeCloser &closer);
     public:
       inline bool is_packed(void) const { return packed; }
       void pack_buffer(Serializer &rez);
