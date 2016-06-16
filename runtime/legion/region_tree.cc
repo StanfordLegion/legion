@@ -15414,6 +15414,15 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        const FieldMask &valid_fields = ref.get_valid_fields();
+        assert(FieldMask::pop_count(valid_fields) <= 
+                    info.req.privilege_fields.size());
+      }
+#endif
       if (IS_REDUCE(info.req))
       {
         // Reduction only case
