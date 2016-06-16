@@ -110,12 +110,23 @@ namespace Legion {
         Memory target;
         unsigned long long create, ready, start, stop;
       };
-      struct InstInfo {
+      struct InstCreateInfo {
       public:
-        UniqueID op_id; 
+	UniqueID op_id;
+        PhysicalInstance inst;
+	unsigned long long create; // time of HLR creation request
+      };
+      struct InstUsageInfo {
+      public:
+	UniqueID op_id;
         PhysicalInstance inst;
         Memory mem;
         size_t total_bytes;
+      };
+      struct InstTimelineInfo {
+      public:
+	UniqueID op_id;
+        PhysicalInstance inst;
         unsigned long long create, destroy;
       };
       struct MessageInfo {
@@ -174,12 +185,13 @@ namespace Legion {
       void process_fill(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
-      void process_inst(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceTimeline *timeline,
+      void process_inst_create(UniqueID op_id, PhysicalInstance inst,
+		  unsigned long long create);
+      void process_inst_usage(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+      void process_inst_timeline(UniqueID op_id,
+                  Realm::ProfilingMeasurements::InstanceTimeline *timeline);
     public:
-      void record_instance_creation(PhysicalInstance inst, Memory memory,
-                                    UniqueID op_id, unsigned long long create);
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
@@ -208,7 +220,9 @@ namespace Legion {
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
-      std::deque<InstInfo> inst_infos;
+      std::deque<InstCreateInfo> inst_create_infos;
+      std::deque<InstUsageInfo> inst_usage_infos;
+      std::deque<InstTimelineInfo> inst_timeline_infos;
     private:
       std::deque<MessageInfo> message_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
