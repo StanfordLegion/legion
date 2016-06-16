@@ -29,7 +29,7 @@ terra e(x : int) : int
 end
 
 task f(r : region(int)) : int
-where reads(r) do
+where reads writes(r) do
   return 5
 end
 
