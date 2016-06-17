@@ -231,6 +231,9 @@ namespace Legion {
         EventUsers(void)
           : single(true) { users.single_user = NULL; }
       public:
+        EventUsers& operator=(const EventUsers &rhs)
+          { assert(false); return *this; }
+      public:
         FieldMask user_mask;
         union {
           PhysicalUser *single_user;
@@ -619,6 +622,9 @@ namespace Legion {
       public:
         EventUsers(void)
           : single(true) { users.single_user = NULL; }
+      public:
+        EventUsers& operator=(const EventUsers &rhs)
+          { assert(false); return *this; }
       public:
         FieldMask user_mask;
         union {

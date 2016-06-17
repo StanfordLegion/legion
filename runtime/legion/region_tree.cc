@@ -2618,8 +2618,10 @@ namespace Legion {
       assert(!IS_REDUCE(req)); // no virtual mapped reductions
 #endif
       RegionUsage usage(req);
-      // Add the different precondition sets to the destination view
-      // Privileges should always be exclusive here
+      // Privileges here should always be read-write exclusive
+      // to ensure that we are conservative about summarizing
+      // all the users that we just collapsed
+      usage.privilege = READ_WRITE; 
       usage.prop = EXCLUSIVE;
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
