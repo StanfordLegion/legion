@@ -80,6 +80,11 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_task_layout_constraint_set_t);
+  NEW_OPAQUE_TYPE(legion_map_task_input_t);
+  NEW_OPAQUE_TYPE(legion_map_task_output_t);
+  NEW_OPAQUE_TYPE(legion_physical_instance_t);
+  NEW_OPAQUE_TYPE(legion_mapper_runtime_t);
+  NEW_OPAQUE_TYPE(legion_mapper_context_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -263,6 +268,16 @@ typedef long long int coord_t;
     // From Legion::DynamicCollective
     legion_reduction_op_id_t redop;
   } legion_dynamic_collective_t;
+
+  /**
+   * @see Legion::Mapping::Mapper::TaskOptions
+   */
+  typedef struct legion_task_options_t {
+    legion_processor_t initial_proc;
+    bool inline_task;
+    bool stealable;
+    bool map_locally;
+  } legion_task_options_t;
 
   /**
    * Interface for a Legion C registration callback.
@@ -3602,6 +3617,189 @@ typedef long long int coord_t;
    */
   legion_memory_t
   legion_memory_query_random(legion_memory_query_t query);
+
+  // -----------------------------------------------------------------------
+  // Physical Instance Operations
+  // -----------------------------------------------------------------------
+
+  /*
+   * @param instance Caller must have ownership of parameter `instance`.
+   *
+   * @see Legion::Mapping::PhysicalInstance
+   */
+  void
+  legion_physical_instance_destroy(legion_physical_instance_t instance);
+
+  // -----------------------------------------------------------------------
+  // Map Task Input/Output
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
+   */
+  void
+  legion_map_task_output_chosen_instances_clear_all(
+      legion_map_task_output_t output);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
+   */
+  void
+  legion_map_task_output_chosen_instances_clear_each(
+      legion_map_task_output_t output,
+      size_t idx);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
+   */
+  void
+  legion_map_task_output_chosen_instances_add(
+      legion_map_task_output_t output,
+      legion_physical_instance_t *instances,
+      size_t instances_size);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
+   */
+  void
+  legion_map_task_output_chosen_instances_set(
+      legion_map_task_output_t output,
+      size_t idx,
+      legion_physical_instance_t *instances,
+      size_t instances_size);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
+   */
+  void
+  legion_map_task_output_target_procs_clear(
+      legion_map_task_output_t output);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
+   */
+  void
+  legion_map_task_output_target_procs_add(
+      legion_map_task_output_t output,
+      legion_processor_t proc);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:task_priority
+   */
+  void
+  legion_map_task_output_task_priority_set(
+      legion_map_task_output_t output,
+      legion_task_priority_t priority);
+
+  // -----------------------------------------------------------------------
+  // MapperRuntime Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::create_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_create_physical_instance_layout_constraint(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_set_t constraints,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool acquire,
+      legion_garbage_collection_priority_t priority);
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::create_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_create_physical_instance_layout_constraint_id(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_id_t layout_id,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool acquire,
+      legion_garbage_collection_priority_t priority);
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::find_or_create_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_set_t constraints,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool *created,
+      bool acquire,
+      legion_garbage_collection_priority_t priority,
+      bool tight_region_bounds);
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::find_or_create_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_find_or_create_physical_instance_layout_constraint_id(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_id_t layout_id,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool *created,
+      bool acquire,
+      legion_garbage_collection_priority_t priority,
+      bool tight_region_bounds);
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::find_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_find_physical_instance_layout_constraint(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_set_t constraints,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool acquire,
+      bool tight_region_bounds);
+
+  /**
+   * @param result Caller takes ownership of handle pointed by `result`.
+   *
+   * @see Legion::Mapping::MapperRuntime::find_physical_instance()
+   */
+  bool
+  legion_mapper_runtime_find_physical_instance_layout_constraint_id(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_memory_t target_memory,
+      legion_layout_constraint_id_t layout_id,
+      const legion_logical_region_t *regions,
+      size_t regions_size,
+      legion_physical_instance_t *result,
+      bool acquire,
+      bool tight_region_bounds);
 
 #ifdef __cplusplus
 }

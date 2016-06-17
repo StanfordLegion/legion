@@ -1571,10 +1571,10 @@ function symbol:gettype()
   return self.symbol_type
 end
 
-function symbol:settype(type, force)
+function symbol:settype(type)
   assert(terralib.types.istype(type))
-  assert(force or not self.symbol_type)
-  if self.symbol_type then assert(not self.symbol_value) end
+  assert(not self.symbol_type)
+  assert(not self.symbol_value)
   self.symbol_type = type
 end
 

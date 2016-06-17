@@ -28,6 +28,7 @@ function context:new_task_scope()
   local cx = {
     var_flows = {},
     var_futures = {},
+    var_symbols = {},
   }
   return setmetatable(cx, context)
 end
@@ -44,8 +45,12 @@ function context:get_flow(v)
   return self.var_flows[v]
 end
 
-function context:is_future(v)
+function context:is_var_future(v)
   return self.var_futures[v]
+end
+
+function context:symbol(v)
+  return self.var_symbols[v]
 end
 
 local analyze_var_flow = {}
@@ -431,6 +436,15 @@ local function compute_var_futures(cx)
   until not changed
 end
 
+local function compute_var_symbols(cx)
+  for v, is_future in pairs(cx.var_futures) do
+    if std.is_symbol(v) and is_future then
+      assert(terralib.types.istype(v:hastype()) and not std.is_future(v:gettype()))
+      cx.var_symbols[v] = std.newsymbol(std.future(v:gettype()), v:hasname())
+    end
+  end
+end
+
 local optimize_futures = {}
 
 local function concretize(node)
@@ -479,19 +493,19 @@ function optimize_futures.expr_condition(cx, node)
 end
 
 function optimize_futures.expr_id(cx, node)
-  if cx:is_future(node.value) then
+  if cx:is_var_future(node.value) then
+    local expr_type
     if std.is_rawref(node.expr_type) then
-      return node {
-        expr_type = std.rawref(&std.future(std.as_read(node.expr_type))),
-      }
+      expr_type = std.rawref(&std.future(std.as_read(node.expr_type)))
     else
-      return node {
-        expr_type = std.future(node.expr_type),
-      }
+      expr_type = std.future(node.expr_type)
     end
-  else
-    return node
+    return node {
+      value = cx:symbol(node.value),
+      expr_type = expr_type,
+    }
   end
+  return node
 end
 
 function optimize_futures.expr_field_access(cx, node)
@@ -1152,30 +1166,38 @@ function optimize_futures.stat_index_launch(cx, node)
 end
 
 function optimize_futures.stat_var(cx, node)
+  local symbols = terralib.newlist()
   local types = terralib.newlist()
   local values = terralib.newlist()
   for i, symbol in ipairs(node.symbols) do
-    local value_type = node.types[i]
-    local future_type = value_type
-    if cx:is_future(symbol) then
-      future_type = std.future(value_type)
-    end
-    types:insert(future_type)
-
-    -- FIXME: Would be better to generate fresh symbols.
-    symbol:settype(future_type, true)
-
     local value = node.values[i]
+    local value_type = node.types[i]
+
+    local new_symbol = symbol
+    if cx:is_var_future(symbol) then
+      new_symbol = cx:symbol(symbol)
+    end
+    symbols[i] = new_symbol
+
+    local new_type = value_type
+    if cx:is_var_future(symbol) then
+      new_type = std.future(value_type)
+    end
+    types[i] = new_type
+
+    local new_value = value
     if value then
-      if cx:is_future(symbol) then
-        values:insert(promote(optimize_futures.expr(cx, value), future_type))
+      if cx:is_var_future(symbol) then
+        new_value = promote(optimize_futures.expr(cx, value), new_type)
       else
-        values:insert(concretize(optimize_futures.expr(cx, value)))
+        new_value = concretize(optimize_futures.expr(cx, value))
       end
     end
+    values[i] = new_value
   end
 
   return node {
+    symbols = symbols,
     types = types,
     values = values,
   }
@@ -1306,57 +1328,47 @@ function optimize_futures.stat(cx, node)
 end
 
 function optimize_futures.top_task_param(cx, param)
-  if cx:is_future(param.symbol) then
-    local param_type = param.param_type
-    local future_type = std.future(param_type)
+  if cx:is_var_future(param.symbol) then
+    local new_type = std.future(param.param_type)
 
-    local new_symbol = std.newsymbol(param_type, param.symbol:getname() .. "_tmp")
-    local new_param = param { symbol = new_symbol }
+    local new_symbol = cx:symbol(param.symbol)
+
     local new_var = ast.typed.stat.Var {
-      symbols = terralib.newlist({param.symbol}),
-      types = terralib.newlist({future_type}),
+      symbols = terralib.newlist({new_symbol}),
+      types = terralib.newlist({new_type}),
       values = terralib.newlist({
           promote(
             ast.typed.expr.ID {
-              value = new_symbol,
-              expr_type = std.rawref(&param_type),
+              value = param.symbol,
+              expr_type = std.rawref(&param.param_type),
               options = param.options,
               span = param.span,
             },
-            future_type),
+            new_type),
       }),
       options = param.options,
       span = param.span,
     }
 
-    -- FIXME: Would be better to generate fresh symbols.
-    param.symbol:settype(future_type, true)
-
-    return new_param, new_var
-  else
-    return param
+    return new_var
   end
 end
 
 function optimize_futures.top_task_params(cx, node)
-  local results = terralib.newlist()
   local actions = terralib.newlist()
   for _, param in ipairs(node.params) do
-    local result, action = optimize_futures.top_task_param(cx, param)
-    results:insert(result)
+    local action = optimize_futures.top_task_param(cx, param)
     if action then actions:insert(action) end
   end
-  return results, actions
+  return actions
 end
 
 function optimize_futures.top_task(cx, node)
   local cx = cx:new_task_scope()
   analyze_var_flow.block(cx, node.body)
-  compute_var_futures(cx, node.params)
-  local params, actions = optimize_futures.top_task_params(cx, node)
-  node.prototype:set_param_symbols(
-    params:map(function(param) return param.symbol end),
-    true)
+  compute_var_futures(cx)
+  compute_var_symbols(cx)
+  local actions = optimize_futures.top_task_params(cx, node)
   local body = optimize_futures.block(cx, node.body)
 
   if #actions > 0 then
@@ -1365,7 +1377,6 @@ function optimize_futures.top_task(cx, node)
   end
 
   return node {
-    params = params,
     body = body
   }
 end

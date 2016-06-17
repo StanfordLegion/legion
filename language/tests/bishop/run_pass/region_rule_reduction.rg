@@ -24,7 +24,7 @@ mapper
 
 $HAS_REGMEM = memories[kind=regmem].size > 0
 
-task#foo[target=$proc] region#r1 {
+task#foo[target=$proc] region#r2 {
   target : $HAS_REGMEM ? $proc.memories[kind=regmem] :
                          $proc.memories[kind=sysmem];
 }
@@ -35,39 +35,38 @@ task[target=$proc] region {
 
 end
 
-fspace Vec2
-{
-  x : float,
-  y : float,
-}
-
-task foo(r1 : region(Vec2), r2 : region(int))
-where reads(r1.x, r2), writes(r1.y)
+task foo(r1 : region(int), r2 : region(int))
+where reads(r1), reduces+(r2)
 do
-  var memory_r1x = c.bishop_physical_region_get_memory(__physical(r1.x)[0])
-  var kind_r1x = c.legion_memory_kind(memory_r1x)
-  var memory_r1y = c.bishop_physical_region_get_memory(__physical(r1.y)[0])
-  var kind_r1y = c.legion_memory_kind(memory_r1y)
-  var memory_r2 = c.bishop_physical_region_get_memory(__physical(r2)[0])
-  var kind_r2 = c.legion_memory_kind(memory_r2)
+  var memories_r1 = c.bishop_physical_region_get_memories(__physical(r1)[0])
+  var memories_r2 = c.bishop_physical_region_get_memories(__physical(r2)[0])
+  var kind_r1 = c.legion_memory_kind(memories_r1.list[0])
+  var kind_r2 = c.legion_memory_kind(memories_r2.list[0])
   var all_memories = c.bishop_all_memories()
   var regmems = c.bishop_filter_memories_by_kind(all_memories, c.REGDMA_MEM)
-  regentlib.assert(regmems.size == 0 or kind_r1x == c.REGDMA_MEM,
-    "test failed")
-  regentlib.assert(regmems.size == 0 or kind_r1y == c.REGDMA_MEM,
-    "test failed")
-  regentlib.assert(kind_r2 == c.SYSTEM_MEM, "test failed")
+  regentlib.assert(kind_r1 == c.SYSTEM_MEM, "test failed")
+  regentlib.assert(regmems.size == 0 or kind_r2 == c.REGDMA_MEM, "test failed")
   c.bishop_delete_memory_list(regmems)
   c.bishop_delete_memory_list(all_memories)
+  for e in r2 do @e += 10 end
 end
 
 task toplevel()
-  var r1 = region(ispace(ptr, 10), Vec2)
+  var r1 = region(ispace(ptr, 10), int)
   var r2 = region(ispace(ptr, 10), int)
-  new(ptr(Vec2, r1), 10)
+  new(ptr(int, r1), 10)
   new(ptr(int, r2), 10)
-  foo(r1, r2)
+  for e in r2 do
+    @e = 0
+  end
+  for i = 0, 10 do
+    foo(r1, r2)
+  end
+  for e in r2 do
+    regentlib.assert(@e == 100, "test failed")
+  end
 end
 
 bishoplib.register_bishop_mappers()
 regentlib.start(toplevel)
+

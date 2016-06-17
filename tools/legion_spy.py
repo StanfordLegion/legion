@@ -3264,24 +3264,25 @@ class LogicalState(object):
             return True
         # See which mode it is open in 
         open_mode = self.open_children[next_child]
-        del self.open_children[next_child]
+        child_to_close = dict()
+        child_to_close[next_child] = False # permit leave open
         if open_mode == OPEN_READ_ONLY:
             # If it is open read-only, there is nothing to do
-            pass
+            del self.open_children[next_child]
         elif open_mode == OPEN_READ_WRITE:
-            if force_close and not self.perform_close_operation(self, child_to_close, 
+            if force_close and not self.perform_close_operation(child_to_close, 
                                         False, op, req, previous_deps, perform_checks): 
                 return False
         elif open_mode == OPEN_SINGLE_REDUCE:
             if force_close: 
-                if not self.perform_close_operation(self, child_to_close,
+                if not self.perform_close_operation(child_to_close,
                             False, op, req, previous_deps, perform_checks):
                     return False
             else:
                 # Update the state to read-write
                 self.open_children[next_child] = OPEN_READ_WRITE
         elif open_mode == OPEN_MULTI_REDUCE:
-            if not self.perform_close_operation(self, child_to_close,
+            if not self.perform_close_operation(child_to_close,
                               False, op, req, previous_deps, perform_checks):
                 return False
         else:
