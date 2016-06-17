@@ -85,6 +85,10 @@ local property_checks = {
                    "sm10", "sm20", "sm30", "sm35",
                    "neon" }
   },
+  priority = {
+    type = any { "task" },
+    condition = integer,
+  },
   spmd = {
     type = any { "task", "for", "while", "do" },
     condition = compile_levels,

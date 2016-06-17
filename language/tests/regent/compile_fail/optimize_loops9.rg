@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_loops9.rg:73: loop optimization failed: argument 1 is not side-effect free
---     f(p_disjoint[e_bad(__runtime())])
---     ^
+-- optimize_loops9.rg:75: loop optimization failed: argument 2 is not side-effect free
+--     f(p_disjoint[i], @x0)
+--      ^
 
 import "regent"
 
@@ -32,7 +32,7 @@ terra e_bad(x : c.legion_runtime_t) : int
   return 3
 end
 
-task f(r : region(int)) : int
+task f(r : region(int), x : int) : int
 where reads(r) do
   return 5
 end
@@ -55,6 +55,8 @@ end
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
+  var x0 = new(ptr(int, r))
+
   var rc = c.legion_coloring_create()
   for i = 0, n do
     c.legion_coloring_ensure_color(rc, i)
@@ -70,7 +72,7 @@ task main()
   -- not optimized: argument 1 is not side-effect free
   __demand(__parallel)
   for i = 0, n do
-    f(p_disjoint[e_bad(__runtime())])
+    f(p_disjoint[i], @x0)
   end
 end
 regentlib.start(main)

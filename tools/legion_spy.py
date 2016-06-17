@@ -3264,24 +3264,25 @@ class LogicalState(object):
             return True
         # See which mode it is open in 
         open_mode = self.open_children[next_child]
-        del self.open_children[next_child]
+        child_to_close = dict()
+        child_to_close[next_child] = False # permit leave open
         if open_mode == OPEN_READ_ONLY:
             # If it is open read-only, there is nothing to do
-            pass
+            del self.open_children[next_child]
         elif open_mode == OPEN_READ_WRITE:
-            if force_close and not self.perform_close_operation(self, child_to_close, 
+            if force_close and not self.perform_close_operation(child_to_close, 
                                         False, op, req, previous_deps, perform_checks): 
                 return False
         elif open_mode == OPEN_SINGLE_REDUCE:
             if force_close: 
-                if not self.perform_close_operation(self, child_to_close,
+                if not self.perform_close_operation(child_to_close,
                             False, op, req, previous_deps, perform_checks):
                     return False
             else:
                 # Update the state to read-write
                 self.open_children[next_child] = OPEN_READ_WRITE
         elif open_mode == OPEN_MULTI_REDUCE:
-            if not self.perform_close_operation(self, child_to_close,
+            if not self.perform_close_operation(child_to_close,
                               False, op, req, previous_deps, perform_checks):
                 return False
         else:
@@ -6368,19 +6369,18 @@ class CompositeInstance(object):
         return True
 
 class EventHandle(object):
-    __slots__ = ['uid', 'gen']
-    def __init__(self, uid, gen):
+    __slots__ = ['uid']
+    def __init__(self, uid):
         self.uid = uid
-        self.gen = gen
 
     def __hash__(self):
-        return hash((self.uid, self.gen))
+        return hash(self.uid)
 
     def __eq__(self, other):
-        return (self.uid,self.gen) == (other.uid,other.gen)
+        return (self.uid) == (other.uid)
 
     def __str__(self):
-        return "ev(" + hex(self.uid) + "," + str(self.gen) + ")"
+        return "ev(" + hex(self.uid) + ")"
 
     __repr__ = __str__
 
@@ -7217,38 +7217,34 @@ mapping_decision_pat    = re.compile(
            "(?P<iid>[0-9a-f]+)")
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
-    prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) (?P<id2>[0-9a-f]+) "+
-           "(?P<gen2>[0-9]+)")
+    prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 ap_user_event_pat       = re.compile(
-    prefix+"Ap User Event (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+    prefix+"Ap User Event (?P<id>[0-9a-f]+)")
 rt_user_event_pat       = re.compile(
-    prefix+"Rt User Event (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+    prefix+"Rt User Event (?P<id>[0-9a-f]+)")
 ap_user_event_trig_pat  = re.compile(
-    prefix+"Ap User Event Trigger (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+    prefix+"Ap User Event Trigger (?P<id>[0-9a-f]+)")
 rt_user_event_trig_pat  = re.compile(
-    prefix+"Rt User Event Trigger (?P<id>[0-9a-f]+) (?P<gen>[0-9]+)")
+    prefix+"Rt User Event Trigger (?P<id>[0-9a-f]+)")
 operation_event_pat     = re.compile(
-    prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) "+
-           "(?P<id2>[0-9a-f]+) (?P<gen2>[0-9]+)")
+    prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 realm_copy_pat          = re.compile(
     prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<pregen>[0-9]+) "+
-           "(?P<postid>[0-9a-f]+) (?P<postgen>[0-9]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_copy_field_pat    = re.compile(
-    prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<srcfid>[0-9]+) "+
+    prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
 realm_copy_intersect_pat= re.compile(
-    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<reg>[0-1]+) "+
+    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
            "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<pregen>[0-9]+) "+
-           "(?P<postid>[0-9a-f]+) (?P<postgen>[0-9]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_fill_field_pat    = re.compile(
-    prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<fid>[0-9]+) "+
+    prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
 realm_fill_intersect_pat= re.compile(
-    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<reg>[0-1]+) "+
+    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
            "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
 phase_barrier_pat       = re.compile(
     prefix+"Phase Barrier (?P<iid>[0-9a-f]+)")
@@ -7263,8 +7259,8 @@ def parse_legion_spy_line(line, state):
     # Event stuff is very likely the most frequent stuff
     m = event_dependence_pat.match(line)
     if m is not None:
-        e1 = state.get_event(int(m.group('id1'),16),int(m.group('gen1')))
-        e2 = state.get_event(int(m.group('id2'),16),int(m.group('gen2')))
+        e1 = state.get_event(int(m.group('id1'),16))
+        e2 = state.get_event(int(m.group('id2'),16))
         assert e2.exists()
         if e1.exists():
             e2.add_incoming(e1)
@@ -7272,35 +7268,35 @@ def parse_legion_spy_line(line, state):
         return True
     m = ap_user_event_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         e.set_ap_user_event()
         return True
     m = rt_user_event_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         e.set_rt_user_event()
         return True
     m = ap_user_event_trig_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         e.set_triggered()
         return True
     m = rt_user_event_trig_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         e.set_triggered()
         return True
     m = operation_event_pat.match(line)
     if m is not None:
-        e1 = state.get_event(int(m.group('id1'),16),int(m.group('gen1')))
-        e2 = state.get_event(int(m.group('id2'),16),int(m.group('gen2')))
+        e1 = state.get_event(int(m.group('id1'),16))
+        e2 = state.get_event(int(m.group('id2'),16))
         op = state.get_operation(int(m.group('uid')))
         op.set_events(e1, e2)
         return True
     m = realm_copy_pat.match(line)
     if m is not None:
-        e1 = state.get_event(int(m.group('preid'),16),int(m.group('pregen')))
-        e2 = state.get_event(int(m.group('postid'),16),int(m.group('postgen')))
+        e1 = state.get_event(int(m.group('preid'),16))
+        e2 = state.get_event(int(m.group('postid'),16))
         copy = state.get_realm_copy(e2)
         copy.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
@@ -7311,7 +7307,7 @@ def parse_legion_spy_line(line, state):
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         copy = state.get_realm_copy(e)
         src = state.get_instance(int(m.group('srcid'),16))
         dst = state.get_instance(int(m.group('dstid'),16))
@@ -7320,7 +7316,7 @@ def parse_legion_spy_line(line, state):
         return True
     m = realm_copy_intersect_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         copy = state.get_realm_copy(e)
         is_region = True if int(m.group('reg')) == 1 else False
         if is_region:
@@ -7332,8 +7328,8 @@ def parse_legion_spy_line(line, state):
         return True
     m = realm_fill_pat.match(line)
     if m is not None:
-        e1 = state.get_event(int(m.group('preid'),16),int(m.group('pregen')))
-        e2 = state.get_event(int(m.group('postid'),16),int(m.group('postgen')))
+        e1 = state.get_event(int(m.group('preid'),16))
+        e2 = state.get_event(int(m.group('postid'),16))
         fill = state.get_realm_fill(e2)
         fill.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
@@ -7344,14 +7340,14 @@ def parse_legion_spy_line(line, state):
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         fill = state.get_realm_fill(e)
         dst = state.get_instance(int(m.group('dstid'),16))
         fill.add_field(int(m.group('fid')), dst)
         return True
     m = realm_fill_intersect_pat.match(line)
     if m is not None:
-        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        e = state.get_event(int(m.group('id'),16))
         fill = state.get_realm_fill(e)
         is_region = True if int(m.group('reg')) == 1 else False
         if is_region:
@@ -7795,7 +7791,7 @@ class State(object):
         self.copies = dict()
         self.fills = dict()
         self.phase_barriers = None
-        self.no_event = Event(self, EventHandle(0,0))
+        self.no_event = Event(self, EventHandle(0))
         # For parsing only
         self.slice_index = dict()
         self.slice_slice = dict()
@@ -7824,8 +7820,9 @@ class State(object):
                 matches += 1
             else:
                 skipped += 1
-                if self.verbose:
-                    print 'Skipping line: ' + line
+                # always print a skipped line if it looks like it should have been matched
+                if self.verbose or (prefix_pat.match(line) is not None):
+                    print 'Skipping line: ' + line.strip()
         log.close()
         if matches == 0:
             print 'WARNING: file %s contained no valid lines!' % file_name
@@ -8202,8 +8199,8 @@ class State(object):
         self.instances[iid] = result
         return result
 
-    def get_event(self, iid, gen):
-        handle = EventHandle(iid, gen)
+    def get_event(self, iid):
+        handle = EventHandle(iid)
         if handle in self.events:
             return self.events[handle]
         result = Event(self, handle)

@@ -26,8 +26,8 @@ extern "C" {
 #include "bishop_c.h"
 }
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Mapping {
 
 		class BishopMapper : public DefaultMapper
 		{
@@ -35,24 +35,27 @@ namespace LegionRuntime {
 				BishopMapper(const std::vector<bishop_task_rule_t>&,
                      const std::vector<bishop_region_rule_t>&,
                      bishop_mapper_state_init_fn_t,
-                     Machine, HighLevelRuntime*, Processor);
+                     MapperRuntime*, Machine, Processor);
 				~BishopMapper();
 
-				virtual void select_task_options(Task *task);
-				virtual void slice_domain(const Task *task, const Domain &domain,
-						std::vector<DomainSplit> &slices);
-				virtual bool pre_map_task(Task *task);
-				virtual void select_task_variant(Task *task);
-				virtual bool map_task(Task *task);
-
-				virtual void notify_mapping_result(const Mappable *mappable);
-				virtual void notify_mapping_failed(const Mappable *mappable);
+        virtual void select_task_options(const MapperContext ctx,
+                                         const Task&         task,
+                                               TaskOptions&  output);
+        virtual void slice_task(const MapperContext    ctx,
+                                const Task&            task,
+                                const SliceTaskInput&  input,
+                                      SliceTaskOutput& output);
+        virtual void map_task(const MapperContext  ctx,
+                              const Task&          task,
+                              const MapTaskInput&  input,
+                                    MapTaskOutput& output);
 
       private:
         std::vector<bishop_task_rule_t> task_rules;
         std::vector<bishop_region_rule_t> region_rules;
         bishop_mapper_state_init_fn_t mapper_init;
         bishop_mapper_state_t mapper_state;
+        legion_mapper_runtime_t runtime_;
 		};
 
 	};
