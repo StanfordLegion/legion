@@ -40,23 +40,31 @@ typedef void* bishop_mapper_state_t;
 typedef
   bool (*bishop_task_predicate_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t);
 
 typedef
   bool (*bishop_region_predicate_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t,
       legion_region_requirement_t);
 
 typedef
   void (*bishop_select_task_options_fn_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t,
       legion_task_options_t);
 
 typedef
   void (*bishop_map_task_fn_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t,
       legion_map_task_input_t,
       legion_map_task_output_t);
@@ -64,20 +72,18 @@ typedef
 typedef
   void (*bishop_task_callback_fn_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t);
 
 typedef
   void (*bishop_region_callback_fn_t)(
       bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
       legion_task_t,
       legion_region_requirement_t,
       unsigned);
-
-typedef
-  legion_processor_t (*bishop_assignment_fn_t)(
-      bishop_mapper_state_t,
-      legion_task_t,
-      legion_domain_point_t);
 
 typedef
   void (*bishop_mapper_state_init_fn_t)(
@@ -87,12 +93,11 @@ typedef struct bishop_task_rule_t {
   bishop_task_predicate_t matches;
   bishop_select_task_options_fn_t select_task_options;
   bishop_map_task_fn_t map_task;
-  bishop_assignment_fn_t select_target_for_point;
 } bishop_task_rule_t;
 
 typedef struct bishop_region_rule_t {
   bishop_region_callback_fn_t pre_map_task;
-  bishop_region_callback_fn_t map_task;
+  bishop_map_task_fn_t map_task;
 } bishop_region_rule_t;
 
 typedef legion_isa_kind_t bishop_isa_t;
@@ -110,6 +115,9 @@ bishop_all_processors();
 legion_processor_t
 bishop_get_no_processor();
 
+legion_memory_t
+bishop_get_no_memory();
+
 bishop_processor_list_t
 bishop_filter_processors_by_isa(bishop_processor_list_t,
                                 bishop_isa_t);
@@ -121,35 +129,8 @@ bishop_memory_list_t
 bishop_filter_memories_by_kind(bishop_memory_list_t,
                                legion_memory_kind_t);
 
-bool
-bishop_task_set_target_processor_select_task_options(legion_task_t,
-                                                     legion_task_options_t,
-                                                     legion_processor_t);
-
-bool
-bishop_task_set_target_processor_map_task(legion_task_t,
-                                          legion_map_task_output_t,
-                                          legion_processor_t);
-
-bool
-bishop_task_set_priority(legion_task_t,
-                         legion_map_task_output_t,
-                         int);
-
-bool
-bishop_task_set_target_processor_list(legion_task_t,
-                                      bishop_processor_list_t);
-
 bishop_memory_list_t
 bishop_all_memories();
-
-bool
-bishop_region_set_target_memory(legion_region_requirement_t,
-                                legion_memory_t);
-
-bool
-bishop_region_set_target_memory_list(legion_region_requirement_t,
-                                     bishop_memory_list_t);
 
 bishop_isa_t
 bishop_processor_get_isa(legion_processor_t);

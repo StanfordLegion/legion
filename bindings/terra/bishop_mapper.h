@@ -55,6 +55,7 @@ namespace Legion {
         std::vector<bishop_region_rule_t> region_rules;
         bishop_mapper_state_init_fn_t mapper_init;
         bishop_mapper_state_t mapper_state;
+        legion_mapper_runtime_t runtime_;
 		};
 
 	};

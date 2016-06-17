@@ -52,7 +52,8 @@ BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
                            MapperRuntime* rt, Machine machine,
                            Processor local_proc)
   : DefaultMapper(rt, machine, local_proc, "bishop"),
-    task_rules(trules), region_rules(rrules), mapper_init(init_fn)
+    task_rules(trules), region_rules(rrules), mapper_init(init_fn),
+    runtime_(CObjectWrapper::wrap(rt))
 //------------------------------------------------------------------------------
 {
   log_bishop.info("bishop mapper created");
@@ -73,14 +74,16 @@ void BishopMapper::select_task_options(const MapperContext ctx,
 //------------------------------------------------------------------------------
 {
   DefaultMapper::select_task_options(ctx, task, output);
+  legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
-  legion_task_options_t options_ = CObjectWrapper::wrap(&output);
+  legion_task_options_t options_ = CObjectWrapper::wrap(output);
   for (unsigned i = 0; i < task_rules.size(); ++i)
   {
     bishop_task_rule_t& rule = task_rules[i];
     if (rule.select_task_options)
-      rule.select_task_options(mapper_state, task_, options_);
+      rule.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
   }
+  output = CObjectWrapper::unwrap(options_);
 }
 
 //------------------------------------------------------------------------------
@@ -101,6 +104,7 @@ void BishopMapper::map_task(const MapperContext ctx,
 //------------------------------------------------------------------------------
 {
   DefaultMapper::map_task(ctx, task, input, output);
+  legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   legion_map_task_input_t input_ = CObjectWrapper::wrap_const(&input);
   legion_map_task_output_t output_ = CObjectWrapper::wrap(&output);
@@ -108,13 +112,13 @@ void BishopMapper::map_task(const MapperContext ctx,
   {
     bishop_task_rule_t& rule = task_rules[i];
     if (rule.map_task)
-      rule.map_task(mapper_state, task_, input_, output_);
+      rule.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
   }
   for (unsigned i = 0; i < region_rules.size(); ++i)
   {
-    bishop_task_rule_t& rule = task_rules[i];
+    bishop_region_rule_t& rule = region_rules[i];
     if (rule.map_task)
-      rule.map_task(mapper_state, task_, input_, output_);
+      rule.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
   }
 }
 

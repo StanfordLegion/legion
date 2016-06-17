@@ -126,8 +126,6 @@ function std.register_bishop_mappers()
           [c.bishop_select_task_options_fn_t]([task_rule.select_task_options]),
         map_task =
           [c.bishop_map_task_fn_t]([task_rule.map_task]),
-        select_target_for_point =
-          [c.bishop_assignment_fn_t]([task_rule.select_target_for_point]),
       }
     end
   end
@@ -140,7 +138,7 @@ function std.register_bishop_mappers()
         pre_map_task =
           [c.bishop_region_callback_fn_t]([region_rule.pre_map_task]),
         map_task =
-          [c.bishop_region_callback_fn_t]([region_rule.map_task]),
+          [c.bishop_map_task_fn_t]([region_rule.map_task]),
       }
     end
   end
