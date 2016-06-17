@@ -187,7 +187,7 @@ def get_test_specs(include_spy):
          )),
         ('run_pass', (test_run_pass, (['-fflow', '1'], {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
-          #os.path.join('tests', 'bishop', 'run_pass'),
+          os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
          )),
     ]
