@@ -616,26 +616,33 @@ function codegen.region_rule(state_type, node)
             c.legion_region_requirement_get_instance_fields(req, fields,
               fields_size)
 
-            var region = c.legion_region_requirement_get_region(req)
-
-            var dims : uint[4]
-            dims[0], dims[1], dims[2], dims[3] =
-              c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
             var layout = c.legion_layout_constraint_set_create()
+            var priv = c.legion_region_requirement_get_privilege(req)
+            var redop = c.legion_region_requirement_get_redop(req)
             c.legion_layout_constraint_set_add_memory_constraint(
               layout,
               c.legion_memory_kind([value.value]))
             c.legion_layout_constraint_set_add_field_constraint(
               layout, fields, fields_size, false, false)
-            c.legion_layout_constraint_set_add_ordering_constraint(
-              layout, dims, 4, false)
 
+            if priv == c.REDUCE then
+              c.legion_layout_constraint_set_add_specialized_constraint(
+                layout, c.REDUCTION_FOLD_SPECIALIZE, redop)
+            elseif priv ~= c.NO_ACCESS then
+              var dims : uint[4]
+              dims[0], dims[1], dims[2], dims[3] =
+                c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
+              c.legion_layout_constraint_set_add_ordering_constraint(
+                layout, dims, 4, false)
+            end
+
+            var region = c.legion_region_requirement_get_region(req)
             var inst : c.legion_physical_instance_t
             var created : bool
             var success =
               c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
                 [rt_var], [ctx_var], [value.value],
-                layout, &region, 1, &inst, &created, true, 0, false)
+                layout, &region, 1, &inst, &created, true, 0, true)
             std.assert(success, "instance creation should succeed")
 
             c.legion_map_task_output_chosen_instances_set(
