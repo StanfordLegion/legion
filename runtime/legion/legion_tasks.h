@@ -496,8 +496,11 @@ namespace Legion {
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, 
                                       bool skip_privileges = false) const; 
-      bool has_created_region(LogicalRegion handle) const;
-      bool has_created_field(FieldSpace handle, FieldID fid) const;
+    protected:
+      LegionErrorType check_privilege_internal(const RegionRequirement &req,
+                                      const RegionRequirement &parent_req,
+                                      FieldID &bad_field, 
+                                      bool skip_privileges) const;
     public:
       bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
       void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
