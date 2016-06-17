@@ -559,6 +559,31 @@ namespace Legion {
         {
           result.is_inner = runtime->is_inner_variant(ctx, task.task_id,
                                                        result.variant);
+          if (result.is_inner)
+          {
+            // Default mapper assumes virtual mappings for all inner
+            // tasks, so see if there are any layout constraints that
+            // are inconsistent with this approach
+            const TaskLayoutConstraintSet &next_layout_constraints = 
+                runtime->find_task_layout_constraints(ctx, 
+                                            task.task_id, result.variant);
+            if (!next_layout_constraints.layouts.empty())
+            {
+              for (std::multimap<unsigned,LayoutConstraintID>::const_iterator 
+                    it = next_layout_constraints.layouts.begin();
+                    it != next_layout_constraints.layouts.end(); it++)
+              {
+                const LayoutConstraintSet &req_cons = 
+                    runtime->find_layout_constraints(ctx, it->second);
+                if ((req_cons.specialized_constraint.kind != NO_SPECIALIZE) &&
+                   (req_cons.specialized_constraint.kind != VIRTUAL_SPECIALIZE))
+                {
+                  result.is_inner = false;
+                  break;
+                }
+              }
+            }
+          }
           preferred_variants[task.task_id] = result;
         }
         return result;
@@ -616,6 +641,7 @@ namespace Legion {
       // Iterate over the premap regions
       bool has_variant_info = false;
       VariantInfo info;
+      bool has_restricted_regions = false;
       for (std::map<unsigned,std::vector<PhysicalInstance> >::const_iterator
             it = input.valid_instances.begin(); 
             it != input.valid_instances.end(); it++)
@@ -625,6 +651,7 @@ namespace Legion {
         if (task.regions[it->first].is_restricted())
         {
           output.premapped_instances.insert(*it);
+          has_restricted_regions = true;
           continue;
         }
         // These are non-restricted regions which means they have to be
@@ -781,6 +808,10 @@ namespace Legion {
                                           task.target_proc, target_memory);
         }
       }
+      // If we have any restricted regions, put the task 
+      // back on the origin processor
+      if (has_restricted_regions)
+        output.new_target_proc = task.orig_proc;
     }
 
     //--------------------------------------------------------------------------

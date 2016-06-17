@@ -42,21 +42,20 @@ namespace Legion {
       VERSION_INFO_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      VERSION_MANAGER_REF = 6,
-      PENDING_GC_REF = 7,
-      REMOTE_DID_REF = 8,
-      PENDING_COLLECTIVE_REF = 9,
-      MEMORY_MANAGER_REF = 10,
-      COMPOSITE_NODE_REF = 11,
-      COMPOSITE_HANDLE_REF = 12,
-      PERSISTENCE_REF = 13,
-      REMOTE_CREATE_REF = 14,
-      INSTANCE_MAPPER_REF = 15,
-      APPLICATION_REF = 16,
-      MAPPING_ACQUIRE_REF = 17,
-      NEVER_GC_REF = 18,
-      CONTEXT_REF = 19,
-      LAST_SOURCE_REF = 20,
+      PENDING_GC_REF = 6,
+      REMOTE_DID_REF = 7,
+      PENDING_COLLECTIVE_REF = 8,
+      MEMORY_MANAGER_REF = 9,
+      COMPOSITE_NODE_REF = 10,
+      COMPOSITE_HANDLE_REF = 11,
+      PERSISTENCE_REF = 12,
+      REMOTE_CREATE_REF = 13,
+      INSTANCE_MAPPER_REF = 14,
+      APPLICATION_REF = 15,
+      MAPPING_ACQUIRE_REF = 16,
+      NEVER_GC_REF = 17,
+      CONTEXT_REF = 18,
+      LAST_SOURCE_REF = 19,
     };
 
     enum ReferenceKind {
@@ -73,7 +72,6 @@ namespace Legion {
       "Version Info Reference",                     \
       "Physical State Reference",                   \
       "Physical Region Reference",                  \
-      "Version Manager Reference",                  \
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
@@ -134,6 +132,74 @@ namespace Legion {
       virtual void reset(int key) = 0;
     };
 
+    /**
+     * \interface ReferenceMutator
+     * This interface is used for capturing the effects
+     * of mutating the state of references for distributed
+     * collectable objects such as a message needing 
+     * to be send to another node as a consequence of 
+     * adding another reference.
+     */
+    class ReferenceMutator {
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event) = 0;
+    };
+
+    /**
+     * \class LocalReferenceMutator 
+     * This is an implementation of the ReferenceMutator
+     * interface for handling local effects that should 
+     * be waiting on locally.
+     */
+    class LocalReferenceMutator : public ReferenceMutator {
+    public:
+      LocalReferenceMutator(void) { }
+      LocalReferenceMutator(const LocalReferenceMutator &rhs);
+      ~LocalReferenceMutator(void);
+    public:
+      LocalReferenceMutator& operator=(const LocalReferenceMutator &rhs);
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    private:
+      std::set<RtEvent> mutation_effects;
+    };
+
+    /**
+     * \class WrapperReferenceMutator
+     * This wraps a target set of runtime events to update
+     */
+    class WrapperReferenceMutator : public ReferenceMutator {
+    public:
+      WrapperReferenceMutator(std::set<RtEvent> &targets)
+        : mutation_effects(targets) { }
+      WrapperReferenceMutator(const WrapperReferenceMutator &rhs);
+      ~WrapperReferenceMutator(void) { }
+    public:
+      WrapperReferenceMutator& operator=(const WrapperReferenceMutator &rhs);
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    private:
+      std::set<RtEvent> &mutation_effects;
+    };
+
+    /**
+     * \class IgnoreReferenceMutator
+     * This will ignore any reference effects
+     */
+    class IgnoreReferenceMutator : public ReferenceMutator {
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event) { }
+    };
+
+    /**
+     * \class Distributed Collectable
+     * This is the base class for handling all the reference
+     * counting logic for any objects in the runtime which 
+     * have distributed copies of themselves across multiple
+     * nodes and therefore have to have a distributed 
+     * reference counting scheme to determine when they 
+     * can be collected.
+     */
     class DistributedCollectable {
     public:
       enum State {
@@ -155,12 +221,15 @@ namespace Legion {
       template<ReferenceKind REF_KIND, bool ADD>
       class UpdateReferenceFunctor {
       public:
-        UpdateReferenceFunctor(DistributedCollectable *dc, unsigned cnt = 1)
-          : source(dc), count(cnt) { }
+        UpdateReferenceFunctor(DistributedCollectable *dc, 
+                               ReferenceMutator *m,
+                               unsigned cnt = 1)
+          : source(dc), mutator(m), count(cnt) { }
       public:
         inline void apply(AddressSpaceID target);
       protected:
-        DistributedCollectable *source;
+        DistributedCollectable *const source;
+        ReferenceMutator *const mutator;
         unsigned count;
       };
     public:
@@ -172,54 +241,86 @@ namespace Legion {
                              bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:
-      inline void add_base_gc_ref(ReferenceSource source, int cnt = 1);
-      inline void add_nested_gc_ref(DistributedID source, int cnt = 1);
-      inline bool remove_base_gc_ref(ReferenceSource source, int cnt = 1);
-      inline bool remove_nested_gc_ref(DistributedID source, int cnt = 1);
+      inline void add_base_gc_ref(ReferenceSource source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
+      inline void add_nested_gc_ref(DistributedID source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
+      inline bool remove_base_gc_ref(ReferenceSource source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
+      inline bool remove_nested_gc_ref(DistributedID source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
     public:
-      inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
-      inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline void add_base_valid_ref(ReferenceSource source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, 
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
       inline bool remove_base_valid_ref(ReferenceSource source, 
-                                        int cnt = 1);
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, 
-                                          int cnt = 1);
+                                  ReferenceMutator *mutator = NULL,int cnt = 1);
     public:
-      inline void add_base_resource_ref(ReferenceSource source, 
-                                        int cnt = 1);
-      inline void add_nested_resource_ref(DistributedID source, 
-                                          int cnt = 1);
-      inline bool remove_base_resource_ref(ReferenceSource source, 
-                                           int cnt = 1);
-      inline bool remove_nested_resource_ref(DistributedID source, 
-                                             int cnt = 1);
-    public: // some help for manaing physical instances 
+      inline void add_base_resource_ref(ReferenceSource source, int cnt = 1);
+      inline void add_nested_resource_ref(DistributedID source, int cnt = 1);
+      inline bool remove_base_resource_ref(ReferenceSource source, int cnt = 1);
+      inline bool remove_nested_resource_ref(DistributedID source, int cnt = 1);
+    public: // some help for managing physical instances 
       inline bool try_add_base_valid_ref(ReferenceSource source,
+                                         ReferenceMutator *mutator,
                                          bool must_be_valid,
                                          int cnt = 1);
       bool try_active_deletion(void);
     private:
-      void add_gc_reference(void);
-      bool remove_gc_reference(void);
+      void add_gc_reference(ReferenceMutator *mutator);
+      bool remove_gc_reference(ReferenceMutator *mutator);
     private:
-      void add_valid_reference(void);
-      bool remove_valid_reference(void);
-      bool try_add_valid_reference(bool must_be_valid, int cnt);
+      void add_valid_reference(ReferenceMutator *mutator);
+      bool remove_valid_reference(ReferenceMutator *mutator);
+      bool try_add_valid_reference(ReferenceMutator *mutator,
+                                   bool must_be_valid, int cnt);
     private:
       void add_resource_reference(void);
       bool remove_resource_reference(void);
 #ifdef USE_REMOTE_REFERENCES
     private:
-      bool add_create_reference(AddressSpaceID source,
-                                AddressSpaceID target, ReferenceKind kind);
+      bool add_create_reference(AddressSpaceID source, 
+          ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind);
       bool remove_create_reference(AddressSpaceID source,
-                                   AddressSpaceID target, ReferenceKind kind);
+          ReferenceMutator *mutator, AddressSpaceID target, ReferenceKind kind);
+#endif
+#ifdef DEBUG_LEGION_GC
+    private:
+      void add_base_gc_ref_internal(ReferenceSource source, 
+                                    ReferenceMutator *mutator, int cnt);
+      void add_nested_gc_ref_internal(DistributedID source, 
+                                    ReferenceMutator *mutator, int cnt);
+      bool remove_base_gc_ref_internal(ReferenceSource source, 
+                                    ReferenceMutator *mutator, int cnt);
+      bool remove_nested_gc_ref_internal(DistributedID source, 
+                                    ReferenceMutator *mutator, int cnt);
+    public:
+      void add_base_valid_ref_internal(ReferenceSource source, 
+                                    ReferenceMutator *mutator, int cnt);
+      void add_nested_valid_ref_internal(DistributedID source, 
+                                    ReferenceMutator *mutator, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, 
+                                    ReferenceMutator *mutator, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, 
+                                    ReferenceMutator *mutator, int cnt);
+      bool try_add_valid_reference_internal(ReferenceSource source, 
+                                            ReferenceMutator *mutator, 
+                                            bool must_be_valid, int cnt);
+    public:
+      void add_base_resource_ref_internal(ReferenceSource source, int cnt); 
+      void add_nested_resource_ref_internal(DistributedID source, int cnt); 
+      bool remove_base_resource_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_resource_ref_internal(DistributedID source, int cnt); 
 #endif
     public:
       // Methods for changing state
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline RtEvent get_destruction_event(void) const 
@@ -233,12 +334,14 @@ namespace Legion {
       // This is for the owner node only
       void register_remote_instance(AddressSpaceID source, 
                                     RtEvent destroy_event);
-      void register_with_runtime(bool send_notification);
+      void register_with_runtime(ReferenceMutator *mutator);
     public:
-      virtual void send_remote_registration(void);
+      virtual void send_remote_registration(ReferenceMutator *mutator);
       void send_remote_valid_update(AddressSpaceID target, 
+                                    ReferenceMutator *mutator,
                                     unsigned count, bool add);
       void send_remote_gc_update(AddressSpaceID target,
+                                 ReferenceMutator *mutator,
                                  unsigned count, bool add);
       void send_remote_resource_update(AddressSpaceID target,
                                        unsigned count, bool add);
@@ -291,6 +394,15 @@ namespace Legion {
                          AddressSpaceID/*dst*/>,int> create_gc_refs;
       std::map<std::pair<AddressSpaceID/*src*/,
                          AddressSpaceID/*dst*/>,int> create_valid_refs;
+#endif
+#ifdef DEBUG_LEGION_GC
+    protected:
+      std::map<ReferenceSource,int> detailed_base_gc_references;
+      std::map<DistributedID,int> detailed_nested_gc_references;
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+      std::map<ReferenceSource,int> detailed_base_resource_references;
+      std::map<DistributedID,int> detailed_nested_resource_references;
 #endif
     protected:
       // Track all the remote instances (relative to ourselves) we know about
@@ -379,12 +491,12 @@ namespace Legion {
       {
         case GC_REF_KIND:
           {
-            source->send_remote_gc_update(target, count, ADD);
+            source->send_remote_gc_update(target, mutator, count, ADD);
             break;
           }
         case VALID_REF_KIND:
           {
-            source->send_remote_valid_update(target, count, ADD);
+            source->send_remote_valid_update(target, mutator, count, ADD);
             break;
           }
         case RESOURCE_REF_KIND:
@@ -399,7 +511,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void DistributedCollectable::add_base_gc_ref(ReferenceSource source,
-                                                        int cnt /*=1*/)
+                                      ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -408,17 +520,21 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
-        add_gc_reference();
+        add_gc_reference(mutator);
+#else
+      add_base_gc_ref_internal(source, mutator, cnt); 
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline void DistributedCollectable::add_nested_gc_ref(
-                                           DistributedID source, int cnt /*=1*/)
+                DistributedID source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -427,17 +543,22 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
-        add_gc_reference();
+        add_gc_reference(mutator);
+#else
+      add_nested_gc_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
+                                 mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline bool DistributedCollectable::remove_base_gc_ref(
-                                         ReferenceSource source, int cnt /*=1*/)
+              ReferenceSource source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -446,18 +567,22 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
-        return remove_gc_reference();
+        return remove_gc_reference(mutator);
       return false;
+#else
+      return remove_base_gc_ref_internal(source, mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline bool DistributedCollectable::remove_nested_gc_ref(
-                                           DistributedID source, int cnt /*=1*/)
+                DistributedID source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -466,18 +591,23 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&gc_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
-        return remove_gc_reference();
+        return remove_gc_reference(mutator);
       return false;
+#else
+      return remove_nested_gc_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline void DistributedCollectable::add_base_valid_ref(
-                                         ReferenceSource source, int cnt /*=1*/)
+              ReferenceSource source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -486,17 +616,21 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
-        add_valid_reference();
+        add_valid_reference(mutator);
+#else
+      add_base_valid_ref_internal(source, mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline void DistributedCollectable::add_nested_valid_ref(
-                                           DistributedID source, int cnt /*=1*/)
+                DistributedID source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -505,17 +639,22 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
-        add_valid_reference();
+        add_valid_reference(mutator);
+#else
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
+                                    mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline bool DistributedCollectable::remove_base_valid_ref(
-                                         ReferenceSource source, int cnt /*=1*/)
+              ReferenceSource source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -524,18 +663,22 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
-        return remove_valid_reference();
+        return remove_valid_reference(mutator);
       return false;
+#else
+      return remove_base_valid_ref_internal(source, mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline bool DistributedCollectable::remove_nested_valid_ref(
-                                           DistributedID source, int cnt /*=1*/)
+                DistributedID source, ReferenceMutator *mutator, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -544,13 +687,18 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&valid_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
 #endif
       if (previous == cnt)
-        return remove_valid_reference();
+        return remove_valid_reference(mutator);
       return false;
+#else
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), mutator, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -564,12 +712,16 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_resource_reference();
+#else
+      add_base_resource_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -583,12 +735,17 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= 0);
 #endif
       if (previous == 0)
         add_resource_reference();
+#else
+      add_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -602,6 +759,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -609,6 +767,9 @@ namespace Legion {
       if (previous == cnt)
         return remove_resource_reference();
       return false;
+#else
+      return remove_base_resource_ref_internal(source, cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -622,6 +783,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
 #endif
+#ifndef DEBUG_LEGION_GC
       int previous = __sync_fetch_and_add(&resource_references, -cnt);
 #ifdef DEBUG_LEGION
       assert(previous >= cnt);
@@ -629,23 +791,37 @@ namespace Legion {
       if (previous == cnt)
         return remove_resource_reference();
       return false;
+#else
+      return remove_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#endif
     }
 
     //--------------------------------------------------------------------------
     inline bool DistributedCollectable::try_add_base_valid_ref(
-                      ReferenceSource source, bool must_be_valid, int cnt/*=1*/) 
+                            ReferenceSource source, ReferenceMutator *mutator, 
+                            bool must_be_valid, int cnt/*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(cnt >= 0);
 #endif
 #ifdef LEGION_GC
+#ifdef DEBUG_LEGION_GC
+      bool result = try_add_valid_reference_internal(source, mutator, 
+                                                     must_be_valid, cnt);
+#else
       bool result = try_add_valid_reference(must_be_valid, cnt);
+#endif
       if (result)
         log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
       return result; 
 #else
-      return try_add_valid_reference(must_be_valid, cnt);
+#ifdef DEBUG_LEGION_GC
+      return try_add_valid_reference_internal(source,mutator,must_be_valid,cnt);
+#else
+      return try_add_valid_reference(mutator, must_be_valid, cnt);
+#endif
 #endif
     }
 

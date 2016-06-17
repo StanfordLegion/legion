@@ -1681,7 +1681,7 @@ namespace Legion {
           ctx->acquired_instances->end())
         return true;
       pause_mapper_call(ctx);
-      if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
+      if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
                                           !manager->is_owner()))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
@@ -1780,7 +1780,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
           *(ctx->acquired_instances);
         // Figure out which instances weren't deleted yet
         for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -1918,7 +1918,7 @@ namespace Legion {
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
         if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                            !manager->is_owner()))
+                                info->operation, !manager->is_owner()))
         {
           // We already know it wasn't there before
           already_acquired[manager] = std::pair<unsigned,bool>(1, false);
@@ -1974,8 +1974,8 @@ namespace Legion {
             record_acquired_instance(info, *it, false/*created*/); 
             // make the reference a local reference and 
             // remove our remote did reference
-            (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-            (*it)->send_remote_valid_update(req_it->first->owner_space,
+            (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, info->operation);
+            (*it)->send_remote_valid_update(req_it->first->owner_space, NULL,
                                             1, false/*add*/);
           }
           else
@@ -2080,7 +2080,8 @@ namespace Legion {
         return;
       // Release the refrences and then keep going, we know there is 
       // a resource reference so no need to check for deletion
-      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second.first);
+      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
+                                     finder->second.first);
       acquired.erase(finder);
     }
 

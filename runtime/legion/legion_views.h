@@ -63,16 +63,16 @@ namespace Legion {
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      void defer_collect_user(ApEvent term_event);
+      void defer_collect_user(ApEvent term_event, ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
                                           const std::set<ApEvent> &term_events);
@@ -108,7 +108,7 @@ namespace Legion {
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
                    AddressSpaceID logical_owner, RegionTreeNode *node, 
-                   SingleTask *owner_context, RtUserEvent destroy_event,
+                   UniqueID owner_context, RtUserEvent destroy_event,
                    bool register_now); 
       virtual ~InstanceView(void);
     public:
@@ -166,10 +166,10 @@ namespace Legion {
                                     const unsigned index) = 0;
     public:
       // Reference counting state change functions
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -209,7 +209,10 @@ namespace Legion {
       static void handle_view_remote_invalidate(Deserializer &derez,  
                                                 Runtime *rt);
     public:
-      SingleTask *const owner_context;
+      // The ID of the context that made this view
+      // Note this view can escape this context inside a composite
+      // instance made for a virtual mapping
+      const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
       const AddressSpaceID logical_owner;
     };
@@ -240,7 +243,7 @@ namespace Legion {
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        AddressSpaceID logical_owner, RegionTreeNode *node, 
                        InstanceManager *manager, MaterializedView *parent, 
-                       SingleTask *owner_context, RtUserEvent destroy_event,
+                       UniqueID owner_context, RtUserEvent destroy_event,
                        bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
@@ -411,10 +414,10 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const unsigned index);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_users);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -628,7 +631,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     AddressSpaceID logical_owner, RegionTreeNode *node, 
-                    ReductionManager *manager, SingleTask *owner_context,
+                    ReductionManager *manager, UniqueID owner_context,
                     RtUserEvent destroy_event, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
@@ -726,10 +729,10 @@ namespace Legion {
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -795,10 +798,10 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void notify_active(void) = 0;
-      virtual void notify_inactive(void) = 0;
-      virtual void notify_valid(void) = 0;
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_active(ReferenceMutator *mutator) = 0;
+      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
+      virtual void notify_valid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -860,8 +863,25 @@ namespace Legion {
      * logical region with a bunch of different instances.
      */
     class CompositeView : public DeferredView {
-      public:
+    public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
+    public:
+      struct DeferCompositeNodeRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        LogicalView *view;
+        unsigned refs;
+      };
+      struct DeferCompositeViewCreationArgs {
+      public:
+        HLRTaskID hlr_id;
+        DistributedID did;
+        AddressSpaceID owner;
+        RegionTreeNode *target_node;
+        CompositeNode *root;
+        CompositeVersionInfo *version_info;
+        RtUserEvent destroy_event;
+      };
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
@@ -880,10 +900,10 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const ColorPoint &c);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -899,6 +919,9 @@ namespace Legion {
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_deferred_node_refs(const void *args);
+      static void handle_deferred_view_creation(Runtime *runtime,
+                                                const void *args);
     public:
       // The root node for this composite view
       CompositeNode *const root;
@@ -967,13 +990,13 @@ namespace Legion {
     public:
       void pack_composite_tree(Serializer &rez, AddressSpaceID target);
       void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
-                               Runtime *runtime,std::set<RtEvent> &ready_events,
-                               std::map<LogicalView*,unsigned> &pending_refs);
+                               Runtime *runtime, std::map<LogicalView*,
+                                std::pair<RtEvent,unsigned> > &pending_refs);
     public:
-      void notify_active(void);
-      void notify_inactive(void);
-      void notify_valid(void);
-      void notify_invalid(void);
+      void notify_active(ReferenceMutator *mutator);
+      void notify_inactive(ReferenceMutator *mutator);
+      void notify_valid(ReferenceMutator *mutator);
+      void notify_invalid(ReferenceMutator *mutator);
     public:
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
@@ -1024,10 +1047,10 @@ namespace Legion {
         { assert(false); return NULL; }
       virtual LogicalView* get_subview(const ColorPoint &c);
     public:
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:

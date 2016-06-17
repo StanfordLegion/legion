@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: pointer int1d(int32, $r) is out-of-bounds
+-- bounds_check_fail_array1.rg:23: pointer int1d(int32, $r) is out-of-bounds
 
 import "regent"
 

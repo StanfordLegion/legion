@@ -505,10 +505,11 @@ typedef enum legion_launch_constraint_t {
 } legion_launch_constraint_t;
 
 typedef enum legion_specialized_constraint_t {
-  NORMAL_SPECIALIZE = 0,
-  REDUCTION_FOLD_SPECIALIZE = 1,
-  REDUCTION_LIST_SPECIALIZE = 2,
-  VIRTUAL_SPECIALIZE = 3,
+  NO_SPECIALIZE = 0,
+  NORMAL_SPECIALIZE = 1,
+  REDUCTION_FOLD_SPECIALIZE = 2,
+  REDUCTION_LIST_SPECIALIZE = 3,
+  VIRTUAL_SPECIALIZE = 4,
 } legion_specialized_constraint_t;
 
 //==========================================================================

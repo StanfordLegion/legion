@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: array access to int32[5] is out-of-bounds
+-- bounds_check_fail2.rg:24: array access to int32[5] is out-of-bounds
 
 import "regent"
 

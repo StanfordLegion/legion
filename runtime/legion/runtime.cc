@@ -31,10 +31,6 @@
 #include "test_mapper.h"
 #include "replay_mapper.h"
 #include "debug_mapper.h"
-#ifdef HANG_TRACE
-#include <signal.h>
-#include <execinfo.h>
-#endif
 #include <unistd.h> // sleep for warnings
 
 namespace LegionRuntime {
@@ -77,7 +73,6 @@ namespace Legion {
     LegionRuntime::Logger::Category log_field("field_spaces");
     LegionRuntime::Logger::Category log_region("regions");
     LegionRuntime::Logger::Category log_inst("instances");
-    LegionRuntime::Logger::Category log_leak("leaks");
     LegionRuntime::Logger::Category log_variant("variants");
     LegionRuntime::Logger::Category log_allocation("allocation");
     LegionRuntime::Logger::Category log_prof("legion_prof");
@@ -442,7 +437,8 @@ namespace Legion {
       // the instances on remote nodes
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       // don't want to leak events
@@ -615,16 +611,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_active(void)
+    void FutureImpl::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_valid(void)
+    void FutureImpl::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -632,7 +628,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_invalid(void)
+    void FutureImpl::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -640,12 +636,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_inactive(void)
+    void FutureImpl::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -731,7 +727,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(void)
+    void FutureImpl::record_future_registered(ReferenceMutator *creator)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -744,7 +740,7 @@ namespace Legion {
       if (!is_owner())
       {
         // Send the remote registration notice
-        send_remote_registration();
+        send_remote_registration(creator);
         // Then send the subscription for this future
         register_waiter(runtime->address_space);
       }
@@ -2036,32 +2032,6 @@ namespace Legion {
                                          op, precondition);
     }
 
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    void ProcessorManager::dump_state(FILE *target)
-    //--------------------------------------------------------------------------
-    {
-      fprintf(target,"State of Processor: " IDFMT " (kind=%d)\n", 
-              local_proc.id, proc_kind);
-      fprintf(target,"  Current Pending Task: %d\n", current_pending);
-      fprintf(target,"  Has Executing Task: %d\n", current_executing);
-      fprintf(target,"  Idle Task Enabled: %d\n", idle_task_enabled);
-      fprintf(target,"  Dependence Queue Depth: %ld\n", 
-              dependence_queues.size());
-      for (unsigned idx = 0; idx < dependence_queues.size(); idx++)
-        fprintf(target,"    Queue at depth %d has %ld elements\n",
-                idx, dependence_queues[idx].queue.size());
-      fprintf(target,"  Ready Queue Count: %ld\n", ready_queues.size());
-      for (std::map<MapperID,std::list<TaskOp*> >::const_iterator it = 
-            ready_queues.begin(); it != ready_queues.end(); it++)
-        fprintf(target,"    Ready queue %d has %ld elements\n",
-                it->first, it->second.size());
-      fprintf(target,"  Local Queue has %ld elements\n", 
-              local_ready_queue.size());
-      fflush(target);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
     //--------------------------------------------------------------------------
@@ -2813,6 +2783,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool remove_min_reference = false;
+      IgnoreReferenceMutator mutator;
       if (!is_owner)
       {
         RtUserEvent never_gc_wait;
@@ -2882,8 +2853,8 @@ namespace Legion {
           if (success)
           {
             // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF);
-            manager->send_remote_valid_update(owner_space, 1, false/*add*/);
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
+            manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
             // Then record it
             AutoLock m_lock(manager_lock);
             InstanceInfo &info = current_instances[manager];
@@ -2893,7 +2864,8 @@ namespace Legion {
               info.min_priority = GC_NEVER_PRIORITY;
             info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
+          if (remove_duplicate && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
@@ -2902,7 +2874,8 @@ namespace Legion {
         // If this a max priority, try adding the reference beforehand, if
         // it fails then we know the instance is already deleted so whatever
         if ((priority == GC_NEVER_PRIORITY) &&
-            !manager->try_add_base_valid_ref(NEVER_GC_REF, true/*must be valid*/))
+            !manager->try_add_base_valid_ref(NEVER_GC_REF, &mutator,
+                                             true/*must be valid*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
@@ -2972,7 +2945,8 @@ namespace Legion {
           }
         }
       }
-      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
+      if (remove_min_reference && 
+          manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
         PhysicalManager::delete_physical_manager(manager);
     }
 
@@ -3334,6 +3308,8 @@ namespace Legion {
       RtEvent manager_ready = RtEvent::NO_RT_EVENT;
       PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(did, manager_ready);
+      std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
         manager_ready.wait();
@@ -3341,8 +3317,8 @@ namespace Legion {
       // and then remove the remote DID
       if (acquire)
       {
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-        manager->send_remote_valid_update(source, 1, false/*add*/);
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);
       }
       *target = MappingInstance(manager);
       *success = true;
@@ -3367,7 +3343,7 @@ namespace Legion {
             // Record the instance as a max priority instance
             bool remove_duplicate = false;
             // No need to be safe here, we have a valid reference
-            manager->add_base_valid_ref(NEVER_GC_REF);
+            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
             {
               std::pair<MapperID,Processor> key(mapper_id,processor);
               AutoLock m_lock(manager_lock);
@@ -3379,7 +3355,7 @@ namespace Legion {
               info.mapper_priorities[key] = NEVER_GC_REF;
             }
             if (remove_duplicate && 
-                manager->remove_base_valid_ref(NEVER_GC_REF))
+                manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
               PhysicalManager::delete_physical_manager(manager);
           }
         }
@@ -3397,7 +3373,7 @@ namespace Legion {
           derez.deserialize(processor);
           bool remove_duplicate = false;
           // No need to be safe here, we have a valid reference
-          manager->add_base_valid_ref(NEVER_GC_REF);
+          manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             AutoLock m_lock(manager_lock);
@@ -3408,12 +3384,16 @@ namespace Legion {
               info.min_priority = NEVER_GC_REF;
             info.mapper_priorities[key] = NEVER_GC_REF;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
+          if (remove_duplicate && 
+              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
       // Trigger that we are done
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -3474,7 +3454,7 @@ namespace Legion {
         derez.deserialize(success);
         // If we succeed we can trigger immediately, otherwise we
         // have to send back the response to fail
-        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF,
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, NULL,
                                              false/*must be valid*/))
         {
           Serializer rez;
@@ -3540,7 +3520,7 @@ namespace Legion {
           continue;
         }
         // Otherwise try to acquire it locally
-        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, 
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, NULL,
                                              false/*needs valid*/))
         {
           failures.push_back(idx);
@@ -3631,7 +3611,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3681,7 +3661,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3732,7 +3712,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3782,7 +3762,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -3832,7 +3812,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        true/*must already be valid*/))
                 continue;
             }
@@ -3881,7 +3861,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        true/*must already be valid*/))
                 continue;
             }
@@ -4113,7 +4093,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -4214,7 +4194,7 @@ namespace Legion {
             {
               // If we fail to acquire then keep going
               if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
                                        false/*must already be valid*/))
                 continue;
             }
@@ -4648,6 +4628,17 @@ namespace Legion {
           case SEND_INDEX_SPACE_CHILD_RESPONSE:
             {
               runtime->handle_index_space_child_response(derez);
+              break;
+            }
+          case SEND_INDEX_SPACE_COLORS_REQUEST:
+            {
+              runtime->handle_index_space_colors_request(derez,
+                                                         remote_address_space);
+              break;
+            }
+          case SEND_INDEX_SPACE_COLORS_RESPONSE:
+            {
+              runtime->handle_index_space_colors_response(derez);
               break;
             }
           case SEND_INDEX_PARTITION_NOTIFICATION:
@@ -5568,7 +5559,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term)
+    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term,
+                                                ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
@@ -5577,7 +5569,7 @@ namespace Legion {
       {
         // Add a garbage collection reference to the view, it will
         // be removed in LogicalView::handle_deferred_collect
-        view->add_base_gc_ref(PENDING_GC_REF);
+        view->add_base_gc_ref(PENDING_GC_REF, mutator);
         collections[view].insert(term);
       }
       else
@@ -6968,6 +6960,7 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         group_lock(Reservation::create_reservation()),
+        processor_mapping_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         distributed_collectable_lock(Reservation::create_reservation()),
@@ -7104,8 +7097,6 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
 #endif
-      // Initialize our one virtual manager
-      VirtualManager::initialize_virtual_instance(this, 0/*same across nodes*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7468,6 +7459,8 @@ namespace Legion {
       projection_functors.clear();
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
+      processor_mapping_lock.destroy_reservation();
+      processor_mapping_lock = Reservation::NO_RESERVATION;
       distributed_id_lock.destroy_reservation();
       distributed_id_lock = Reservation::NO_RESERVATION;
       distributed_collectable_lock.destroy_reservation();
@@ -9699,6 +9692,14 @@ namespace Legion {
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
+      return get_index_partition(parent, color);
+      
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
+    //--------------------------------------------------------------------------
+    {
       IndexPartition result = forest->get_index_partition(parent, 
                                                           ColorPoint(color));
 #ifdef DEBUG_LEGION
@@ -9714,15 +9715,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
+    IndexPartition Runtime::get_index_partition(Context ctx,
+                                    IndexSpace parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition(parent, ColorPoint(color));
+      return get_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(Context ctx,
-                                    IndexSpace parent, const DomainPoint &color)
+    IndexPartition Runtime::get_index_partition(IndexSpace parent,
+                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       IndexPartition result = forest->get_index_partition(parent, 
@@ -9759,6 +9761,14 @@ namespace Legion {
                                       const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
+      return has_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_partition(IndexSpace parent,
+                                      const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
       IndexPartition result = forest->get_index_partition(parent, 
                                                           ColorPoint(color));
       return result.exists();
@@ -9769,24 +9779,23 @@ namespace Legion {
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
+      return get_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color color)
+    //--------------------------------------------------------------------------
+    {
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid color %d for get index subspace", 
-                                color);
+        log_index.error("Invalid color %d for get index subspace", color);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_COLOR); 
       }
 #endif
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color c)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_subspace(p, ColorPoint(c));
     }
 
     //--------------------------------------------------------------------------
@@ -9836,6 +9845,13 @@ namespace Legion {
                                      const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
+      return has_index_subspace(p, color); 
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace(IndexPartition p, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
       IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
       return result.exists();
     }
@@ -9858,6 +9874,13 @@ namespace Legion {
     Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
+      return get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_space_domain(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
       Domain result = forest->get_index_space_domain(handle);
 #ifdef DEBUG_LEGION
       if (!result.exists())
@@ -9870,13 +9893,6 @@ namespace Legion {
       }
 #endif
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -9900,6 +9916,13 @@ namespace Legion {
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
+      return get_index_partition_color_space(p); 
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Runtime::get_index_partition_color_space(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
       Domain result = forest->get_index_partition_color_space(p);
 #ifdef DEBUG_LEGION
       if (!result.exists())
@@ -9914,24 +9937,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_partition_color_space(IndexPartition p)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_partition_color_space(p);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-      std::set<ColorPoint> color_points;
-      forest->get_index_space_partition_colors(sp, color_points);
-      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
-            it != color_points.end(); it++)
-      {
-        colors.insert(it->get_index());
-      }
+      return get_index_space_partition_colors(sp, colors);
     }
 
     //--------------------------------------------------------------------------
@@ -9950,6 +9960,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
+                                                  std::set<DomainPoint> &colors)
+    //--------------------------------------------------------------------------
+    {
+      get_index_space_partition_colors(sp, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_space_partition_colors(IndexSpace sp,
                                                   std::set<DomainPoint> &colors)
     //--------------------------------------------------------------------------
     {
@@ -9984,6 +10002,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_complete(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->is_index_partition_complete(p);
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -10000,6 +10025,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(Context ctx, 
                                                      IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_space_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_space_color(handle).get_point();
@@ -10023,6 +10055,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_partition_color_point(Context ctx,
                                                          IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_partition_color_point(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return forest->get_index_partition_color(handle).get_point();
@@ -10388,8 +10427,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition Runtime::get_logical_partition_by_color(LogicalRegion par,
+                                                           const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_logical_partition_by_color(Context ctx, 
                                  LogicalRegion parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_partition_by_color(parent, ColorPoint(color));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_partition_by_color(LogicalRegion parent, 
+                                                 const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return forest->has_logical_partition_by_color(parent, ColorPoint(color));
@@ -10455,8 +10510,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
+                                                          const DomainPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_subregion_by_color(par, ColorPoint(c));
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::has_logical_subregion_by_color(Context ctx,
                               LogicalPartition parent, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_logical_subregion_by_color(LogicalPartition parent, 
+                                                 const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
@@ -10495,6 +10566,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(Context ctx,
+                                                        LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_region_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_region_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_logical_partition_color(Context ctx,
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
@@ -10507,6 +10593,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return forest->get_logical_partition_color(handle).get_index();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_partition_color_point(Context ctx,
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_color(handle).get_point();
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_partition_color_point(
+                                                        LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_logical_partition_color(handle).get_point();
     }
 
     //--------------------------------------------------------------------------
@@ -10748,7 +10850,7 @@ namespace Legion {
             // garbage collection by the runtime
             result->add_reference();
             launcher.predicate_false_future.impl->add_base_gc_ref(
-                                                    FUTURE_HANDLE_REF);
+                                                FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
             args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
@@ -13766,6 +13868,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_colors_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_COLORS_REQUEST,
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_colors_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,SEND_INDEX_SPACE_COLORS_RESPONSE,
+                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_notification(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14209,7 +14329,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14218,7 +14338,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14227,7 +14347,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_UPDATE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14236,7 +14356,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_INVALIDATE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14668,6 +14788,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_node_child_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_colors_request(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_colors_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_colors_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_colors_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15258,10 +15393,11 @@ namespace Legion {
       RemoteTask *context;
       derez.deserialize(context);
       // Unpack the result
-      context->unpack_remote_context(derez);
+      std::set<RtEvent> preconditions;
+      context->unpack_remote_context(derez, preconditions);
       // Then register it
       UniqueID context_uid = context->get_context_uid();
-      register_remote_context(context_uid, context);
+      register_remote_context(context_uid, context, preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -15585,20 +15721,6 @@ namespace Legion {
                                      result, acquire, tight_region_bounds);
     }
 
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    void Runtime::dump_processor_states(FILE *target)
-    //--------------------------------------------------------------------------
-    {
-      // Don't need to hold the lock since we are hung when this is called  
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->dump_state(target);
-      }
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void Runtime::process_schedule_request(Processor proc)
     //--------------------------------------------------------------------------
@@ -15742,7 +15864,7 @@ namespace Legion {
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      if (wait_on.exists())
+      if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
         args.hlr_id = HLR_DEFERRED_ENQUEUE_TASK_ID;
@@ -15775,16 +15897,7 @@ namespace Legion {
       // Compute a hash of all the processor ids to avoid testing all sets 
       // Only need to worry about local IDs since all processors are
       // in this address space.
-      ProcessorMask local_mask;
-      for (std::vector<Processor>::const_iterator it = procs.begin(); 
-            it != procs.end(); it++)
-      {
-        uint64_t local_id = it->local_id();
-#ifdef DEBUG_LEGION
-        assert(local_id < MAX_NUM_PROCS);
-#endif
-        local_mask.set_bit(local_id);
-      }
+      ProcessorMask local_mask = find_processor_mask(procs);
       uint64_t hash = local_mask.get_hash_key();
       AutoLock g_lock(group_lock);
       std::map<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned >::iterator 
@@ -15806,6 +15919,52 @@ namespace Legion {
       else
         processor_groups[hash].push_back(ProcessorGroupInfo(group, local_mask));
       return group;
+    }
+
+    //--------------------------------------------------------------------------
+    ProcessorMask Runtime::find_processor_mask(
+                                            const std::vector<Processor> &procs)
+    //--------------------------------------------------------------------------
+    {
+      ProcessorMask result;
+      std::vector<Processor> need_allocation;
+      {
+        AutoLock p_lock(processor_mapping_lock,1,false/*exclusive*/);
+        for (std::vector<Processor>::const_iterator it = procs.begin();
+              it != procs.end(); it++)
+        {
+          std::map<Processor,unsigned>::const_iterator finder = 
+            processor_mapping.find(*it);
+          if (finder == processor_mapping.end())
+          {
+            need_allocation.push_back(*it);
+            continue;
+          }
+          result.set_bit(finder->second);
+        }
+      }
+      if (need_allocation.empty())
+        return result;
+      AutoLock p_lock(processor_mapping_lock);
+      for (std::vector<Processor>::const_iterator it = 
+            need_allocation.begin(); it != need_allocation.end(); it++)
+      {
+        // Check to make sure we didn't lose the race
+        std::map<Processor,unsigned>::const_iterator finder = 
+            processor_mapping.find(*it);
+        if (finder != processor_mapping.end())
+        {
+          result.set_bit(finder->second);
+          continue;
+        }
+        unsigned next_index = processor_mapping.size();
+#ifdef DEBUG_LEGION
+        assert(next_index < MAX_NUM_PROCS);
+#endif
+        processor_mapping[*it] = next_index;
+        result.set_bit(next_index);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -16139,7 +16298,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    FutureImpl* Runtime::find_or_create_future(DistributedID did)
+    FutureImpl* Runtime::find_or_create_future(DistributedID did,
+                                               ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -16181,18 +16341,19 @@ namespace Legion {
         }
         dist_collectables[did] = result;
       }
-      result->record_future_registered();
+      result->record_future_registered(mutator);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event)
+    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,
+                                     ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       GarbageCollectionEpoch *to_trigger = NULL;
       {
         AutoLock gc(gc_epoch_lock);
-        current_gc_epoch->add_collection(view, term_event);
+        current_gc_epoch->add_collection(view, term_event, mutator);
         gc_epoch_counter++;
         if (gc_epoch_counter == Runtime::gc_epoch_size)
         {
@@ -16489,7 +16650,7 @@ namespace Legion {
       }
       IndividualTask *result = get_available(individual_task_lock, 
                                          available_individual_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock i_lock(individual_task_lock);
@@ -16517,7 +16678,7 @@ namespace Legion {
       }
       PointTask *result = get_available(point_task_lock, 
                                         available_point_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock p_lock(point_task_lock);
@@ -16545,7 +16706,7 @@ namespace Legion {
       }
       IndexTask *result = get_available(index_task_lock, 
                                        available_index_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock i_lock(index_task_lock);
@@ -16573,7 +16734,7 @@ namespace Legion {
       }
       SliceTask *result = get_available(slice_task_lock, 
                                        available_slice_tasks, has_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       if (!has_lock)
       {
         AutoLock s_lock(slice_task_lock);
@@ -17082,7 +17243,7 @@ namespace Legion {
     {
       AutoLock i_lock(individual_task_lock);
       available_individual_tasks.push_front(task);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_individual_tasks.erase(task);
 #endif
     }
@@ -17092,7 +17253,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(point_task_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_point_tasks.erase(task);
 #endif
       // Note that we can safely delete point tasks because they are
@@ -17111,7 +17272,7 @@ namespace Legion {
     {
       AutoLock i_lock(index_task_lock);
       available_index_tasks.push_front(task);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_index_tasks.erase(task);
 #endif
     }
@@ -17121,7 +17282,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(slice_task_lock);
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       out_slice_tasks.erase(task);
 #endif
       // Note that we can safely delete slice tasks because they are
@@ -17435,7 +17596,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_remote_context(UniqueID context_uid, 
-                                          RemoteTask *context)
+                          RemoteTask *context, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
@@ -17454,7 +17615,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(to_trigger.exists());
 #endif
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -18060,7 +18224,7 @@ namespace Legion {
     }
 #endif
 
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void Runtime::print_out_individual_tasks(FILE *f, int cnt /*= -1*/)
     //--------------------------------------------------------------------------
@@ -18080,9 +18244,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18110,9 +18274,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18140,9 +18304,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18170,9 +18334,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18219,33 +18383,33 @@ namespace Legion {
           case TaskOp::INDIVIDUAL_TASK_KIND:
             {
               fprintf(f,"Outstanding Individual Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::POINT_TASK_KIND:
             {
               fprintf(f,"Outstanding Point Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::INDEX_TASK_KIND:
             {
               fprintf(f,"Outstanding Index Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::SLICE_TASK_KIND:
             {
               fprintf(f,"Outstanding Slice Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           default:
@@ -18518,7 +18682,8 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Runtime* Runtime::runtime_map[(MAX_NUM_PROCS+1)];
+    /*static*/ Runtime* Runtime::the_runtime = NULL;
+    /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
@@ -18566,33 +18731,7 @@ namespace Legion {
     /*static*/ bool Runtime::verify_disjointness = false;
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
-#ifdef DEBUG_PERF
-    /*static*/ unsigned long long Runtime::perf_trace_tolerance = 10000; 
-#endif
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
-
-#ifdef HANG_TRACE
-    //--------------------------------------------------------------------------
-    static void catch_hang(int signal)
-    //--------------------------------------------------------------------------
-    {
-      assert(signal == SIGTERM);
-      static int call_count = 0;
-      int count = __sync_fetch_and_add(&call_count, 0);
-      if (count == 0)
-      {
-        Runtime *rt = Runtime::runtime_map[1];
-        const char *prefix = "";
-        char file_name[1024];
-        sprintf(file_name,"%strace_%d.txt", prefix, rt->address_space);
-        FILE *target = fopen(file_name,"w");
-        //rt->dump_processor_states(target);
-        //rt->print_outstanding_tasks(target);
-        rt->print_out_acquire_ops(target);
-        fclose(target);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -18650,6 +18789,8 @@ namespace Legion {
         // Set these values here before parsing the input arguments
         // so that we don't need to trust the C runtime to do 
         // static initialization properly (always risky).
+        the_runtime = NULL;
+        runtime_map = NULL;
         separate_runtime_instances = false;
         record_registration = false;
         stealing_disabled = false;
@@ -18688,6 +18829,7 @@ namespace Legion {
         verify_disjointness = false;
         bit_mask_logging = false;
 #endif
+        unsigned delay_start = 0;
         for (int i = 1; i < argc; i++)
         {
           BOOL_ARG("-hl:separate",separate_runtime_instances);
@@ -18709,6 +18851,7 @@ namespace Legion {
             dynamic_independence_tests = false;
           BOOL_ARG("-hl:spy",legion_spy_enabled);
           BOOL_ARG("-hl:test",enable_test_mapper);
+          INT_ARG("-hl:delay", delay_start);
           if (!strcmp(argv[i],"-hl:replay"))
           {
             replay_file = argv[++i];
@@ -18741,11 +18884,10 @@ namespace Legion {
                               "disjointness testing compile in debug mode.");
           }
 #endif
-#ifdef DEBUG_PERF
-          INT_ARG("-hl:perf_tol", perf_trace_tolerance);
-#endif
           INT_ARG("-hl:prof", num_profiling_nodes);
         }
+        if (delay_start > 0)
+          sleep(delay_start);
 #undef INT_ARG
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
@@ -18875,13 +19017,10 @@ namespace Legion {
         fflush(stderr);
         sleep(5);
       }
-#endif
+#endif 
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
-#ifdef HANG_TRACE
-      signal(SIGTERM, catch_hang); 
-#endif
       // For the moment, we only need to register our runtime tasks
       // We'll register everything else once the Legion runtime starts
       RtEvent tasks_registered = register_runtime_tasks(realm);
@@ -18909,6 +19048,21 @@ namespace Legion {
           assert(false);
 #endif
           exit(ERROR_SEPARATE_UTILITY_PROCS);
+        }
+#ifdef DEBUG_LEGION
+        assert(runtime_map == NULL);
+#endif
+        // Create the runtime map for everyone to use
+        runtime_map = new std::map<Processor,Runtime*>();
+        // Instantiate all the entries, but assign them to NULL
+        // so that the map doesn't change while parallel start-up
+        // is occurring
+        Machine::ProcessorQuery local_procs(machine);
+        local_procs.local_address_space();
+        for (Machine::ProcessorQuery::iterator it = local_procs.begin();
+              it != local_procs.end(); it++)
+        {
+          (*runtime_map)[*it] = NULL;
         }
       }
       // Check for exceeding the local number of processors
@@ -19085,10 +19239,23 @@ namespace Legion {
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
+      if (separate_runtime_instances)
+      {
 #ifdef DEBUG_LEGION
-      assert(p.local_id() < (MAX_NUM_PROCS+1));
+        assert(runtime_map != NULL);
+        assert(the_runtime == NULL);
+        assert(runtime_map->find(p) != runtime_map->end());
 #endif
-      return runtime_map[p.local_id()];
+        return (*runtime_map)[p];
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(runtime_map == NULL);
+        assert(the_runtime != NULL);
+#endif
+        return the_runtime;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -19680,23 +19847,42 @@ namespace Legion {
       Runtime *local_rt = new Runtime(machine, local_space_id, 
                                       local_procs, local_util_procs,
                                       address_spaces, proc_spaces);
-      // Now set up the runtime on all of the local processors
-      // and their utility processors
-      for (std::set<Processor>::const_iterator it = local_procs.begin();
-            it != local_procs.end(); it++)
+      if (separate_runtime_instances)
       {
-        runtime_map[it->local_id()] = local_rt;
+#ifdef DEBUG_LEGION
+        assert(local_util_procs.empty());
+        assert(runtime_map != NULL);
+#endif
+        // Now set up the runtime on all of the local processors
+        // and their utility processors
+        for (std::set<Processor>::const_iterator it = local_procs.begin();
+              it != local_procs.end(); it++)
+        {
+          std::map<Processor,Runtime*>::iterator finder = 
+            runtime_map->find(*it);
+#ifdef DEBUG_LEGION
+          assert(finder != runtime_map->end());
+          assert(finder->second == NULL);
+#endif
+          finder->second = local_rt;
+        }
       }
-      for (std::set<Processor>::const_iterator it = local_util_procs.begin();
-            it != local_util_procs.end(); it++)
+      else
       {
-        runtime_map[it->local_id()] = local_rt;
+#ifdef DEBUG_LEGION
+        assert(the_runtime == NULL);
+#endif
+        the_runtime = local_rt; 
       }
       // Do the rest of our initialization
-      local_rt->register_static_variants();
-      local_rt->register_static_constraints();
       if (local_space_id < Runtime::num_profiling_nodes)
         local_rt->initialize_legion_prof();
+      local_rt->register_static_variants();
+      local_rt->register_static_constraints();
+      // Initialize our one virtual manager, do this after we register
+      // the static constraints so we get a valid layout constraint ID
+      VirtualManager::initialize_virtual_instance(local_rt, 
+                                                  0/*same across nodes*/);
       // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
         local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
@@ -19794,7 +19980,7 @@ namespace Legion {
           {
             const Operation::DeferredCompleteArgs *deferred_complete_args =
               (const Operation::DeferredCompleteArgs*)args;
-            deferred_complete_args->proxy_this->trigger_complete();
+            deferred_complete_args->proxy_this->complete_operation();
             break;
           } 
         case HLR_DEFERRED_COMMIT_ID:
@@ -19831,6 +20017,13 @@ namespace Legion {
             const SingleTask::DeferredDependenceArgs *deferred_trigger_args =
               (const SingleTask::DeferredDependenceArgs*)args;
             deferred_trigger_args->op->trigger_dependence_analysis();
+            break;
+          }
+        case HLR_TRIGGER_COMPLETE_ID:
+          {
+            const Operation::TriggerCompleteArgs *trigger_complete_args =
+              (const Operation::TriggerCompleteArgs*)args;
+            trigger_complete_args->proxy_this->trigger_complete();
             break;
           }
         case HLR_TRIGGER_OP_ID:
@@ -19912,7 +20105,7 @@ namespace Legion {
             future_args->target->complete_future();
             if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->target);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -19934,7 +20127,7 @@ namespace Legion {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_reference())
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF))
+            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
@@ -20142,7 +20335,7 @@ namespace Legion {
               (const SelectTunableArgs*)args;
             Runtime::get_runtime(p)->perform_tunable_selection(tunable_args);
             // Remove the reference that we added
-            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
+            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               legion_delete(tunable_args->result);
             break;
           }
@@ -20162,6 +20355,27 @@ namespace Legion {
         case HLR_DEFER_COMPOSITE_HANDLE_TASK_ID:
           {
             InstanceRef::handle_deferred_composite_handle(args);
+            break;
+          }
+        case HLR_DEFER_COMPOSITE_NODE_TASK_ID:
+          {
+            CompositeView::handle_deferred_node_refs(args);
+            break;
+          }
+        case HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID:
+          {
+            CompositeView::handle_deferred_view_creation(
+                            Runtime::get_runtime(p), args);
+            break;
+          }
+        case HLR_UPDATE_VIEW_REFERENCES_TASK_ID:
+          {
+            VersionState::process_view_references(args);
+            break;
+          }
+        case HLR_REMOVE_VERSION_STATE_REF_TASK_ID:
+          {
+            VersionState::process_remove_version_state_ref(args);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:

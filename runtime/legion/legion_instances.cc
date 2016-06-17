@@ -452,26 +452,7 @@ namespace Legion {
                                                     AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      RezCheck z(rez);
-      // Do a quick check to see if the target already has the layout
-      // We don't need to hold a lock here since if we lose the race
-      // we will just send the layout twice and everything will be
-      // resolved on the far side
-      if (known_nodes.contains(target))
-        rez.serialize<bool>(true);
-      else
-        rez.serialize<bool>(false);
       rez.serialize(constraints->layout_id);
-      rez.serialize(allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::update_known_nodes(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Hold the lock to get serial access to this data structure
-      AutoLock l_lock(layout_lock);
-      known_nodes.add(target);
     }
 
     //--------------------------------------------------------------------------
@@ -480,41 +461,27 @@ namespace Legion {
                                  AddressSpaceID source, RegionNode *region_node)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      bool has_local;
-      derez.deserialize(has_local);
       FieldSpaceNode *field_space_node = region_node->column_source;
-      LayoutDescription *result = NULL;
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
+
       LayoutConstraints *constraints = 
         region_node->context->runtime->find_layout_constraints(layout_id);
-      FieldMask mask;
-      derez.deserialize(mask);
-      if (has_local)
-      {
-        // If we have a local layout, then we should be able to find it
-        result = field_space_node->find_layout_description(mask, constraints);
-      }
-      else
-      {
-        const std::vector<FieldID> &field_set = 
-          constraints->field_constraint.get_field_set();
-        std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
-        std::vector<unsigned> mask_index_map(field_set.size());
-        std::vector<CustomSerdezID> serdez(field_set.size());
-        mask.clear();
-        field_space_node->compute_create_offsets(field_set, field_sizes,
-                                        mask_index_map, serdez, mask);
-        result = field_space_node->create_layout_description(mask, constraints,
+
+      FieldMask instance_mask;
+      const std::vector<FieldID> &field_set = 
+        constraints->field_constraint.get_field_set(); 
+      std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
+      std::vector<unsigned> mask_index_map(field_set.size());
+      std::vector<CustomSerdezID> serdez(field_set.size());
+      field_space_node->compute_create_offsets(field_set, field_sizes,
+                                         mask_index_map, serdez, instance_mask);
+      LayoutDescription *result = 
+        field_space_node->create_layout_description(instance_mask, constraints,
                                        mask_index_map, serdez, field_sizes);
-      }
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      // Record that the sender already has this layout
-      // Only do this after we've registered the instance
-      result->update_known_nodes(source);
       return result;
     }
 
@@ -557,16 +524,12 @@ namespace Legion {
       // If we're the owner remove our resource references
       if (is_owner())
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
+        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
+          functor(this, NULL);
         map_over_remote_instances(functor);
       }
       else
         memory_manager->unregister_remote_instance(this);
-      if (is_owner() && instance.exists())
-      {
-        log_leak.warning("Leaking physical instance " IDFMT " in memory"
-                               IDFMT "", instance.id, get_memory().id);
-      }
       // If we own our domain, then we need to delete it now
       if (own_domain)
       {
@@ -576,7 +539,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_active(void)
+    void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -588,11 +551,11 @@ namespace Legion {
         memory_manager->activate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_inactive(void)
+    void PhysicalManager::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -603,11 +566,11 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
       if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_valid(void)
+    void PhysicalManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // No need to do anything
@@ -620,11 +583,11 @@ namespace Legion {
         memory_manager->validate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
+        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_invalid(void)
+    void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -635,7 +598,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
       if (!is_owner())
-        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -979,7 +942,7 @@ namespace Legion {
       log_garbage.info("GC Instance Manager %ld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
-      if (is_owner() && Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, 0);
         LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
@@ -1072,13 +1035,14 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
+      UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView* result = 
               legion_new<MaterializedView>(context, view_did, 
                                            owner_space, owner_space, 
                                            logical_owner, region_node,
                                            const_cast<InstanceManager*>(this),
                                            (MaterializedView*)NULL/*parent*/, 
-                                           own_ctx, 
+                                           context_uid,
                                            RtUserEvent::NO_RT_USER_EVENT, 
                                            true/*register now*/);
       register_active_context(own_ctx);
@@ -1200,10 +1164,6 @@ namespace Legion {
       }
       context->runtime->send_instance_manager(target, rez);
       register_remote_instance(target, destroy_event);
-      // Finally we can update our known nodes
-      // It's only safe to do this after the message
-      // has been sent
-      layout->update_known_nodes(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1254,7 +1214,7 @@ namespace Legion {
                                     destroy_event, false/*reg now*/, 
                                     use_event, flags);
       // Hold-off doing the registration until construction is complete
-      man->register_with_runtime(false/*no remote registration*/);
+      man->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1284,7 +1244,7 @@ namespace Legion {
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     {  
-      if (is_owner() && Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
         LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
@@ -1444,7 +1404,7 @@ namespace Legion {
                                            ptr_space, destroy_event, 
                                            false/*reg now*/);
       }
-      man->register_with_runtime(false/*no remote registration*/);
+      man->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1457,12 +1417,14 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
+      UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView *result = 
              legion_new<ReductionView>(context, view_did, 
                                        owner_space, owner_space, 
                                        logical_owner, region_node, 
                                        const_cast<ReductionManager*>(this),
-                                       own_ctx, RtUserEvent::NO_RT_USER_EVENT,
+                                       context_uid, 
+                                       RtUserEvent::NO_RT_USER_EVENT,
                                        true/*register now*/);
       register_active_context(own_ctx);
       return result;
@@ -2003,6 +1965,7 @@ namespace Legion {
       }
       switch (constraints.specialized_constraint.get_kind())
       {
+        case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
             
@@ -2271,6 +2234,7 @@ namespace Legion {
       // the constraints and see if we recognize any of them
       switch (constraints.specialized_constraint.get_kind())
       {
+        case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
             const std::vector<DimensionKind> &ordering = 

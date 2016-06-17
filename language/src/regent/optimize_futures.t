@@ -446,15 +446,20 @@ local function concretize(node)
   return node
 end
 
-local function promote(node)
+local function promote(node, expected_type)
+  assert(std.is_future(expected_type))
+
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
     return ast.typed.expr.Future {
       value = node,
-      expr_type = std.future(expr_type),
+      expr_type = expected_type,
       options = node.options,
       span = node.span,
     }
+  elseif not std.type_eq(expr_type, expected_type) then
+    -- FIXME: This requires a cast. For now, just concretize and re-promote.
+    return promote(concretize(node), expected_type)
   end
   return node
 end
@@ -1151,19 +1156,19 @@ function optimize_futures.stat_var(cx, node)
   local values = terralib.newlist()
   for i, symbol in ipairs(node.symbols) do
     local value_type = node.types[i]
+    local future_type = value_type
     if cx:is_future(symbol) then
-      types:insert(std.future(value_type))
-
-      -- FIXME: Would be better to generate fresh symbols.
-      symbol:settype(std.future(value_type), true)
-    else
-      types:insert(value_type)
+      future_type = std.future(value_type)
     end
+    types:insert(future_type)
+
+    -- FIXME: Would be better to generate fresh symbols.
+    symbol:settype(future_type, true)
 
     local value = node.values[i]
     if value then
       if cx:is_future(symbol) then
-        values:insert(promote(optimize_futures.expr(cx, value)))
+        values:insert(promote(optimize_futures.expr(cx, value), future_type))
       else
         values:insert(concretize(optimize_futures.expr(cx, value)))
       end
@@ -1199,8 +1204,9 @@ function optimize_futures.stat_assignment(cx, node)
   for i, lh in ipairs(lhs) do
     local rh = rhs[i]
 
-    if std.is_future(std.as_read(lh.expr_type)) then
-      normalized_rhs:insert(promote(rh))
+    local lh_type = std.as_read(lh.expr_type)
+    if std.is_future(lh_type) then
+      normalized_rhs:insert(promote(rh, lh_type))
     else
       normalized_rhs:insert(concretize(rh))
     end
@@ -1310,12 +1316,14 @@ function optimize_futures.top_task_param(cx, param)
       symbols = terralib.newlist({param.symbol}),
       types = terralib.newlist({future_type}),
       values = terralib.newlist({
-          promote(ast.typed.expr.ID {
-            value = new_symbol,
-            expr_type = std.rawref(&param_type),
-            options = param.options,
-            span = param.span,
-          }),
+          promote(
+            ast.typed.expr.ID {
+              value = new_symbol,
+              expr_type = std.rawref(&param_type),
+              options = param.options,
+              span = param.span,
+            },
+            future_type),
       }),
       options = param.options,
       span = param.span,

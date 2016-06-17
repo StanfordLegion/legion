@@ -275,6 +275,7 @@ namespace Legion {
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
       };
       struct PremapTaskOutput {
+        Processor                                          new_target_proc;
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
       };
       //------------------------------------------------------------------------

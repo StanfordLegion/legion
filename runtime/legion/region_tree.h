@@ -310,6 +310,7 @@ namespace Legion {
                               InstanceRef &composite_ref,
                               VersionInfo &version_info,
                               SingleTask *target_ctx,
+                              Operation *op,
                               const bool needs_fields
 #ifdef DEBUG_LEGION
                               , unsigned index
@@ -398,7 +399,8 @@ namespace Legion {
                                       bool initial_user,
                                       std::set<RtEvent> &applied_events);
     public:
-      int physical_convert_mapping(const RegionRequirement &req,
+      int physical_convert_mapping(Operation *op,
+                               const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
@@ -406,18 +408,23 @@ namespace Legion {
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
-      bool physical_convert_postmapping(const RegionRequirement &req,
+      bool physical_convert_postmapping(Operation *op,
+                               const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
+      void physical_convert_restricted(Operation *op,
+                               const RegionRequirement &req,
+                               const InstanceSet &restricted_instances,
+                                     InstanceSet &result);
       void log_mapping_decision(UniqueID uid, unsigned index,
                                 const RegionRequirement &req,
                                 const InstanceSet &targets);
     protected: // helper method for the above two methods
-      void perform_missing_acquires(
+      void perform_missing_acquires(Operation *op,
                  std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:
@@ -612,97 +619,7 @@ namespace Legion {
                                const Domain &right);
       static bool are_disjoint(IndexSpaceNode *left,
                                IndexSpaceNode *right);
-#ifdef DEBUG_PERF
-    public:
-      void record_call(int kind, unsigned long long time);
-    protected:
-      void begin_perf_trace(int kind);
-      void end_perf_trace(unsigned long long tolerance);
-    public:
-      struct CallRecord {
-      public:
-        CallRecord(void)
-          : kind(0), count(0), total_time(0), max_time(0), min_time(0) { }
-        CallRecord(int k)
-          : kind(k), count(0), total_time(0), max_time(0), min_time(0) { }
-      public:
-        inline void record_call(unsigned long long time)
-        {
-          count++;
-          total_time += time;
-          if (min_time == 0)
-            min_time = time;
-          else if (time < min_time)
-            min_time = time;
-          if (time > max_time)
-            max_time = time;
-        }
-      public:
-        int kind;
-        int count;
-        unsigned long long total_time;
-        unsigned long long max_time;
-        unsigned long long min_time;
-      };
-      struct PerfTrace {
-      public:
-        PerfTrace(void)
-          : tracing(false), kind(0) { }
-        PerfTrace(int k, unsigned long long start);
-      public:
-        inline void record_call(int call_kind, unsigned long long time)
-        {
-          if (tracing)
-            records[call_kind].record_call(time);
-        }
-        void report_trace(unsigned long long diff);
-      public:
-        bool tracing;
-        int kind;
-        unsigned long long start;
-        std::vector<CallRecord> records;
-      };
-    protected:
-      Reservation perf_trace_lock;
-      std::vector<std::vector<PerfTrace> > traces;
-#endif
     };
-
-#ifdef DEBUG_PERF
-    enum TraceKind {
-      REGION_DEPENDENCE_ANALYSIS,  
-      PREMAP_PHYSICAL_REGION_ANALYSIS,
-      MAP_PHYSICAL_REGION_ANALYSIS,
-      REMAP_PHYSICAL_REGION_ANALYSIS,
-      REGISTER_PHYSICAL_REGION_ANALYSIS,
-      COPY_ACROSS_ANALYSIS,
-      PERFORM_CLOSE_OPERATIONS_ANALYSIS,
-    };
-
-    enum CallKind {
-      
-      NUM_CALL_KIND,
-    };
-
-    class PerfTracer {
-    public:
-      PerfTracer(RegionTreeForest *f, int k)
-        : forest(f), kind(k)
-      {
-        start = TimeStamp::get_current_time_in_micros();
-      }
-      ~PerfTracer(void)
-      {
-        unsigned long long stop = TimeStamp::get_current_time_in_micros();
-        unsigned long long diff = stop - start;
-        forest->record_call(kind, diff);
-      }
-    private:
-      RegionTreeForest *forest;
-      int kind;
-      unsigned long long start;
-    };
-#endif
 
     /**
      * \class IndexTreeNode
@@ -804,17 +721,6 @@ namespace Legion {
         IndexSpaceNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
-      };
-      struct ChildRequestFunctor {
-      public:
-        ChildRequestFunctor(Runtime *rt, Serializer &r, AddressSpaceID t)
-          : runtime(rt), rez(r), target(t) { }
-      public:
-        void apply(AddressSpaceID next);
-      private:
-        Runtime *const runtime;
-        Serializer &rez;
-        AddressSpaceID target;
       };
     public:
       IndexSpaceNode(IndexSpace handle, const Domain &d, 
@@ -918,8 +824,6 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
-      void send_child_node(AddressSpaceID target, 
-                    const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -928,6 +832,9 @@ namespace Legion {
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void handle_node_child_response(Deserializer &derez);
+      static void handle_colors_request(RegionTreeForest *context,
+                            Deserializer &derez, AddressSpaceID source);
+      static void handle_colors_response(Deserializer &derez);
     public:
       IndexSpaceAllocator* get_allocator(void);
     public:
@@ -1072,8 +979,6 @@ namespace Legion {
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
-      void send_child_node(AddressSpaceID target,
-                         const ColorPoint &child_color, RtUserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
@@ -1314,7 +1219,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
       void set_restricted_fields(ContextID ctx, FieldMask &child_restricted);
-      inline PhysicalState* get_physical_state(ContextID ctx, VersionInfo &info,
+      inline PhysicalState* get_physical_state(VersionInfo &info,
                                                bool capture = true)
       {
         // First check to see if the version info already has a state
@@ -1425,7 +1330,8 @@ namespace Legion {
                                    const FieldMask &send_mask, 
                                    AddressSpaceID target);
       void process_logical_state_return(Deserializer &derez,
-                                        AddressSpaceID source);
+                                        AddressSpaceID source, 
+                                        ReferenceMutator *mutator);
       static void handle_logical_state_return(RegionTreeForest *forest,
                                               Deserializer &derez,
                                               AddressSpaceID source);
@@ -1570,13 +1476,15 @@ namespace Legion {
                                 std::vector<MaterializedView*> &target_views);
     public:
       bool register_instance_view(PhysicalManager *manager, 
-                                  SingleTask *context, InstanceView *view);
+                                  UniqueID context_uid, InstanceView *view);
       void unregister_instance_view(PhysicalManager *manager, 
-                                    SingleTask *context);
+                                    UniqueID context_uid);
       InstanceView* find_instance_view(PhysicalManager *manager,
                                        SingleTask *context);
-      VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
-                                  DistributedID did, AddressSpaceID owner);
+    public:
+      VersionState* find_remote_version_state(VersionID vid,
+        DistributedID did, AddressSpaceID owner, ReferenceMutator *mutator);
+      VersionState* create_new_version_state(VersionID vid); 
     public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
@@ -1690,7 +1598,7 @@ namespace Legion {
       // should rarely need to be accessed for tracking views
       // The distributed IDs here correspond to the Instance Manager
       // distributed ID.
-      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*,
+      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*,
                 LOGICAL_VIEW_ALLOC>::tracked instance_views;
       LegionMap<DistributedID,PhysicalManager*,
                 PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
@@ -1838,7 +1746,7 @@ namespace Legion {
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              const InstanceSet &targets,
-                             UniqueID init_op_id, unsigned init_index,
+                             SingleTask *context, unsigned init_index,
                              const std::vector<LogicalView*> &corresponding);
       void close_state(const TraversalInfo &info,
                        RegionUsage &usage, InstanceSet &targets);

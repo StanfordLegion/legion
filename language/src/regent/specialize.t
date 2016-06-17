@@ -1701,6 +1701,9 @@ function specialize.top_task_param(cx, node)
   local symbol = std.newsymbol(node.param_name)
   cx.env:insert(node, node.param_name, symbol)
   local param_type = node.type_expr(cx.env:env())
+  if not param_type then
+    log.error(node, "param type is undefined or nil")
+  end
   symbol:settype(param_type)
 
   return ast.specialized.top.TaskParam {

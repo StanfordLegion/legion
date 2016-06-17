@@ -28,12 +28,14 @@ local default_options = {
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
+  ["layout-constraints"] = true,
   ["leaf"] = true,
   ["trace"] = true,
   ["vectorize"] = true,
+  ["validate"] = true,
   ["task-inlines"] = true,
-  ["flow"] = true,
-  ["flow-spmd"] = true,
+  ["flow"] = false,
+  ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
 }
 

@@ -1564,7 +1564,7 @@ namespace Realm {
 
     int GPUZCMemory::get_home_node(off_t offset, size_t size)
     {
-      return ID(me).node();
+      return ID(me).memory.owner_node;
     }
 
 #ifdef POINTER_CHECKS

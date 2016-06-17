@@ -498,7 +498,8 @@ namespace Legion {
     {
       if (redop == 0)
       {
-        if ((kind != NORMAL_SPECIALIZE) && (kind != VIRTUAL_SPECIALIZE))
+        if ((kind != NO_SPECIALIZE) && (kind != NORMAL_SPECIALIZE) && 
+            (kind != VIRTUAL_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "
@@ -526,6 +527,9 @@ namespace Legion {
     bool SpecializedConstraint::entails(const SpecializedConstraint &other)const
     //--------------------------------------------------------------------------
     {
+      // entails if the other doesn't have any specialization
+      if (other.kind == NO_SPECIALIZE)
+        return true;
       if (kind != other.kind)
         return false;
       if (redop != other.redop)
@@ -538,6 +542,10 @@ namespace Legion {
                                        const SpecializedConstraint &other) const
     //--------------------------------------------------------------------------
     {
+      if (kind == NO_SPECIALIZE)
+        return false;
+      if (other.kind == NO_SPECIALIZE)
+        return false;
       if (kind != other.kind)
         return true;
       if (redop != other.redop)

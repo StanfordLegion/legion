@@ -16,22 +16,11 @@
 #
 
 from __future__ import print_function
-import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
+import argparse, codecs, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
 from collections import OrderedDict
 import regent
 
 _version = sys.version_info.major
-
-if _version == 2: # Python 2.x:
-    # Use binary mode to avoid mangling newlines.
-    def _open(filename, mode='r'):
-        return open(filename, '%sb' % mode)
-elif _version == 3: # Python 3.x:
-    # Use text mode with UTF-8 encoding and '\n' newlines:
-    def _open(filename, mode='r'):
-        return open(filename, mode=mode, encoding='utf-8', newline='\n')
-else:
-    raise Exception('Incompatible Python version')
 
 if _version == 2: # Python 2.x:
     def glob(path):
@@ -85,7 +74,7 @@ def run_spy(logfile, verbose):
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_text(filename, label):
     re_label = re.compile(_re_label.format(label=label), re.MULTILINE)
-    with _open(filename, 'r') as f:
+    with codecs.open(filename, 'r', encoding='utf-8') as f:
         program_text = f.read()
     match = re.search(re_label, program_text)
     if match is None:
@@ -112,13 +101,18 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     try:
         run(filename, debug, False, flags, env)
     except TestFailure as e:
-        failure = '\n'.join(
-            itertools.takewhile(
-                (lambda line: line != 'stack traceback:'),
-                itertools.dropwhile(
-                    (lambda line: 'Errors reported during' in line),
-                    (line.strip() for line in e.output.strip().split('\n')
-                     if len(line.strip()) > 0))))
+        lines = (line.strip() for line in e.output.strip().split('\n')
+                 if len(line.strip()) > 0)
+        lines = itertools.dropwhile(
+            (lambda line: 'Errors reported during' in line),
+            lines)
+        lines = itertools.takewhile(
+            (lambda line: line != 'stack traceback:' and
+             'Caught a fatal signal:' not in line and
+             '----------' not in line),
+            lines)
+        lines = OrderedDict((line, True) for line in lines).keys()
+        failure = '\n'.join(lines)
         if failure != expected_failure:
             raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
     else:
@@ -183,22 +177,22 @@ def get_test_specs(include_spy):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', '-fflow', '1'], {})),
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
          )),
-        ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
+        ('pretty', (test_run_pass, (['-fpretty', '1', '-fflow', '1'], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('examples'),
          )),
-        ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
+        ('run_pass', (test_run_pass, (['-fflow', '1'], {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
           #os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
          )),
     ]
     spy = [
-        ('spy', (test_spy, ([], {})),
+        ('spy', (test_spy, (['-fflow', '1'], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('examples'),
          )),

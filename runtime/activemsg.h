@@ -95,10 +95,14 @@ namespace Realm {
 //  before we include gasnet.h
 #undef __PLATFORM_COMPILER_GNU_VERSION_STR
 
+#ifndef GASNET_PAR
 #define GASNET_PAR
+#endif
 #include <gasnet.h>
 
+#ifndef GASNETT_THREAD_SAFE
 #define GASNETT_THREAD_SAFE
+#endif
 #include <gasnet_tools.h>
 
 #ifdef CHECK_REENTRANT_MESSAGES

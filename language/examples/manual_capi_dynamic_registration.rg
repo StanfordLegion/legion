@@ -49,9 +49,9 @@ function legion_task_wrapper(body)
     wrapper = terra(data : &opaque, datalen : c.size_t, userdata : &opaque, userlen : c.size_t, proc_id : c.legion_lowlevel_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
-	  num_regions : uint32,
-	  ctx : c.legion_context_t,
-	  runtime : c.legion_runtime_t
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
       c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
       var rv : rt = body(task, regions, num_regions, ctx, runtime)
       c.legion_task_postamble(runtime, ctx, [&opaque](&rv), terralib.sizeof(rt))
@@ -60,9 +60,9 @@ function legion_task_wrapper(body)
     wrapper = terra(data : &opaque, datalen : c.size_t, userdata : &opaque, userlen : c.size_t, proc_id : c.legion_lowlevel_id_t)
       var task : c.legion_task_t,
           regions : &c.legion_physical_region_t,
-	  num_regions : uint32,
-	  ctx : c.legion_context_t,
-	  runtime : c.legion_runtime_t
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
       c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
       body(task, regions, num_regions, ctx, runtime)
       c.legion_task_postamble(runtime, ctx, [&opaque](0), 0)
@@ -78,23 +78,31 @@ function preregister_task(terrafunc)
     -- if we can register llvmir, ask Terra to generate that
     local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
     local rfunc = terra(id : c.legion_task_id_t,
-			proc_kind : c.legion_processor_kind_t,
-			options: c.legion_task_config_options_t,
-			task_name : &int8,
-			userdata : &opaque,
-			userlen : c.size_t)
-      return c.legion_runtime_preregister_task_variant_llvmir(id, proc_kind, options, task_name, userdata, userlen, ir, "entry")
+                        task_name : &int8,
+                        execution_constraints : c.legion_execution_constraint_set_t,
+                        layout_constraints : c.legion_task_layout_constraint_set_t,
+                        options: c.legion_task_config_options_t,
+                        userdata : &opaque,
+                        userlen : c.size_t)
+      return c.legion_runtime_preregister_task_variant_llvmir(
+        id, task_name,
+        execution_constraints, layout_constraints, options,
+        ir, "entry", userdata, userlen)
     end
     return rfunc
   else
     -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
     local rfunc = terra(id : c.legion_task_id_t,
-			proc_kind : c.legion_processor_kind_t,
-			options: c.legion_task_config_options_t,
-			task_name : &int8,
-			userdata : &opaque,
-			userlen : c.size_t)
-      return c.legion_runtime_preregister_task_variant_fnptr(id, proc_kind, options, task_name, userdata, userlen, wrapped)
+                        task_name : &int8,
+                        execution_constraints : c.legion_execution_constraint_set_t,
+                        layout_constraints : c.legion_task_layout_constraint_set_t,
+                        options: c.legion_task_config_options_t,
+                        userdata : &opaque,
+                        userlen : c.size_t)
+      return c.legion_runtime_preregister_task_variant_fnptr(
+        id, task_name,
+        execution_constraints, layout_constraints, options,
+        wrapped, userdata, userlen)
     end
     return rfunc
   end
@@ -107,41 +115,35 @@ function register_task(terrafunc)
     -- if we can register llvmir, ask Terra to generate that
     local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
     local rfunc = terra(runtime : c.legion_runtime_t,
-			id : c.legion_task_id_t,
-			proc_kind : c.legion_processor_kind_t,
-			options: c.legion_task_config_options_t,
-			task_name : &int8,
-			userdata : &opaque,
-			userlen : c.size_t)
-      return c.legion_runtime_register_task_variant_llvmir(runtime,
-							   id,
-							   proc_kind,
-							   true, -- global registration possible with llvmir
-							   options,
-							   task_name,
-							   userdata,
-							   userlen,
-							   ir,
-							   "entry")
+                        id : c.legion_task_id_t,
+                        task_name : &int8,
+                        execution_constraints : c.legion_execution_constraint_set_t,
+                        layout_constraints : c.legion_task_layout_constraint_set_t,
+                        options: c.legion_task_config_options_t,
+                        userdata : &opaque,
+                        userlen : c.size_t)
+      return c.legion_runtime_register_task_variant_llvmir(
+        runtime, id, task_name,
+        true, -- global registration possible with llvmir
+        execution_constraints, layout_constraints, options,
+        ir, "entry", userdata, userlen)
     end
     return rfunc
   else
     -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
     local rfunc = terra(runtime : c.legion_runtime_t,
-			id : c.legion_task_id_t,
-			proc_kind : c.legion_processor_kind_t,
-			options: c.legion_task_config_options_t,
-			task_name : &int8,
-			userdata : &opaque,
-			userlen : c.size_t)
-      return c.legion_runtime_register_task_variant_fnptr(runtime,
-							  id,
-							  proc_kind,
-							  options,
-							  task_name,
-							  userdata,
-							  userlen,
-							  wrapped)
+                        id : c.legion_task_id_t,
+                        task_name : &int8,
+                        execution_constraints : c.legion_execution_constraint_set_t,
+                        layout_constraints : c.legion_task_layout_constraint_set_t,
+                        options: c.legion_task_config_options_t,
+                        userdata : &opaque,
+                        userlen : c.size_t)
+      return c.legion_runtime_register_task_variant_fnptr(
+        runtime, id, task_name,
+        false, -- global registration not possible with non-portable pointer
+        execution_constraints, layout_constraints, options,
+        wrapped, userdata, userlen)
     end
     return rfunc
   end
@@ -177,13 +179,15 @@ terra top_level_task(task : c.legion_task_t,
   -- the Lua escape here constructs the right registration function, picking between a non-portable function
   --  pointer and LLVMIR during the compilation of this task, but the actual registration happens when the
   --  top_level_task is executed
-  [ register_task(sub_task) ](runtime,
-			      TID_SUB_TASK,
-			      c.LOC_PROC,
-			      c.legion_task_config_options_t {
-				 leaf = false, inner = false, idempotent = false},
-			      "sub_task",
-			      [&opaque](0), 0)
+  var execution_constraints = c.legion_execution_constraint_set_create()
+  c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
+  var layout_constraints = c.legion_task_layout_constraint_set_create()
+  [ register_task(sub_task) ](
+    runtime, TID_SUB_TASK, "sub_task",
+    execution_constraints, layout_constraints,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    nil, 0)
 
   var x : uint32 = 42
   var sub_args = c.legion_task_argument_t {
@@ -203,19 +207,26 @@ terra top_level_task(task : c.legion_task_t,
   end
 end
 
+local args = require("manual_capi_args")
+
 terra main()
   c.printf("in main...\n")
 
   -- top level task must be "preregistered" (i.e. before we start the runtime)
-  [ preregister_task(top_level_task) ](TID_TOP_LEVEL_TASK,
-				       c.LOC_PROC,
-				       c.legion_task_config_options_t {
-					  leaf = false, inner = false, idempotent = false},
-				       "top_level_task",
-				       [&opaque](0), 0)
+  var execution_constraints = c.legion_execution_constraint_set_create()
+  c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
+  var layout_constraints = c.legion_task_layout_constraint_set_create()
+  [ preregister_task(top_level_task) ](
+    TID_TOP_LEVEL_TASK,
+    "top_level_task",
+    execution_constraints, layout_constraints,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    nil, 0)
 
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
-  c.legion_runtime_start(0, [&rawstring](0), false)
+  [args.argv_setup]
+  c.legion_runtime_start(args.argc, args.argv, false)
 end
 
 if use_llvm then

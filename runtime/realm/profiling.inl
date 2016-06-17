@@ -199,10 +199,13 @@ namespace Realm {
   } 
 
   template <typename T>
-  void ProfilingMeasurementCollection::add_measurement(const T& data)
+  void ProfilingMeasurementCollection::add_measurement(const T& data, bool send_complete_responses /*= true*/)
   {
-    // we'll assume the caller already asked if the measurement was wanted before
-    //  giving us something expensive...
+    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.find((ProfilingMeasurementID)T::ID);
+    if(it == requested_measurements.end()) {
+      // caller probably should have asked if we wanted this before measuring it...
+      return;
+    }
 
     // no duplicates for now
     assert(measurements.count((ProfilingMeasurementID)T::ID) == 0);
@@ -219,6 +222,44 @@ namespace Realm {
     ByteArray& md = measurements[(ProfilingMeasurementID)T::ID];
     ByteArray b = dbs.detach_bytearray(-1);  // no trimming
     md.swap(b);  // avoids a copy
+
+    // update the number of remaining measurements for each profiling request that wanted this
+    //  if the count hits zero, we can either send the request immediately or mark that we want to
+    //  later
+    for(std::vector<const ProfilingRequest *>::const_iterator it2 = it->second.begin();
+	it2 != it->second.end();
+	it2++) {
+      std::map<const ProfilingRequest *, int>::iterator it3 = measurements_left.find(*it2);
+      assert(it3 != measurements_left.end());
+      it3->second--;
+      if(it3->second == 0) {
+	if(send_complete_responses) {
+	  measurements_left.erase(it3);
+	  send_response(**it2);
+	} else {
+	  completed_requests_present = true;
+	}
+      }
+    }
+
+    // while we're here, if we're allowed to send responses, see if there are any deferred ones
+    if(send_complete_responses && completed_requests_present) {
+      std::map<const ProfilingRequest *, int>::iterator it = measurements_left.begin();
+      while(it != measurements_left.end()) {
+	if(it->second > 0) {
+	  it++;
+	  continue;
+	}
+
+	// make a copy of the iterator so we can increment it
+	std::map<const ProfilingRequest *, int>::iterator old = it;
+	it++;
+	send_response(*(old->first));
+	measurements_left.erase(old);
+      }
+      
+      completed_requests_present = false;
+    }
   }
 
 

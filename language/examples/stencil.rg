@@ -83,7 +83,7 @@ task make_bloated_partition(points : region(ispace(int2d), point),
     var pts = private[i]
     var rect = c.legion_domain_get_rect_2d(
       c.legion_index_space_get_domain(
-        __runtime(), __context(), (__raw(pts)).index_space))
+        __runtime(), (__raw(pts)).index_space))
     var bloated = make_bloated_rect(rect, radius)
     c.legion_domain_point_coloring_color_domain(
       coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(bloated))

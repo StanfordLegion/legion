@@ -175,18 +175,18 @@ namespace Legion {
       // at the boolean value of a future if it is set
       bool get_boolean_value(bool &valid);
     public:
-      virtual void notify_active(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
       void register_waiter(AddressSpaceID sid);
-      void record_future_registered(void);
     public:
+      void record_future_registered(ReferenceMutator *creator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -488,10 +488,6 @@ namespace Legion {
     public:
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
-#ifdef HANG_TRACE
-    public:
-      void dump_state(FILE *target);
-#endif
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -918,7 +914,8 @@ namespace Legion {
     public:
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
-      void add_collection(LogicalView *view, ApEvent term_event);
+      void add_collection(LogicalView *view, ApEvent term_event,
+                          ReferenceMutator *mutator);
       RtEvent launch(void);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
@@ -1440,7 +1437,11 @@ namespace Legion {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      IndexPartition get_index_partition(IndexSpace parent,
+                                         const DomainPoint &color);
       bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
+      bool has_index_partition(IndexSpace parent, 
                                const DomainPoint &color);
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                     Color color); 
@@ -1449,6 +1450,8 @@ namespace Legion {
                                     const DomainPoint &color);
       IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
       bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
+      bool has_index_subspace(IndexPartition p, 
                               const DomainPoint &color);
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       bool has_multiple_domains(IndexSpace handle);
@@ -1466,16 +1469,21 @@ namespace Legion {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
                                             std::set<DomainPoint> &colors);
+      void get_index_space_partition_colors(IndexSpace handle,
+                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(Context ctx, IndexPartition p);
+      bool is_index_partition_complete(IndexPartition p);
       Color get_index_space_color(Context ctx, IndexSpace handle);
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
+      DomainPoint get_index_space_color_point(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(Context ctx, 
                                                   IndexPartition handle);
+      DomainPoint get_index_partition_color_point(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
@@ -1525,7 +1533,11 @@ namespace Legion {
                                                       const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
+                                                      const DomainPoint &c);
       bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
+                                          const DomainPoint &color);
+      bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
@@ -1546,7 +1558,11 @@ namespace Legion {
                                                    const DomainPoint &c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    Color c);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
+                                                   const DomainPoint &c);
       bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
+                                          const DomainPoint &color);
+      bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
@@ -1557,8 +1573,14 @@ namespace Legion {
                                                   RegionTreeID tid);
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
       Color get_logical_region_color(LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(Context ctx, 
+                                                 LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(Context ctx, 
+                                                    LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
@@ -1822,6 +1844,10 @@ namespace Legion {
                                           Serializer &rez);
       void send_index_space_child_response(AddressSpaceID target,
                                            Serializer &rez);
+      void send_index_space_colors_request(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_index_space_colors_response(AddressSpaceID target,
+                                            Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
@@ -1950,6 +1976,9 @@ namespace Legion {
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);
+      void handle_index_space_colors_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_index_space_colors_response(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
@@ -2129,10 +2158,6 @@ namespace Legion {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef HANG_TRACE
-    public:
-      void dump_processor_states(FILE *target);
-#endif
     public:
       // Manage the execution of tasks within a context
       void activate_context(SingleTask *context);
@@ -2146,6 +2171,7 @@ namespace Legion {
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
+      ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
       RtEvent issue_runtime_meta_task(const void *args, size_t arglen,
                                   HLRTaskID tid, HLRPriority hlr_priority,
                                   Operation *op = NULL,
@@ -2177,9 +2203,11 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did);
+      FutureImpl* find_or_create_future(DistributedID did,
+                                        ReferenceMutator *mutator);
     public:
-      void defer_collect_user(LogicalView *view, ApEvent term_event);
+      void defer_collect_user(LogicalView *view, ApEvent term_event, 
+                              ReferenceMutator *mutator);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
       void increment_outstanding_top_level_tasks(void);
@@ -2302,7 +2330,8 @@ namespace Legion {
     public:
       void allocate_local_context(SingleTask *task);
       void free_local_context(SingleTask *task);
-      void register_remote_context(UniqueID context_uid, RemoteTask *context);
+      void register_remote_context(UniqueID context_uid, RemoteTask *context,
+                                   std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
       SingleTask* find_context(UniqueID context_uid, 
                                bool return_null_if_not_found = false);
@@ -2465,6 +2494,9 @@ namespace Legion {
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
     protected:
+      Reservation processor_mapping_lock;
+      std::map<Processor,unsigned> processor_mapping;
+    protected:
       Reservation distributed_id_lock;
       DistributedID unique_distributed_id;
       LegionDeque<DistributedID,
@@ -2576,7 +2608,7 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-#if defined(DEBUG_LEGION) || defined(HANG_TRACE)
+#ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of
       // some of the outstanding tasks
@@ -2664,7 +2696,9 @@ namespace Legion {
       static void log_machine(Machine machine);
     public:
       // Static member variables
-      static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
+      static Runtime *the_runtime;
+      // the runtime map is only valid when running with -hl:separate
+      static std::map<Processor,Runtime*> *runtime_map;
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
@@ -2700,10 +2734,6 @@ namespace Legion {
       static bool bit_mask_logging;
 #endif
       static bool program_order_execution;
-#ifdef DEBUG_PERF
-    public:
-      static unsigned long long perf_trace_tolerance;
-#endif
     public:
       static unsigned num_profiling_nodes;
     public:
@@ -2886,9 +2916,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
@@ -2905,9 +2935,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
       LegionSpy::log_event_dependence(e2, result);
@@ -2921,15 +2951,21 @@ namespace Legion {
                                                 const std::set<ApEvent> &events)
     //--------------------------------------------------------------------------
     {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return ApEvent::NO_AP_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       for (std::set<ApEvent>::const_iterator it = events.begin();
             it != events.end(); it++)
@@ -2960,6 +2996,12 @@ namespace Legion {
                                                 const std::set<RtEvent> &events)
     //--------------------------------------------------------------------------
     {
+#ifndef LEGION_SPY
+      if (events.empty())
+        return RtEvent::NO_RT_EVENT;
+      if (events.size() == 1)
+        return *(events.begin());
+#endif
       // No logging for runtime operations currently
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
@@ -2970,7 +3012,13 @@ namespace Legion {
     /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      ApUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_ap_user_event(result);
+      return result;
+#else
       return ApUserEvent(Realm::UserEvent::create_user_event());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2981,6 +3029,7 @@ namespace Legion {
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
 #ifdef LEGION_SPY
+      LegionSpy::log_ap_user_event_trigger(to_trigger);
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
 #endif
@@ -2990,7 +3039,13 @@ namespace Legion {
     /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      RtUserEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_rt_user_event(result);
+      return result;
+#else
       return RtUserEvent(Realm::UserEvent::create_user_event());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3000,6 +3055,9 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_trigger;
       copy.trigger(precondition);
+#ifdef LEGION_SPY
+      LegionSpy::log_rt_user_event_trigger(to_trigger);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3080,9 +3138,9 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (precondition.exists() && !result.exists())
       {
-        ApUserEvent rename(Realm::UserEvent::create_user_event());
-        Runtime::trigger_event(rename);
-        result = rename;
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
       }
       if (precondition.exists())
         LegionSpy::log_event_dependence(precondition, result);

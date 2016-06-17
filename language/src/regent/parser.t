@@ -43,7 +43,6 @@ function parser.option_values(p)
       p:error("unroll factor should be an integer")
     end
     p:expect(")")
-    p:expect(")")
     return ast.options.Unroll { value = value }
   else
     return false

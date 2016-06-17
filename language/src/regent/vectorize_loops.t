@@ -144,7 +144,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
 
     for i = 1, #node.symbols do
       types:insert(flip_types.type(simd_width, node.types[i]))
-      symbols:insert(std.newsymbol(types[i], node.symbols[i]:getname() .. "_vectorized"))
+      symbols:insert(std.newsymbol(types[i], node.symbols[i]:hasname() and node.symbols[i]:getname() .. "_vectorized"))
       cx:add_substitution(node.symbols[i], symbols[i])
       if i <= #node.values then
         values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
@@ -787,6 +787,12 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
+    if std.is_bounded_type(node.arg.expr_type) and
+       node.arg.expr_type.dim >= 1 then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a corner case statement not supported for the moment")
+      return false
+    end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
@@ -949,7 +955,7 @@ function vectorize_loops.stat_for_list(node)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
-    return node { block = node.block }
+    return node { block = vectorize_loops.block(node.block) }
   end
 end
 

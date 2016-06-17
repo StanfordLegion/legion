@@ -30,25 +30,15 @@ namespace Realm {
     class Event {
     public:
       typedef ::legion_lowlevel_id_t id_t;
-      typedef ::legion_lowlevel_event_gen_t gen_t;
 
       id_t id;
-      gen_t gen;
-      bool operator<(const Event& rhs) const 
-      { 
-        if (id < rhs.id)
-          return true;
-        else if (id > rhs.id)
-          return false;
-        else
-          return (gen < rhs.gen);
-      }
-      bool operator==(const Event& rhs) const { return (id == rhs.id) && (gen == rhs.gen); }
-      bool operator!=(const Event& rhs) const { return (id != rhs.id) || (gen != rhs.gen); }
+      bool operator<(const Event& rhs) const { return id < rhs.id; }
+      bool operator==(const Event& rhs) const { return id == rhs.id; }
+      bool operator!=(const Event& rhs) const { return id != rhs.id; }
 
       static const Event NO_EVENT;
 
-      bool exists(void) const { return id != 0; }
+      inline bool exists(void) const { return id != 0; }
 
       // test whether an event has triggered without waiting
       bool has_triggered(void) const;
@@ -90,7 +80,7 @@ namespace Realm {
 					Event happens_after, bool all_must_trigger = true);
     };
 
-    inline std::ostream& operator<<(std::ostream& os, Event e) { return os << std::hex << e.id << std::dec << '/' << e.gen; }
+    inline std::ostream& operator<<(std::ostream& os, Event e) { return os << std::hex << e.id << std::dec; }
 
     // A user level event has all the properties of event, except
     // it can be triggered by the user.  This prevents users from

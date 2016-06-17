@@ -68,7 +68,8 @@ namespace Legion {
       void unpack_base_task(Deserializer &derez, 
                             std::set<RtEvent> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_external_task(Deserializer &derez); 
+      void unpack_base_external_task(Deserializer &derez,
+                                     ReferenceMutator *mutator); 
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
@@ -126,7 +127,8 @@ namespace Legion {
       RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void pack_version_infos(Serializer &rez,
-                              std::vector<VersionInfo> &infos);
+                              std::vector<VersionInfo> &infos,
+                              const std::vector<bool> &full_version_info);
       void unpack_version_infos(Deserializer &derez,
                                 std::vector<VersionInfo> &infos);
     protected:
@@ -541,7 +543,8 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
       void send_back_created_state(AddressSpaceID target, unsigned start,
                                    RegionTreeContext remote_outermost_context);
     public:
@@ -690,6 +693,12 @@ namespace Legion {
     protected:
       // Information for tracking restrictions
       LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
+#ifdef LEGION_SPY
+    public:
+      RtEvent update_previous_mapped_event(RtEvent next);
+    protected:
+      RtEvent previous_mapped_event;
+#endif
     };
 
     /**
@@ -843,6 +852,8 @@ namespace Legion {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
@@ -964,6 +975,8 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint &mp);
+    public:
+      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       friend class SliceTask;
       SliceTask                   *slice_owner;
@@ -1076,7 +1089,8 @@ namespace Legion {
     public:
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
     public:
       void add_top_region(LogicalRegion handle);
     public:
@@ -1246,6 +1260,8 @@ namespace Legion {
     public:
       virtual void register_must_epoch(void);
     public:
+      virtual void record_reference_mutation_effect(RtEvent event);
+    public:
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points, long long denom,
@@ -1346,6 +1362,8 @@ namespace Legion {
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
+      public:
+      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void return_privileges(PointTask *point);
       void return_virtual_instance(unsigned index, InstanceSet &refs,
@@ -1359,7 +1377,7 @@ namespace Legion {
       void trigger_slice_commit(void);
     protected:
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
-      void pack_remote_complete(Serializer &rez);
+      void pack_remote_complete(Serializer &rez); 
       void pack_remote_commit(Serializer &rez);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);

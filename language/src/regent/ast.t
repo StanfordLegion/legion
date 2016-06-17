@@ -267,6 +267,27 @@ end
 
 -- Traversal
 
+function ast.traverse_node_continuation(fn, node)
+  local function continuation(node, continuing)
+    if ast.is_node(node) then
+      if continuing == nil then
+        continuing = fn(node, continuation)
+      end
+      if continuing then
+        for _, child in pairs(node) do
+          continuation(child)
+        end
+      else
+      end
+    elseif terralib.islist(node) then
+      for _, child in ipairs(node) do
+        continuation(child)
+      end
+    end
+  end
+  continuation(node)
+end
+
 function ast.traverse_node_postorder(fn, node)
   if ast.is_node(node) then
     for _, child in pairs(node) do
@@ -293,6 +314,26 @@ function ast.map_node_postorder(fn, node)
     local tmp = terralib.newlist()
     for _, child in ipairs(node) do
       tmp:insert(ast.map_node_postorder(fn, child))
+    end
+    return tmp
+  end
+  return node
+end
+
+function ast.map_node_prepostorder(pre_fn, post_fn, node)
+  if ast.is_node(node) then
+    local new_node = pre_fn(node)
+    local tmp = {}
+    for k, child in pairs(new_node) do
+      if k ~= "node_type" then
+        tmp[k] = ast.map_node_prepostorder(pre_fn, post_fn, child)
+      end
+    end
+    return post_fn(new_node(tmp))
+  elseif terralib.islist(node) then
+    local tmp = terralib.newlist()
+    for _, child in ipairs(node) do
+      tmp:insert(ast.map_node_prepostorder(pre_fn, post_fn, child))
     end
     return tmp
   end
@@ -389,21 +430,20 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
-                         "vectorize", "block"},
+ast.options:leaf("Set", {"block", "cuda", "inline", "parallel", "spmd", "trace",
+                         "vectorize"},
                  false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
-  local forbid = ast.options.Forbid { value = false }
   return ast.options.Set {
+    block = allow,
     cuda = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
     trace = allow,
     vectorize = allow,
-    block = forbid,
   }
 end
 
@@ -744,8 +784,8 @@ ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
 ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
-ast.typed.stat:leaf("IndexLaunch", {"symbol", "domain", "call", "reduce_lhs",
-                                    "reduce_op", "args_provably"})
+ast.typed.stat:leaf("IndexLaunch", {"symbol", "domain", "preamble", "call",
+                                    "reduce_lhs", "reduce_op", "args_provably"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "variant"})
 ast.typed.stat:leaf("Var", {"symbols", "types", "values"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})

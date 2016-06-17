@@ -1,0 +1,18 @@
+This file lists the major changes as they appear in the stable branch.  No
+attempt is made to keep this list accurate for the master branch.
+
+Version 16.06.0 (June 15, 2016)
+  * Legion
+    - New mapper API:
+        use ShimMapper for limited backwards compatibility
+    - New task variant registration API
+        supports specifying layout constraints for region requirements
+        old interface is still available but deprecated
+    - Several large bug fixes for internal version numbering computation
+  * C API
+    - The context parameter for many API calls has been removed
+  * Tools
+    - Total re-write of Legion Spy
+
+Version 16.05.0 (May 2, 2016)
+  * Lots of stuff - we weren't itemizing things before this point.

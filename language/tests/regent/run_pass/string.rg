@@ -14,10 +14,10 @@
 
 import "regent"
 
-cstdio = terralib.includec("stdio.h")
+local cstdio = terralib.includec("stdio.h")
 
 task main()
   var x = "hello, world!\n"
-  [cstdio.printf](x)
+  cstdio.printf(x)
 end
 regentlib.start(main)

@@ -1,0 +1,3 @@
+[submodule "language/src/rdir"]
+	path = language/src/rdir
+	url = https://github.com/StanfordLegion/rdir.git

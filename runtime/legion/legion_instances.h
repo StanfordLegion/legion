@@ -80,7 +80,6 @@ namespace Legion {
       void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
-      void update_known_nodes(AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
@@ -100,7 +99,6 @@ namespace Legion {
       Reservation layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
                LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
-      NodeSet known_nodes;
     }; 
  
     /**
@@ -137,10 +135,10 @@ namespace Legion {
       inline VirtualManager* as_virtual_manager(void) const;
     public:
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 

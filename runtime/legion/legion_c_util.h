@@ -153,9 +153,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_memory_query_t, Machine::MemoryQuery *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
                          Mapping::Utilities::MachineQueryInterface *);
-      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper*);
-      NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet*);
-      NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet*);
+      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper *);
+      NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet *);
+      NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet *);
+      NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -521,7 +522,6 @@ namespace Legion {
       wrap(PhaseBarrier barrier) {
         legion_phase_barrier_t barrier_;
         barrier_.id = barrier.get_barrier().id;
-        barrier_.gen = barrier.get_barrier().gen;
         barrier_.timestamp = barrier.get_barrier().timestamp;
         return barrier_;
       }
@@ -530,7 +530,6 @@ namespace Legion {
       unwrap(legion_phase_barrier_t barrier_) {
         PhaseBarrier barrier;
         barrier.phase_barrier.id = barrier_.id;
-        barrier.phase_barrier.gen = barrier_.gen;
         barrier.phase_barrier.timestamp = barrier_.timestamp;
         return barrier;
       }
@@ -539,7 +538,6 @@ namespace Legion {
       wrap(DynamicCollective collective) {
         legion_dynamic_collective_t collective_;
         collective_.id = collective.get_barrier().id;
-        collective_.gen = collective.get_barrier().gen;
         collective_.timestamp = collective.get_barrier().timestamp;
         collective_.redop = collective.redop;
         return collective_;
@@ -549,7 +547,6 @@ namespace Legion {
       unwrap(legion_dynamic_collective_t collective_) {
         DynamicCollective collective;
         collective.phase_barrier.id = collective_.id;
-        collective.phase_barrier.gen = collective_.gen;
         collective.phase_barrier.timestamp = collective_.timestamp;
         collective.redop = collective_.redop;
         return collective;

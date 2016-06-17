@@ -25,10 +25,10 @@ local std = require("regent/std")
 local context = {}
 context.__index = context
 
-function context:new_loop_scope(loop_variable)
+function context:new_local_scope()
   local cx = {
     constraints = self.constraints,
-    loop_variable = loop_variable,
+    loop_variables = {},
   }
   return setmetatable(cx, context)
 end
@@ -43,6 +43,16 @@ end
 function context.new_global_scope()
   local cx = {}
   return setmetatable(cx, context)
+end
+
+function context:add_loop_variable(loop_variable)
+  assert(self.loop_variables)
+  self.loop_variables[loop_variable] = true
+end
+
+function context:is_loop_variable(variable)
+  assert(self.loop_variables)
+  return self.loop_variables[variable]
 end
 
 local function check_privilege_noninterference(cx, task, region_type,
@@ -123,6 +133,7 @@ end
 
 local function analyze_is_side_effect_free_node(cx)
   return function(node)
+    -- Expressions:
     if node:is(ast.typed.expr.FieldAccess) then
       local ptr_type = std.as_read(node.value.expr_type)
       return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
@@ -131,6 +142,8 @@ local function analyze_is_side_effect_free_node(cx)
     elseif node:is(ast.typed.expr.RawContext) or
       node:is(ast.typed.expr.RawPhysical) or
       node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.New) or
+      node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
       node:is(ast.typed.expr.PartitionEqual) or
@@ -149,10 +162,52 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
     then
       return false
+
+    elseif node:is(ast.typed.expr.ID) or
+      node:is(ast.typed.expr.Constant) or
+      node:is(ast.typed.expr.Function) or
+      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.MethodCall) or
+      node:is(ast.typed.expr.Cast) or
+      node:is(ast.typed.expr.Ctor) or
+      node:is(ast.typed.expr.CtorListField) or
+      node:is(ast.typed.expr.CtorRecField) or
+      node:is(ast.typed.expr.RawFields) or
+      node:is(ast.typed.expr.RawValue) or
+      node:is(ast.typed.expr.Isnull) or
+      node:is(ast.typed.expr.Null) or
+      node:is(ast.typed.expr.DynamicCast) or
+      node:is(ast.typed.expr.StaticCast) or
+      node:is(ast.typed.expr.UnsafeCast) or
+      node:is(ast.typed.expr.ListInvert) or
+      node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.WithScratchFields) or
+      node:is(ast.typed.expr.RegionRoot) or
+      node:is(ast.typed.expr.Condition) or
+      node:is(ast.typed.expr.Unary) or
+      node:is(ast.typed.expr.Binary)
+    then
+      return true
+
+    -- Statements:
+    elseif node:is(ast.typed.stat.Var) then
+      return true
+
+    -- Miscellaneous:
+    elseif node:is(ast.location) or
+      node:is(ast.options)
+    then
+      return true
+
+    else
+      assert(false, "unexpected node type " .. tostring(node.node_type))
     end
   end
 end
@@ -166,13 +221,15 @@ end
 
 local function analyze_is_loop_invariant_node(cx)
   return function(node)
+    -- Expressions:
     if node:is(ast.typed.expr.ID) then
-      assert(cx.loop_variable)
-      return node.value ~= cx.loop_variable
+      return not cx:is_loop_variable(node.value)
     elseif node:is(ast.typed.expr.FieldAccess) then
       local ptr_type = std.as_read(node.value.expr_type)
       return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
     elseif node:is(ast.typed.expr.Call) or
+      node:is(ast.typed.expr.New) or
+      node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
       node:is(ast.typed.expr.PartitionEqual) or
@@ -196,6 +253,44 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Deref)
     then
       return false
+
+    elseif node:is(ast.typed.expr.Constant) or
+      node:is(ast.typed.expr.Function) or
+      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.MethodCall) or
+      node:is(ast.typed.expr.Cast) or
+      node:is(ast.typed.expr.Ctor) or
+      node:is(ast.typed.expr.CtorListField) or
+      node:is(ast.typed.expr.CtorRecField) or
+      node:is(ast.typed.expr.RawContext) or
+      node:is(ast.typed.expr.RawFields) or
+      node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.RawRuntime) or
+      node:is(ast.typed.expr.RawValue) or
+      node:is(ast.typed.expr.Isnull) or
+      node:is(ast.typed.expr.Null) or
+      node:is(ast.typed.expr.DynamicCast) or
+      node:is(ast.typed.expr.StaticCast) or
+      node:is(ast.typed.expr.UnsafeCast) or
+      node:is(ast.typed.expr.ListInvert) or
+      node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.WithScratchFields) or
+      node:is(ast.typed.expr.RegionRoot) or
+      node:is(ast.typed.expr.Condition) or
+      node:is(ast.typed.expr.Unary) or
+      node:is(ast.typed.expr.Binary)
+    then
+      return true
+
+    -- Miscellaneous:
+    elseif node:is(ast.location) or
+      node:is(ast.options)
+    then
+      return true
+
+    else
+      assert(false, "unexpected node type " .. tostring(node.node_type))
     end
   end
 end
@@ -227,12 +322,37 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     return node
   end
 
-  if #node.block.stats ~= 1 then
-    log_fail(node, "loop optimization failed: body has multiple statements")
+  if #node.block.stats == 0 then
+    log_fail(node, "loop optimization failed: body is empty")
     return node
   end
 
-  local body = node.block.stats[1]
+  local loop_cx = cx:new_local_scope()
+  loop_cx:add_loop_variable(node.symbol)
+
+  local preamble = terralib.newlist()
+  for i = 1, #node.block.stats - 1 do
+    local stat = node.block.stats[i]
+    if not stat:is(ast.typed.stat.Var) then
+      log_fail(stat, "loop optimization failed: preamble statement is not a variable")
+      return node
+    end
+    if not analyze_is_side_effect_free(cx, stat) then
+      log_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
+      return node
+    end
+
+    for i, symbol in ipairs(stat.symbols) do
+      local value = stat.values[i]
+      if value and not analyze_is_loop_invariant(loop_cx, value) then
+        loop_cx:add_loop_variable(symbol)
+      end
+    end
+
+    preamble:insert(stat)
+  end
+
+  local body = node.block.stats[#node.block.stats]
   local call
   local reduce_lhs, reduce_op = false, false
   if body:is(ast.typed.stat.Expr) and
@@ -313,7 +433,6 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   --     they come from a disjoint partition, as long as indexing into
   --     said partition is provably disjoint.
 
-  local loop_cx = cx:new_loop_scope(node.symbol)
   local param_types = task:gettype().parameters
   local args = call.args
   local args_provably = ast.IndexLaunchArgsProvably {
@@ -329,6 +448,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     end
 
     local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
+
     local arg_variant = false
     local partition_type
 
@@ -406,6 +526,7 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   return ast.typed.stat.IndexLaunch {
     symbol = node.symbol,
     domain = node.values,
+    preamble = preamble,
     call = call,
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,

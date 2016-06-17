@@ -237,14 +237,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::release_acquired_instances(
+    void Operation::release_acquired_instances(
        std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
       for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, this, 
                                              it->second.first))
           PhysicalManager::delete_physical_manager(it->first);
       }
@@ -266,6 +266,14 @@ namespace Legion {
         parent_ctx->register_new_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      // should be overwridden by inheriting classes
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -426,7 +434,7 @@ namespace Legion {
     void Operation::complete_execution(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      if (!wait_on.has_triggered())
+      if (wait_on.exists() && !wait_on.has_triggered())
       {
         // We have to defer the execution of this operation
         DeferredExecuteArgs args;
@@ -455,11 +463,11 @@ namespace Legion {
       {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
-        DeferredCompleteArgs args;
-        args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        TriggerCompleteArgs args;
+        args.hlr_id = HLR_TRIGGER_COMPLETE_ID;
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_COMPLETE_ID,
+                                         HLR_TRIGGER_COMPLETE_ID,
                                          HLR_LATENCY_PRIORITY,
                                          this, trigger_pre);
       }
@@ -482,9 +490,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::complete_operation(void)
+    void Operation::complete_operation(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
+      if (wait_on.exists() && !wait_on.has_triggered())
+      {
+        DeferredCompleteArgs args;
+        args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_COMPLETE_ID,
+                                         HLR_LATENCY_PRIORITY,
+                                         this, wait_on);
+        return;
+      }
       bool need_trigger = false;
       // Tell our parent that we are complete
       // It's important that we do this before we mark ourselves
@@ -549,7 +568,7 @@ namespace Legion {
                                      RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      if (!wait_on.has_triggered())
+      if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredCommitArgs args;
         args.hlr_id = HLR_DEFERRED_COMMIT_ID;
@@ -637,6 +656,7 @@ namespace Legion {
         trace->register_operation(this, gen);
       // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
+
     }
 
     //--------------------------------------------------------------------------
@@ -649,6 +669,16 @@ namespace Legion {
       MappingDependenceTracker *tracker = dependence_tracker.mapping;
       // Now make a commit tracker
       dependence_tracker.commit = new CommitDependenceTracker();
+#ifdef LEGION_SPY
+      // Enforce serial mapping dependences for validating runtime analysis
+      // Don't record it though to avoid confusing legion spy
+      // Do this after all the rest of the dependence analysis to catch
+      // dependences on any close operations that were generated
+      RtEvent previous_mapped = 
+        parent_ctx->update_previous_mapped_event(mapped_event);
+      if (previous_mapped.exists())
+        dependence_tracker.mapping->add_mapping_dependence(previous_mapped);
+#endif
       // Cannot touch anything not on our stack after this call
       tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
@@ -1749,6 +1779,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       atomic_locks.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
       runtime->free_map_op(this);
@@ -1802,11 +1833,8 @@ namespace Legion {
     void MapOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -1821,11 +1849,13 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       InstanceSet mapped_instances;
-      std::set<RtEvent> map_applied_conditions;
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
-        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
                                                this, 0/*idx*/, 
@@ -2041,6 +2071,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID MapOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -2252,7 +2289,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(
+      int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
                                 chosen_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
@@ -2802,6 +2839,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       atomic_locks.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
@@ -2880,19 +2918,9 @@ namespace Legion {
     {
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_versions.size(); idx++)
-      {
-        RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_context(src_parent_indexes[idx]);
-        src_versions[idx].make_local(preconditions, runtime->forest, 
-                                     physical_ctx.get_id());
-      }
+        src_versions[idx].make_local(preconditions, this, runtime->forest); 
       for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-      {
-        RegionTreeContext physical_ctx =
-          parent_ctx->find_enclosing_context(dst_parent_indexes[idx]);
-        dst_versions[idx].make_local(preconditions, runtime->forest, 
-                                     physical_ctx.get_id());
-      }
+        dst_versions[idx].make_local(preconditions, this, runtime->forest); 
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -2955,7 +2983,6 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
-      std::set<RtEvent> map_applied_conditions;
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -3063,7 +3090,7 @@ namespace Legion {
                                                 src_requirements[idx],
                                                 src_targets[src_composite],
                                                 src_versions[idx],
-                                                parent_ctx,
+                                                parent_ctx, this,
                                                 false/*needs fields*/
 #ifdef DEBUG_LEGION
                                                 , idx, get_logging_name()
@@ -3092,8 +3119,11 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(src_parent_indexes[idx],
-                                              src_targets);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, 
+              src_requirements[idx], restricted_instances, src_targets);
           if (Runtime::legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                   src_requirements[idx],
@@ -3143,8 +3173,11 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(dst_parent_indexes[idx],
-                                              dst_targets);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, 
+              dst_requirements[idx], restricted_instances, dst_targets);
           set_mapping_state(idx, false/*src*/);
           runtime->forest->traverse_and_register(dst_contexts[idx],
                                                  dst_privilege_paths[idx],
@@ -3360,6 +3393,13 @@ namespace Legion {
       }
       else
         local_locks[lock] = exclusive;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -3604,7 +3644,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_idx = runtime->forest->physical_convert_mapping(
+      int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
                               !Runtime::unsafe_mapper);
@@ -4540,11 +4580,8 @@ namespace Legion {
     void CloseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(find_parent_index(0));
       std::set<RtEvent> preconditions;
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -4741,6 +4778,7 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
@@ -4771,7 +4809,6 @@ namespace Legion {
       // See if we are restricted or not and if not find our valid instances 
       InstanceSet chosen_instances;
       int composite_idx = -1;
-      std::set<RtEvent> map_applied_conditions;
       if (!restrict_info.has_restrictions())
       {
         InstanceSet valid_instances;
@@ -4791,8 +4828,11 @@ namespace Legion {
       }
       else
       {
-        parent_ctx->get_physical_references(parent_req_index, chosen_instances);
-      } 
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, chosen_instances);
+      }
       // Now we can perform our close operation
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
@@ -4877,6 +4917,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InterCloseOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
     int InterCloseOp::invoke_mapper(const InstanceSet &valid_instances,
                                           InstanceSet &chosen_instances)
     //--------------------------------------------------------------------------
@@ -4909,7 +4956,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(
+      int composite_index = runtime->forest->physical_convert_mapping(this,
                                   requirement, output.chosen_instances, 
                                   chosen_instances, bad_tree, missing_fields,
                                   &acquired_instances, unacquired, 
@@ -5190,6 +5237,7 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_post_close_op(this);
     }
@@ -5245,9 +5293,10 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
       // We already know the instances that we are going to need
+      // No need to do the conversion because we know we are closing
+      // for the whole region requirement
       InstanceSet chosen_instances;
       parent_ctx->get_physical_references(parent_idx, chosen_instances);
-      std::set<RtEvent> map_applied_conditions;
       ApEvent close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/,
@@ -5326,6 +5375,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -5410,6 +5466,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
+      map_applied_conditions.clear();
       runtime->free_virtual_close_op(this);
     }
 
@@ -5446,22 +5503,13 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
-      // We already know the instances that we are going to need
-      InstanceSet chosen_instances;
-      parent_ctx->get_physical_references(parent_idx, chosen_instances);
-      // This should have exactly one instance and it should be 
-      // composite reference
-#ifdef DEBUG_LEGION
-      assert(chosen_instances.size() == 1);
-      assert(chosen_instances[0].is_composite_ref());
-#endif
       InstanceSet composite_refs(1);
       composite_refs[0] = InstanceRef(true/*composite*/);
       // Always eagerly translate composite instances back out into
       // the parent context
       runtime->forest->map_virtual_region(physical_ctx, requirement,
                                           composite_refs[0], version_info,
-                                          parent_ctx->get_parent(),
+                                          parent_ctx->get_parent(), this,
                                           true/*needs fields*/
 #ifdef DEBUG_LEGION
                                           , 0/*idx*/, get_logging_name()
@@ -5471,7 +5519,10 @@ namespace Legion {
       // Pass the reference back to the parent task
       parent_ctx->return_virtual_instance(parent_idx, composite_refs); 
       // Then we can mark that we are mapped and executed
-      complete_mapping();
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
       complete_execution();
       return true;
     }
@@ -5484,6 +5535,13 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5654,6 +5712,7 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::AcquireProfilingInfo();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
@@ -5715,11 +5774,8 @@ namespace Legion {
     void AcquireOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -5775,11 +5831,15 @@ namespace Legion {
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances;
-      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      {
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
+      }
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
-      std::set<RtEvent> map_applied_conditions;
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
@@ -5876,6 +5936,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -6219,6 +6286,7 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
+      map_applied_conditions.clear();
       profiling_results = Mapper::ReleaseProfilingInfo();
       // Return this operation to the runtime
       runtime->free_release_op(this);
@@ -6281,11 +6349,8 @@ namespace Legion {
     void ReleaseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -6340,11 +6405,15 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We already know what the answer has to be here 
       InstanceSet mapped_instances;
-      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      {
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
+      }
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
-      std::set<RtEvent> map_applied_conditions;
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
@@ -6458,6 +6527,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -8990,11 +9066,8 @@ namespace Legion {
                                                         RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -9010,7 +9083,6 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We still have to do the traversal to flush any reductions
       InstanceSet empty_instances;
-      std::set<RtEvent> map_applied_conditions;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info, 
                                               this, 0/*idx*/, 
@@ -9098,6 +9170,7 @@ namespace Legion {
         Runtime::trigger_event(handle_ready);
       version_info.clear();
       restrict_info.clear();
+      map_applied_conditions.clear();
       runtime->free_dependent_partition_op(this);
     }
 
@@ -9128,6 +9201,13 @@ namespace Legion {
     {
       version_info.release();
       commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -9376,6 +9456,8 @@ namespace Legion {
     void FillOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
+      if (!Runtime::legion_spy_enabled)
+	return;
       LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                     unique_op_id);
       LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
@@ -9466,11 +9548,8 @@ namespace Legion {
     void FillOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -9536,8 +9615,11 @@ namespace Legion {
         InstanceSet mapped_instances;
         if (restrict_info.has_restrictions())
         {
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(parent_req_index, 
-                                              mapped_instances);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, requirement,
+                                      restricted_instances, mapped_instances);
           runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                  requirement, version_info, 
                                                  this, 0/*idx*/, 
@@ -9627,7 +9709,11 @@ namespace Legion {
       InstanceSet mapped_instances;
       if (restrict_info.has_restrictions())
       {
-        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        InstanceSet restricted_instances;
+        parent_ctx->get_physical_references(parent_req_index, 
+                                            restricted_instances);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                    restricted_instances, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
                                                this, 0/*idx*/, 
@@ -10018,6 +10104,7 @@ namespace Legion {
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
+      map_applied_conditions.clear();
       runtime->free_attach_op(this);
     }
 
@@ -10084,11 +10171,8 @@ namespace Legion {
     void AttachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else
@@ -10104,7 +10188,6 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We still have to do a traversal to make sure everything is open
       InstanceSet empty_instances;
-      std::set<RtEvent> map_applied_conditions;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info, 
                                               this, 0/*idx*/,
@@ -10155,6 +10238,13 @@ namespace Legion {
     {
       version_info.release();
       commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -10449,11 +10539,8 @@ namespace Legion {
     void DetachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, runtime->forest,
-                              physical_ctx.get_id());
+      version_info.make_local(preconditions, this, runtime->forest);
       if (preconditions.empty())
         Runtime::trigger_event(ready_event);
       else

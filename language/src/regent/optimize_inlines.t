@@ -63,15 +63,17 @@ local function uses(cx, region_type, polarity)
   assert(std.type_supports_privileges(region_type))
   local usage = { [region_type] = polarity }
   for other_region_type, _ in pairs(cx.region_universe) do
-    local constraint = {
-      lhs = region_type,
-      rhs = other_region_type,
-      op = "*"
-    }
-    if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
-      not std.check_constraint(cx, constraint)
-    then
-      usage[other_region_type] = polarity
+    if std.is_region(other_region_type) then -- Skip lists of regions
+      local constraint = {
+        lhs = region_type,
+        rhs = other_region_type,
+        op = "*"
+      }
+      if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
+        not std.check_constraint(cx, constraint)
+      then
+        usage[other_region_type] = polarity
+      end
     end
   end
   return setmetatable(usage, region_usage)

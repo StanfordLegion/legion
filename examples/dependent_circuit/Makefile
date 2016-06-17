@@ -13,6 +13,7 @@
 # limitations under the License.
 #
 
+
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
@@ -20,7 +21,7 @@ endif
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
-SHARED_LOWLEVEL ?= 1		# Use shared-memory runtime (not recommended)
+SHARED_LOWLEVEL ?= 0		# Use shared-memory runtime (not recommended)
 USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
@@ -30,7 +31,9 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 OUTFILE		?= ckt_sim
 # List all the application source files here
 GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
+ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
+endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

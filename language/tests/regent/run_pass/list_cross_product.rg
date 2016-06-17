@@ -14,14 +14,6 @@
 
 import "regent"
 
--- runs-with:
--- [["-finlines", "0"]]
-
--- FIXME: This test exercises some bizarre corner case in the inline
--- optimization. Probably, the (duplicated) lists are not being marked
--- as disjoint from everything else. At any rate, this test fails with
--- inline optimization enabled.
-
 local c = regentlib.c
 
 task inc(r : region(int), y : int)
