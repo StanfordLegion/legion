@@ -543,7 +543,7 @@ function codegen.region_rule(state_type, node)
         "unnamed task element cannot have a named region element")
     end
 
-    local param_name = "$" .. first_element.name[1]
+    local param_name = first_element.name[1]
     local task_name = first_task_element.name[1]
     local regent_task = rawget(_G, task_name)
     assert(regent_task, "unreachable")
@@ -558,7 +558,7 @@ function codegen.region_rule(state_type, node)
                                    regent_task:getprivileges(),
                                    regent_task:get_coherence_modes(),
                                    regent_task:get_flags())
-        if tostring(param.symbol) == param_name then
+        if param.symbol:hasname() == param_name then
           param_type = param_type_in_signature
           start_idx = accum_idx
           end_idx = start_idx + #privileges
