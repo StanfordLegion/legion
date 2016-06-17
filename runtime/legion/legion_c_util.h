@@ -157,9 +157,11 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
-      NEW_OPAQUE_WRAPPER(legion_task_options_t, Mapping::Mapper::TaskOptions *);
       NEW_OPAQUE_WRAPPER(legion_map_task_input_t, Mapping::Mapper::MapTaskInput *);
       NEW_OPAQUE_WRAPPER(legion_map_task_output_t, Mapping::Mapper::MapTaskOutput *);
+      NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
+      NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
+      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -553,6 +555,26 @@ namespace Legion {
         collective.phase_barrier.timestamp = collective_.timestamp;
         collective.redop = collective_.redop;
         return collective;
+      }
+
+      static legion_task_options_t
+      wrap(Mapping::Mapper::TaskOptions& options) {
+        legion_task_options_t options_;
+        options_.initial_proc = CObjectWrapper::wrap(options.initial_proc);
+        options_.inline_task = options.inline_task;
+        options_.stealable = options.stealable;
+        options_.map_locally = options.map_locally;
+        return options_;
+      }
+
+      static Mapping::Mapper::TaskOptions
+      unwrap(legion_task_options_t& options_) {
+        Mapping::Mapper::TaskOptions options;
+        options.initial_proc = CObjectWrapper::unwrap(options_.initial_proc);
+        options.inline_task = options_.inline_task;
+        options.stealable = options_.stealable;
+        options.map_locally = options_.map_locally;
+        return options;
       }
     };
 
