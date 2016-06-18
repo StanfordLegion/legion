@@ -990,13 +990,24 @@ namespace Legion {
                 state->version_states.end());
 #endif
         const VersionStateInfo &state_info = state->version_states[it1->first];
-        rez.serialize<size_t>(state_info.states.size());
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              state_info.states.begin(); it != state_info.states.end(); it++)
+        if (state_info.single)
         {
-          rez.serialize(it->first->did);
-          rez.serialize(it->first->owner_space);
-          rez.serialize(it->second);
+          rez.serialize<size_t>(1);
+          rez.serialize(state_info.states.single_state->did);
+          rez.serialize(state_info.states.single_state->owner_space);
+          rez.serialize(state_info.valid_fields);
+        }
+        else
+        {
+          rez.serialize<size_t>(state_info.states.multi_states->size());
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                state_info.states.multi_states->begin(); it != 
+                state_info.states.multi_states->end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->first->owner_space);
+            rez.serialize(it->second);
+          }
         }
       }
       size_t total_advance_states = 0;
@@ -1007,7 +1018,10 @@ namespace Legion {
               state->advance_states.end(); it1++)
         {
           const VersionStateInfo &state_info = it1->second;
-          total_advance_states += state_info.states.size();
+          if (state_info.single)
+            total_advance_states++;
+          else
+            total_advance_states += state_info.states.multi_states->size();
         }
         rez.serialize(total_advance_states);
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
@@ -1015,13 +1029,24 @@ namespace Legion {
               state->advance_states.end(); it1++)
         {
           const VersionStateInfo &state_info = it1->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                state_info.states.begin(); it != state_info.states.end(); it++)
+          if (state_info.single)
           {
             rez.serialize(it1->first);
-            rez.serialize(it->first->did);
-            rez.serialize(it->first->owner_space);
-            rez.serialize(it->second);
+            rez.serialize(state_info.states.single_state->did);
+            rez.serialize(state_info.states.single_state->owner_space);
+            rez.serialize(state_info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = state_info.states.multi_states->begin(); 
+                  it != state_info.states.multi_states->end(); it++)
+            {
+              rez.serialize(it1->first);
+              rez.serialize(it->first->did);
+              rez.serialize(it->first->owner_space);
+              rez.serialize(it->second);
+            }
           }
         }
       }
@@ -1954,32 +1979,60 @@ namespace Legion {
       partially_closed.clear();
       if (!current_version_infos.empty())
       {
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
               vit = current_version_infos.begin(); vit != 
               current_version_infos.end(); vit++)
         {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-                info.states.begin(); it != info.states.end(); it++)
+          VersionStateInfo &info = vit->second;
+          if (info.single)
           {
-            if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
-              legion_delete(it->first);
+            if (info.states.single_state->remove_base_valid_ref(
+                                                  CURRENT_STATE_REF))
+              legion_delete(info.states.single_state);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); 
+                  it != info.states.multi_states->end(); it++)
+            {
+              if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
+                legion_delete(it->first);
+            }
+            delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+            info.states.multi_states = NULL;
+#endif
           }
         }
         current_version_infos.clear();
       }
       if (!previous_version_infos.empty())
       {
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+        for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
               vit = previous_version_infos.begin(); vit != 
               previous_version_infos.end(); vit++)
         {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-                info.states.begin(); it != info.states.end(); it++)
+          VersionStateInfo &info = vit->second;
+          if (info.single)
           {
-            if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
-              legion_delete(it->first);
+            if (info.states.single_state->remove_base_valid_ref(
+                                                  CURRENT_STATE_REF))
+              legion_delete(info.states.single_state);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); 
+                  it != info.states.multi_states->end(); it++)
+            {
+              if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
+                legion_delete(it->first);
+            }
+            delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+            info.states.multi_states = NULL;
+#endif
           }
         }
         previous_version_infos.clear();
@@ -2031,26 +2084,57 @@ namespace Legion {
         {
           VersionStateInfo &info = vit->second;
           info.valid_fields -= deleted_mask;
-          std::vector<VersionState*> states_to_delete;
-          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->second -= deleted_mask;
-            if (!it->second)
-              states_to_delete.push_back(it->first);
-          }
-          if (!states_to_delete.empty())
-          {
-            for (std::vector<VersionState*>::iterator it = 
-                  states_to_delete.begin(); it != states_to_delete.end(); it++)
+            if (!info.valid_fields)
             {
-              info.states.erase(*it);
-              if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
-                legion_delete(*it);
+              if (info.states.single_state->remove_base_valid_ref(
+                                                  CURRENT_STATE_REF))
+                legion_delete(info.states.single_state);
+              versions_to_delete.push_back(vit->first);
             }
           }
-          if (info.states.empty())
-            versions_to_delete.push_back(vit->first);
+          else
+          {
+            std::vector<VersionState*> states_to_delete;
+            for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                  info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->second -= deleted_mask;
+              if (!it->second)
+                states_to_delete.push_back(it->first);
+            }
+            if (!states_to_delete.empty())
+            {
+              for (std::vector<VersionState*>::iterator it = 
+                    states_to_delete.begin(); it != 
+                    states_to_delete.end(); it++)
+              {
+                info.states.multi_states->erase(*it);
+                if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
+                  legion_delete(*it);
+              }
+            }
+            if (info.states.multi_states->empty())
+            {
+              delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+              info.states.multi_states = NULL;
+#endif
+              versions_to_delete.push_back(vit->first);
+            }
+            else if (info.states.multi_states->size() == 1)
+            {
+              LegionMap<VersionState*,FieldMask>::aligned::iterator first =
+                info.states.multi_states->begin();
+              VersionState *single = first->first;
+              info.valid_fields = first->second;
+              delete info.states.multi_states;
+              info.single = true;
+              info.states.single_state = single;
+            }
+          }
         }
         if (!versions_to_delete.empty())
         {
@@ -2071,26 +2155,57 @@ namespace Legion {
         {
           VersionStateInfo &info = vit->second;
           info.valid_fields -= deleted_mask;
-          std::vector<VersionState*> states_to_delete;
-          for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->second -= deleted_mask;
-            if (!it->second)
-              states_to_delete.push_back(it->first);
-          }
-          if (!states_to_delete.empty())
-          {
-            for (std::vector<VersionState*>::iterator it = 
-                  states_to_delete.begin(); it != states_to_delete.end(); it++)
+            if (!info.valid_fields)
             {
-              info.states.erase(*it);
-              if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
-                legion_delete(*it);
+              if (info.states.single_state->remove_base_valid_ref(
+                                                  CURRENT_STATE_REF))
+                legion_delete(info.states.single_state);
+              versions_to_delete.push_back(vit->first);
             }
           }
-          if (info.states.empty())
-            versions_to_delete.push_back(vit->first);
+          else
+          {
+            std::vector<VersionState*> states_to_delete;
+            for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                  info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->second -= deleted_mask;
+              if (!it->second)
+                states_to_delete.push_back(it->first);
+            }
+            if (!states_to_delete.empty())
+            {
+              for (std::vector<VersionState*>::iterator it = 
+                    states_to_delete.begin(); it != 
+                    states_to_delete.end(); it++)
+              {
+                info.states.multi_states->erase(*it);
+                if ((*it)->remove_base_valid_ref(CURRENT_STATE_REF))
+                  legion_delete(*it);
+              }
+            }
+            if (info.states.multi_states->empty())
+            {
+              delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+              info.states.multi_states = NULL;
+#endif
+              versions_to_delete.push_back(vit->first);
+            }
+            else if (info.states.multi_states->size() == 1)
+            {
+              LegionMap<VersionState*,FieldMask>::aligned::iterator first =
+                info.states.multi_states->begin();
+              VersionState *single = first->first;
+              info.valid_fields = first->second;
+              delete info.states.multi_states;
+              info.single = true;
+              info.states.single_state = single;
+            }
+          }
         }
         if (!versions_to_delete.empty())
         {
@@ -2141,16 +2256,22 @@ namespace Legion {
       {
         const VersionStateInfo &info = vit->second;
         assert(!!info.valid_fields);
-        // Make sure each field appears once in each version state info
-        FieldMask local_version_fields;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        if (info.single)
+          assert(!!info.valid_fields);
+        else
         {
-          assert(!!it->second); // better not be empty
-          assert(local_version_fields * it->second); // better not overlap
-          local_version_fields |= it->second;
+          // Make sure each field appears once in each version state info
+          FieldMask local_version_fields;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            assert(!!it->second); // better not be empty
+            assert(local_version_fields * it->second); // better not overlap
+            local_version_fields |= it->second;
+          }
+          assert(info.valid_fields == local_version_fields); // beter match
         }
-        assert(info.valid_fields == local_version_fields); // beter match
         // Should not overlap with other fields in the current version
         assert(current_version_fields * info.valid_fields);
         current_version_fields |= info.valid_fields;
@@ -2162,16 +2283,22 @@ namespace Legion {
       {
         const VersionStateInfo &info = vit->second;
         assert(!!info.valid_fields);
-        // Make sure each field appears once in each version state info
-        FieldMask local_version_fields;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        if (info.single)
+          assert(!!info.valid_fields);
+        else
         {
-          assert(!!it->second); // better not be empty
-          assert(local_version_fields * it->second); // better not overlap
-          local_version_fields |= it->second;
+          // Make sure each field appears once in each version state info
+          FieldMask local_version_fields;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            assert(!!it->second); // better not be empty
+            assert(local_version_fields * it->second); // better not overlap
+            local_version_fields |= it->second;
+          }
+          assert(info.valid_fields == local_version_fields); // beter match
         }
-        assert(info.valid_fields == local_version_fields); // beter match
         // Should not overlap with other fields in the current version
         assert(previous_version_fields * info.valid_fields);
         previous_version_fields |= info.valid_fields;
@@ -2200,8 +2327,13 @@ namespace Legion {
         init_state->add_base_valid_ref(CURRENT_STATE_REF, context);
         init_state->initialize(term_event, usage, user_mask, 
                                targets, context, init_index, corresponding);
-        current_version_infos[init_version].valid_fields = user_mask;
-        current_version_infos[init_version].states[init_state] = user_mask;
+        VersionStateInfo &info = current_version_infos[init_version];
+#ifdef DEBUG_LEGION
+        assert(info.single);
+        assert(info.states.single_state == NULL);
+#endif
+        info.valid_fields = user_mask;
+        info.states.single_state = init_state;
       }
       else
       {
@@ -2209,16 +2341,11 @@ namespace Legion {
           current_version_infos.find(init_version);
 #ifdef DEBUG_LEGION
         assert(finder != current_version_infos.end());
+        assert(finder->second.single); // should be only one
 #endif
         finder->second.valid_fields |= user_mask;
-#ifdef DEBUG_LEGION
-        assert(finder->second.states.size() == 1);
-#endif
-        LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
-          finder->second.states.begin();
-        it->first->initialize(term_event, usage, user_mask,
-                              targets, context, init_index, corresponding);
-        it->second |= user_mask;
+        finder->second.states.single_state->initialize(term_event, usage,
+            user_mask, targets, context, init_index, corresponding);
       }
 #ifdef DEBUG_LEGION
       sanity_check();
@@ -2289,14 +2416,19 @@ namespace Legion {
           }
           node_info.field_versions->add_field_version(vit->first, overlap);
           // Now record all the previous and advance version states
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = vit->second.states.begin(); it != 
-                vit->second.states.end(); it++)
+          if (vit->second.single)
+            state->add_version_state(vit->second.states.single_state, overlap);
+          else
           {
-            FieldMask state_overlap = it->second & overlap;
-            if (!state_overlap)
-              continue;
-            state->add_version_state(it->first, state_overlap);
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = vit->second.states.multi_states->begin(); it != 
+                  vit->second.states.multi_states->end(); it++)
+            {
+              FieldMask state_overlap = it->second & overlap;
+              if (!state_overlap)
+                continue;
+              state->add_version_state(it->first, state_overlap);
+            }
           }
           LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
             finder = current_version_infos.find(vit->first+1);
@@ -2304,14 +2436,24 @@ namespace Legion {
           assert(finder != current_version_infos.end());
           assert(!(overlap - finder->second.valid_fields));
 #endif
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
-                it = finder->second.states.begin(); it != 
-                finder->second.states.end(); it++)
+          if (finder->second.single)
           {
-            FieldMask state_overlap = it->second & overlap;
-            if (!state_overlap)
-              continue;
-            state->add_advance_state(it->first, state_overlap);
+            FieldMask state_overlap = finder->second.valid_fields & overlap;
+            if (!!state_overlap)
+              state->add_advance_state(finder->second.states.single_state,
+                                       state_overlap);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = finder->second.states.multi_states->begin(); it != 
+                  finder->second.states.multi_states->end(); it++)
+            {
+              FieldMask state_overlap = it->second & overlap;
+              if (!state_overlap)
+                continue;
+              state->add_advance_state(it->first, state_overlap);
+            }
           }
         }
         // If we had any unversioned fields, it is because we don't track
@@ -2331,13 +2473,20 @@ namespace Legion {
           // See if we have any fields to test
           if (!(info.valid_fields * unversioned))
           {
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
+            if (info.single)
+              state->add_advance_state(info.states.single_state,
+                                       info.valid_fields & unversioned);
+            else
             {
-              FieldMask state_overlap = it->second & unversioned;
-              if (!state_overlap)
-                continue;
-              state->add_advance_state(it->first, state_overlap);
+              for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                    it = info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask state_overlap = it->second & unversioned;
+                if (!state_overlap)
+                  continue;
+                state->add_advance_state(it->first, state_overlap);
+              }
             }
             unversioned -= info.valid_fields;
           }
@@ -2347,8 +2496,30 @@ namespace Legion {
             VersionState *init_state = 
               owner->create_new_version_state(init_version);
             init_state->add_base_valid_ref(CURRENT_STATE_REF);
-            info.states[init_state] = unversioned;
-            info.valid_fields |= unversioned;
+            if (info.single)
+            {
+              if (info.states.single_state == NULL)
+              {
+                info.states.single_state = init_state;
+                info.valid_fields = unversioned;
+              }
+              else
+              {
+                // go to multi       
+                LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                  new LegionMap<VersionState*,FieldMask>::aligned();
+                (*multi)[info.states.single_state] = info.valid_fields;
+                (*multi)[init_state] = unversioned;
+                info.single = false;
+                info.states.multi_states = multi;
+                info.valid_fields |= unversioned;
+              }
+            }
+            else
+            {
+              (*info.states.multi_states)[init_state] = unversioned;
+              info.valid_fields |= unversioned;
+            }
             state->add_advance_state(init_state, unversioned);
           }
         }
@@ -2370,15 +2541,20 @@ namespace Legion {
             node_info.field_versions->add_reference();
           }
           node_info.field_versions->add_field_version(vit->first, overlap);
-          // Only need to capture the current version infos
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
-                it = vit->second.states.begin(); it !=
-                vit->second.states.end(); it++)
+          if (vit->second.single)
+            state->add_version_state(vit->second.states.single_state, overlap);
+          else
           {
-            FieldMask state_overlap = it->second & overlap;
-            if (!state_overlap)
-              continue;
-            state->add_version_state(it->first, state_overlap);
+            // Only need to capture the current version infos
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = vit->second.states.multi_states->begin(); it !=
+                  vit->second.states.multi_states->end(); it++)
+            {
+              FieldMask state_overlap = it->second & overlap;
+              if (!state_overlap)
+                continue;
+              state->add_version_state(it->first, state_overlap);
+            }
           }
         }
         if (!!unversioned)
@@ -2400,8 +2576,30 @@ namespace Legion {
           VersionState *init_state = 
             owner->create_new_version_state(init_version);
           init_state->add_base_valid_ref(CURRENT_STATE_REF);
-          info.states[init_state] = unversioned;
-          info.valid_fields |= unversioned;
+          if (info.single)
+          {
+            if (info.states.single_state == NULL)
+            {
+              info.states.single_state = init_state;
+              info.valid_fields = unversioned;
+            }
+            else
+            {
+              // go to multi       
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[info.states.single_state] = info.valid_fields;
+              (*multi)[init_state] = unversioned;
+              info.single = false;
+              info.states.multi_states = multi;
+              info.valid_fields |= unversioned;
+            }
+          }
+          else
+          {
+            (*info.states.multi_states)[init_state] = unversioned;
+            info.valid_fields |= unversioned;
+          }
           state->add_version_state(init_state, unversioned);
         }
       }
@@ -2437,36 +2635,66 @@ namespace Legion {
           // The whole version number is going away, remove all
           // the valid references on the version state objects
           to_delete_previous.push_back(vit->first);
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
-              legion_delete(it->first);
+            if (info.states.single_state->remove_base_valid_ref(
+                                                  CURRENT_STATE_REF))
+              legion_delete(info.states.single_state);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
+                legion_delete(it->first);
+            }
+            delete info.states.multi_states;
+            info.states.multi_states = NULL;
+            info.single = true;
           }
         }
         else
         {
           // Only some of the state are being filtered
-          std::vector<VersionState*> to_delete;
-          for (LegionMap<VersionState*,FieldMask>::aligned::iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (!info.single)
           {
-            it->second -= overlap;
-            if (!it->second)
+            std::vector<VersionState*> to_delete;
+            for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                  info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
             {
-              to_delete.push_back(it->first);
-              if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
-                legion_delete(it->first);
+              it->second -= overlap;
+              if (!it->second)
+              {
+                to_delete.push_back(it->first);
+                if (it->first->remove_base_valid_ref(CURRENT_STATE_REF))
+                  legion_delete(it->first);
+              }
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<VersionState*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+              {
+                info.states.multi_states->erase(*it);
+              }
+              if (info.states.multi_states->size() == 1)
+              {
+                LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  first = info.states.multi_states->begin();
+#ifdef DEBUG_LEGION
+                assert(first->second == info.valid_fields);
+#endif
+                VersionState *single = first->first;
+                delete info.states.multi_states;
+                info.single = true;
+                info.states.single_state = single;
+              }
             }
           }
-          if (!to_delete.empty())
-          {
-            for (std::vector<VersionState*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              info.states.erase(*it);
-            }
-          }
+          // Otherwise the one single state is still good
         }
         previous_filter -= overlap;
         if (!previous_filter)
@@ -2509,106 +2737,330 @@ namespace Legion {
             VersionStateInfo &prev_info = previous_version_infos[vit->first];
             prev_info = info;
             prev_info.valid_fields = overlap;
+            info.states.multi_states = NULL;
+            info.single = true;
           }
-          else
+          else // prev_inf already existed
           {
             VersionStateInfo &prev_info = prev_finder->second;
             // Filter back the version states
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
+            if (info.single)
             {
-              // See if we find it 
-              LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-                prev_info.states.find(it->first);
-              if (finder != prev_info.states.end())
+              if (prev_info.single)
               {
-                finder->second |= it->second;
-                // Remove duplicate reference
-                it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+#ifdef DEBUG_LEGION
+                assert(prev_info.states.single_state != NULL);
+#endif
+                if (prev_info.states.single_state != info.states.single_state)
+                {
+                  // Different states so go to multi mode,
+                  // valid fields are updated below
+                  LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                      new LegionMap<VersionState*,FieldMask>::aligned();
+                  (*multi)[prev_info.states.single_state] = 
+                    prev_info.valid_fields;
+                  (*multi)[info.states.single_state] = overlap;
+                  prev_info.single = false;
+                  prev_info.states.multi_states = multi;
+                  prev_info.valid_fields |= overlap;
+                }
+                else
+                {
+                  // Remove the duplicate reference
+                  info.states.single_state->remove_base_valid_ref(
+                                                          CURRENT_STATE_REF);
+                  prev_info.valid_fields |= overlap;
+                }
               }
-              else // didn't find it, just insert it
-                prev_info.states.insert(*it);
+              else // prev_info already multi
+              {
+                // See if previous already has it or not
+                LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+                  prev_info.states.multi_states->find(info.states.single_state);
+                if (finder != prev_info.states.multi_states->end())
+                {
+                  finder->second |= overlap;
+                  // Remove the duplicate reference
+                  info.states.single_state->remove_base_valid_ref(
+                                                          CURRENT_STATE_REF);
+                }
+                else // didn't find it, so just insert it
+                  (*prev_info.states.multi_states)[info.states.single_state] |= 
+                                                                      overlap;
+                prev_info.valid_fields |= overlap;
+              }
+              info.states.single_state = NULL;
             }
-            prev_info.valid_fields |= overlap;
+            else // info is multi
+            {
+              for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                    it = info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                // See if we find it, valid fields updated below 
+                if (prev_info.single)
+                {
+                  if (prev_info.states.single_state != it->first)
+                  {
+                    // go to multi-mode
+                    LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                      new LegionMap<VersionState*,FieldMask>::aligned();
+                    (*multi)[prev_info.states.single_state] = 
+                      prev_info.valid_fields;
+                    (*multi)[it->first] = it->second;
+                    prev_info.single = false;
+                    prev_info.states.multi_states = multi;
+                  }
+                  else
+                  {
+                    prev_info.valid_fields |= it->second;
+                    // Remove the duplicate reference
+                    it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+                  }
+                }
+                else
+                {
+                  LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+                    prev_info.states.multi_states->find(it->first);
+                  if (finder != prev_info.states.multi_states->end())
+                  {
+                    finder->second |= it->second;
+                    // Remove duplicate reference
+                    it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+                  }
+                  else // didn't find it, just insert it
+                    prev_info.states.multi_states->insert(*it);
+                }
+              }
+              prev_info.valid_fields |= overlap;
+              // we can delete this now
+              delete info.states.multi_states;
+              info.single = true;
+              info.states.multi_states = NULL;
+            }
           }
-          // always make sure we clear the states in case we actually
-          // make a new version state info later
-          info.states.clear();
         }
         else
         {
-          // Filter back the only some of the version states
-          // See if there is some one to filter back to
-          std::vector<VersionState*> to_delete;
-          LegionMap<VersionID,VersionStateInfo>::aligned::iterator prev_finder =
-            previous_version_infos.find(vit->first);
-          if (prev_finder == previous_version_infos.end())
+          // Filter back only some of the version states
+          if (info.single)
           {
-            // Make a new version state info
-            VersionStateInfo &prev_info = previous_version_infos[vit->first];
-            for (LegionMap<VersionState*,FieldMask>::aligned::iterator
-                  it = info.states.begin(); it != info.states.end(); it++)
+            // See if there is some one to filter back to
+            LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
+              prev_finder = previous_version_infos.find(vit->first);
+            if (prev_finder == previous_version_infos.end())
             {
-              FieldMask state_overlap = it->second & overlap;
-              if (!state_overlap)
-                continue;
-              prev_info.states[it->first] = state_overlap;
-              it->second -= state_overlap;
-              if (!it->second) // Whole state flows back including reference
-                to_delete.push_back(it->first);
-              else // Partial flow back so add a reference
-                it->first->add_base_valid_ref(CURRENT_STATE_REF);
+              VersionStateInfo &prev_info = previous_version_infos[vit->first];
+              prev_info.states.single_state = info.states.single_state;
+              prev_info.valid_fields = overlap;
+              // Add the valid reference
+              info.states.single_state->add_base_valid_ref(CURRENT_STATE_REF);
             }
-            prev_info.valid_fields = overlap;
-          }
-          else
-          {
-            VersionStateInfo &prev_info = prev_finder->second;
-            for (LegionMap<VersionState*,FieldMask>::aligned::iterator
-                  it = info.states.begin(); it != info.states.end(); it++)
+            else
             {
-              FieldMask state_overlap = it->second & overlap;
-              if (!state_overlap)
-                continue;
-              it->second -= state_overlap;
-              if (!it->second)
+              VersionStateInfo &prev_info = prev_finder->second;
+              if (prev_info.single)
               {
-                to_delete.push_back(it->first);
-                // Whole state flows back
-                LegionMap<VersionState*,FieldMask>::aligned::iterator 
-                  finder = prev_info.states.find(it->first);
-                if (finder != prev_info.states.end())
+#ifdef DEBUG_LEGION
+                assert(prev_info.states.single_state != NULL);
+#endif
+                // See if they are the same or not
+                if (info.states.single_state != prev_info.states.single_state)
                 {
-                  // Already exists, merge it back and remove duplicate ref
-                  finder->second |= state_overlap;
-                  it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+                  // Add the valid reference
+                  info.states.single_state->add_base_valid_ref(
+                                                  CURRENT_STATE_REF);
+                  // Not the same go to multi
+                  LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                    new LegionMap<VersionState*,FieldMask>::aligned();
+                  (*multi)[prev_info.states.single_state] = 
+                    prev_info.valid_fields;
+                  (*multi)[info.states.single_state] = overlap;
+                  prev_info.single = false;
+                  prev_info.states.multi_states = multi;
                 }
-                else // just send it back including reference
-                  prev_info.states[it->first] = state_overlap;
+                // Otherwise they are the same so just update the valid fields
+                prev_info.valid_fields |= overlap;
               }
               else
               {
-                // Partial state flows back  
-                LegionMap<VersionState*,FieldMask>::aligned::iterator 
-                  finder = prev_info.states.find(it->first);
-                if (finder == prev_info.states.end())
+                // See if it already exists
+                LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+                  prev_info.states.multi_states->find(info.states.single_state);
+                if (finder == prev_info.states.multi_states->end())
                 {
-                  prev_info.states[it->first] = state_overlap;
-                  // Add an extra reference
-                  it->first->add_base_valid_ref(CURRENT_STATE_REF);
+                  (*prev_info.states.multi_states)[info.states.single_state] = 
+                    overlap;
+                  // Add the valid reference
+                  info.states.single_state->add_base_valid_ref(
+                                                          CURRENT_STATE_REF);
                 }
-                else
-                  finder->second |= state_overlap;
+                else // already exists, so just add our fields
+                  finder->second |= overlap;
+                prev_info.valid_fields |= overlap;
               }
             }
-            prev_info.valid_fields |= overlap;
           }
-          if (!to_delete.empty())
+          else // info is multi
           {
-            for (std::vector<VersionState*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
+            std::vector<VersionState*> to_delete;
+            // See if there is some one to filter back to
+            LegionMap<VersionID,VersionStateInfo>::aligned::iterator 
+              prev_finder = previous_version_infos.find(vit->first);
+            if (prev_finder == previous_version_infos.end())
             {
-              info.states.erase(*it);
+              // Make a new version state info
+              VersionStateInfo &prev_info = previous_version_infos[vit->first];
+              for (LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
+                    info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask state_overlap = it->second & overlap;
+                if (!state_overlap)
+                  continue;
+                it->second -= state_overlap;
+                if (!it->second) // Whole state flows back including reference
+                  to_delete.push_back(it->first);
+                else // Partial flow back so add a reference
+                  it->first->add_base_valid_ref(CURRENT_STATE_REF);
+                if (prev_info.single)
+                {
+                  if (prev_info.states.single_state == NULL)
+                  {
+                    prev_info.states.single_state = it->first;
+                    prev_info.valid_fields = state_overlap;
+                  }
+                  else
+                  {
+                    // Go to multi
+                    LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                      new LegionMap<VersionState*,FieldMask>::aligned();
+                    (*multi)[prev_info.states.single_state] = 
+                      prev_info.valid_fields;
+                    (*multi)[it->first] = state_overlap;
+                    prev_info.single = false;
+                    prev_info.states.multi_states = multi;
+                    prev_info.valid_fields |= state_overlap;
+                  }
+                }
+                else
+                {
+                  (*prev_info.states.multi_states)[it->first] = state_overlap;
+                  prev_info.valid_fields |= state_overlap;
+                }
+              }
+            }
+            else // prev_info already existed
+            {
+              VersionStateInfo &prev_info = prev_finder->second;
+              for (LegionMap<VersionState*,FieldMask>::aligned::iterator it =
+                    info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask state_overlap = it->second & overlap;
+                if (!state_overlap)
+                  continue;
+                it->second -= state_overlap;
+                if (!it->second)
+                {
+                  to_delete.push_back(it->first);
+                  // Whole state flows back
+                  if (prev_info.single)
+                  {
+#ifdef DEBUG_LEGION
+                    assert(prev_info.states.single_state != NULL);
+#endif
+                    if (prev_info.states.single_state != it->first)
+                    {
+                      // Go to multi, reference flows back
+                      LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                        new LegionMap<VersionState*,FieldMask>::aligned();
+                      (*multi)[prev_info.states.single_state] = 
+                        prev_info.valid_fields;
+                      (*multi)[it->first] = state_overlap;
+                      prev_info.single = false;
+                      prev_info.states.multi_states = multi;
+                    }
+                    else // same state so remove duplicate reference
+                    {
+                      it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+                      // must update valid fields here
+                      prev_info.valid_fields |= state_overlap;
+                    }
+                  }
+                  else
+                  {
+                    LegionMap<VersionState*,FieldMask>::aligned::iterator 
+                      finder = prev_info.states.multi_states->find(it->first);
+                    if (finder != prev_info.states.multi_states->end())
+                    {
+                      // Already exists, merge it back and remove duplicate ref
+                      finder->second |= state_overlap;
+                      it->first->remove_base_valid_ref(CURRENT_STATE_REF);
+                    }
+                    else // just send it back including reference
+                      (*prev_info.states.multi_states)[it->first] = 
+                        state_overlap;
+                  }
+                }
+                else
+                {
+                  // Partial state flows back  
+                  if (prev_info.single)
+                  {
+#ifdef DEBUG_LEGION
+                    assert(prev_info.states.single_state != NULL);
+#endif
+                    if (prev_info.states.single_state != it->first)
+                    {
+                      // Add an extra reference
+                      it->first->add_base_valid_ref(CURRENT_STATE_REF);
+                      // Go to multi
+                      LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                        new LegionMap<VersionState*,FieldMask>::aligned();
+                      (*multi)[prev_info.states.single_state] = 
+                        prev_info.valid_fields;
+                      (*multi)[it->first] = state_overlap;
+                      prev_info.single = false;
+                      prev_info.states.multi_states = multi;
+                    }
+                  }
+                  else
+                  {
+                    LegionMap<VersionState*,FieldMask>::aligned::iterator 
+                      finder = prev_info.states.multi_states->find(it->first);
+                    if (finder == prev_info.states.multi_states->end())
+                    {
+                      (*prev_info.states.multi_states)[it->first] = 
+                        state_overlap;
+                      // Add an extra reference
+                      it->first->add_base_valid_ref(CURRENT_STATE_REF);
+                    }
+                    else
+                      finder->second |= state_overlap;
+                  }
+                }
+                prev_info.valid_fields |= state_overlap;
+              }
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<VersionState*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                info.states.multi_states->erase(*it);
+              // Go back to single if possible
+              if (info.states.multi_states->size() == 1)
+              {
+                LegionMap<VersionState*,FieldMask>::aligned::iterator first = 
+                  info.states.multi_states->begin();
+#ifdef DEBUG_LEGION
+                assert(first->second == info.valid_fields);
+#endif
+                VersionState *single = first->first;
+                delete info.states.multi_states;
+                info.single = true;
+                info.states.single_state = single;
+              }
             }
           }
         }
@@ -2630,10 +3082,35 @@ namespace Legion {
           // We know it doesn't exist yet
 #ifdef DEBUG_LEGION
           // Just to be completely safe
-          assert(next_finder->second.states.find(new_state) ==
-                 next_finder->second.states.end());
+          if (next_finder->second.single)
+            assert(next_finder->second.states.single_state != new_state);
+          else
+            assert(next_finder->second.states.multi_states->find(new_state) ==
+                   next_finder->second.states.multi_states->end());
 #endif
-          next_finder->second.states[new_state] = overlap; 
+          if (next_finder->second.single)
+          {
+            // It's possible this was a state to be removed so handle 
+            // that case special
+            if (!next_finder->second.valid_fields)
+            {
+              next_finder->second.states.single_state = new_state;
+              next_finder->second.valid_fields = overlap;
+            }
+            else
+            {
+              // Go to multi
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[next_finder->second.states.single_state] = 
+                next_finder->second.valid_fields;
+              (*multi)[new_state] = overlap;
+              next_finder->second.single = false;
+              next_finder->second.states.multi_states = multi;
+            }
+          }
+          else
+            (*next_finder->second.states.multi_states)[new_state] = overlap;
           next_finder->second.valid_fields |= overlap;
         }
         else
@@ -2651,8 +3128,30 @@ namespace Legion {
           owner->create_new_version_state(init_version);
         new_state->add_base_valid_ref(CURRENT_STATE_REF);
         VersionStateInfo &info = current_version_infos[init_version];
-        info.states[new_state] = current_filter;
-        info.valid_fields |= current_filter;
+        if (info.single)
+        {
+          if (info.states.single_state == NULL)
+          {
+            info.states.single_state = new_state;
+            info.valid_fields = current_filter; 
+          }
+          else
+          {
+            // Go to multi
+            LegionMap<VersionState*,FieldMask>::aligned *multi = 
+              new LegionMap<VersionState*,FieldMask>::aligned();
+            (*multi)[info.states.single_state] = info.valid_fields;
+            (*multi)[new_state] = current_filter;
+            info.single = false;
+            info.states.multi_states = multi;
+            info.valid_fields |= current_filter;
+          }
+        }
+        else
+        {
+          (*info.states.multi_states)[new_state] = current_filter;
+          info.valid_fields |= current_filter;
+        }
       }
       // Remove any old version state infos
       if (!to_delete_current.empty())
@@ -2675,8 +3174,34 @@ namespace Legion {
 #endif
           VersionStateInfo &info = 
             current_version_infos[it->first->version_number];
-          info.states[it->first] = it->second;
-          info.valid_fields = it->second;
+          if (info.single)
+          {
+            if (info.states.single_state == NULL)
+            {
+              info.states.single_state = it->first;
+              info.valid_fields = it->second;
+            }
+            else if (info.states.single_state == it->first)
+            {
+              info.valid_fields |= it->second;
+            }
+            else
+            {
+              // Go to multi
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[info.states.single_state] = info.valid_fields;
+              (*multi)[it->first] = it->second;
+              info.single = false;
+              info.states.multi_states = multi;
+              info.valid_fields |= it->second;
+            }
+          }
+          else
+          {
+            (*info.states.multi_states)[it->first] = it->second;
+            info.valid_fields = it->second;
+          }
         }
       }
 #ifdef DEBUG_LEGION
@@ -2701,14 +3226,24 @@ namespace Legion {
         if (capture_mask * vit->second.valid_fields)
           continue;
         FieldMask version_fields;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              vit->second.states.begin(); it != vit->second.states.end(); it++)
+        if (vit->second.single)
         {
-          FieldMask overlap = capture_mask & it->second;
-          if (!overlap)
-            continue;
-          version_fields |= overlap;
-          it->first->update_physical_state(&temp_state, overlap);
+          version_fields = (capture_mask & vit->second.valid_fields);
+          vit->second.states.single_state->update_physical_state(&temp_state, 
+                                                                version_fields);
+        }
+        else
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+               vit->second.states.multi_states->begin(); it != 
+               vit->second.states.multi_states->end(); it++)
+          {
+            FieldMask overlap = capture_mask & it->second;
+            if (!overlap)
+              continue;
+            version_fields |= overlap;
+            it->first->update_physical_state(&temp_state, overlap);
+          }
         }
         assert(!!version_fields);
         char *version_buffer = version_fields.to_string();
@@ -3688,26 +4223,54 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remove references to our version states and delete them if necessary
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator vit =
             version_states.begin(); vit != version_states.end(); vit++)
       {
-        const VersionStateInfo &info = vit->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        VersionStateInfo &info = vit->second;
+        if (info.single)
         {
-          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF)) 
-            legion_delete(it->first);
+          if (info.states.single_state->remove_base_valid_ref(
+                                                PHYSICAL_STATE_REF))
+            legion_delete(info.states.single_state);
+        }
+        else
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF)) 
+              legion_delete(it->first);
+          }
+          delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+          info.states.multi_states = NULL;
+#endif
         }
       }
-      for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
+      for (LegionMap<VersionID,VersionStateInfo>::aligned::iterator vit =
             advance_states.begin(); vit != advance_states.end(); vit++)
       {
-        const VersionStateInfo &info = vit->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        VersionStateInfo &info = vit->second;
+        if (info.single)
         {
-          if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF))
-            legion_delete(it->first);
+          if (info.states.single_state->remove_base_valid_ref(
+                                                PHYSICAL_STATE_REF))
+            legion_delete(info.states.single_state);
+        }
+        else
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            if (it->first->remove_base_valid_ref(PHYSICAL_STATE_REF))
+              legion_delete(it->first);
+          }
+          delete info.states.multi_states;
+#ifdef DEBUG_LEGION
+          info.states.multi_states = NULL;
+#endif
         }
       }
       version_states.clear();
@@ -3757,16 +4320,44 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionStateInfo &info = version_states[state->version_number];
-      LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-        info.states.find(state);
-      if (finder == info.states.end())
+      if (info.single)
       {
-        state->add_base_valid_ref(PHYSICAL_STATE_REF);
-        info.states[state] = state_mask;
+        if (info.states.single_state == NULL)
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          info.states.single_state = state;
+          info.valid_fields = state_mask;
+        }
+        else if (info.states.single_state == state)
+        {
+          info.valid_fields |= state_mask;
+        }
+        else
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          // Go to multi
+          LegionMap<VersionState*,FieldMask>::aligned *multi = 
+            new LegionMap<VersionState*,FieldMask>::aligned();
+          (*multi)[info.states.single_state] = info.valid_fields;
+          (*multi)[state] = state_mask;
+          info.single = false;
+          info.states.multi_states = multi;
+          info.valid_fields |= state_mask;
+        }
       }
       else
-        finder->second |= state_mask;
-      info.valid_fields |= state_mask;
+      {
+        LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+          info.states.multi_states->find(state);
+        if (finder == info.states.multi_states->end())
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          (*info.states.multi_states)[state] = state_mask;
+        }
+        else
+          finder->second |= state_mask;
+        info.valid_fields |= state_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3775,16 +4366,44 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionStateInfo &info = advance_states[state->version_number];
-      LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-        info.states.find(state);
-      if (finder == info.states.end())
+      if (info.single)
       {
-        state->add_base_valid_ref(PHYSICAL_STATE_REF);
-        info.states[state] = state_mask;
+        if (info.states.single_state == NULL)
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          info.states.single_state = state;
+          info.valid_fields = state_mask;
+        }
+        else if (info.states.single_state == state)
+        {
+          info.valid_fields |= state_mask;
+        }
+        else
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          // Go to multi
+          LegionMap<VersionState*,FieldMask>::aligned *multi = 
+            new LegionMap<VersionState*,FieldMask>::aligned();
+          (*multi)[info.states.single_state] = info.valid_fields;
+          (*multi)[state] = state_mask;
+          info.single = false;
+          info.states.multi_states = multi;
+          info.valid_fields |= state_mask;
+        }
       }
       else
-        finder->second |= state_mask;
-      info.valid_fields |= state_mask;
+      {
+        LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+          info.states.multi_states->find(state);
+        if (finder == info.states.multi_states->end())
+        {
+          state->add_base_valid_ref(PHYSICAL_STATE_REF);
+          (*info.states.multi_states)[state] = state_mask;
+        }
+        else
+          finder->second |= state_mask;
+        info.valid_fields |= state_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3800,10 +4419,19 @@ namespace Legion {
               vit = version_states.begin(); vit != version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->update_path_only_state(this, it->second);
+            info.states.single_state->update_path_only_state(this, 
+                                                             info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->update_path_only_state(this, it->second);
+            }
           }
         }
       }
@@ -3817,20 +4445,38 @@ namespace Legion {
               vit = version_states.begin(); vit != version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->update_split_previous_state(this, it->second);
+            info.states.single_state->update_split_previous_state(this,
+                                                        info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->update_split_previous_state(this, it->second);
+            }
           }
         }
         for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
               vit = advance_states.begin(); vit != advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->update_split_advance_state(this, it->second);
+            info.states.single_state->update_split_advance_state(this,
+                                                            info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->update_split_advance_state(this, it->second);
+            }
           }
         }
       }
@@ -3840,10 +4486,19 @@ namespace Legion {
               vit = version_states.begin(); vit != version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->update_physical_state(this, it->second);
+            info.states.single_state->update_physical_state(this, 
+                                                            info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->update_physical_state(this, it->second);
+            }
           }
         }
       }
@@ -3864,11 +4519,20 @@ namespace Legion {
               advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->merge_path_only_state(this, it->second, 
-                                             target, applied_conditions);
+            info.states.single_state->merge_path_only_state(this, 
+                info.valid_fields, target, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->merge_path_only_state(this, it->second, 
+                                               target, applied_conditions);
+            }
           }
           non_advance_mask -= info.valid_fields;
         }
@@ -3880,16 +4544,29 @@ namespace Legion {
                 version_states.end(); vit++)
           {
             const VersionStateInfo &info = vit->second;
-            if (info.valid_fields * non_advance_mask)
-              continue;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
+            
+            if (info.single)
             {
-              FieldMask overlap = it->second & non_advance_mask;
+              FieldMask overlap = info.valid_fields & non_advance_mask;
               if (!overlap)
                 continue;
-              it->first->merge_path_only_state(this, overlap,
-                                               target, applied_conditions);
+              info.states.single_state->merge_path_only_state(this, overlap,
+                                                target, applied_conditions);
+            }
+            else
+            {
+              if (info.valid_fields * non_advance_mask)
+                continue;
+              for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                    it = info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask overlap = it->second & non_advance_mask;
+                if (!overlap)
+                  continue;
+                it->first->merge_path_only_state(this, overlap,
+                                                 target, applied_conditions);
+              }
             }
           }
         }
@@ -3901,11 +4578,20 @@ namespace Legion {
               version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->merge_path_only_state(this, it->second, 
-                                             target, applied_conditions); 
+            info.states.single_state->merge_path_only_state(this, 
+                info.valid_fields, target, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->merge_path_only_state(this, it->second, 
+                                               target, applied_conditions); 
+            }
           }
         }
       }
@@ -3929,11 +4615,20 @@ namespace Legion {
               advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->merge_physical_state(this, it->second, 
-                                            target, applied_conditions);
+            info.states.single_state->merge_physical_state(this, 
+                info.valid_fields, target, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->merge_physical_state(this, it->second, 
+                                              target, applied_conditions);
+            }
           }
           non_advance_mask -= info.valid_fields;
         }
@@ -3944,16 +4639,28 @@ namespace Legion {
                 version_states.end(); vit++)
           {
             const VersionStateInfo &info = vit->second;
-            if (info.valid_fields * non_advance_mask)
-              continue;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
+            if (info.single)
             {
-              FieldMask overlap = it->second & non_advance_mask;
+              FieldMask overlap = info.valid_fields & non_advance_mask;
               if (!overlap)
                 continue;
-              it->first->merge_physical_state(this, overlap,
-                                              target, applied_conditions); 
+              info.states.single_state->merge_physical_state(this, overlap,
+                                                  target, applied_conditions);
+            }
+            else
+            {
+              if (info.valid_fields * non_advance_mask)
+                continue;
+              for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                    it = info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask overlap = it->second & non_advance_mask;
+                if (!overlap)
+                  continue;
+                it->first->merge_physical_state(this, overlap,
+                                                target, applied_conditions); 
+              }
             }
           } 
         }
@@ -3968,11 +4675,20 @@ namespace Legion {
               version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->merge_physical_state(this, it->second,
-                                            target, applied_conditions); 
+            info.states.single_state->merge_physical_state(this, 
+                info.valid_fields, target, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->merge_physical_state(this, it->second,
+                                              target, applied_conditions); 
+            }
           }
         }
       }
@@ -3999,12 +4715,22 @@ namespace Legion {
               advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->filter_and_merge_physical_state(this, it->second, 
-                target, filter_masks, filter_views, filter_children,
-                closed_children, applied_conditions);
+            info.states.single_state->filter_and_merge_physical_state(this,
+                info.valid_fields, target, filter_masks, filter_views,
+                filter_children, closed_children, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->filter_and_merge_physical_state(this, it->second, 
+                  target, filter_masks, filter_views, filter_children,
+                  closed_children, applied_conditions);
+            }
           }
           non_advance_mask -= info.valid_fields;
         }
@@ -4015,17 +4741,29 @@ namespace Legion {
                 version_states.end(); vit++)
           {
             const VersionStateInfo &info = vit->second;
-            if (info.valid_fields * non_advance_mask)
-              continue;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = info.states.begin(); it != info.states.end(); it++)
+            if (info.single)
             {
-              FieldMask overlap = it->second & non_advance_mask;
+              FieldMask overlap = info.valid_fields & non_advance_mask;
               if (!overlap)
                 continue;
-              // Never need to filter previous states
-              it->first->merge_physical_state(this, overlap,
-                                              target, applied_conditions); 
+              info.states.single_state->merge_physical_state(this, overlap,
+                                                target, applied_conditions);
+            }
+            else
+            {
+              if (info.valid_fields * non_advance_mask)
+                continue;
+              for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                    it = info.states.multi_states->begin(); it != 
+                    info.states.multi_states->end(); it++)
+              {
+                FieldMask overlap = it->second & non_advance_mask;
+                if (!overlap)
+                  continue;
+                // Never need to filter previous states
+                it->first->merge_physical_state(this, overlap,
+                                                target, applied_conditions); 
+              }
             }
           } 
         }   
@@ -4040,12 +4778,21 @@ namespace Legion {
               version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            // Never need to filter previous states
-            it->first->merge_physical_state(this, it->second,
-                                            target, applied_conditions); 
+            info.states.single_state->merge_physical_state(this, 
+                info.valid_fields, target, applied_conditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              // Never need to filter previous states
+              it->first->merge_physical_state(this, it->second,
+                                              target, applied_conditions); 
+            }
           }
         }
       }
@@ -4102,10 +4849,18 @@ namespace Legion {
             version_states.begin(); it1 != version_states.end(); it1++)
       {
         const VersionStateInfo &info = it1->second;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        if (info.single)
         {
-          result->add_version_state(it->first, it->second);
+          result->add_version_state(info.states.single_state,info.valid_fields);
+        }
+        else
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            result->add_version_state(it->first, it->second);
+          }
         }
       }
       if (need_adv && !advance_states.empty())
@@ -4114,10 +4869,19 @@ namespace Legion {
               it1 = advance_states.begin(); it1 != advance_states.end(); it1++)
         {
           const VersionStateInfo &info = it1->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            result->add_advance_state(it->first, it->second);
+            result->add_advance_state(info.states.single_state, 
+                                      info.valid_fields);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              result->add_advance_state(it->first, it->second);
+            }
           }
         }
       }
@@ -4143,15 +4907,26 @@ namespace Legion {
             version_states.begin(); it1 != version_states.end(); it1++)
       {
         const VersionStateInfo &info = it1->second;
-        if (it1->second.valid_fields * clone_mask)
-          continue;
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              info.states.begin(); it != info.states.end(); it++)
+        if (info.single)
         {
-          FieldMask overlap = it->second & clone_mask;
+          FieldMask overlap = info.valid_fields & clone_mask;
           if (!overlap)
             continue;
-          result->add_version_state(it->first, it->second);
+          result->add_version_state(info.states.single_state, overlap);
+        }
+        else
+        {
+          if (it1->second.valid_fields * clone_mask)
+            continue;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+                info.states.multi_states->begin(); it != 
+                info.states.multi_states->end(); it++)
+          {
+            FieldMask overlap = it->second & clone_mask;
+            if (!overlap)
+              continue;
+            result->add_version_state(it->first, overlap);
+          }
         }
       }
       if (need_adv && !advance_states.empty())
@@ -4160,15 +4935,26 @@ namespace Legion {
               it1 = advance_states.begin(); it1 != advance_states.end(); it1++)
         {
           const VersionStateInfo &info = it1->second;
-          if (it1->second.valid_fields * clone_mask)
-            continue;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            FieldMask overlap = it->second & clone_mask;
+            FieldMask overlap = info.valid_fields & clone_mask;
             if (!overlap)
               continue;
-            result->add_advance_state(it->first, it->second);
+            result->add_advance_state(info.states.single_state, overlap);
+          }
+          else
+          {
+            if (it1->second.valid_fields * clone_mask)
+              continue;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              FieldMask overlap = it->second & clone_mask;
+              if (!overlap)
+                continue;
+              result->add_advance_state(it->first, overlap);
+            }
           }
         }
       }
@@ -4228,10 +5014,19 @@ namespace Legion {
              vit = version_states.begin(); vit != version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->request_final_version_state(it->second, preconditions);
+            info.states.single_state->request_final_version_state(
+                info.valid_fields, preconditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->request_final_version_state(it->second, preconditions);
+            }
           }
         }
       }
@@ -4242,10 +5037,20 @@ namespace Legion {
              vit = version_states.begin(); vit != version_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->request_initial_version_state(it->second, preconditions);
+            info.states.single_state->request_initial_version_state(
+                info.valid_fields, preconditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->request_initial_version_state(it->second, 
+                                                       preconditions);
+            }
           }
         }
       }
@@ -4255,10 +5060,20 @@ namespace Legion {
              vit = advance_states.begin(); vit != advance_states.end(); vit++)
         {
           const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            it->first->request_initial_version_state(it->second, preconditions);
+            info.states.single_state->request_initial_version_state(
+                info.valid_fields, preconditions);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              it->first->request_initial_version_state(it->second, 
+                                                       preconditions);
+            }
           }
         }
       }
