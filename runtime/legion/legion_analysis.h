@@ -387,8 +387,19 @@ namespace Legion {
      */
     struct VersionStateInfo {
     public:
+      VersionStateInfo(void)
+        : single(true) { states.single_state = NULL; }
+#ifdef DEBUG_LEGION
+      ~VersionStateInfo(void)
+      { if (!single) assert(states.multi_states == NULL); }
+#endif
+    public:
       FieldMask valid_fields;
-      LegionMap<VersionState*,FieldMask>::aligned states;
+      union {
+        VersionState *single_state;
+        LegionMap<VersionState*,FieldMask>::aligned *multi_states;
+      } states;
+      bool single;
     };
 
     /**
