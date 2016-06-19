@@ -1256,6 +1256,10 @@ namespace Legion {
                                  const TraceInfo &trace_info,
                                  const bool projecting,
                                  const bool report_uninitialized = false);
+      void register_local_user(CurrentState &state,
+                               const LogicalUser &user,
+                               RegstrictInfo &restrict_info,
+                               const TraceInfo &trace_info);
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
@@ -1508,6 +1512,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
+      virtual AbstractTreeNode *get_abstract_subtree(void) = 0;
     public:
       // Interfaces to Realm
       virtual ApEvent issue_copy(Operation *op,
@@ -1664,6 +1669,7 @@ namespace Legion {
 #endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
+      virtual AbstractTreeNode *get_abstract_subtree(void);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
@@ -1852,6 +1858,7 @@ namespace Legion {
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalPartition handle, 
                                             Runtime *runtime);
+      virtual AbstractTreeNode *get_abstract_subtree(void);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
@@ -1932,6 +1939,110 @@ namespace Legion {
       std::map<ColorPoint,RegionNode*> color_map;
       std::map<ColorPoint,RegionNode*> valid_map;
     }; 
+
+    /**
+     * \class AbstractTreeNode
+     * An abstract node is a region tree node that is an abstraction
+     * of the region tree at a certain depth from some parent node
+     */
+    class AbstractTreeNode : public RegionTreeNode {
+    public:
+      AbstractTreeNode(RegionTreeNode *owner, unsigned depth,
+                       RegionTreeForest *ctx);
+      AbstractTreeNode(const AbstractTreeNode &rhs);
+      ~AbstractTreeNode(void);
+    public:
+      AbstractTreeNode& operator=(const AbstractTreeNode &rhs);
+    public:
+      virtual unsigned get_depth(void) const;
+      virtual const ColorPoint& get_color(void) const;
+      virtual IndexTreeNode *get_row_source(void) const;
+      virtual RegionTreeID get_tree_id(void) const;
+      virtual RegionTreeNode* get_parent(void) const;
+      virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
+    public:
+      virtual ApEvent issue_copy(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &src_fields,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true);
+      virtual ApEvent issue_fill(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  ApEvent precondition, RegionTreeNode *intersect = NULL);
+    public:
+      virtual bool are_children_disjoint(const ColorPoint &c1, 
+                                         const ColorPoint &c2);
+      virtual bool are_all_children_disjoint(void);
+      virtual void instantiate_children(void);
+      virtual bool is_region(void) const;
+#ifdef DEBUG_LEGION
+      virtual RegionNode* as_region_node(void) const;
+      virtual PartitionNode* as_partition_node(void) const;
+#endif
+      virtual AddressSpaceID get_owner_space(void) const;
+      virtual AbstractTreeNode *get_abstract_subtree(void) const;
+      virtual bool visit_node(PathTraverser *traverser);
+      virtual bool visit_node(NodeTraverser *traverser);
+      virtual const Domain& get_domain_blocking(void) const;
+      virtual const Domain& get_domain(ApEvent &precondition) const;
+      virtual const Domain& get_domain_no_wait(void) const;
+      virtual bool is_complete(void);
+      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool dominates(RegionTreeNode *other);
+      virtual size_t get_num_children(void) const;
+      virtual InterCloseOp* create_close_op(Operation *creator, 
+                                            const FieldMask &closing_mask,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                            const VersionInfo &close_info,
+                                            const VersionInfo &version_info,
+                                            const RestrictInfo &res_info,
+                                            const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                            const TraceInfo &trace_info);
+      virtual ApEvent perform_close_operation(const TraversalInfo &info,
+                                            const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                            const InstanceSet &targets,
+                                            VersionInfo &version_info,
+                                            ApEvent term_event,
+                                     const std::set<ColorPoint> &next_children);
+      virtual void send_node(AddressSpaceID target);
+    public:
+      virtual InstanceView* find_context_view(PhysicalManager *manager,
+                                              SingleTask *context);
+    public:
+      virtual void send_semantic_request(AddressSpaceID target, 
+           SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
+      virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
+                             const void *buffer, size_t size, bool is_mutable);
+    public:
+      // Logging calls
+      virtual void print_logical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+      virtual void print_physical_context(ContextID ctx, 
+                                          TreeStateLogger *logger,
+                                          const FieldMask &mask);
+#ifdef DEBUG_LEGION
+    public:
+      // These methods are only ever called by a debugger
+      virtual void dump_logical_context(ContextID ctx, 
+                                        TreeStateLogger *logger,
+                                        const FieldMask &mask);
+      virtual void dump_physical_context(ContextID ctx, 
+                                         TreeStateLogger *logger,
+                                         const FieldMask &mask);
+#endif
+    public:
+      RegionTreeNode *const owner; // root of abstract tree
+      const unsigned depth; // relative depth from owner
+    protected:
+      AbstractTreeNode *child;
+      std::set<RegionTreeNode*> instances;
+    };
 
     // some inline implementations
 #ifndef DEBUG_LEGION

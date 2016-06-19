@@ -1119,6 +1119,7 @@ namespace Legion {
     class RegionTreeNode;
     class RegionNode;
     class PartitionNode;
+    class AbstractTreeNode;
 
     class RegionTreeContext;
     class RegionTreePath;

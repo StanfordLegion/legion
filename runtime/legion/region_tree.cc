@@ -10018,15 +10018,20 @@ namespace Legion {
       // doing them later. We can also skip the close operations for 
       // any operations which have arrived and have read-write privileges
       // because they will be doing their own close operations.
-      if (!arrived || !(projecting || IS_WRITE(user.usage)))
+      if (!arrived || projecting || !IS_WRITE(user.usage))
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
-        const bool captures_closes = !arrived || 
+        const bool captures_closes = !arrived || projecting ||
                               IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
         LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
-        siphon_logical_children(closer, state, user.field_mask,
-                                captures_closes, next_child, open_below);
+        // Special siphon operation for arrived projecting functions
+        if (arrived && projecting)
+          siphon_logical_projection(closer, state, user.field_mask,
+                                    captures_closes, open_below);
+        else
+          siphon_logical_children(closer, state, user.field_mask,
+                                  captures_closes, next_child, open_below);
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
@@ -10056,145 +10061,114 @@ namespace Legion {
           closer.register_close_operations(state.curr_epoch_users);
         }
       }
-      FieldMask dominator_mask;
-      if (!arrived || !projecting)
-      {
-        // We also always do our dependence analysis even if we have
-        // already traced because we need to pick up dependences on 
-        // any dynamic close operations that we need to do
-        // Now that we registered any close operation, do our analysis
-        dominator_mask = 
-               perform_dependence_checks<CURR_LOGICAL_ALLOC,
-                         true/*record*/,false/*has skip*/,true/*track dom*/>(
-                            user, state.curr_epoch_users, user.field_mask, 
-                            open_below, arrived/*validates*/ && !projecting);
-        FieldMask non_dominated_mask = user.field_mask - dominator_mask;
-        // For the fields that weren't dominated, we have to check
-        // those fields against the previous epoch's users
-        if (!!non_dominated_mask)
-        {
-          perform_dependence_checks<PREV_LOGICAL_ALLOC,
-                        true/*record*/, false/*has skip*/, false/*track dom*/>(
-                          user, state.prev_epoch_users, non_dominated_mask, 
+      // We also always do our dependence analysis even if we have
+      // already traced because we need to pick up dependences on 
+      // any dynamic close operations that we need to do
+      // Now that we registered any close operation, do our analysis
+      FieldMask dominator_mask = 
+             perform_dependence_checks<CURR_LOGICAL_ALLOC,
+                       true/*record*/,false/*has skip*/,true/*track dom*/>(
+                          user, state.curr_epoch_users, user.field_mask, 
                           open_below, arrived/*validates*/ && !projecting);
+      FieldMask non_dominated_mask = user.field_mask - dominator_mask;
+      // For the fields that weren't dominated, we have to check
+      // those fields against the previous epoch's users
+      if (!!non_dominated_mask)
+      {
+        perform_dependence_checks<PREV_LOGICAL_ALLOC,
+                      true/*record*/, false/*has skip*/, false/*track dom*/>(
+                        user, state.prev_epoch_users, non_dominated_mask, 
+                        open_below, arrived/*validates*/ && !projecting);
+      }
+      const bool is_write = IS_WRITE(user.usage); // only writes
+      // If we dominated and this is our final destination then we 
+      // can filter the operations since we actually do dominate them
+      if (arrived && !!dominator_mask)
+      {
+        // Dominator mask is not empty
+        // Mask off all the dominated fields from the previous set
+        // of epoch users and remove any previous epoch users
+        // that were totally dominated
+        filter_prev_epoch_users(state, dominator_mask); 
+        // Mask off all dominated fields from current epoch users and move
+        // them to prev epoch users.  If all fields masked off, then remove
+        // them from the list of current epoch users.
+        filter_curr_epoch_users(state, dominator_mask);
+        // We only advance version numbers for fields which are being
+        // written and dominated the previous epoch because multiple 
+        // writes for atomic and simultaneous go in the same generation.
+        if (is_write)
+        {
+          // Only advance fields that are not already dirty below
+          if (!!state.dirty_below)
+          {
+            FieldMask split_mask = dominator_mask - state.dirty_below;
+            if (!!split_mask)
+              state.advance_version_numbers(split_mask);
+          }
+          else
+            state.advance_version_numbers(dominator_mask);
         }
       }
-      if (arrived)
+      if (arrived && !projecting)
       { 
-        const bool is_write = IS_WRITE(user.usage); // only writes
-        // Now that we've arrived, check to see if we are a projection 
-        // region requirement or a normal region requirement. If we are normal
-        // then we can do the regular analysis, otherwise, we have to traverse
-        // the paths for all the projected regions
-        if (projecting)
+        // This is the normal arrival case, we are there
+        // If we have arrived and we are doing read-write access, then we
+        // need to capture any versions in sub-trees for which we will 
+        // be issuing a close when we actually map.
+        if (is_write)
         {
-          assert(false);
+          LogicalCloser closer(ctx,user,true/*validates*/,false/*captures*/);
+          // There's no point in siphoning, we know we need to close
+          // everything up that interferes with this task
+          close_logical_subtree(closer, user.field_mask);
+          if (closer.has_closed_fields())
+          {
+            const FieldMask &closed_fields = closer.get_closed_fields();
+            closer.record_top_version_numbers(this, state);
+            // We've registered dependences on any users in the sub-tree
+            // and we definitely interfered with them all so all we need
+            // to do now is capture the version information.
+            closer.merge_version_info(version_info, closed_fields);
+            FieldMask non_closed = user.field_mask - closed_fields;
+            if (!!non_closed)
+              state.record_version_numbers(non_closed, user, version_info,
+                                  true/*previous*/, false/*path only*/,
+                                  true/*final*/, false/*close top*/,
+                                  report_uninitialized);
+          }
+          else
+            state.record_version_numbers(user.field_mask, user, version_info,
+                                  true/*previous*/, false/*path only*/,
+                                  true/*final*/, false/*close top*/,
+                                  report_uninitialized);
         }
         else
         {
-          // If we dominated and this is our final destination then we 
-          // can filter the operations since we actually do dominate them
-          if (!!dominator_mask)
-          {
-            // Dominator mask is not empty
-            // Mask off all the dominated fields from the previous set
-            // of epoch users and remove any previous epoch users
-            // that were totally dominated
-            filter_prev_epoch_users(state, dominator_mask); 
-            // Mask off all dominated fields from current epoch users and move
-            // them to prev epoch users.  If all fields masked off, then remove
-            // them from the list of current epoch users.
-            filter_curr_epoch_users(state, dominator_mask);
-            // We only advance version numbers for fields which are being
-            // written and dominated the previous epoch because multiple 
-            // writes for atomic and simultaneous go in the same generation.
-            if (is_write)
-            {
-              // Only advance fields that are not already dirty below
-              if (!!state.dirty_below)
-              {
-                FieldMask split_mask = dominator_mask - state.dirty_below;
-                if (!!split_mask)
-                  state.advance_version_numbers(split_mask);
-              }
-              else
-                state.advance_version_numbers(dominator_mask);
-            }
-          }
-          // Easy case, we are there 
-          // If we have arrived and we are doing read-write access, then we
-          // need to capture any versions in sub-trees for which we will 
-          // be issuing a close when we actually map.
-          if (is_write)
-          {
-            LogicalCloser closer(ctx,user,true/*validates*/,false/*captures*/);
-            // There's no point in siphoning, we know we need to close
-            // everything up that interferes with this task
-            close_logical_subtree(closer, user.field_mask);
-            if (closer.has_closed_fields())
-            {
-              const FieldMask &closed_fields = closer.get_closed_fields();
-              closer.record_top_version_numbers(this, state);
-              // We've registered dependences on any users in the sub-tree
-              // and we definitely interfered with them all so all we need
-              // to do now is capture the version information.
-              closer.merge_version_info(version_info, closed_fields);
-              FieldMask non_closed = user.field_mask - closed_fields;
-              if (!!non_closed)
-                state.record_version_numbers(non_closed, user, version_info,
-                                    true/*previous*/, false/*path only*/,
-                                    true/*final*/, false/*close top*/,
-                                    report_uninitialized);
-            }
-            else
-              state.record_version_numbers(user.field_mask, user, version_info,
-                                    true/*previous*/, false/*path only*/,
-                                    true/*final*/, false/*close top*/,
-                                    report_uninitialized);
-          }
-          else
-          {
-            // We also need to record the needed version numbers for this node
-            // Note that we do this after the version numbers have been updated
-            // so that we get the version numbers that we are contributing to
-            // as part of the execution for this operation. If we are writing
-            // in any way, then record the previous version number
-            // If this is a projection requirement, we also need to record any
-            // version numbers from farther down in the tree as well. 
-            // Do this before the version numbers can be updated.
-            state.record_version_numbers(user.field_mask, user, version_info,
-                                   false/*previous*/, false/*path only*/,
-                                   false/*final*/, false/*close top*/, 
-                                   report_uninitialized);
-          }
-          // If this is a reduction, record that we have an outstanding 
-          // reduction at this node in the region tree
-          if (user.usage.redop > 0)
-            record_logical_reduction(state, user.usage.redop, user.field_mask);
-          // Record any restrictions we have on mappings if necessary
-          if (restrict_info.needs_check())
-          {
-            FieldMask restricted = user.field_mask & state.restricted_fields;
-            if (!!restricted)
-            {
-              RegionNode *local_this = as_region_node();
-              restrict_info.add_restriction(local_this->handle, restricted);
-            }
-          }
+          // We also need to record the needed version numbers for this node
+          // Note that we do this after the version numbers have been updated
+          // so that we get the version numbers that we are contributing to
+          // as part of the execution for this operation. If we are writing
+          // in any way, then record the previous version number
+          // If this is a projection requirement, we also need to record any
+          // version numbers from farther down in the tree as well. 
+          // Do this before the version numbers can be updated.
+          state.record_version_numbers(user.field_mask, user, version_info,
+                                 false/*previous*/, false/*path only*/,
+                                 false/*final*/, false/*close top*/, 
+                                 report_uninitialized);
         }
-        // Here is the only difference with tracing.  If we already
-        // traced then we don't need to register ourselves as a user
-        if (!trace_info.already_traced)
-        {
-          // Register ourself with as a current user of this region
-          // Record a mapping reference on this operation
-          user.op->add_mapping_reference(user.gen);
-          // Add ourselves to the current epoch
-          state.curr_epoch_users.push_back(user);
-        }
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // do the local registration of this user
+        register_local_user(state, user, restrict_info, trace_info);
       }
       else // We're still not there, so keep going
       {
+        // Either we haven't arrived, or we've arrived for a projection
+        // In both cases the version number computation is the same
         // If we are writing check to see if we have already marked those 
         // fields dirty. If not, advance the version numbers for those fields.
         if (HAS_WRITE(user.usage))
@@ -10262,13 +10236,65 @@ namespace Legion {
                                      report_uninitialized);
           }
         }
-        RegionTreeNode *child = get_tree_child(next_child);
-        if (!open_below)
-          child->open_logical_node(ctx, user, path, version_info,
-                        restrict_info, trace_info.already_traced, projecting);
+        if (arrived)
+        {
+#ifdef DEBUG_LEGION
+          assert(projecting);
+#endif
+          // Compute our version numbers from the abstract region tree
+
+          // do the local registration of this user
+          register_local_user(state, user, restrict_info, trace_info);
+        }
         else
-          child->register_logical_user(ctx, user, path, version_info, 
-                                       restrict_info, trace_info, projecting);
+        {
+          // Haven't arrived, yet, so keep going down the tree
+          RegionTreeNode *child = get_tree_child(next_child);
+          if (!open_below)
+            child->open_logical_node(ctx, user, path, version_info,
+                          restrict_info, trace_info.already_traced, projecting);
+          else
+            child->register_logical_user(ctx, user, path, version_info, 
+                                         restrict_info, trace_info, projecting);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::register_local_user(CurrentState &state,
+                                             const LogicalUser &user,
+                                             RestrictInfo &restrict_info,
+                                             const TraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // Record any restrictions we have on mappings if necessary
+      if (restrict_info.needs_check())
+      {
+        FieldMask restricted = user.field_mask & state.restricted_fields;
+        if (!!restricted)
+        {
+          if (is_region())
+          {
+            RegionNode *local_this = as_region_node();
+            restrict_info.add_restriction(local_this->handle, restricted);
+          }
+          else
+          {
+            PartitionNode *local_this = as_partition_node();
+            restrict_info.add_restriction(local_this->parent->handle, 
+                                          restricted);
+          }
+        }
+      }
+      // Here is the only difference with tracing.  If we already
+      // traced then we don't need to register ourselves as a user
+      if (!trace_info.already_traced)
+      {
+        // Register ourself with as a current user of this region
+        // Record a mapping reference on this operation
+        user.op->add_mapping_reference(user.gen);
+        // Add ourselves to the current epoch
+        state.curr_epoch_users.push_back(user);
       }
     }
 
@@ -10858,20 +10884,52 @@ namespace Legion {
             }
           case OPEN_READ_ONLY_PROJ:
             {
-              // Can easily mark this closed without doing anything
-              assert(false);
+              // If we are reading at this level, we can
+              // leave it open otherwise we need a read-only close
+              if (!IS_READ_ONLY(closer.user.usage) ||
+                  next_child.is_valid())
+              {
+                close_abstract_tree(closer, current_mask, *it,
+                                    true/*read only close*/,
+                                    record_close_operations);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else // reading at this level so we can keep it open
+                it++;
               break;
             }
           case OPEN_READ_WRITE_PROJ:
             {
-              // Need to issue a close operation on all children
-              assert(false);
+              // Have to close up this sub-tree no matter what
+              close_abstract_tree(closer, current_mask, *it,
+                                  false/*read only close*/,
+                                  record_close_operations);
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
               break;
             }
           case OPEN_REDUCE_PROJ:
             {
-              // need to issue a close operation on all children
-              assert(false);
+              // If we are reducing at this level we can 
+              // leave it open otherwise we need a close
+              if (!IS_REDUCE(closer.user.usage) || next_child.is_valid() ||
+                  (closer.user.usage.redop != it->redop))
+              {
+                close_abstract_tree(closer, current_mask, *it,
+                                    false/*read only close*/,
+                                    record_close_operations);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else // reducing at this level so we can leave it open
+                it++;
               break;
             }
           default:
