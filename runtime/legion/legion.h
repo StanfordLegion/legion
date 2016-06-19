@@ -2028,6 +2028,15 @@ namespace Legion {
      * for initializing the runtime during start-up callback.
      * The final section of calls are static methods that are
      * used to configure the runtime prior to starting it up.
+     *
+     * A note on context free functions: context free functions 
+     * have equivalent functionality to their non-context-free 
+     * couterparts. However, context free functions can be 
+     * safely used in a leaf task while any runtime function 
+     * that requires a context cannot be used in a leaf task. 
+     * If your task variant only uses context free functions
+     * as part of its implementation then it is safe for you 
+     * to annotate it as a leaf task variant.
      */
     class Runtime {
     protected:
