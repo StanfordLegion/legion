@@ -40,7 +40,11 @@ namespace Realm {
     {
       // this is a hack for the Legion runtime
       ID id(*this);
-      return id.memory.owner_node;
+      unsigned n = id.memory.owner_node;
+      if(n <= ID::MAX_NODE_ID)
+        return n;
+      else
+        return 0;  // claim node 0 owns "global" things
     }
 
     Memory::Kind Memory::kind(void) const
