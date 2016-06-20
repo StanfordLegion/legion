@@ -1907,11 +1907,21 @@ namespace Legion {
             }
             else
             {
+              Reservation functor_reservation;
               ProjectionFunctor *functor = 
-                runtime->find_projection_functor(regions[idx].projection);
-              regions[idx].region = 
-                functor->project(DUMMY_CONTEXT, this, idx,
-                                 regions[idx].partition, index_point);
+                runtime->find_projection_functor(regions[idx].projection,
+                                                 functor_reservation);
+              if (functor_reservation.exists())
+              {
+                AutoLock f_lock(functor_reservation);
+                regions[idx].region = 
+                  functor->project(DUMMY_CONTEXT, this, idx,
+                                   regions[idx].partition, index_point);
+              }
+              else
+                regions[idx].region = 
+                  functor->project(DUMMY_CONTEXT, this, idx,
+                                   regions[idx].partition, index_point);
             }
           }
           // Update the region requirement kind 
@@ -1928,11 +1938,21 @@ namespace Legion {
           {
             if (regions[idx].projection != 0)
             {
+              Reservation functor_reservation;
               ProjectionFunctor *functor = 
-                runtime->find_projection_functor(regions[idx].projection);
-              regions[idx].region = 
-                functor->project(DUMMY_CONTEXT, this, idx, 
-                                 regions[idx].region, index_point);
+                runtime->find_projection_functor(regions[idx].projection,
+                                                 functor_reservation);
+              if (functor_reservation.exists())
+              {
+                AutoLock f_lock(functor_reservation);
+                regions[idx].region = 
+                  functor->project(DUMMY_CONTEXT, this, idx, 
+                                   regions[idx].region, index_point);
+              }
+              else
+                regions[idx].region = 
+                  functor->project(DUMMY_CONTEXT, this, idx, 
+                                   regions[idx].region, index_point);
             }
           }
           // Otherwise we are the default case in which 
@@ -12131,14 +12151,30 @@ namespace Legion {
           }
           else
           {
+            Reservation functor_reservation;
             ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            for (std::vector<MinimalPoint>::iterator it = 
-                  minimal_points.begin(); it != minimal_points.end(); it++)
+              runtime->find_projection_functor(regions[idx].projection,
+                                               functor_reservation);
+            if (functor_reservation.exists())
             {
-              it->add_projection_region(idx,
-                  functor->project(DUMMY_CONTEXT, this, idx, 
-                           regions[idx].partition, it->get_domain_point()));
+              AutoLock f_lock(functor_reservation);
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx,
+                    functor->project(DUMMY_CONTEXT, this, idx, 
+                             regions[idx].partition, it->get_domain_point()));
+              }
+            }
+            else
+            {
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx,
+                    functor->project(DUMMY_CONTEXT, this, idx, 
+                             regions[idx].partition, it->get_domain_point()));
+              }
             }
           }
         }
@@ -12149,14 +12185,30 @@ namespace Legion {
 #endif
           if (regions[idx].projection != 0)
           {
+            Reservation functor_reservation;
             ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            for (std::vector<MinimalPoint>::iterator it = 
-                  minimal_points.begin(); it != minimal_points.end(); it++)
+              runtime->find_projection_functor(regions[idx].projection,
+                                               functor_reservation);
+            if (functor_reservation.exists())
             {
-              it->add_projection_region(idx, 
-                  functor->project(DUMMY_CONTEXT, this, idx,
-                         regions[idx].region, it->get_domain_point()));
+              AutoLock f_lock(functor_reservation);
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx, 
+                    functor->project(DUMMY_CONTEXT, this, idx,
+                           regions[idx].region, it->get_domain_point()));
+              }
+            }
+            else
+            {
+              for (std::vector<MinimalPoint>::iterator it = 
+                    minimal_points.begin(); it != minimal_points.end(); it++)
+              {
+                it->add_projection_region(idx, 
+                    functor->project(DUMMY_CONTEXT, this, idx,
+                           regions[idx].region, it->get_domain_point()));
+              }
             }
           }
           else

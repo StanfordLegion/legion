@@ -2018,7 +2018,7 @@ namespace Legion {
        * Usually they must be exclusive if this functor contains
        * state for memoizing results.
        */
-      virtual bool is_exclusive(void) const { return true; }
+      virtual bool is_exclusive(void) const { return false; }
     private:
       friend class Internal::Runtime;
       // For pre-registered projection functors the runtime will
