@@ -2848,7 +2848,7 @@ namespace LegionRuntime {
       Memory tgt_mem = Memory::NO_MEMORY;
       machine.get_all_memories(mem);
       for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-        if (it->kind() == kind && ID(*it).node() == tgt_node) {
+        if (it->kind() == kind && ID(*it).memory.owner_node == tgt_node) {
           tgt_mem = *it;
         }
       assert(tgt_mem != Memory::NO_MEMORY);
@@ -2883,7 +2883,7 @@ namespace LegionRuntime {
     {
       Memory::Kind src_ll_kind = get_runtime()->get_memory_impl(src_mem)->lowlevel_kind;
       Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
-      if(ID(src_mem).node() == ID(dst_mem).node()) {
+      if(ID(src_mem).memory.owner_node == ID(dst_mem).memory.owner_node) {
         switch(src_ll_kind) {
         case Memory::GLOBAL_MEM:
           if (is_cpu_mem(dst_ll_kind))
@@ -3000,7 +3000,7 @@ namespace LegionRuntime {
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
-          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).node());
+          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
           sub_path.push_back(new_xdid);
           path.push_back(new_xdid);
         }
@@ -3022,7 +3022,7 @@ namespace LegionRuntime {
         Buffer pre_buf;
         assert(mem_path.size() - 1 == sub_path.size());
         for (int idx = 0; idx < mem_path.size(); idx ++) {
-	  log_new_dma.info("mem_path[%d]: node(%d), memory(%d)", idx, ID(mem_path[idx]).node(), mem_path[idx].kind());
+	  log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
           if (idx == 0) {
             pre_buf = src_buf;
           } else {
@@ -3041,7 +3041,7 @@ namespace LegionRuntime {
               hdf_inst = RegionInstance::NO_INST;
 
             if (idx != mem_path.size() - 1) {
-              cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).node(), mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
             } else {
               cur_buf = dst_buf;
               oasvec_src = oasvec;
@@ -3609,17 +3609,9 @@ namespace LegionRuntime {
       default:
         assert(0);
       }
-      log_dma.info("dma request %p launched - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id,
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id,
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
+
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+                     << domain << " before=" << before_copy << " after=" << get_finish_event();
 
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         const InstPair &pair = oas_by_inst->begin()->first;

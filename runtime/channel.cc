@@ -740,7 +740,7 @@ namespace LegionRuntime {
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_node = ID(_dst_buf.memory).node();
+          requests[i].dst_node = ID(_dst_buf.memory).memory.owner_node;
           available_reqs.push(&requests[i]);
         }
       }
@@ -2349,7 +2349,7 @@ namespace LegionRuntime {
                            XferOrder::Type _order, XferDes::XferKind _kind,
                            XferDesFence* _complete_fence, RegionInstance inst)
       {
-        if (ID(_src_buf.memory).node() == gasnet_mynode()) {
+        if (ID(_src_buf.memory).memory.owner_node == gasnet_mynode()) {
           size_t total_field_size = 0;
           for (int i = 0; i < _oas_vec.size(); i++) {
             total_field_size += _oas_vec[i].size;
@@ -2419,7 +2419,7 @@ namespace LegionRuntime {
       } else {
         log_new_dma.info("Create remote XferDes: id(%lx), pre(%lx), next(%lx), type(%d)",
                          _guid, _pre_xd_guid, _next_xd_guid, _kind);
-        XferDesCreateMessage::send_request(ID(_src_buf.memory).node(), _dma_request, _launch_node,
+        XferDesCreateMessage::send_request(ID(_src_buf.memory).memory.owner_node, _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
                                            _max_req_size, max_nr, _priority,

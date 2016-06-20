@@ -487,7 +487,7 @@ namespace LegionRuntime{
 
       gasnet_node_t find_execution_node() {
         // For now, we think the node that contains the src_buf is the execution node
-        return ID(src_buf.memory).node();
+        return ID(src_buf.memory).memory.owner_node;
       }
 
       virtual void notify_request_read_done(Request* req) = 0;
