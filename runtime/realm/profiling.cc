@@ -138,25 +138,97 @@ namespace Realm {
   //
 
   ProfilingMeasurementCollection::ProfilingMeasurementCollection(void)
+    : completed_requests_present(false)
   {}
 
   ProfilingMeasurementCollection::~ProfilingMeasurementCollection(void)
-  {
-    // have to delete any serialized measurements we have
-    clear(); 
-  }
+  {}
 
   void ProfilingMeasurementCollection::import_requests(const ProfilingRequestSet& prs)
   {
-    // just iterate over all the individual requests and union the sets of measurements requested
+    // iterate over the individual requests, recording the measurements needed
     for(std::vector<ProfilingRequest *>::const_iterator it = prs.requests.begin();
 	it != prs.requests.end();
-	it++)
-      requested_measurements.insert((*it)->requested_measurements.begin(),
-				    (*it)->requested_measurements.end());
+	it++) {
+      if((*it)->requested_measurements.empty()) {
+	// TODO: respond to empty requests immediately?
+      } else {
+	for(std::set<ProfilingMeasurementID>::const_iterator it2 = (*it)->requested_measurements.begin();
+	    it2 != (*it)->requested_measurements.end();
+	    it2++) {
+	  requested_measurements[*it2].push_back(*it);
+	  measurements_left[*it]++;
+	}
+      }
+    }
   }
 
-  void ProfilingMeasurementCollection::send_responses(const ProfilingRequestSet& prs) const
+  void ProfilingMeasurementCollection::send_response(const ProfilingRequest& pr) const
+  {
+    // for each request, find the intersection of the measurements it wants and the ones we have
+    std::set<ProfilingMeasurementID> ids;
+
+    // at the very least, we need a count of measurements and the offset of the user data
+    size_t bytes_needed = 2 * sizeof(int) + pr.user_data.size();
+
+    for(std::set<ProfilingMeasurementID>::const_iterator it2 = pr.requested_measurements.begin();
+	it2 != pr.requested_measurements.end();
+	it2++) {
+      std::map<ProfilingMeasurementID, ByteArray>::const_iterator it3 = measurements.find(*it2);
+      if(it3 == measurements.end()) continue;
+      
+      ids.insert(*it2);
+      size_t msize = it3->second.size();
+      // we'll pad each measurement to an 8 byte boundary
+      size_t msize_padded = (msize + 7) & ~7ULL;
+
+      bytes_needed += 2 * sizeof(int);  // to store ID and offset of data
+      bytes_needed += msize_padded;     // to store actual data
+    }
+
+    char *payload = (char *)malloc(bytes_needed);
+    assert(payload != 0);
+
+    int count = ids.size();
+
+    int *header = (int *)payload;  // first bunch of stuff is a big int array
+    char *data = payload + (2 + 2 * count) * sizeof(int);
+
+    *header++ = count;
+    for(std::set<ProfilingMeasurementID>::const_iterator it2 = ids.begin();
+	it2 != ids.end();
+	it2++) {
+      *header = (int)(*it2);
+      *(header + count) = data - payload; // offset of data start
+      header++;
+
+      std::map<ProfilingMeasurementID, ByteArray>::const_iterator it3 = measurements.find(*it2);
+      assert(it3 != measurements.end());
+
+      size_t size = it3->second.size();
+      if(size > 0) {
+	memcpy(data, it3->second.base(), size);
+
+	size_t msize_padded = (size + 7) & ~7ULL;
+	data += msize_padded;
+      }
+    }
+
+    // offset of user data start is always provided (if it equals the response size, there's no data)
+    *(header + count) = data - payload;
+    if(pr.user_data.size() > 0) {
+      memcpy(data, pr.user_data.base(), pr.user_data.size());
+      data += pr.user_data.size();
+    }
+
+    assert((size_t)(data - payload) == bytes_needed);
+    
+    pr.response_proc.spawn(pr.response_task_id, payload, bytes_needed);
+      
+    free(payload);
+  }
+
+  void ProfilingMeasurementCollection::send_responses(const ProfilingRequestSet& prs)
   {
     // print raw data right now
 #ifdef DEBUG_PROFILING
@@ -174,74 +246,27 @@ namespace Realm {
     for(std::vector<ProfilingRequest *>::const_iterator it = prs.requests.begin();
 	it != prs.requests.end();
 	it++) {
-      const ProfilingRequest& pr = **it;
+      // only send responses for things that we didn't send eagerly on completion
+      if(measurements_left.count(*it) == 0)
+	continue;
 
-      // for each request, find the intersection of the measurements it wants and the ones we have
-      std::set<ProfilingMeasurementID> ids;
-
-      // at the very least, we need a count of measurements and the offset of the user data
-      size_t bytes_needed = 2 * sizeof(int) + pr.user_data.size();
-
-      for(std::set<ProfilingMeasurementID>::const_iterator it2 = pr.requested_measurements.begin();
-	  it2 != pr.requested_measurements.end();
-	  it2++) {
-	std::map<ProfilingMeasurementID, ByteArray>::const_iterator it3 = measurements.find(*it2);
-	if(it3 == measurements.end()) continue;
-
-	ids.insert(*it2);
-	size_t msize = it3->second.size();
-	// we'll pad each measurement to an 8 byte boundary
-	size_t msize_padded = (msize + 7) & ~7ULL;
-
-	bytes_needed += 2 * sizeof(int);  // to store ID and offset of data
-	bytes_needed += msize_padded;     // to store actual data
-      }
-
-      char *payload = (char *)malloc(bytes_needed);
-      assert(payload != 0);
-
-      int count = ids.size();
-
-      int *header = (int *)payload;  // first bunch of stuff is a big int array
-      char *data = payload + (2 + 2 * count) * sizeof(int);
-
-      *header++ = count;
-      for(std::set<ProfilingMeasurementID>::const_iterator it2 = ids.begin();
-	  it2 != ids.end();
-	  it2++) {
-	*header = (int)(*it2);
-	*(header + count) = data - payload; // offset of data start
-	header++;
-
-	std::map<ProfilingMeasurementID, ByteArray>::const_iterator it3 = measurements.find(*it2);
-	assert(it3 != measurements.end());
-
-	size_t size = it3->second.size();
-	if(size > 0) {
-	  memcpy(data, it3->second.base(), size);
-
-	  size_t msize_padded = (size + 7) & ~7ULL;
-	  data += msize_padded;
-	}
-      }
-
-      // offset of user data start is always provided (if it equals the response size, there's no data)
-      *(header + count) = data - payload;
-      if(pr.user_data.size() > 0) {
-	memcpy(data, pr.user_data.base(), pr.user_data.size());
-	data += pr.user_data.size();
-      }
-
-      assert((size_t)(data - payload) == bytes_needed);
-
-      pr.response_proc.spawn(pr.response_task_id, payload, bytes_needed);
-
-      free(payload);
+      send_response(**it);
     }
   }
 
   void ProfilingMeasurementCollection::clear(void) {
     measurements.clear();
+
+    // also have to restore the counts
+    measurements_left.clear();
+    for(std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.begin();
+	it != requested_measurements.end();
+	it++) {
+      for(std::vector<const ProfilingRequest *>::const_iterator it2 = it->second.begin();
+	  it2 != it->second.end();
+	  it2++)
+	measurements_left[*it2]++;
+    }
   }
 
   

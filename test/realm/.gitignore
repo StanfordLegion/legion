@@ -7,3 +7,4 @@ proc_group
 barrier_reduce
 taskreg
 memspeed
+idcheck

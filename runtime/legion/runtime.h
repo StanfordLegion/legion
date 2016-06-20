@@ -186,7 +186,7 @@ namespace Legion {
       void broadcast_result(void);
       void register_waiter(AddressSpaceID sid);
     public:
-      void record_future_registered(Operation *creator);
+      void record_future_registered(ReferenceMutator *creator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -1293,6 +1293,7 @@ namespace Legion {
     public:
       void register_static_variants(void);
       void register_static_constraints(void);
+      void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
       void construct_mpi_rank_tables(Processor proc, int rank);
@@ -1750,7 +1751,10 @@ namespace Legion {
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunctor* find_projection_functor(ProjectionID pid);
+      static void preregister_projection_functor(ProjectionID pid,
+                                       ProjectionFunctor *func);
+      ProjectionFunctor* find_projection_functor(ProjectionID pid,
+                                             Reservation &functor_reservation);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
@@ -2203,7 +2207,8 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did,Operation *requestor);
+      FutureImpl* find_or_create_future(DistributedID did,
+                                        ReferenceMutator *mutator);
     public:
       void defer_collect_user(LogicalView *view, ApEvent term_event, 
                               ReferenceMutator *mutator);
@@ -2329,7 +2334,8 @@ namespace Legion {
     public:
       void allocate_local_context(SingleTask *task);
       void free_local_context(SingleTask *task);
-      void register_remote_context(UniqueID context_uid, RemoteTask *context);
+      void register_remote_context(UniqueID context_uid, RemoteTask *context,
+                                   std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
       SingleTask* find_context(UniqueID context_uid, 
                                bool return_null_if_not_found = false);
@@ -2482,7 +2488,9 @@ namespace Legion {
       unsigned unique_task_id;
       unsigned unique_mapper_id;
     protected:
-      std::map<ProjectionID,ProjectionFunctor*> projection_functors;
+      Reservation projection_lock;
+      std::map<ProjectionID,
+        std::pair<ProjectionFunctor*,Reservation> > projection_functors;
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;
@@ -2658,14 +2666,12 @@ namespace Legion {
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
-      static ProjectionID register_region_projection_function(
-                                    ProjectionID handle, void *func_ptr);
-      static ProjectionID register_partition_projection_function(
-                                    ProjectionID handle, void *func_ptr);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
+      static std::map<ProjectionID,ProjectionFunctor*>&
+                                get_pending_projection_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -2673,10 +2679,6 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc,
                       bool has_ret, const char *task_name,bool check_id = true);
-      static PartitionProjectionFnptr 
-                    find_partition_projection_function(ProjectionID pid);
-      static RegionProjectionFnptr
-                    find_region_projection_function(ProjectionID pid);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -2687,8 +2689,6 @@ namespace Legion {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
-      static RegionProjectionTable& get_region_projection_table(void);
-      static PartitionProjectionTable& get_partition_projection_table(void);
       static RtEvent register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);

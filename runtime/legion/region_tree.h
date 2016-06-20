@@ -416,6 +416,10 @@ namespace Legion {
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
+      void physical_convert_restricted(Operation *op,
+                               const RegionRequirement &req,
+                               const InstanceSet &restricted_instances,
+                                     InstanceSet &result);
       void log_mapping_decision(UniqueID uid, unsigned index,
                                 const RegionRequirement &req,
                                 const InstanceSet &targets);

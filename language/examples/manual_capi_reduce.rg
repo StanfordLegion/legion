@@ -98,7 +98,7 @@ terra top_level_task(task : c.legion_task_t,
   c.legion_coloring_add_point(coloring, 2, ptr1)
 
   var isp = c.legion_index_partition_create_coloring(
-    runtime, ctx, is, coloring, true, -1)
+    runtime, ctx, is, coloring, false, -1)
   var lp = c.legion_logical_partition_create(runtime, ctx, r, isp)
   c.legion_coloring_destroy(coloring)
 

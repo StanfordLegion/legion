@@ -32,10 +32,10 @@ local default_options = {
   ["leaf"] = true,
   ["trace"] = true,
   ["vectorize"] = true,
-  ["validate"] = false,
+  ["validate"] = true,
   ["task-inlines"] = true,
-  ["flow"] = true,
-  ["flow-spmd"] = true,
+  ["flow"] = false,
+  ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
 }
 

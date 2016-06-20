@@ -642,8 +642,8 @@ function type_check.expr_index_access(cx, node)
       else
         expr_type = value_type:slice(1)
       end
-      std.copy_privileges(cx, value_type, expr_type)
-      -- FIXME: Copy constraints from list type.
+      std.add_constraint(cx, expr_type, value_type, "<=", false)
+
       return ast.typed.expr.IndexAccess {
         value = value,
         index = index,
@@ -1831,9 +1831,7 @@ function type_check.expr_list_cross_product(cx, node)
     expr_type = std.list(std.list(rhs_type:subregion_dynamic(), nil, 1), nil, 1)
   end
 
-  std.copy_privileges(cx, rhs_type, expr_type)
-  -- FIXME: Copy constraints.
-  cx:intern_region(expr_type)
+  std.add_constraint(cx, expr_type, rhs_type, "<=", false)
 
   return ast.typed.expr.ListCrossProduct {
     lhs = lhs,
@@ -1861,9 +1859,7 @@ function type_check.expr_list_cross_product_complete(cx, node)
     std.list(product_type:subregion_dynamic(), nil, 1),
     nil, 1)
 
-  std.copy_privileges(cx, product_type, expr_type)
-  -- FIXME: Copy constraints.
-  cx:intern_region(expr_type)
+  std.add_constraint(cx, expr_type, product_type, "<=", false)
 
   return ast.typed.expr.ListCrossProductComplete {
     lhs = lhs,

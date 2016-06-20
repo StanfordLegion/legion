@@ -7,7 +7,7 @@ Version 16.06.0 (June 15, 2016)
         use ShimMapper for limited backwards compatibility
     - New task variant registration API
         supports specifying layout constraints for region requirements
-        old interface is still available but deprecated)
+        old interface is still available but deprecated
     - Several large bug fixes for internal version numbering computation
   * C API
     - The context parameter for many API calls has been removed

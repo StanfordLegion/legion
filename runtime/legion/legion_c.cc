@@ -3949,7 +3949,7 @@ legion_task_get_task_id(legion_task_t task_)
 }
 
 legion_processor_t
-legion_task_get_target_pro(legion_task_t task_)
+legion_task_get_target_proc(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
@@ -3957,7 +3957,7 @@ legion_task_get_target_pro(legion_task_t task_)
 }
 
 const char *
-legion_task_get_task_name(legion_task_t task_)
+legion_task_get_name(legion_task_t task_)
 {
   Task *task = CObjectWrapper::unwrap(task_);
 
@@ -5188,3 +5188,273 @@ legion_memory_query_random(legion_memory_query_t query_)
   return CObjectWrapper::wrap(result);
 }
 
+// -----------------------------------------------------------------------
+// Physical Instance Operations
+// -----------------------------------------------------------------------
+
+void
+legion_physical_instance_destroy(legion_physical_instance_t instance_)
+{
+  delete CObjectWrapper::unwrap(instance_);
+}
+
+// -----------------------------------------------------------------------
+// Map Task Input/Output
+// -----------------------------------------------------------------------
+
+void
+legion_map_task_output_chosen_instances_clear_all(
+    legion_map_task_output_t output_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->chosen_instances.clear();
+}
+
+void
+legion_map_task_output_chosen_instances_clear_each(
+    legion_map_task_output_t output_,
+    size_t idx_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->chosen_instances.reserve(idx_);
+  output->chosen_instances[idx_].clear();
+}
+
+void
+legion_map_task_output_chosen_instances_add(
+    legion_map_task_output_t output_,
+    legion_physical_instance_t *instances_,
+    size_t instances_size_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->chosen_instances.push_back(std::vector<PhysicalInstance>());
+  std::vector<PhysicalInstance>& chosen_instances =
+    output->chosen_instances.back();
+  for (size_t i = 0; i < instances_size_; ++i)
+    chosen_instances.push_back(*CObjectWrapper::unwrap(instances_[i]));
+}
+
+void
+legion_map_task_output_chosen_instances_set(
+    legion_map_task_output_t output_,
+    size_t idx_,
+    legion_physical_instance_t *instances_,
+    size_t instances_size_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->chosen_instances.reserve(idx_);
+  std::vector<PhysicalInstance>& chosen_instances =
+    output->chosen_instances[idx_];
+  chosen_instances.clear();
+  for (size_t i = 0; i < instances_size_; ++i)
+    chosen_instances.push_back(*CObjectWrapper::unwrap(instances_[i]));
+}
+
+void
+legion_map_task_output_target_procs_clear(
+    legion_map_task_output_t output_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->target_procs.clear();
+}
+
+void
+legion_map_task_output_target_procs_add(
+    legion_map_task_output_t output_,
+    legion_processor_t proc_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->target_procs.push_back(CObjectWrapper::unwrap(proc_));
+}
+
+void
+legion_map_task_output_task_priority_set(
+    legion_map_task_output_t output_,
+    legion_task_priority_t priority_)
+{
+  Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
+  output->task_priority = priority_;
+}
+
+// -----------------------------------------------------------------------
+// MapperRuntime Operations
+// -----------------------------------------------------------------------
+
+bool
+legion_mapper_runtime_create_physical_instance_layout_constraint(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_set_t constraints_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool acquire_,
+    legion_garbage_collection_priority_t priority_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  LayoutConstraintSet* constraints = CObjectWrapper::unwrap(constraints_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->create_physical_instance(
+        ctx, memory, *constraints, regions, *result, acquire_, priority_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}
+
+bool
+legion_mapper_runtime_create_physical_instance_layout_constraint_id(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_id_t layout_id_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool acquire_,
+    legion_garbage_collection_priority_t priority_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->create_physical_instance(
+        ctx, memory, layout_id_, regions, *result, acquire_, priority_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}
+
+bool
+legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_set_t constraints_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool *created_,
+    bool acquire_,
+    legion_garbage_collection_priority_t priority_,
+    bool tight_region_bounds_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  LayoutConstraintSet* constraints = CObjectWrapper::unwrap(constraints_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->find_or_create_physical_instance(
+        ctx, memory, *constraints, regions, *result, *created_,
+        acquire_, priority_, tight_region_bounds_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}
+
+bool
+legion_mapper_runtime_find_or_create_physical_instance_layout_constraint_id(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_id_t layout_id_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool *created_,
+    bool acquire_,
+    legion_garbage_collection_priority_t priority_,
+    bool tight_region_bounds_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->find_or_create_physical_instance(
+        ctx, memory, layout_id_, regions, *result, *created_,
+        acquire_, priority_, tight_region_bounds_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}
+
+bool
+legion_mapper_runtime_find_physical_instance_layout_constraint(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_set_t constraints_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool acquire_,
+    bool tight_region_bounds_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  LayoutConstraintSet* constraints = CObjectWrapper::unwrap(constraints_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->find_physical_instance(
+        ctx, memory, *constraints, regions, *result,
+        acquire_, tight_region_bounds_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}
+
+bool
+legion_mapper_runtime_find_physical_instance_layout_constraint_id(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_memory_t target_memory_,
+    legion_layout_constraint_id_t layout_id_,
+    const legion_logical_region_t *regions_,
+    size_t regions_size_,
+    legion_physical_instance_t *result_,
+    bool acquire_,
+    bool tight_region_bounds_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  Memory memory = CObjectWrapper::unwrap(target_memory_);
+  std::vector<LogicalRegion> regions;
+  regions.reserve(regions_size_);
+  for (size_t idx = 0; idx < regions_size_; ++idx)
+    regions.push_back(CObjectWrapper::unwrap(regions_[idx]));
+
+  PhysicalInstance* result = new PhysicalInstance;
+  bool ret =
+    runtime->find_physical_instance(
+        ctx, memory, layout_id_, regions, *result,
+        acquire_, tight_region_bounds_);
+  *result_ = CObjectWrapper::wrap(result);
+  return ret;
+}

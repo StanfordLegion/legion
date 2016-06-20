@@ -665,6 +665,7 @@ namespace Legion {
         trace->register_operation(this, gen);
       // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
+
     }
 
     //--------------------------------------------------------------------------
@@ -677,6 +678,16 @@ namespace Legion {
       MappingDependenceTracker *tracker = dependence_tracker.mapping;
       // Now make a commit tracker
       dependence_tracker.commit = new CommitDependenceTracker();
+#ifdef LEGION_SPY
+      // Enforce serial mapping dependences for validating runtime analysis
+      // Don't record it though to avoid confusing legion spy
+      // Do this after all the rest of the dependence analysis to catch
+      // dependences on any close operations that were generated
+      RtEvent previous_mapped = 
+        parent_ctx->update_previous_mapped_event(mapped_event);
+      if (previous_mapped.exists())
+        dependence_tracker.mapping->add_mapping_dependence(previous_mapped);
+#endif
       // Cannot touch anything not on our stack after this call
       tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
@@ -1850,7 +1861,10 @@ namespace Legion {
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
-        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
                                                this, 0/*idx*/, 
@@ -3114,8 +3128,11 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(src_parent_indexes[idx],
-                                              src_targets);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, 
+              src_requirements[idx], restricted_instances, src_targets);
           if (Runtime::legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                   src_requirements[idx],
@@ -3165,8 +3182,11 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(dst_parent_indexes[idx],
-                                              dst_targets);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, 
+              dst_requirements[idx], restricted_instances, dst_targets);
           set_mapping_state(idx, false/*src*/);
           runtime->forest->traverse_and_register(dst_contexts[idx],
                                                  dst_privilege_paths[idx],
@@ -4817,8 +4837,11 @@ namespace Legion {
       }
       else
       {
-        parent_ctx->get_physical_references(parent_req_index, chosen_instances);
-      } 
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, chosen_instances);
+      }
       // Now we can perform our close operation
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
@@ -5279,6 +5302,8 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
       // We already know the instances that we are going to need
+      // No need to do the conversion because we know we are closing
+      // for the whole region requirement
       InstanceSet chosen_instances;
       parent_ctx->get_physical_references(parent_idx, chosen_instances);
       ApEvent close_event = 
@@ -5815,7 +5840,12 @@ namespace Legion {
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances;
-      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      {
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
+      }
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -6384,7 +6414,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We already know what the answer has to be here 
       InstanceSet mapped_instances;
-      parent_ctx->get_physical_references(parent_req_index, mapped_instances); 
+      {
+        InstanceSet restricted_insts;
+        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                            restricted_insts, mapped_instances);
+      }
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -9608,8 +9643,11 @@ namespace Legion {
         InstanceSet mapped_instances;
         if (restrict_info.has_restrictions())
         {
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(parent_req_index, 
-                                              mapped_instances);
+                                              restricted_instances);
+          runtime->forest->physical_convert_restricted(this, requirement,
+                                      restricted_instances, mapped_instances);
           runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                  requirement, version_info, 
                                                  this, 0/*idx*/, 
@@ -9699,7 +9737,11 @@ namespace Legion {
       InstanceSet mapped_instances;
       if (restrict_info.has_restrictions())
       {
-        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
+        InstanceSet restricted_instances;
+        parent_ctx->get_physical_references(parent_req_index, 
+                                            restricted_instances);
+        runtime->forest->physical_convert_restricted(this, requirement,
+                                    restricted_instances, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
                                                this, 0/*idx*/, 

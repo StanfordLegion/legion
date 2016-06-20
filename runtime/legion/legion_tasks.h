@@ -68,7 +68,8 @@ namespace Legion {
       void unpack_base_task(Deserializer &derez, 
                             std::set<RtEvent> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_external_task(Deserializer &derez); 
+      void unpack_base_external_task(Deserializer &derez,
+                                     ReferenceMutator *mutator); 
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
@@ -495,8 +496,11 @@ namespace Legion {
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, 
                                       bool skip_privileges = false) const; 
-      bool has_created_region(LogicalRegion handle) const;
-      bool has_created_field(FieldSpace handle, FieldID fid) const;
+    protected:
+      LegionErrorType check_privilege_internal(const RegionRequirement &req,
+                                      const RegionRequirement &parent_req,
+                                      FieldID &bad_field, 
+                                      bool skip_privileges) const;
     public:
       bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
       void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
@@ -542,7 +546,8 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
       void send_back_created_state(AddressSpaceID target, unsigned start,
                                    RegionTreeContext remote_outermost_context);
     public:
@@ -691,6 +696,12 @@ namespace Legion {
     protected:
       // Information for tracking restrictions
       LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
+#ifdef LEGION_SPY
+    public:
+      RtEvent update_previous_mapped_event(RtEvent next);
+    protected:
+      RtEvent previous_mapped_event;
+#endif
     };
 
     /**
@@ -1084,7 +1095,8 @@ namespace Legion {
     public:
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void unpack_remote_context(Deserializer &derez);
+      virtual void unpack_remote_context(Deserializer &derez,
+                                         std::set<RtEvent> &preconditions);
     public:
       void add_top_region(LogicalRegion handle);
     public:

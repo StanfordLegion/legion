@@ -2618,8 +2618,10 @@ namespace Legion {
       assert(!IS_REDUCE(req)); // no virtual mapped reductions
 #endif
       RegionUsage usage(req);
-      // Add the different precondition sets to the destination view
-      // Privileges should always be exclusive here
+      // Privileges here should always be read-write exclusive
+      // to ensure that we are conservative about summarizing
+      // all the users that we just collapsed
+      usage.privilege = READ_WRITE; 
       usage.prop = EXCLUSIVE;
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
@@ -2837,6 +2839,42 @@ namespace Legion {
         perform_missing_acquires(op, *acquired, unacquired);
       }
       return has_composite;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_convert_restricted(Operation *op,
+                                        const RegionRequirement &req,
+                                        const InstanceSet &restricted_instances,
+                                              InstanceSet &result)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
+#ifdef DEBUG_LEGION
+      // Can be a part projection if we are closing to a partition node
+      assert((req.handle_type == SINGULAR) || 
+              (req.handle_type == PART_PROJECTION));
+#endif
+      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
+        static_cast<RegionTreeNode*>(get_node(req.region)) : 
+        static_cast<RegionTreeNode*>(get_node(req.partition));      
+      // Get the field mask for the fields we need
+      FieldMask needed_fields = 
+                tree_node->column_source->get_field_mask(req.privilege_fields);
+      for (unsigned idx = 0; idx < restricted_instances.size(); idx++)
+      {
+        const InstanceRef &ref = restricted_instances[idx];
+        const FieldMask &valid_fields = ref.get_valid_fields();
+        FieldMask inst_fields = needed_fields & valid_fields;
+        if (!inst_fields)
+          continue;
+        result.add_instance(InstanceRef(ref.get_manager(), inst_fields));
+        needed_fields -= inst_fields;
+        if (!needed_fields)
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(!needed_fields); // should be empty at this point
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -12208,30 +12246,51 @@ namespace Legion {
               vit != state.current_version_infos.end(); vit++)
         {
           const VersionStateInfo &info = vit->second; 
-          if (info.valid_fields * send_mask)
-            continue;
-          num_current++;
-          current_rez.serialize(vit->first);
-          Serializer state_rez;
-          unsigned num_states = 0;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            FieldMask overlap = it->second & send_mask; 
+            FieldMask overlap = info.valid_fields & send_mask;
             if (!overlap)
               continue;
-            num_states++;
+            num_current++;
+            current_rez.serialize(vit->first);
+            current_rez.serialize<unsigned>(1);
             // Add a valid reference for when it is in transit
-            it->first->add_base_valid_ref(REMOTE_DID_REF);
-            // Remove it pending the completion of the transfer 
-            it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
-            state_rez.serialize(it->first->did);
-            state_rez.serialize(it->first->owner_space);
-            state_rez.serialize(overlap);
+            info.states.single_state->add_base_valid_ref(REMOTE_DID_REF);
+            // Remove it pending the completion of the transfer
+            info.states.single_state->remove_version_state_ref(REMOTE_DID_REF,
+                                                               done_event);
+            current_rez.serialize(info.states.single_state->did);
+            current_rez.serialize(info.states.single_state->owner_space);
+            current_rez.serialize(overlap); 
           }
-          current_rez.serialize(num_states);
-          current_rez.serialize(state_rez.get_buffer(), 
-                                state_rez.get_used_bytes());
+          else
+          {
+            if (info.valid_fields * send_mask)
+              continue;
+            num_current++;
+            current_rez.serialize(vit->first);
+            Serializer state_rez;
+            unsigned num_states = 0;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              FieldMask overlap = it->second & send_mask; 
+              if (!overlap)
+                continue;
+              num_states++;
+              // Add a valid reference for when it is in transit
+              it->first->add_base_valid_ref(REMOTE_DID_REF);
+              // Remove it pending the completion of the transfer 
+              it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
+              state_rez.serialize(it->first->did);
+              state_rez.serialize(it->first->owner_space);
+              state_rez.serialize(overlap);
+            }
+            current_rez.serialize(num_states);
+            current_rez.serialize(state_rez.get_buffer(), 
+                                  state_rez.get_used_bytes());
+          }
         }
         rez.serialize(num_current);
         rez.serialize(current_rez.get_buffer(), current_rez.get_used_bytes());
@@ -12242,30 +12301,51 @@ namespace Legion {
               vit != state.previous_version_infos.end(); vit++)
         {
           const VersionStateInfo &info = vit->second; 
-          if (info.valid_fields * send_mask)
-            continue;
-          num_previous++;
-          previous_rez.serialize(vit->first);
-          Serializer state_rez;
-          unsigned num_states = 0;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
-                info.states.begin(); it != info.states.end(); it++)
+          if (info.single)
           {
-            FieldMask overlap = it->second & send_mask; 
+            FieldMask overlap = info.valid_fields & send_mask;
             if (!overlap)
               continue;
-            num_states++;
+            num_previous++;
+            previous_rez.serialize(vit->first);
+            previous_rez.serialize<unsigned>(1);
             // Add a valid reference for when it is in transit
-            it->first->add_base_valid_ref(REMOTE_DID_REF);
+            info.states.single_state->add_base_valid_ref(REMOTE_DID_REF);
             // Remove it pending the completion of the transfer 
-            it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
-            state_rez.serialize(it->first->did);
-            state_rez.serialize(it->first->owner_space);
-            state_rez.serialize(overlap);
+            info.states.single_state->remove_version_state_ref(REMOTE_DID_REF,
+                                                               done_event);
+            previous_rez.serialize(info.states.single_state->did);
+            previous_rez.serialize(info.states.single_state->owner_space);
+            previous_rez.serialize(overlap);
           }
-          previous_rez.serialize(num_states);
-          previous_rez.serialize(state_rez.get_buffer(), 
-                                 state_rez.get_used_bytes());
+          else
+          {
+            if (info.valid_fields * send_mask)
+              continue;
+            num_previous++;
+            previous_rez.serialize(vit->first);
+            Serializer state_rez;
+            unsigned num_states = 0;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.multi_states->begin(); it != 
+                  info.states.multi_states->end(); it++)
+            {
+              FieldMask overlap = it->second & send_mask; 
+              if (!overlap)
+                continue;
+              num_states++;
+              // Add a valid reference for when it is in transit
+              it->first->add_base_valid_ref(REMOTE_DID_REF);
+              // Remove it pending the completion of the transfer 
+              it->first->remove_version_state_ref(REMOTE_DID_REF, done_event);
+              state_rez.serialize(it->first->did);
+              state_rez.serialize(it->first->owner_space);
+              state_rez.serialize(overlap);
+            }
+            previous_rez.serialize(num_states);
+            previous_rez.serialize(state_rez.get_buffer(), 
+                                   state_rez.get_used_bytes());
+          }
         }
         rez.serialize(num_previous);
         rez.serialize(previous_rez.get_buffer(), previous_rez.get_used_bytes());
@@ -12349,16 +12429,44 @@ namespace Legion {
           derez.deserialize(state_mask);
           VersionState *version_state = 
             find_remote_version_state(vid, did, owner, mutator);
-          LegionMap<VersionState*,FieldMask>::aligned::iterator finder =
-            info.states.find(version_state);
-          if (finder == info.states.end())
+          if (info.single)
           {
-            info.states[version_state] = state_mask;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+            if (info.states.single_state == NULL)
+            {
+              info.states.single_state = version_state;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+              info.valid_fields = state_mask;
+            }
+            else if (info.states.single_state == version_state)
+            {
+              info.valid_fields |= state_mask;
+            }
+            else
+            {
+              // go to multi
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[info.states.single_state] = info.valid_fields;
+              (*multi)[version_state] = state_mask;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+              info.single = false;
+              info.states.multi_states = multi;
+              info.valid_fields |= state_mask;
+            }
           }
           else
-            finder->second |= state_mask;
-          info.valid_fields |= state_mask;
+          {
+            LegionMap<VersionState*,FieldMask>::aligned::iterator finder =
+              info.states.multi_states->find(version_state);
+            if (finder == info.states.multi_states->end())
+            {
+              (*info.states.multi_states)[version_state] = state_mask;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+            }
+            else
+              finder->second |= state_mask;
+            info.valid_fields |= state_mask;
+          }
         }
       }
       unsigned num_previous;
@@ -12380,16 +12488,44 @@ namespace Legion {
           derez.deserialize(state_mask);
           VersionState *version_state = 
             find_remote_version_state(vid, did, owner, mutator);
-          LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-            info.states.find(version_state);
-          if (finder == info.states.end())
+          if (info.single)
           {
-            info.states[version_state] = state_mask;
-            version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+            if (info.states.single_state == NULL)
+            {
+              info.states.single_state = version_state;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+              info.valid_fields = state_mask;
+            }
+            else if (info.states.single_state == version_state)
+            {
+              info.valid_fields |= state_mask;
+            }
+            else
+            {
+              // go to multi
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[info.states.single_state] = info.valid_fields;
+              (*multi)[version_state] = state_mask;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+              info.single = false;
+              info.states.multi_states = multi;
+              info.valid_fields |= state_mask;
+            }
           }
           else
-            finder->second |= state_mask;
-          info.valid_fields |= state_mask;
+          {
+            LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+              info.states.multi_states->find(version_state);
+            if (finder == info.states.multi_states->end())
+            {
+              (*info.states.multi_states)[version_state] = state_mask;
+              version_state->add_base_valid_ref(CURRENT_STATE_REF, mutator);
+            }
+            else
+              finder->second |= state_mask;
+            info.valid_fields |= state_mask;
+          }
         }
       }
       unsigned num_reduc;
@@ -15378,6 +15514,15 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        const FieldMask &valid_fields = ref.get_valid_fields();
+        assert(unsigned(FieldMask::pop_count(valid_fields)) <= 
+                              info.req.privilege_fields.size());
+      }
+#endif
       if (IS_REDUCE(info.req))
       {
         // Reduction only case

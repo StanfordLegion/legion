@@ -104,7 +104,7 @@ namespace LegionRuntime {
 	    (*it)->print(os);
 	    os << "\n";
 	  }
-	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	  for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
 	      it != e->future_local_waiters.end();
 	      it++) {
 	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
@@ -136,7 +136,7 @@ namespace LegionRuntime {
 
 	  os << "Barrier " << b->me << ": gen=" << b->generation
 	     << " subscr=" << b->gen_subscribed << "\n";
-          for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
+          for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;

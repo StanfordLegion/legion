@@ -727,7 +727,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(Operation *creator)
+    void FutureImpl::record_future_registered(ReferenceMutator *creator)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -6959,6 +6959,7 @@ namespace Legion {
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
+        projection_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
         processor_mapping_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -7135,11 +7136,15 @@ namespace Legion {
         if (message_managers[idx] != NULL)
           delete message_managers[idx];
       }
-      for (std::map<ProjectionID,ProjectionFunctor*>::const_iterator it = 
-            projection_functors.begin(); it != projection_functors.end(); it++)
+      for (std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+            iterator it = projection_functors.begin(); 
+            it != projection_functors.end(); it++)
       {
-        delete it->second;
+        delete it->second.first;
+        if (it->second.second.exists())
+          it->second.second.destroy_reservation();
       } 
+      projection_functors.clear();
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -7456,7 +7461,8 @@ namespace Legion {
       message_manager_lock.destroy_reservation();
       message_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
-      projection_functors.clear();
+      projection_lock.destroy_reservation();
+      projection_lock = Reservation::NO_RESERVATION;
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
       processor_mapping_lock.destroy_reservation();
@@ -7543,6 +7549,21 @@ namespace Legion {
         // avoid races if we are doing separate runtime creation
         if (!Runtime::separate_runtime_instances)
           pending_constraints.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_static_projections(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
+        get_pending_projection_table();
+      for (std::map<ProjectionID,ProjectionFunctor*>::const_iterator it =
+            pending_projection_functors.begin(); it !=
+            pending_projection_functors.end(); it++)
+      {
+        it->second->set_runtime(external);
+        register_projection_functor(it->first, it->second);
       }
     }
 
@@ -13021,10 +13042,14 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
+      Reservation functor_reservation = Reservation::NO_RESERVATION;
+      if (functor->is_exclusive())
+        functor_reservation = Reservation::create_reservation();
+      AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
       // registration time before the runtime starts up
-      std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
-        projection_functors.find(pid);
+      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+        const_iterator finder = projection_functors.find(pid);
       if (finder != projection_functors.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
@@ -13034,28 +13059,68 @@ namespace Legion {
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
       }
-      projection_functors[pid] = functor;
+      projection_functors[pid] = 
+        std::pair<ProjectionFunctor*,Reservation>(functor, functor_reservation);
     }
 
     //--------------------------------------------------------------------------
-    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid)
+    /*static*/ void Runtime::preregister_projection_functor(ProjectionID pid,
+                                                     ProjectionFunctor *functor)
     //--------------------------------------------------------------------------
     {
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_projection_functor' after "
+                      "the runtime has started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      if (pid == 0)
+      {
+        log_run.error("ERROR: ProjectionID zero is reserved.\n");
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_PROJECTION_ID);
+      }
+      std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
+        get_pending_projection_table();
       std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
-        projection_functors.find(pid);
+        pending_projection_functors.find(pid);
+      if (finder != pending_projection_functors.end())
+      {
+        log_run.error("ERROR: ProjectionID %d has already been used in "
+                                    "the region projection table\n", pid);
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_PROJECTION_ID);
+      }
+      pending_projection_functors[pid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid,
+                                               Reservation &functor_reservation)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(projection_lock,1,false/*exclusive*/);
+      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+        const_iterator finder = projection_functors.find(pid);
       if (finder == projection_functors.end())
       {
         log_run.warning("Unable to find registered region projection "
                               "ID %d. Please upgrade to using projection "
                               "functors!", pid);
-        // Uncomment this once we deprecate the old projection functions
 #ifdef DEBUG_LEGION
-        //assert(false);
+        assert(false);
 #endif
-        //exit(ERROR_INVALID_PROJECTION_ID);
-        return NULL;
+        exit(ERROR_INVALID_PROJECTION_ID);
       }
-      return finder->second;
+      functor_reservation = finder->second.second;
+      return finder->second.first;
     }
 
     //--------------------------------------------------------------------------
@@ -15393,10 +15458,11 @@ namespace Legion {
       RemoteTask *context;
       derez.deserialize(context);
       // Unpack the result
-      context->unpack_remote_context(derez);
+      std::set<RtEvent> preconditions;
+      context->unpack_remote_context(derez, preconditions);
       // Then register it
       UniqueID context_uid = context->get_context_uid();
-      register_remote_context(context_uid, context);
+      register_remote_context(context_uid, context, preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -16298,7 +16364,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
-                                               Operation *requestor)
+                                               ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -16340,7 +16406,7 @@ namespace Legion {
         }
         dist_collectables[did] = result;
       }
-      result->record_future_registered(requestor);
+      result->record_future_registered(mutator);
       return result;
     }
 
@@ -17595,7 +17661,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_remote_context(UniqueID context_uid, 
-                                          RemoteTask *context)
+                          RemoteTask *context, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       RtUserEvent to_trigger;
@@ -17614,7 +17680,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(to_trigger.exists());
 #endif
-      Runtime::trigger_event(to_trigger);
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -18240,9 +18309,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18270,9 +18339,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18300,9 +18369,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18330,9 +18399,9 @@ namespace Legion {
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         ApEvent completion = it->second->get_completion_event();
-        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
+        fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen); 
+                completion.id); 
         if (cnt > 0)
           cnt--;
         else if (cnt == 0)
@@ -18379,33 +18448,33 @@ namespace Legion {
           case TaskOp::INDIVIDUAL_TASK_KIND:
             {
               fprintf(f,"Outstanding Individual Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::POINT_TASK_KIND:
             {
               fprintf(f,"Outstanding Point Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::INDEX_TASK_KIND:
             {
               fprintf(f,"Outstanding Index Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           case TaskOp::SLICE_TASK_KIND:
             {
               fprintf(f,"Outstanding Slice Task %lld: %p %s (" 
-                        IDFMT ",%d)\n",
+                        IDFMT ")\n",
                 it->first, it->second, it->second->get_task_name(),
-                completion.id, completion.gen);
+                completion.id);
               break;
             }
           default:
@@ -19279,93 +19348,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::register_region_projection_function(
-                                          ProjectionID handle, void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (handle == 0)
-      {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_PROJECTION_ID);
-      }
-      RegionProjectionTable &proj_table = 
-                          Runtime::get_region_projection_table();
-      if (proj_table.find(handle) != proj_table.end())
-      {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
-                                    "the region projection table\n",handle);
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_PROJECTION_ID);
-      }
-      if (handle == AUTO_GENERATE_ID)
-      {
-        for (ProjectionID idx = 1; idx < AUTO_GENERATE_ID; idx++)
-        {
-          if (proj_table.find(idx) == proj_table.end())
-          {
-            handle = idx;
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // We should never run out of type handles
-        assert(handle != AUTO_GENERATE_ID);
-#endif
-      }
-      proj_table[handle] = (RegionProjectionFnptr)func_ptr;  
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::
-      register_partition_projection_function(ProjectionID handle, 
-                                             void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (handle == 0)
-      {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_PROJECTION_ID);
-      }
-      PartitionProjectionTable &proj_table = 
-                              Runtime::get_partition_projection_table();
-      if (proj_table.find(handle) != proj_table.end())
-      {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
-                            "the partition projection table\n",handle);
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_PROJECTION_ID);
-      }
-      if (handle == AUTO_GENERATE_ID)
-      {
-        for (ProjectionID idx = 1; idx < AUTO_GENERATE_ID; idx++)
-        {
-          if (proj_table.find(idx) == proj_table.end())
-          {
-            handle = idx;
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // We should never run out of type handles
-        assert(handle != AUTO_GENERATE_ID);
-#endif
-      }
-      proj_table[handle] = (PartitionProjectionFnptr)func_ptr;  
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ std::deque<PendingVariantRegistration*>& 
                                        Runtime::get_pending_variant_table(void)
     //--------------------------------------------------------------------------
@@ -19382,6 +19364,15 @@ namespace Legion {
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>
                                                     pending_constraint_table;
       return pending_constraint_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<ProjectionID,ProjectionFunctor*>&
+                                     Runtime::get_pending_projection_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ProjectionID,ProjectionFunctor*> pending_projection_table;
+      return pending_projection_table;
     }
 
     //--------------------------------------------------------------------------
@@ -19449,44 +19440,6 @@ namespace Legion {
       return vid;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionFnptr Runtime::
-                            find_partition_projection_function(ProjectionID pid)
-    //--------------------------------------------------------------------------
-    {
-      const PartitionProjectionTable &table = get_partition_projection_table();
-      PartitionProjectionTable::const_iterator finder = table.find(pid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find registered partition "
-                            "projection ID %d", pid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PROJECTION_ID);
-      }
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionFnptr Runtime::find_region_projection_function(
-                                                              ProjectionID pid)
-    //--------------------------------------------------------------------------
-    {
-      const RegionProjectionTable &table = get_region_projection_table();
-      RegionProjectionTable::const_iterator finder = table.find(pid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find registered region projection "
-                            "ID %d", pid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PROJECTION_ID);
-      }
-      return finder->second;
-    }
-
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
@@ -19542,24 +19495,6 @@ namespace Legion {
       }
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionTable& Runtime::
-                                              get_region_projection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static RegionProjectionTable proj_table;
-      return proj_table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionTable& Runtime::
-                                          get_partition_projection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static PartitionProjectionTable proj_table;
-      return proj_table;
-    }
 
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::register_runtime_tasks(RealmRuntime &realm)
@@ -19875,6 +19810,7 @@ namespace Legion {
         local_rt->initialize_legion_prof();
       local_rt->register_static_variants();
       local_rt->register_static_constraints();
+      local_rt->register_static_projections();
       // Initialize our one virtual manager, do this after we register
       // the static constraints so we get a valid layout constraint ID
       VirtualManager::initialize_virtual_instance(local_rt, 

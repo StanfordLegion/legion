@@ -811,7 +811,7 @@ namespace Legion {
       bool result = try_add_valid_reference_internal(source, mutator, 
                                                      must_be_valid, cnt);
 #else
-      bool result = try_add_valid_reference(must_be_valid, cnt);
+      bool result = try_add_valid_reference(mutator, must_be_valid, cnt);
 #endif
       if (result)
         log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);

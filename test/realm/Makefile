@@ -51,7 +51,7 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed
+TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck
 TESTS_SINGLENODE := proc_group
 
 ifeq ($(strip $(USE_GASNET)),1)
@@ -88,7 +88,7 @@ REALM_LIB := librealm.a
 run_all : $(TESTS:%=run_%)
 
 run_% : %
-	# this echos exactly once, even if -s was specified
+	@# this echos exactly once, even if -s was specified
 	@echo $(call LAUNCHER, ./$*) $(TESTARGS_$*)
 	@$(call LAUNCHER, ./$*) $(TESTARGS_$*)
 

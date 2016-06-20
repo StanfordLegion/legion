@@ -12,26 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_loops_vars1.rg:30: loop optimization failed: preamble statement is not side-effect free
+--     var x = f(p[i])
+--       ^
+
 import "regent"
 
-__demand(__inline)
-task f(s : region(int)) : ptr(int, s)
-  return new(ptr(int, s))
-end
-
-task g(t : region(int), y : ptr(int, t)) : int
-where reads(t) do
-  return @y
-end
-
-task h() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = f(r)
-  @x = 5
-  return g(r, x)
-end
+task f(r : region(int)) where reads writes(r) do return 0 end
 
 task main()
-  regentlib.assert(h() == 5, "test failed")
+  var r = region(ispace(ptr, 5), int)
+  var p = partition(equal, r, ispace(int1d, 4))
+
+  __demand(__parallel)
+  for i = 0, 4 do
+    var x = f(p[i])
+    f(p[i])
+  end
 end
 regentlib.start(main)

@@ -175,9 +175,8 @@ namespace Legion {
                       Operation *owner_op, RegionTreeForest *forest);
       void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
                               const VersionInfo &rhs, bool check_below);
-      // TODO: delete these with versioning fix
-      void clone_from(const VersionInfo &rhs);
-      void clone_from(const VersionInfo &rhs, CompositeCloser &closer);
+      void clone_version_numbers(const VersionInfo &rhs, 
+                                 const CompositeCloser &closer);
     public:
       inline bool is_packed(void) const { return packed; }
       void pack_buffer(Serializer &rez);
@@ -387,8 +386,19 @@ namespace Legion {
      */
     struct VersionStateInfo {
     public:
+      VersionStateInfo(void)
+        : single(true) { states.single_state = NULL; }
+#ifdef DEBUG_LEGION
+      ~VersionStateInfo(void)
+      { if (!single) assert(states.multi_states == NULL); }
+#endif
+    public:
       FieldMask valid_fields;
-      LegionMap<VersionState*,FieldMask>::aligned states;
+      union {
+        VersionState *single_state;
+        LegionMap<VersionState*,FieldMask>::aligned *multi_states;
+      } states;
+      bool single;
     };
 
     /**

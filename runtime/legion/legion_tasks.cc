@@ -215,7 +215,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
-      unpack_base_external_task(derez); 
+      unpack_base_external_task(derez, this); 
       DerezCheck z(derez);
       derez.deserialize(map_locally);
       if (map_locally)
@@ -284,7 +284,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::unpack_base_external_task(Deserializer &derez)
+    void TaskOp::unpack_base_external_task(Deserializer &derez, 
+                                           ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -307,7 +308,7 @@ namespace Legion {
         DistributedID future_did;
         derez.deserialize(future_did);
         futures[idx] = Future(
-            runtime->find_or_create_future(future_did, this));
+            runtime->find_or_create_future(future_did, mutator));
       }
       size_t num_grants;
       derez.deserialize(num_grants);
@@ -1906,16 +1907,16 @@ namespace Legion {
             }
             else
             {
+              Reservation functor_reservation;
               ProjectionFunctor *functor = 
-                runtime->find_projection_functor(regions[idx].projection);
-              if (functor == NULL)
+                runtime->find_projection_functor(regions[idx].projection,
+                                                 functor_reservation);
+              if (functor_reservation.exists())
               {
-                PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
-                      regions[idx].projection);
+                AutoLock f_lock(functor_reservation);
                 regions[idx].region = 
-                  (*projfn)(regions[idx].partition,
-                            index_point,runtime->external);
+                  functor->project(DUMMY_CONTEXT, this, idx,
+                                   regions[idx].partition, index_point);
               }
               else
                 regions[idx].region = 
@@ -1937,15 +1938,16 @@ namespace Legion {
           {
             if (regions[idx].projection != 0)
             {
+              Reservation functor_reservation;
               ProjectionFunctor *functor = 
-                runtime->find_projection_functor(regions[idx].projection);
-              if (functor == NULL)
+                runtime->find_projection_functor(regions[idx].projection,
+                                                 functor_reservation);
+              if (functor_reservation.exists())
               {
-                RegionProjectionFnptr projfn = 
-                  Runtime::find_region_projection_function(
-                      regions[idx].projection);
+                AutoLock f_lock(functor_reservation);
                 regions[idx].region = 
-                 (*projfn)(regions[idx].region,index_point,runtime->external);
+                  functor->project(DUMMY_CONTEXT, this, idx, 
+                                   regions[idx].region, index_point);
               }
               else
                 regions[idx].region = 
@@ -2037,8 +2039,14 @@ namespace Legion {
         {
           // Since we know we are on the owner node, we know we can
           // always ask our parent context to find the restricted instances
+          InstanceSet restricted_instances;
           parent_ctx->get_physical_references(
-              parent_req_indexes[*it], chosen_instances);
+              parent_req_indexes[*it], restricted_instances);
+          // Now do the conversion to get the instances that we should
+          // actually use, no need to check for errors since we know
+          // that the parent task is keeping hold of these regions
+          runtime->forest->physical_convert_restricted(this, regions[*it],
+                                   restricted_instances, chosen_instances);
         }
         else
         {
@@ -2598,6 +2606,9 @@ namespace Legion {
       inner_cached = false;
       has_virtual_instances_result = false;
       has_virtual_instances_cached = false;
+#ifdef LEGION_SPY
+      previous_mapped_event = RtEvent::NO_RT_EVENT;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3065,7 +3076,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::unpack_remote_context(Deserializer &derez)
+    void SingleTask::unpack_remote_context(Deserializer &derez,
+                                           std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       assert(false); // should only be called for RemoteTask
@@ -3893,6 +3905,8 @@ namespace Legion {
       RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
       runtime->forest->get_field_space_fields(handle.get_field_space(),
                                               new_req.instance_fields);
+      if (new_req.instance_fields.empty())
+        return;
       new_req.privilege_fields.insert(new_req.instance_fields.begin(),
                                       new_req.instance_fields.end());
       // Now make a new region requirement and physical region
@@ -5003,88 +5017,58 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
       if (req.flags & VERIFIED_FLAG)
         return NO_ERROR;
-      std::set<FieldID> checking_fields = req.privilege_fields;
+      // Try our original region requirements first
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
-#ifdef DEBUG_LEGION
-        assert(it->handle_type == SINGULAR); // better be singular
-#endif
-        // Check to see if we found the requirement in the parent
-        if (it->region == req.parent)
-        {
-          if ((req.handle_type == SINGULAR) || 
-              (req.handle_type == REG_PROJECTION))
-          {
-            std::vector<ColorPoint> path;
-            if (!runtime->forest->compute_index_path(req.parent.index_space,
-                                              req.region.index_space, path))
-              return ERROR_BAD_REGION_PATH;
-          }
-          else
-          {
-            std::vector<ColorPoint> path;
-            if (!runtime->forest->compute_partition_path(req.parent.index_space,
-                                          req.partition.index_partition, path))
-              return ERROR_BAD_PARTITION_PATH;
-          }
-          // Now check that the types are subset of the fields
-          // Note we can use the parent since all the regions/partitions
-          // in the same region tree have the same field space
-          bool has_fields = false;
-          {
-            std::vector<FieldID> to_delete;
-            for (std::set<FieldID>::const_iterator fit = 
-                  checking_fields.begin(); fit != checking_fields.end(); fit++)
-            {
-              if (it->privilege_fields.find(*fit) != it->privilege_fields.end())
-              {
-                to_delete.push_back(*fit);
-                has_fields = true;
-              }
-              else if (has_created_field(req.parent.field_space, *fit))
-              {
-                to_delete.push_back(*fit);
-              }
-            }
-            for (std::vector<FieldID>::const_iterator fit = to_delete.begin();
-                  fit != to_delete.end(); fit++)
-            {
-              checking_fields.erase(*fit);
-            }
-          }
-          // Only need to do this check if there were overlapping fields
-          if (!skip_privilege && has_fields && 
-              (req.privilege & (~(it->privilege))))
-          {
-            // Handle the special case where the parent has WRITE_DISCARD
-            // privilege and the sub-task wants any other kind of privilege.  
-            // This case is ok because the parent could write something
-            // and then hand it off to the child.
-            if (it->privilege != WRITE_DISCARD)
-            {
-              if ((req.handle_type == SINGULAR) || 
-                  (req.handle_type == REG_PROJECTION))
-                return ERROR_BAD_REGION_PRIVILEGES;
-              else
-                return ERROR_BAD_PARTITION_PRIVILEGES;
-            }
-          }
-          // If we've seen all our fields, then we're done
-          if (checking_fields.empty())
-            return NO_ERROR;
-        }
+        LegionErrorType et = 
+          check_privilege_internal(req, *it, bad_field, skip_privilege);
+        // No error so we are done
+        if (et == NO_ERROR)
+          return et;
+        // Something other than bad parent region is a real error
+        if (et != ERROR_BAD_PARENT_REGION)
+          return et;
+        // Otherwise we just keep going
       }
-      // Also check to see if it was a created region
-      if (has_created_region(req.parent))
+      // If none of that worked, we now get to try the created requirements
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++)
       {
-        // Check that there is a path between the parent and the child
+        LegionErrorType et = 
+          check_privilege_internal(req, *it, bad_field, skip_privilege);
+        // No error so we are done
+        if (et == NO_ERROR)
+          return et;
+        // Something other than bad parent region is a real error
+        if (et != ERROR_BAD_PARENT_REGION)
+          return et;
+        // Otherwise we just keep going
+      }
+      // Didn't actually find it so this is the result 
+      return ERROR_BAD_PARENT_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LegionErrorType SingleTask::check_privilege_internal(
+        const RegionRequirement &req, const RegionRequirement &our_req,
+        FieldID &bad_field, bool skip_privilege) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(our_req.handle_type == SINGULAR); // better be singular
+#endif
+      // Check to see if we found the requirement in the parent
+      if (our_req.region == req.parent)
+      {
         if ((req.handle_type == SINGULAR) || 
             (req.handle_type == REG_PROJECTION))
         {
           std::vector<ColorPoint> path;
           if (!runtime->forest->compute_index_path(req.parent.index_space,
-                                              req.region.index_space, path))
+                                            req.region.index_space, path))
             return ERROR_BAD_REGION_PATH;
         }
         else
@@ -5094,47 +5078,38 @@ namespace Legion {
                                         req.partition.index_partition, path))
             return ERROR_BAD_PARTITION_PATH;
         }
-        // No need to check the field privileges since we should have them all
-        checking_fields.clear();
-        // No need to check the privileges since we know we have them all
+        // Now check that the types are subset of the fields
+        // Note we can use the parent since all the regions/partitions
+        // in the same region tree have the same field space
+        for (std::set<FieldID>::const_iterator fit = 
+              req.privilege_fields.begin(); fit != 
+              req.privilege_fields.end(); fit++)
+        {
+          if (our_req.privilege_fields.find(*fit) == 
+              our_req.privilege_fields.end())
+            // Indicate we should keep going
+            return ERROR_BAD_PARENT_REGION;
+        }
+        // Only need to do this check if there were overlapping fields
+        if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
+        {
+          // Handle the special case where the parent has WRITE_DISCARD
+          // privilege and the sub-task wants any other kind of privilege.  
+          // This case is ok because the parent could write something
+          // and then hand it off to the child.
+          if (our_req.privilege != WRITE_DISCARD)
+          {
+            if ((req.handle_type == SINGULAR) || 
+                (req.handle_type == REG_PROJECTION))
+              return ERROR_BAD_REGION_PRIVILEGES;
+            else
+              return ERROR_BAD_PARTITION_PRIVILEGES;
+          }
+        }
+        // If we make it here then we are good
         return NO_ERROR;
       }
-      if (!checking_fields.empty() && 
-          (checking_fields.size() < req.privilege_fields.size()))
-      {
-        bad_field = *(checking_fields.begin());
-        return ERROR_BAD_REGION_TYPE;
-      }
       return ERROR_BAD_PARENT_REGION;
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::has_created_region(LogicalRegion handle) const
-    //--------------------------------------------------------------------------
-    {
-      // Hold the operation lock when doing this since children could
-      // be returning values from the utility processor
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      return (created_regions.find(handle) != created_regions.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::has_created_field(FieldSpace handle, FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      if (created_fields.find(std::pair<FieldSpace,FieldID>(handle,fid))
-              != created_fields.end())
-        return true;
-      // Otherwise, check our locally created fields to see if we have
-      // privileges from there
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-      {
-        if ((local_fields[idx].handle == handle) && 
-            (local_fields[idx].fid == fid))
-          return true;
-      }
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7213,6 +7188,17 @@ namespace Legion {
           it->impl->unmap_region();
       }
     }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    RtEvent SingleTask::update_previous_mapped_event(RtEvent next)
+    ///--------------------------------------------------------------------------
+    {
+      RtEvent result = previous_mapped_event;
+      previous_mapped_event = next;
+      return result;
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Multi Task 
@@ -9917,12 +9903,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void RemoteTask::unpack_remote_context(Deserializer &derez)
+    void RemoteTask::unpack_remote_context(Deserializer &derez,
+                                           std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
       derez.deserialize(depth);
-      unpack_base_external_task(derez);
+      WrapperReferenceMutator mutator(preconditions);
+      unpack_base_external_task(derez, &mutator);
       version_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         version_infos[idx].unpack_version_numbers(derez, runtime->forest);
@@ -11427,19 +11415,19 @@ namespace Legion {
           }
           else
           {
+            Reservation functor_reservation;
             ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
+              runtime->find_projection_functor(regions[idx].projection,
+                                               functor_reservation);
+            if (functor_reservation.exists())
             {
-              PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
-                      regions[idx].projection);
+              AutoLock f_lock(functor_reservation);
               for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
                     minimal_points.begin(); it != minimal_points.end(); it++)
               {
-                it->second->add_projection_region(idx,  
-                    (*projfn)(regions[idx].partition,
-                              it->first,runtime->external));
+                it->second->add_projection_region(idx,
+                    functor->project(DUMMY_CONTEXT, this, idx,
+                                     regions[idx].partition, it->first));
               }
             }
             else
@@ -11461,19 +11449,18 @@ namespace Legion {
 #endif
           if (regions[idx].projection != 0)
           {
+            Reservation functor_reservation;
             ProjectionFunctor *functor = 
-              runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
+              runtime->find_projection_functor(regions[idx].projection,
+                                               functor_reservation);
+            if (functor_reservation.exists())
             {
-              RegionProjectionFnptr projfn = 
-                Runtime::find_region_projection_function(
-                    regions[idx].projection);
               for (std::map<DomainPoint,MinimalPoint*>::const_iterator it = 
                     minimal_points.begin(); it != minimal_points.end(); it++)
               {
                 it->second->add_projection_region(idx, 
-                  (*projfn)(regions[idx].region,
-                            it->first, runtime->external));
+                  functor->project(DUMMY_CONTEXT, this, idx, 
+                                   regions[idx].region, it->first));
               }
             }
             else

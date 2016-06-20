@@ -12,26 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_loops_empty.rg:24: loop optimization failed: body is empty
+--   for i = 0, 4 do
+--     ^
+
 import "regent"
 
-__demand(__inline)
-task f(s : region(int)) : ptr(int, s)
-  return new(ptr(int, s))
-end
-
-task g(t : region(int), y : ptr(int, t)) : int
-where reads(t) do
-  return @y
-end
-
-task h() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = f(r)
-  @x = 5
-  return g(r, x)
-end
-
 task main()
-  regentlib.assert(h() == 5, "test failed")
+  __demand(__parallel)
+  for i = 0, 4 do
+  end
 end
 regentlib.start(main)

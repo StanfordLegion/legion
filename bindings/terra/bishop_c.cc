@@ -24,15 +24,19 @@
 #include <cstdlib>
 
 using namespace std;
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::MappingUtilities ;
+using namespace Legion;
+using namespace Legion::Mapping;
+using namespace Legion::Mapping::Utilities;
 
 static vector<bishop_task_rule_t> task_rules;
 static vector<bishop_region_rule_t> region_rules;
 static bishop_mapper_state_init_fn_t mapper_init;
 
-extern Logger::Category log_bishop;
+namespace Legion {
+  namespace Mapping {
+    extern LegionRuntime::Logger::Category log_bishop;
+  }
+}
 
 static void
 bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
@@ -41,10 +45,10 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
   for (set<Processor>::const_iterator it = local_procs.begin();
        it != local_procs.end(); it++)
   {
-    runtime->replace_default_mapper(new BishopMapper(task_rules, region_rules,
-                                                     mapper_init,
-                                                     machine, runtime, *it),
-                                    *it);
+    BishopMapper* mapper =
+      new BishopMapper(task_rules, region_rules, mapper_init,
+                       runtime->get_mapper_runtime(), machine, *it);
+    runtime->replace_default_mapper(mapper, *it);
   }
 }
 
@@ -126,6 +130,12 @@ bishop_get_no_processor()
   return CObjectWrapper::wrap(Processor::NO_PROC);
 }
 
+legion_memory_t
+bishop_get_no_memory()
+{
+  return CObjectWrapper::wrap(Memory::NO_MEMORY);
+}
+
 bishop_processor_list_t
 bishop_filter_processors_by_isa(bishop_processor_list_t source,
                                 bishop_isa_t isa)
@@ -146,6 +156,10 @@ bishop_filter_processors_by_isa(bishop_processor_list_t source,
       case CUDA_ISA:
         {
           if (proc.kind() == Processor::TOC_PROC) result.push_back(proc_);
+          break;
+        }
+      default:
+        {
           break;
         }
     }
@@ -193,56 +207,6 @@ bishop_filter_memories_by_kind(bishop_memory_list_t source,
   for (unsigned i = 0; i < result.size(); ++i)
     result_.list[i] = result[i];
   return result_;
-}
-
-bool
-bishop_task_set_target_processor(legion_task_t task_, legion_processor_t proc_)
-{
-  Task* task = CObjectWrapper::unwrap(task_);
-  task->target_proc = CObjectWrapper::unwrap(proc_);
-  return true;
-}
-
-bool
-bishop_task_set_target_processor_list(legion_task_t task_,
-                                      bishop_processor_list_t list_)
-{
-  if (list_.size > 0)
-  {
-    Task* task = CObjectWrapper::unwrap(task_);
-    task->target_proc = CObjectWrapper::unwrap(list_.list[0]);
-    for (unsigned i = 1; i < list_.size; ++i)
-      task->additional_procs.insert(CObjectWrapper::unwrap(list_.list[i]));
-    return true;
-  }
-  else
-    return false;
-}
-
-bool
-bishop_region_set_target_memory(legion_region_requirement_t req_,
-                                legion_memory_t memory_)
-{
-  RegionRequirement& req = *CObjectWrapper::unwrap(req_);
-  req.target_ranking.clear();
-  req.target_ranking.push_back(CObjectWrapper::unwrap(memory_));
-  return true;
-}
-
-bool
-bishop_region_set_target_memory_list(legion_region_requirement_t req_,
-                                     bishop_memory_list_t list_)
-{
-  if (list_.size > 0)
-  {
-    RegionRequirement& req = *CObjectWrapper::unwrap(req_);
-    req.target_ranking.clear();
-    for (unsigned i = 0; i < list_.size; ++i)
-      req.target_ranking.push_back(CObjectWrapper::unwrap(list_.list[i]));
-    return true;
-  }
-  else
-    return false;
 }
 
 bishop_isa_t

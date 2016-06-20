@@ -410,25 +410,24 @@ namespace Realm {
 
     Memory RuntimeImpl::next_local_memory_id(void)
     {
-      Memory m = ID(ID::ID_MEMORY, 
-		    gasnet_mynode(), 
-		    num_local_memories++, 0).convert<Memory>();
+      Memory m = ID::make_memory(gasnet_mynode(),
+				 num_local_memories++).convert<Memory>();
       return m;
     }
 
     Processor RuntimeImpl::next_local_processor_id(void)
     {
-      Processor p = ID(ID::ID_PROCESSOR, 
-		       gasnet_mynode(), 
-		       num_local_processors++).convert<Processor>();
+      Processor p = ID::make_processor(gasnet_mynode(), 
+				       num_local_processors++).convert<Processor>();
       return p;
     }
 
     void RuntimeImpl::add_memory(MemoryImpl *m)
     {
       // right now expect this to always be for the current node and the next memory ID
-      assert((ID(m->me).node() == gasnet_mynode()) &&
-	     (ID(m->me).index_h() == nodes[gasnet_mynode()].memories.size()));
+      ID id(m->me);
+      assert(id.memory.owner_node == gasnet_mynode());
+      assert(id.memory.mem_idx == nodes[gasnet_mynode()].memories.size());
 
       nodes[gasnet_mynode()].memories.push_back(m);
     }
@@ -436,8 +435,9 @@ namespace Realm {
     void RuntimeImpl::add_processor(ProcessorImpl *p)
     {
       // right now expect this to always be for the current node and the next processor ID
-      assert((ID(p->me).node() == gasnet_mynode()) &&
-	     (ID(p->me).index() == nodes[gasnet_mynode()].processors.size()));
+      ID id(p->me);
+      assert(id.proc.owner_node == gasnet_mynode());
+      assert(id.proc.proc_idx == nodes[gasnet_mynode()].processors.size());
 
       nodes[gasnet_mynode()].processors.push_back(p);
     }
@@ -735,11 +735,11 @@ namespace Realm {
                        "in legion_config.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
-      if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
+      if (gasnet_nodes() > (ID::MAX_NODE_ID + 1))
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
-                       "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
+		       "of bits in ID", gasnet_nodes(), (ID::MAX_NODE_ID + 1));
         gasnet_exit(1);
       }
 
@@ -890,7 +890,9 @@ namespace Realm {
       //CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
 
       if(gasnet_mem_size_in_mb > 0)
-	global_memory = new GASNetMemory(ID(ID::ID_MEMORY, 0, ID::ID_GLOBAL_MEM, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+	// use an 'owner_node' of all 1's for this
+        // SJT: actually, go back to an owner node of 0 and memory_idx of all 1's for now
+	global_memory = new GASNetMemory(ID::make_memory(0, -1U).convert<Memory>(), gasnet_mem_size_in_mb << 20);
       else
 	global_memory = 0;
 
@@ -913,9 +915,8 @@ namespace Realm {
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
 	char *regmem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
-	regmem = new LocalCPUMemory(ID(ID::ID_MEMORY,
-				       gasnet_mynode(),
-				       n->memories.size(), 0).convert<Memory>(),
+	regmem = new LocalCPUMemory(ID::make_memory(gasnet_mynode(),
+						    n->memories.size()).convert<Memory>(),
 				    reg_mem_size_in_mb << 20,
 				    regmem_base,
 				    true);
@@ -928,9 +929,8 @@ namespace Realm {
       if(disk_mem_size_in_mb > 0) {
         char file_name[30];
         sprintf(file_name, "disk_file%d.tmp", gasnet_mynode());
-        diskmem = new DiskMemory(ID(ID::ID_MEMORY,
-                                    gasnet_mynode(),
-                                    n->memories.size(), 0).convert<Memory>(),
+        diskmem = new DiskMemory(ID::make_memory(gasnet_mynode(),
+						 n->memories.size()).convert<Memory>(),
                                  disk_mem_size_in_mb << 20,
                                  std::string(file_name));
         n->memories.push_back(diskmem);
@@ -938,17 +938,15 @@ namespace Realm {
         diskmem = 0;
 
       FileMemory *filemem;
-      filemem = new FileMemory(ID(ID::ID_MEMORY,
-                                 gasnet_mynode(),
-                                 n->memories.size(), 0).convert<Memory>());
+      filemem = new FileMemory(ID::make_memory(gasnet_mynode(),
+					       n->memories.size()).convert<Memory>());
       n->memories.push_back(filemem);
 
 #ifdef USE_HDF
       // create HDF memory
       HDFMemory *hdfmem;
-      hdfmem = new HDFMemory(ID(ID::ID_MEMORY,
-                                gasnet_mynode(),
-                                n->memories.size(), 0).convert<Memory>());
+      hdfmem = new HDFMemory(ID::make_memory(gasnet_mynode(),
+					     n->memories.size()).convert<Memory>());
       n->memories.push_back(hdfmem);
 #endif
 
@@ -1245,7 +1243,7 @@ namespace Realm {
 #endif
 
       // root node will be whoever owns the target proc
-      int root = ID(target_proc).node();
+      int root = ID(target_proc).proc.owner_node;
 
       if(gasnet_mynode() == root) {
 	// ROOT NODE
@@ -1683,64 +1681,64 @@ namespace Realm {
     EventImpl *RuntimeImpl::get_event_impl(Event e)
     {
       ID id(e);
-      switch(id.type()) {
-      case ID::ID_EVENT:
+      if(id.is_event())
 	return get_genevent_impl(e);
-      case ID::ID_BARRIER:
+      if(id.is_barrier())
 	return get_barrier_impl(e);
-      default:
-	assert(0);
-	return 0;
-      }
+      assert(0);
+      return 0;
     }
 
     GenEventImpl *RuntimeImpl::get_genevent_impl(Event e)
     {
       ID id(e);
-      assert(id.type() == ID::ID_EVENT);
+      assert(id.is_event());
 
-      Node *n = &nodes[id.node()];
-      GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
-      assert(impl->me == id);
-
+      Node *n = &nodes[id.event.creator_node];
+      GenEventImpl *impl = n->events.lookup_entry(id.event.gen_event_idx, id.event.creator_node);
+      {
+	ID check(impl->me);
+	assert(check.event.creator_node == id.event.creator_node);
+	assert(check.event.gen_event_idx == id.event.gen_event_idx);
+      }
       return impl;
     }
 
     BarrierImpl *RuntimeImpl::get_barrier_impl(Event e)
     {
       ID id(e);
-      assert(id.type() == ID::ID_BARRIER);
+      assert(id.is_barrier());
 
-      Node *n = &nodes[id.node()];
-      BarrierImpl *impl = n->barriers.lookup_entry(id.index(), id.node());
-      assert(impl->me == id);
+      Node *n = &nodes[id.barrier.creator_node];
+      BarrierImpl *impl = n->barriers.lookup_entry(id.barrier.barrier_idx, id.barrier.creator_node);
+      {
+	ID check(impl->me);
+	assert(check.barrier.creator_node == id.barrier.creator_node);
+	assert(check.barrier.barrier_idx == id.barrier.barrier_idx);
+      }
       return impl;
     }
 
     ReservationImpl *RuntimeImpl::get_lock_impl(ID id)
     {
-      switch(id.type()) {
-      case ID::ID_LOCK:
-	{
-	  Node *n = &nodes[id.node()];
-	  ReservationImpl *impl = n->reservations.lookup_entry(id.index(), id.node());
-	  assert(impl->me == id.convert<Reservation>());
-	  return impl;
-	}
+      if(id.is_reservation()) {
+	Node *n = &nodes[id.rsrv.creator_node];
+	ReservationImpl *impl = n->reservations.lookup_entry(id.rsrv.rsrv_idx, id.rsrv.creator_node);
+	assert(impl->me == id.convert<Reservation>());
+	return impl;
+      }
 
-      case ID::ID_INDEXSPACE:
+      if(id.is_idxspace())
 	return &(get_index_space_impl(id)->lock);
 
-      case ID::ID_INSTANCE:
+      if(id.is_instance())
 	return &(get_instance_impl(id)->lock);
 
-      case ID::ID_PROCGROUP:
+      if(id.is_procgroup())
 	return &(get_procgroup_impl(id)->lock);
 
-      default:
-	assert(0);
-	return 0;
-      }
+      assert(0);
+      return 0;
     }
 
     template <class T>
@@ -1752,79 +1750,96 @@ namespace Realm {
 
     MemoryImpl *RuntimeImpl::get_memory_impl(ID id)
     {
-      switch(id.type()) {
-      case ID::ID_MEMORY:
-      case ID::ID_ALLOCATOR:
-      case ID::ID_INSTANCE:
-	if(id.index_h() == ID::ID_GLOBAL_MEM)
+      if(id.is_memory()) {
+        // support old encoding for global memory too
+	if((id.memory.owner_node > ID::MAX_NODE_ID) || (id.memory.mem_idx == ((1U << 12) - 1)))
 	  return global_memory;
-	return null_check(nodes[id.node()].memories[id.index_h()]);
-
-      default:
-	assert(0);
-	return 0;
+	else
+	  return null_check(nodes[id.memory.owner_node].memories[id.memory.mem_idx]);
       }
+
+#ifdef TODO
+      if(id.is_allocator()) {
+	if(id.allocator.owner_node > ID::MAX_NODE_ID)
+	  return global_memory;
+	else
+	  return null_check(nodes[id.allocator.owner_node].memories[id.allocator.mem_idx]);
+      }
+#endif
+
+      if(id.is_instance()) {
+        // support old encoding for global memory too
+	if((id.instance.owner_node > ID::MAX_NODE_ID) || (id.instance.mem_idx == ((1U << 12) - 1)))
+	  return global_memory;
+	else
+	  return null_check(nodes[id.instance.owner_node].memories[id.instance.mem_idx]);
+      }
+      assert(0);
+      return 0;
     }
 
     ProcessorImpl *RuntimeImpl::get_processor_impl(ID id)
     {
-      if(id.type() == ID::ID_PROCGROUP)
+      if(id.is_procgroup())
 	return get_procgroup_impl(id);
 
-      assert(id.type() == ID::ID_PROCESSOR);
-      return null_check(nodes[id.node()].processors[id.index()]);
+      assert(id.is_processor());
+      return null_check(nodes[id.proc.owner_node].processors[id.proc.proc_idx]);
     }
 
     ProcessorGroup *RuntimeImpl::get_procgroup_impl(ID id)
     {
-      assert(id.type() == ID::ID_PROCGROUP);
+      assert(id.is_procgroup());
 
-      Node *n = &nodes[id.node()];
-      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.index(), id.node());
+      Node *n = &nodes[id.pgroup.owner_node];
+      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup.pgroup_idx,
+							 id.pgroup.owner_node);
       assert(impl->me == id.convert<Processor>());
       return impl;
     }
 
     IndexSpaceImpl *RuntimeImpl::get_index_space_impl(ID id)
     {
-      assert(id.type() == ID::ID_INDEXSPACE);
+      assert(id.is_idxspace());
 
-      Node *n = &nodes[id.node()];
-      IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.index(), id.node());
+      Node *n = &nodes[id.idxspace.owner_node];
+      IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.idxspace.idxspace_idx,
+							  id.idxspace.owner_node);
       assert(impl->me == id.convert<IndexSpace>());
       return impl;
     }
 
     RegionInstanceImpl *RuntimeImpl::get_instance_impl(ID id)
     {
-      assert(id.type() == ID::ID_INSTANCE);
+      assert(id.is_instance());
       MemoryImpl *mem = get_memory_impl(id);
       
       AutoHSLLock al(mem->mutex);
 
-      if(id.index_l() >= mem->instances.size()) {
-	assert(id.node() != gasnet_mynode());
+      // TODO: factor creator_node into lookup!
+      if(id.instance.inst_idx >= mem->instances.size()) {
+	assert(id.instance.owner_node != gasnet_mynode());
 
 	size_t old_size = mem->instances.size();
-	if(id.index_l() >= old_size) {
+	if(id.instance.inst_idx >= old_size) {
 	  // still need to grow (i.e. didn't lose the race)
-	  mem->instances.resize(id.index_l() + 1);
+	  mem->instances.resize(id.instance.inst_idx + 1);
 
 	  // don't have region/offset info - will have to pull that when
 	  //  needed
-	  for(unsigned i = old_size; i <= id.index_l(); i++) 
+	  for(unsigned i = old_size; i <= id.instance.inst_idx; i++) 
 	    mem->instances[i] = 0;
 	}
       }
 
-      if(!mem->instances[id.index_l()]) {
-	if(!mem->instances[id.index_l()]) {
+      if(!mem->instances[id.instance.inst_idx]) {
+	if(!mem->instances[id.instance.inst_idx]) {
 	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", gasnet_mynode(), id.id());
-	  mem->instances[id.index_l()] = new RegionInstanceImpl(id.convert<RegionInstance>(), mem->me);
+	  mem->instances[id.instance.inst_idx] = new RegionInstanceImpl(id.convert<RegionInstance>(), mem->me);
 	}
       }
 	  
-      return mem->instances[id.index_l()];
+      return mem->instances[id.instance.inst_idx];
     }
 
     /*static*/
