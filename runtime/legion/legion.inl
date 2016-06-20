@@ -1578,6 +1578,34 @@ namespace Legion {
         Realm::CustomSerdezUntyped::create_custom_serdez<SERDEZ>();
     }
 
+    namespace Internal {
+      // Wrapper class for old projection functions
+      template<RegionProjectionFnptr FNPTR>
+      class RegionProjectionWrapper : public ProjectionFunctor {
+      public:
+        RegionProjectionWrapper(void) 
+          : ProjectionFunctor() { }
+        virtual ~RegionProjectionWrapper(void) { }
+      public:
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalRegion upper_bound,
+                                      const DomainPoint &point)
+        {
+          return (*FNPTR)(upper_bound, point, runtime); 
+        }
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalPartition upper_bound,
+                                      const DomainPoint &point)
+        {
+          assert(false);
+          return LogicalRegion::NO_REGION;
+        }
+        virtual bool is_exclusive(void) const { return false; }
+      };
+    };
+
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
                                        Runtime*)>
@@ -1585,9 +1613,38 @@ namespace Legion {
                                                             ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_region_projection_function(
-                                  handle, reinterpret_cast<void *>(PROJ_PTR));
+      Runtime::preregister_projection_functor(handle,
+          new Internal::RegionProjectionWrapper<PROJ_PTR>());
+      return handle;
     }
+
+    namespace Internal {
+      // Wrapper class for old projection functions
+      template<PartitionProjectionFnptr FNPTR>
+      class PartitionProjectionWrapper : public ProjectionFunctor {
+      public:
+        PartitionProjectionWrapper(void)
+          : ProjectionFunctor() { }
+        virtual ~PartitionProjectionWrapper(void) { }
+      public:
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalRegion upper_bound,
+                                      const DomainPoint &point)
+        {
+          assert(false);
+          return LogicalRegion::NO_REGION;
+        }
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalPartition upper_bound,
+                                      const DomainPoint &point)
+        {
+          return (*FNPTR)(upper_bound, point, runtime);
+        }
+        virtual bool is_exclusive(void) const { return false; }
+      };
+    };
 
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
@@ -1596,8 +1653,9 @@ namespace Legion {
                                                     ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_partition_projection_function(
-                                  handle, reinterpret_cast<void *>(PROJ_PTR));
+      Runtime::preregister_projection_functor(handle,
+          new Internal::PartitionProjectionWrapper<PROJ_PTR>());
+      return handle;
     }
 
     //--------------------------------------------------------------------------

@@ -1293,6 +1293,7 @@ namespace Legion {
     public:
       void register_static_variants(void);
       void register_static_constraints(void);
+      void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
       void construct_mpi_rank_tables(Processor proc, int rank);
@@ -1749,6 +1750,8 @@ namespace Legion {
                                         MapperID map_id, Processor proc);
     public:
       void register_projection_functor(ProjectionID pid,
+                                       ProjectionFunctor *func);
+      static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
@@ -2660,14 +2663,12 @@ namespace Legion {
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
-      static ProjectionID register_region_projection_function(
-                                    ProjectionID handle, void *func_ptr);
-      static ProjectionID register_partition_projection_function(
-                                    ProjectionID handle, void *func_ptr);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
+      static std::map<ProjectionID,ProjectionFunctor*>&
+                                get_pending_projection_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
@@ -2675,10 +2676,6 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc,
                       bool has_ret, const char *task_name,bool check_id = true);
-      static PartitionProjectionFnptr 
-                    find_partition_projection_function(ProjectionID pid);
-      static RegionProjectionFnptr
-                    find_region_projection_function(ProjectionID pid);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -2689,8 +2686,6 @@ namespace Legion {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
-      static RegionProjectionTable& get_region_projection_table(void);
-      static PartitionProjectionTable& get_partition_projection_table(void);
       static RtEvent register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);

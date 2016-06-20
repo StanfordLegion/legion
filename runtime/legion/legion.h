@@ -1980,6 +1980,7 @@ namespace Legion {
      */
     class ProjectionFunctor {
     public:
+      ProjectionFunctor(void);
       ProjectionFunctor(Runtime *rt);
       virtual ~ProjectionFunctor(void);
     public:
@@ -2011,8 +2012,20 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point) = 0;
+      /**
+       * Indicate whether calls to this projection functor
+       * must be serialized or can be performed in parallel.
+       * Usually they must be exclusive if this functor contains
+       * state for memoizing results.
+       */
+      virtual bool is_exclusive(void) const { return true; }
+    private:
+      friend class Internal::Runtime;
+      // For pre-registered projection functors the runtime will
+      // use this to initialize the runtime pointer
+      inline void set_runtime(Runtime *rt) { runtime = rt; }
     protected:
-      Runtime *const runtime;
+      Runtime *runtime;
     };
 
     /**
@@ -4434,11 +4447,25 @@ namespace Legion {
        * zero is the identity projection. Unlike mappers which
        * require a separate instance per processor, only
        * one of these must be registered per projection ID.
+       * The runtime takes ownership for deleting the projection 
+       * functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
-       * @param functor the object to register for handle projections
+       * @param functor the object to register for handling projections
        */
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *functor);
+
+      /**
+       * Register a projection functor before the runtime has started only.
+       * The runtime will update the projection functor so that it has 
+       * contains a valid runtime pointer prior to the projection functor
+       * ever being invoked. The runtime takes ownership for deleting the
+       * projection functor after the application has finished executing.
+       * @param pid the projection ID to use for the registration
+       * @param functor the objecto register for handling projections
+       */
+      static void preregister_projection_functor(ProjectionID pid,
+                                                 ProjectionFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
@@ -4666,8 +4693,7 @@ namespace Legion {
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
        * task execution.  The projection ID zero is reserved for runtime
-       * use. The user can pass in AUTO_GENERATE_ID to
-       * have the runtime automatically generate an ID.
+       * use.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -4680,8 +4706,6 @@ namespace Legion {
        * map from an upper bound of a logical partition down to a specific
        * logical sub-region for a given domain point during index task
        * execution.  The projection ID zero is reserved for runtime use.
-       * The user can pass in AUTO_GENERATE_ID to have the runtime
-       * automatically generate an ID.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -5122,11 +5146,6 @@ namespace Legion {
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
-    private:
-      static ProjectionID register_region_projection_function(
-                                    ProjectionID handle, void *func_ptr);
-      static ProjectionID register_partition_projection_function(
-                                    ProjectionID handle, void *func_ptr);
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,

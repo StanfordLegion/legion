@@ -7547,6 +7547,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::register_static_projections(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
+        get_pending_projection_table();
+      for (std::map<ProjectionID,ProjectionFunctor*>::const_iterator it =
+            pending_projection_functors.begin(); it !=
+            pending_projection_functors.end(); it++)
+      {
+        it->second->set_runtime(external);
+        register_projection_functor(it->first, it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::initialize_legion_prof(void)
     //--------------------------------------------------------------------------
     {
@@ -13035,6 +13050,44 @@ namespace Legion {
         exit(ERROR_DUPLICATE_PROJECTION_ID);
       }
       projection_functors[pid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_projection_functor(ProjectionID pid,
+                                                     ProjectionFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_projection_functor' after "
+                      "the runtime has started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      if (pid == 0)
+      {
+        log_run.error("ERROR: ProjectionID zero is reserved.\n");
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_PROJECTION_ID);
+      }
+      std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
+        get_pending_projection_table();
+      std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
+        pending_projection_functors.find(pid);
+      if (finder != pending_projection_functors.end())
+      {
+        log_run.error("ERROR: ProjectionID %d has already been used in "
+                                    "the region projection table\n", pid);
+#ifdef DEBUG_HIGH_LEVEl
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_PROJECTION_ID);
+      }
+      pending_projection_functors[pid] = functor;
     }
 
     //--------------------------------------------------------------------------
@@ -19283,93 +19336,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::register_region_projection_function(
-                                          ProjectionID handle, void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (handle == 0)
-      {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_PROJECTION_ID);
-      }
-      RegionProjectionTable &proj_table = 
-                          Runtime::get_region_projection_table();
-      if (proj_table.find(handle) != proj_table.end())
-      {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
-                                    "the region projection table\n",handle);
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_PROJECTION_ID);
-      }
-      if (handle == AUTO_GENERATE_ID)
-      {
-        for (ProjectionID idx = 1; idx < AUTO_GENERATE_ID; idx++)
-        {
-          if (proj_table.find(idx) == proj_table.end())
-          {
-            handle = idx;
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // We should never run out of type handles
-        assert(handle != AUTO_GENERATE_ID);
-#endif
-      }
-      proj_table[handle] = (RegionProjectionFnptr)func_ptr;  
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::
-      register_partition_projection_function(ProjectionID handle, 
-                                             void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      if (handle == 0)
-      {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_PROJECTION_ID);
-      }
-      PartitionProjectionTable &proj_table = 
-                              Runtime::get_partition_projection_table();
-      if (proj_table.find(handle) != proj_table.end())
-      {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
-                            "the partition projection table\n",handle);
-#ifdef DEBUG_HIGH_LEVEl
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_PROJECTION_ID);
-      }
-      if (handle == AUTO_GENERATE_ID)
-      {
-        for (ProjectionID idx = 1; idx < AUTO_GENERATE_ID; idx++)
-        {
-          if (proj_table.find(idx) == proj_table.end())
-          {
-            handle = idx;
-            break;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // We should never run out of type handles
-        assert(handle != AUTO_GENERATE_ID);
-#endif
-      }
-      proj_table[handle] = (PartitionProjectionFnptr)func_ptr;  
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ std::deque<PendingVariantRegistration*>& 
                                        Runtime::get_pending_variant_table(void)
     //--------------------------------------------------------------------------
@@ -19386,6 +19352,15 @@ namespace Legion {
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>
                                                     pending_constraint_table;
       return pending_constraint_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<ProjectionID,ProjectionFunctor*>&
+                                     Runtime::get_pending_projection_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ProjectionID,ProjectionFunctor*> pending_projection_table;
+      return pending_projection_table;
     }
 
     //--------------------------------------------------------------------------
@@ -19453,44 +19428,6 @@ namespace Legion {
       return vid;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionFnptr Runtime::
-                            find_partition_projection_function(ProjectionID pid)
-    //--------------------------------------------------------------------------
-    {
-      const PartitionProjectionTable &table = get_partition_projection_table();
-      PartitionProjectionTable::const_iterator finder = table.find(pid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find registered partition "
-                            "projection ID %d", pid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PROJECTION_ID);
-      }
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionFnptr Runtime::find_region_projection_function(
-                                                              ProjectionID pid)
-    //--------------------------------------------------------------------------
-    {
-      const RegionProjectionTable &table = get_region_projection_table();
-      RegionProjectionTable::const_iterator finder = table.find(pid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find registered region projection "
-                            "ID %d", pid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PROJECTION_ID);
-      }
-      return finder->second;
-    }
-
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     /*static*/ const char* Runtime::find_privilege_task_name(void *impl)
@@ -19546,24 +19483,6 @@ namespace Legion {
       }
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ RegionProjectionTable& Runtime::
-                                              get_region_projection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static RegionProjectionTable proj_table;
-      return proj_table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PartitionProjectionTable& Runtime::
-                                          get_partition_projection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static PartitionProjectionTable proj_table;
-      return proj_table;
-    }
 
     //--------------------------------------------------------------------------
     /*static*/ RtEvent Runtime::register_runtime_tasks(RealmRuntime &realm)
@@ -19879,6 +19798,7 @@ namespace Legion {
         local_rt->initialize_legion_prof();
       local_rt->register_static_variants();
       local_rt->register_static_constraints();
+      local_rt->register_static_projections();
       // Initialize our one virtual manager, do this after we register
       // the static constraints so we get a valid layout constraint ID
       VirtualManager::initialize_virtual_instance(local_rt, 

@@ -1351,10 +1351,6 @@ namespace Legion {
       const DomainPoint&, Runtime *rt);
   typedef bool (*PredicateFnptr)(const void*, size_t, 
       const std::vector<Future> futures);
-  typedef std::map<ProjectionID,RegionProjectionFnptr> 
-    RegionProjectionTable;
-  typedef std::map<ProjectionID,PartitionProjectionFnptr> 
-    PartitionProjectionTable;
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
   // The most magical of typedefs
