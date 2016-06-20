@@ -17350,6 +17350,42 @@ namespace Legion {
     }
 #endif 
 
+    /////////////////////////////////////////////////////////////
+    // Abstract Tree Node 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AbstractTreeNode::AbstractTreeNode(RegionTreeNode *own, unsigned dep,
+                                       RegionTreeForest *ctx)
+      : depth(dep), owner(own), context(ctx), child(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AbstractTreeNode::AbstractTreeNode(const AbstractTreeNode &rhs)
+      : depth(rhs.depth), owner(rhs.owner), context(rhs.context)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    AbstractTreeNode::~AbstractTreeNode(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    AbstractTreeNode& AbstractTreeNode::operator=(const AbstractTreeNode &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
   }; // namespace Internal 
 }; // namespace Legion
 

@@ -1909,19 +1909,9 @@ namespace Legion {
             {
               ProjectionFunctor *functor = 
                 runtime->find_projection_functor(regions[idx].projection);
-              if (functor == NULL)
-              {
-                PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
-                      regions[idx].projection);
-                regions[idx].region = 
-                  (*projfn)(regions[idx].partition,
-                            index_point,runtime->external);
-              }
-              else
-                regions[idx].region = 
-                  functor->project(DUMMY_CONTEXT, this, idx,
-                                   regions[idx].partition, index_point);
+              regions[idx].region = 
+                functor->project(DUMMY_CONTEXT, this, idx,
+                                 regions[idx].partition, index_point);
             }
           }
           // Update the region requirement kind 
@@ -1940,18 +1930,9 @@ namespace Legion {
             {
               ProjectionFunctor *functor = 
                 runtime->find_projection_functor(regions[idx].projection);
-              if (functor == NULL)
-              {
-                RegionProjectionFnptr projfn = 
-                  Runtime::find_region_projection_function(
-                      regions[idx].projection);
-                regions[idx].region = 
-                 (*projfn)(regions[idx].region,index_point,runtime->external);
-              }
-              else
-                regions[idx].region = 
-                  functor->project(DUMMY_CONTEXT, this, idx, 
-                                   regions[idx].region, index_point);
+              regions[idx].region = 
+                functor->project(DUMMY_CONTEXT, this, idx, 
+                                 regions[idx].region, index_point);
             }
           }
           // Otherwise we are the default case in which 
@@ -12152,28 +12133,12 @@ namespace Legion {
           {
             ProjectionFunctor *functor = 
               runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
+            for (std::vector<MinimalPoint>::iterator it = 
+                  minimal_points.begin(); it != minimal_points.end(); it++)
             {
-              PartitionProjectionFnptr projfn = 
-                  Runtime::find_partition_projection_function(
-                      regions[idx].projection);
-              for (std::vector<MinimalPoint>::iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->add_projection_region(idx,
-                    (*projfn)(regions[idx].partition, 
-                              it->get_domain_point(), runtime->external));
-              }
-            }
-            else
-            {
-              for (std::vector<MinimalPoint>::iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->add_projection_region(idx,
-                    functor->project(DUMMY_CONTEXT, this, idx, 
-                             regions[idx].partition, it->get_domain_point()));
-              }
+              it->add_projection_region(idx,
+                  functor->project(DUMMY_CONTEXT, this, idx, 
+                           regions[idx].partition, it->get_domain_point()));
             }
           }
         }
@@ -12186,28 +12151,12 @@ namespace Legion {
           {
             ProjectionFunctor *functor = 
               runtime->find_projection_functor(regions[idx].projection);
-            if (functor == NULL)
+            for (std::vector<MinimalPoint>::iterator it = 
+                  minimal_points.begin(); it != minimal_points.end(); it++)
             {
-              RegionProjectionFnptr projfn = 
-                Runtime::find_region_projection_function(
-                    regions[idx].projection);
-              for (std::vector<MinimalPoint>::iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->add_projection_region(idx,
-                    (*projfn)(regions[idx].region,
-                              it->get_domain_point(), runtime->external));
-              }
-            }
-            else
-            {
-              for (std::vector<MinimalPoint>::iterator it = 
-                    minimal_points.begin(); it != minimal_points.end(); it++)
-              {
-                it->add_projection_region(idx, 
-                    functor->project(DUMMY_CONTEXT, this, idx,
-                           regions[idx].region, it->get_domain_point()));
-              }
+              it->add_projection_region(idx, 
+                  functor->project(DUMMY_CONTEXT, this, idx,
+                         regions[idx].region, it->get_domain_point()));
             }
           }
           else
