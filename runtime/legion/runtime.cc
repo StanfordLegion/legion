@@ -6959,6 +6959,7 @@ namespace Legion {
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
+        projection_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
         processor_mapping_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -7135,11 +7136,15 @@ namespace Legion {
         if (message_managers[idx] != NULL)
           delete message_managers[idx];
       }
-      for (std::map<ProjectionID,ProjectionFunctor*>::const_iterator it = 
-            projection_functors.begin(); it != projection_functors.end(); it++)
+      for (std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+            iterator it = projection_functors.begin(); 
+            it != projection_functors.end(); it++)
       {
-        delete it->second;
+        delete it->second.first;
+        if (it->second.second.exists())
+          it->second.second.destroy_reservation();
       } 
+      projection_functors.clear();
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -7456,7 +7461,8 @@ namespace Legion {
       message_manager_lock.destroy_reservation();
       message_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
-      projection_functors.clear();
+      projection_lock.destroy_reservation();
+      projection_lock = Reservation::NO_RESERVATION;
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
       processor_mapping_lock.destroy_reservation();
@@ -13036,10 +13042,14 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
+      Reservation functor_reservation = Reservation::NO_RESERVATION;
+      if (functor->is_exclusive())
+        functor_reservation = Reservation::create_reservation();
+      AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
       // registration time before the runtime starts up
-      std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
-        projection_functors.find(pid);
+      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+        const_iterator finder = projection_functors.find(pid);
       if (finder != projection_functors.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
@@ -13049,7 +13059,8 @@ namespace Legion {
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
       }
-      projection_functors[pid] = functor;
+      projection_functors[pid] = 
+        std::pair<ProjectionFunctor*,Reservation>(functor, functor_reservation);
     }
 
     //--------------------------------------------------------------------------
@@ -13091,24 +13102,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid)
+    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid,
+                                               Reservation &functor_reservation)
     //--------------------------------------------------------------------------
     {
-      std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
-        projection_functors.find(pid);
+      AutoLock p_lock(projection_lock,1,false/*exclusive*/);
+      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
+        const_iterator finder = projection_functors.find(pid);
       if (finder == projection_functors.end())
       {
         log_run.warning("Unable to find registered region projection "
                               "ID %d. Please upgrade to using projection "
                               "functors!", pid);
-        // Uncomment this once we deprecate the old projection functions
 #ifdef DEBUG_LEGION
-        //assert(false);
+        assert(false);
 #endif
-        //exit(ERROR_INVALID_PROJECTION_ID);
-        return NULL;
+        exit(ERROR_INVALID_PROJECTION_ID);
       }
-      return finder->second;
+      functor_reservation = finder->second.second;
+      return finder->second.first;
     }
 
     //--------------------------------------------------------------------------

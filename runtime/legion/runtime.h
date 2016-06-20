@@ -1753,7 +1753,8 @@ namespace Legion {
                                        ProjectionFunctor *func);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunctor* find_projection_functor(ProjectionID pid);
+      ProjectionFunctor* find_projection_functor(ProjectionID pid,
+                                             Reservation &functor_reservation);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
@@ -2487,7 +2488,9 @@ namespace Legion {
       unsigned unique_task_id;
       unsigned unique_mapper_id;
     protected:
-      std::map<ProjectionID,ProjectionFunctor*> projection_functors;
+      Reservation projection_lock;
+      std::map<ProjectionID,
+        std::pair<ProjectionFunctor*,Reservation> > projection_functors;
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;
