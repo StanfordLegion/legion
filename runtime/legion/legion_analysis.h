@@ -267,9 +267,9 @@ namespace Legion {
     struct TraceInfo {
     public:
       TraceInfo(bool already_tr,
-                  LegionTrace *tr,
-                  unsigned idx,
-                  const RegionRequirement &r)
+                LegionTrace *tr,
+                unsigned idx,
+                const RegionRequirement &r)
         : already_traced(already_tr), trace(tr),
           req_idx(idx), req(r) { }
     public:
@@ -277,6 +277,20 @@ namespace Legion {
       LegionTrace *trace;
       unsigned req_idx;
       const RegionRequirement &req;
+    };
+
+    /**
+     * \struct ProjectionInfo
+     * Projection information for index space requirements
+     */
+    struct ProjectionInfo {
+    public:
+      ProjectionInfo(Operation *op, const RegionRequirement &req);
+    public:
+      inline bool is_projecting(void) const { return (projection != NULL); }
+    public:
+      ProjectionFunction *const projection;
+      const Domain &projection_domain;
     };
 
     /**
@@ -367,6 +381,8 @@ namespace Legion {
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
+      FieldState(const GenericUser &u, const FieldMask &m,
+                 ProjectionFunction *proj, const Domain &proj_domain, bool dis);
     public:
       bool overlaps(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
@@ -374,9 +390,12 @@ namespace Legion {
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask) const;
     public:
+      bool dominates(const Domain &next_domain) const;
+    public:
       OpenState open_state;
       ReductionOpID redop;
-      ProjectionID projection;
+      ProjectionFunction *projection;
+      Domain projection_domain;
       unsigned rebuild_timeout;
     }; 
 

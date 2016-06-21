@@ -1254,7 +1254,7 @@ namespace Legion {
                                  VersionInfo &version_info,
                                  RestrictInfo &restrict_info,
                                  const TraceInfo &trace_info,
-                                 const bool projecting,
+                                 const ProjectionInfo &projection_info,
                                  const bool report_uninitialized = false);
       void register_local_user(CurrentState &state,
                                const LogicalUser &user,
@@ -1265,8 +1265,8 @@ namespace Legion {
                              RegionTreePath &path,
                              VersionInfo &version_info,
                              RestrictInfo &restrict_info,
-                             const bool already_traced,
-                             const bool projecting);
+                             const TraceInfo &trace_info,
+                             const ProjectionInfo &projection_info);
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user,
                                     VersionInfo &version_info);
@@ -1285,8 +1285,15 @@ namespace Legion {
       void siphon_logical_projection(LogicalCloser &closer,
                                      CurrentState &state,
                                      const FieldMask &closing_mask,
+                                     const ProjectionInfo &proj_info,
                                      bool record_close_operations,
                                      FieldMask &open_below);
+      void flush_logical_reductions(LogicalCloser &closer,
+                                    CurrentState &state,
+                                    FieldMask &reduction_flush_fields,
+                                    bool record_close_operations,
+                                    const ColorPoint &next_child,
+                              LegionDeque<FieldState>::aligned &new_states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,

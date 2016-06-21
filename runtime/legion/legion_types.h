@@ -201,7 +201,8 @@ namespace Legion {
       OPEN_MULTI_REDUCE    = 4, // multiple open children with same reduction
       OPEN_READ_ONLY_PROJ  = 5, // read-only projection
       OPEN_READ_WRITE_PROJ = 6, // read-write projection
-      OPEN_REDUCE_PROJ     = 7, // reduction-only projection
+      OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=1, children disjoint
+      OPEN_REDUCE_PROJ     = 8, // reduction-only projection
     }; 
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -796,6 +797,7 @@ namespace Legion {
       REGION_NODE_OPEN_LOGICAL_NODE_CALL,
       REGION_NODE_CLOSE_LOGICAL_NODE_CALL,
       REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
+      REGION_NODE_SIPHON_LOGICAL_PROJECTION_CALL,
       REGION_NODE_PERFORM_LOGICAL_CLOSES_CALL,
       REGION_NODE_CLOSE_PHYSICAL_NODE_CALL,
       REGION_NODE_SIPHON_PHYSICAL_CHILDREN_CALL,
@@ -975,7 +977,8 @@ namespace Legion {
       "Region Node Register Logical User",                            \
       "Region Node Open Logical Node",                                \
       "Region Node Close Logical Node",                               \
-      "Region Node Siphon Logical Node",                              \
+      "Region Node Siphon Logical Children",                          \
+      "Region Node Siphon Logical Projection",                        \
       "Region Node Perform Logical Closes",                           \
       "Region Node Close Physical Node",                              \
       "Region Node Siphon Physical Children",                         \
@@ -1060,6 +1063,7 @@ namespace Legion {
     class VariantImpl;
     class LayoutConstraints;
     class GeneratorImpl;
+    class ProjectionFunction;
     class Runtime;
 
     // legion_ops.h

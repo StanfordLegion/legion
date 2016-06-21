@@ -2019,6 +2019,13 @@ namespace Legion {
        * state for memoizing results.
        */
       virtual bool is_exclusive(void) const { return false; }
+
+      /**
+       * Specify the depth which this projection function goes
+       * for all the points in an index space launch from 
+       * the upper bound node in the region tree.
+       */
+      virtual unsigned get_depth(void) const { return 1; };
     private:
       friend class Internal::Runtime;
       // For pre-registered projection functors the runtime will

@@ -6921,6 +6921,138 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Projection Function 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionFunction::ProjectionFunction(ProjectionID pid, 
+                                           ProjectionFunctor *func)
+      : depth(func->get_depth()), is_exclusive(func->is_exclusive()),
+        projection_id(pid), functor(func)
+    //--------------------------------------------------------------------------
+    {
+      if (is_exclusive)
+        projection_reservation = Reservation::create_reservation();
+      else
+        projection_reservation = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionFunction::ProjectionFunction(const ProjectionFunction &rhs)
+      : depth(rhs.depth), is_exclusive(rhs.is_exclusive), 
+        projection_id(rhs.projection_id), functor(rhs.functor)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionFunction::~ProjectionFunction(void)
+    //--------------------------------------------------------------------------
+    {
+      delete functor;
+      if (projection_reservation.exists())
+        projection_reservation.destroy_reservation();
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunction::project_point(Task *task, unsigned idx, 
+                                                    const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = task->regions[idx];
+#ifdef DEBUG_LEGION
+      assert(req.handle_type != SINGULAR);
+#endif
+      if (projection_reservation.exists())
+      {
+        AutoLock p_lock(projection_reservation);
+        if (req.handle_type == PART_PROJECTION)
+        {
+            return functor->project(DUMMY_CONTEXT, task, idx, 
+                                    req.partition, point); 
+        }
+        else
+        {
+          return functor->project(DUMMY_CONTEXT, task, idx,
+                                  req.region, point);
+        }
+      }
+      else
+      {
+        if (req.handle_type == PART_PROJECTION)
+        {
+          return functor->project(DUMMY_CONTEXT, task, idx, 
+                                  req.partition, point);
+        }
+        else
+        {
+          return functor->project(DUMMY_CONTEXT, task, idx,
+                                  req.region, point);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::project_points(Task *task, unsigned idx, 
+                                      std::vector<MinimalPoint> &minimal_points)
+    //--------------------------------------------------------------------------
+    {
+      const RegionRequirement &req = task->regions[idx];
+#ifdef DEBUG_LEGION
+      assert(req.handle_type != SINGULAR);
+#endif
+      if (projection_reservation.exists())
+      {
+        AutoLock p_lock(projection_reservation);
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<MinimalPoint>::iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            it->add_projection_region(idx,
+                functor->project(DUMMY_CONTEXT, task, idx,
+                                 req.partition, it->get_domain_point()));
+          }
+        }
+        else
+        {
+          for (std::vector<MinimalPoint>::iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            it->add_projection_region(idx,
+                functor->project(DUMMY_CONTEXT, task, idx,
+                                 req.region, it->get_domain_point()));
+          }
+        }
+      }
+      else
+      {
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<MinimalPoint>::iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            it->add_projection_region(idx, 
+              functor->project(DUMMY_CONTEXT, task, idx, 
+                               req.partition, it->get_domain_point()));
+          }
+        }
+        else
+        {
+          for (std::vector<MinimalPoint>::iterator it = 
+                minimal_points.begin(); it != minimal_points.end(); it++)
+          {
+            it->add_projection_region(idx,
+              functor->project(DUMMY_CONTEXT, task, idx,
+                               req.region, it->get_domain_point()));
+          }
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
 
@@ -7136,15 +7268,13 @@ namespace Legion {
         if (message_managers[idx] != NULL)
           delete message_managers[idx];
       }
-      for (std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
-            iterator it = projection_functors.begin(); 
-            it != projection_functors.end(); it++)
+      for (std::map<ProjectionID,ProjectionFunction*>::
+            iterator it = projection_functions.begin(); 
+            it != projection_functions.end(); it++)
       {
-        delete it->second.first;
-        if (it->second.second.exists())
-          it->second.second.destroy_reservation();
+        delete it->second;
       } 
-      projection_functors.clear();
+      projection_functions.clear();
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -13042,15 +13172,13 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
-      Reservation functor_reservation = Reservation::NO_RESERVATION;
-      if (functor->is_exclusive())
-        functor_reservation = Reservation::create_reservation();
+      ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
       // registration time before the runtime starts up
-      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
-        const_iterator finder = projection_functors.find(pid);
-      if (finder != projection_functors.end())
+      std::map<ProjectionID,ProjectionFunction*>::
+        const_iterator finder = projection_functions.find(pid);
+      if (finder != projection_functions.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
@@ -13059,8 +13187,7 @@ namespace Legion {
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
       }
-      projection_functors[pid] = 
-        std::pair<ProjectionFunctor*,Reservation>(functor, functor_reservation);
+      projection_functions[pid] = function;
     }
 
     //--------------------------------------------------------------------------
@@ -13102,14 +13229,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionFunctor* Runtime::find_projection_functor(ProjectionID pid,
-                                               Reservation &functor_reservation)
+    ProjectionFunction* Runtime::find_projection_function(ProjectionID pid)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(projection_lock,1,false/*exclusive*/);
-      std::map<ProjectionID,std::pair<ProjectionFunctor*,Reservation> >::
-        const_iterator finder = projection_functors.find(pid);
-      if (finder == projection_functors.end())
+      std::map<ProjectionID,ProjectionFunction*>::
+        const_iterator finder = projection_functions.find(pid);
+      if (finder == projection_functions.end())
       {
         log_run.warning("Unable to find registered region projection "
                               "ID %d. Please upgrade to using projection "
@@ -13119,8 +13245,7 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_PROJECTION_ID);
       }
-      functor_reservation = finder->second.second;
-      return finder->second.first;
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------

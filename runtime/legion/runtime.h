@@ -1208,6 +1208,31 @@ namespace Legion {
     };
 
     /**
+     * \class ProjectionFunction
+     * A class for wrapping projection functors
+     */
+    class ProjectionFunction {
+    public:
+      ProjectionFunction(ProjectionID pid, ProjectionFunctor *functor);
+      ProjectionFunction(const ProjectionFunction &rhs);
+      ~ProjectionFunction(void);
+    public:
+      ProjectionFunction& operator=(const ProjectionFunction &rhs);
+    public:
+      LogicalRegion project_point(Task *task, unsigned idx,
+                                  const DomainPoint &point);
+      void project_points(Task *task, unsigned idx,
+                          std::vector<MinimalPoint> &minimal_points);
+    public:
+      const int depth; 
+      const bool is_exclusive;
+      const ProjectionID projection_id;
+      ProjectionFunctor *const functor;
+    private:
+      Reservation projection_reservation;
+    };
+
+    /**
      * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 
@@ -1753,8 +1778,7 @@ namespace Legion {
                                        ProjectionFunctor *func);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
-      ProjectionFunctor* find_projection_functor(ProjectionID pid,
-                                             Reservation &functor_reservation);
+      ProjectionFunction* find_projection_function(ProjectionID pid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
@@ -2489,8 +2513,7 @@ namespace Legion {
       unsigned unique_mapper_id;
     protected:
       Reservation projection_lock;
-      std::map<ProjectionID,
-        std::pair<ProjectionFunctor*,Reservation> > projection_functors;
+      std::map<ProjectionID,ProjectionFunction*> projection_functions;
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;

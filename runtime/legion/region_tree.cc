@@ -1503,6 +1503,7 @@ namespace Legion {
         restrict_info.set_check();
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
+      ProjectionInfo projection_info(op, req);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1516,7 +1517,7 @@ namespace Legion {
       // analysis for a single context are performed in order
       parent_node->register_logical_user(ctx.get_id(), user, path, version_info,
                                          restrict_info, trace_info, 
-                                         (req.handle_type != SINGULAR), 
+                                         projection_info,
                                          true/*report uninitialized*/);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
@@ -9997,7 +9998,7 @@ namespace Legion {
                                                VersionInfo &version_info,
                                                RestrictInfo &restrict_info,
                                                const TraceInfo &trace_info,
-                                               const bool projecting,
+                                               const ProjectionInfo &proj_info,
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
     {
@@ -10018,17 +10019,17 @@ namespace Legion {
       // doing them later. We can also skip the close operations for 
       // any operations which have arrived and have read-write privileges
       // because they will be doing their own close operations.
-      if (!arrived || projecting || !IS_WRITE(user.usage))
+      if (!arrived || proj_info.is_projecting() || !IS_WRITE(user.usage))
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
-        const bool captures_closes = !arrived || projecting ||
+        const bool captures_closes = !arrived || proj_info.is_projecting() ||
                               IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
         LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
         // Special siphon operation for arrived projecting functions
-        if (arrived && projecting)
+        if (arrived && proj_info.is_projecting())
           siphon_logical_projection(closer, state, user.field_mask,
-                                    captures_closes, open_below);
+                                    proj_info, captures_closes, open_below);
         else
           siphon_logical_children(closer, state, user.field_mask,
                                   captures_closes, next_child, open_below);
@@ -10069,7 +10070,8 @@ namespace Legion {
              perform_dependence_checks<CURR_LOGICAL_ALLOC,
                        true/*record*/,false/*has skip*/,true/*track dom*/>(
                           user, state.curr_epoch_users, user.field_mask, 
-                          open_below, arrived/*validates*/ && !projecting);
+                          open_below, arrived/*validates*/ && 
+                                        !proj_info.is_projecting());
       FieldMask non_dominated_mask = user.field_mask - dominator_mask;
       // For the fields that weren't dominated, we have to check
       // those fields against the previous epoch's users
@@ -10078,7 +10080,8 @@ namespace Legion {
         perform_dependence_checks<PREV_LOGICAL_ALLOC,
                       true/*record*/, false/*has skip*/, false/*track dom*/>(
                         user, state.prev_epoch_users, non_dominated_mask, 
-                        open_below, arrived/*validates*/ && !projecting);
+                        open_below, arrived/*validates*/ && 
+                                      !proj_info.is_projecting());
       }
       const bool is_write = IS_WRITE(user.usage); // only writes
       // If we dominated and this is our final destination then we 
@@ -10110,7 +10113,7 @@ namespace Legion {
             state.advance_version_numbers(dominator_mask);
         }
       }
-      if (arrived && !projecting)
+      if (arrived && !proj_info.is_projecting())
       { 
         // This is the normal arrival case, we are there
         // If we have arrived and we are doing read-write access, then we
@@ -10239,12 +10242,12 @@ namespace Legion {
         if (arrived)
         {
 #ifdef DEBUG_LEGION
-          assert(projecting);
+          assert(!proj_info.is_projecting());
 #endif
-          // Compute our version numbers from the abstract region tree
-
-          // do the local registration of this user
+          // Do the local registration of this user
           register_local_user(state, user, restrict_info, trace_info);
+          // Then traverse the abstract tree to get the version numbers
+          // TODO
         }
         else
         {
@@ -10252,10 +10255,10 @@ namespace Legion {
           RegionTreeNode *child = get_tree_child(next_child);
           if (!open_below)
             child->open_logical_node(ctx, user, path, version_info,
-                          restrict_info, trace_info.already_traced, projecting);
+                                     restrict_info, trace_info, proj_info);
           else
             child->register_logical_user(ctx, user, path, version_info, 
-                                         restrict_info, trace_info, projecting);
+                                         restrict_info, trace_info, proj_info);
         }
       }
     }
@@ -10300,12 +10303,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::open_logical_node(ContextID ctx,
-                                             const LogicalUser &user,
-                                             RegionTreePath &path,
-                                             VersionInfo &version_info,
-                                             RestrictInfo &restrict_info,
-                                             const bool already_traced,
-                                             const bool projecting)
+                                           const LogicalUser &user,
+                                           RegionTreePath &path,
+                                           VersionInfo &version_info,
+                                           RestrictInfo &restrict_info,
+                                           const TraceInfo &trace_info,
+                                           const ProjectionInfo &proj_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_OPEN_LOGICAL_NODE_CALL);
@@ -10314,51 +10317,29 @@ namespace Legion {
       sanity_check_logical_state(state);
 #endif
       const unsigned depth = get_depth(); 
-      if (!path.has_child(depth))
+      const bool arrived = !path.has_child(depth);
+      if (arrived && !proj_info.is_projecting())
       {
         const bool is_write = IS_WRITE(user.usage);
         // If this is a write, then update our version numbers
         if (is_write)
           state.advance_version_numbers(user.field_mask);
-        // If this is a projection then we do need to capture any 
-        // child version information because it might change
-        if (projecting)
-        {
-          assert(false); 
-        }
-        else
-        {
-          // First record any version information that we need
-          state.record_version_numbers(user.field_mask, user, version_info,
-                                 is_write, false/*path only*/, 
-                                 is_write, false/*close top*/, 
-                                 false/*report uninitialized*/);
-          // If this is a reduction, record that we have an outstanding 
-          // reduction at this node in the region tree
-          if (user.usage.redop > 0)
-            record_logical_reduction(state, user.usage.redop, user.field_mask);
-          // Record any restrictions we have on mappings if necessary
-          if (restrict_info.needs_check())
-          {
-            FieldMask restricted = user.field_mask & state.restricted_fields;
-            if (!!restricted)
-            {
-              RegionNode *local_this = as_region_node();
-              restrict_info.add_restriction(local_this->handle, restricted);
-            }
-          }
-        }
-        if (!already_traced)
-        {
-          // We've arrived where we're going,
-          // add ourselves as a user
-          // Record a mapping reference on this operation
-          user.op->add_mapping_reference(user.gen);
-          state.curr_epoch_users.push_back(user);
-        }
+        // First record any version information that we need
+        state.record_version_numbers(user.field_mask, user, version_info,
+                               is_write, false/*path only*/, 
+                               is_write, false/*close top*/, 
+                               false/*report uninitialized*/);
+        // If this is a reduction, record that we have an outstanding 
+        // reduction at this node in the region tree
+        if (user.usage.redop > 0)
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // Register our local user
+        register_local_user(state, user, restrict_info, trace_info);
       }
       else
       {
+        // Either we haven't arrived or we arrived for a projection
+        // In both cases the version number computation is the same
         // If we are writing check to see if we have already 
         // marked those fields dirty. If not,
         // advance the version numbers for those fields.
@@ -10383,17 +10364,30 @@ namespace Legion {
                                  false/*final*/, false/*close top*/,
                                  false/*report uninitialized*/);
         }
-        const ColorPoint &next_child = path.get_child(depth);
-        // Update our field states
-        merge_new_field_state(state, 
-                              FieldState(user, user.field_mask, next_child));
+        if (arrived)
+        {
 #ifdef DEBUG_LEGION
-        sanity_check_logical_state(state);
+          assert(proj_info.is_projecting());
 #endif
-        // Then continue the traversal
-        RegionTreeNode *child_node = get_tree_child(next_child);
-        child_node->open_logical_node(ctx, user, path, version_info, 
-                                     restrict_info, already_traced, projecting);
+          // Do the local registration of this user
+          register_local_user(state, user, restrict_info, trace_info);
+          // Then traverse the abstract tree to get the version numbers
+          // TODO
+        }
+        else
+        {
+          const ColorPoint &next_child = path.get_child(depth);
+          // Update our field states
+          merge_new_field_state(state, 
+                                FieldState(user, user.field_mask, next_child));
+#ifdef DEBUG_LEGION
+          sanity_check_logical_state(state);
+#endif
+          // Then continue the traversal
+          RegionTreeNode *child_node = get_tree_child(next_child);
+          child_node->open_logical_node(ctx, user, path, version_info, 
+                                        restrict_info, trace_info, proj_info);
+        }
       }
     }
 
@@ -10570,62 +10564,9 @@ namespace Legion {
         FieldMask reduction_flush_fields = 
           current_mask & state.outstanding_reduction_fields;
         if (!!reduction_flush_fields)
-        {
-          // If we are doing a reduction too, check to see if they are 
-          // the same in which case we can skip these fields
-          if (closer.user.usage.redop > 0)
-          {
-            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator finder =
-              state.outstanding_reductions.find(closer.user.usage.redop);
-            // Don't need to flush fields we are reducing to with the
-            // same operation
-            if (finder != state.outstanding_reductions.end())
-              reduction_flush_fields -= finder->second;
-          }
-          // See if we still have fields to close
-          if (!!reduction_flush_fields)
-          {
-            FieldMask flushed_fields;
-            // We need to flush these fields so issue close operations
-            for (std::list<FieldState>::iterator it = 
-                  state.field_states.begin(); it != 
-                  state.field_states.end(); /*nothing*/)
-            {
-              FieldMask overlap = it->valid_fields & reduction_flush_fields;
-              if (!overlap)
-              {
-                it++;
-                continue;
-              }
-              FieldMask closed_child_fields;
-              perform_close_operations(closer, overlap, *it,
-                                       next_child, false/*allow_next*/,
-                                       false/*needs upgrade*/,
-                                       false/*permit leave open*/,
-                                       false/*read only close*/,
-                                       record_close_operations,
-                                       true/*record closed fields*/,
-                                       new_states, closed_child_fields);
-              // We only really flushed fields that were actually closed
-              flushed_fields |= closed_child_fields;
-              if (!it->valid_fields)
-                it = state.field_states.erase(it);
-              else
-                it++;
-            }
-            // Check to see if we have any unflushed fields
-            // These are fields which still need a close operation
-            // to be performed but only to flush the reductions
-            FieldMask unflushed = reduction_flush_fields - flushed_fields;
-            if (!!unflushed)
-              closer.record_flush_only_fields(unflushed);
-            // Then we can mark that these fields no longer have 
-            // unflushed reductions
-            clear_logical_reduction_fields(state, reduction_flush_fields);
-          }
-        }
+          flush_logical_reductions(closer, state, reduction_flush_fields,
+                         record_close_operations, next_child, new_states);
       }
-
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
@@ -10902,6 +10843,7 @@ namespace Legion {
               break;
             }
           case OPEN_READ_WRITE_PROJ:
+          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
             {
               // Have to close up this sub-tree no matter what
               close_abstract_tree(closer, current_mask, *it,
@@ -10945,6 +10887,266 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif 
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::siphon_logical_projection(LogicalCloser &closer,
+                                                CurrentState &state,
+                                                const FieldMask &current_mask,
+                                                const ProjectionInfo &proj_info,
+                                                bool record_close_operations,
+                                                FieldMask &open_below)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_SIPHON_LOGICAL_PROJECTION_CALL);
+#ifdef DEBUG_LEGION
+      sanity_check_logical_state(state);
+#endif
+      LegionDeque<FieldState>::aligned new_states;
+      // First let's see if we need to flush any reductions
+      ColorPoint no_next_child; // never a next child here
+      if (!!state.outstanding_reduction_fields)
+      {
+        FieldMask reduction_flush_fields = 
+          current_mask & state.outstanding_reduction_fields;
+        if (!!reduction_flush_fields)
+          flush_logical_reductions(closer, state, reduction_flush_fields,
+                       record_close_operations, no_next_child,new_states);
+      }
+      // Now we can look at all the children
+      for (LegionList<FieldState>::aligned::iterator it = 
+            state.field_states.begin(); it != 
+            state.field_states.end(); /*nothing*/)
+      {
+        // Quick check for disjointness, in which case we can continue
+        if (it->valid_fields * current_mask)
+        {
+          it++;
+          continue;
+        }
+        // Now we can check the current state
+        switch (it->open_state)
+        {
+          // For now, any children open in a normal mode get closed
+          case OPEN_READ_ONLY:
+            {
+              FieldMask already_open;
+              perform_close_operations(closer, current_mask, *it, 
+                                       no_next_child, false/*allow next*/,
+                                       false/*needs upgrade*/,
+                                       false/*permit leave open*/,
+                                       true/*read only close*/,
+                                       record_close_operations,
+                                       false/*record closed fields*/,
+                                       new_states, already_open);
+              open_below |= already_open;
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+              break;
+            }
+          case OPEN_READ_WRITE:
+          case OPEN_SINGLE_REDUCE:
+          case OPEN_MULTI_REDUCE:
+            {
+              FieldMask already_open;
+              perform_close_operations(closer, current_mask, *it, 
+                                       no_next_child, false/*allow next*/,
+                                       false/*needs upgrade*/,
+                                       false/*permit leave open*/,
+                                       false/*read only close*/,
+                                       record_close_operations,
+                                       false/*record closed fields*/,
+                                       new_states, already_open);
+              open_below |= already_open;
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+              break;
+            }
+          case OPEN_READ_ONLY_PROJ:
+            {
+              if (IS_READ_ONLY(closer.user.usage))
+              {
+                // These fields are already open below
+                open_below |= (it->valid_fields & current_mask);
+                // Keep going
+                it++;
+              }
+              else
+              {
+                // Otherwise we are going to a different mode 
+                // no need to do a close since we're staying in
+                // projection mode.
+                it->valid_fields -= current_mask;
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              break;
+            }
+          case OPEN_READ_WRITE_PROJ:
+            {
+              // Can only avoid a close operation if we have the 
+              // same projection function with the same or smaller
+              // size domain as the original index space launch
+              if ((it->projection == proj_info.projection) &&
+                  it->dominates(proj_info.projection_domain))
+              {
+                // Update the domain  
+                it->projection_domain = proj_info.projection_domain;
+                open_below |= (it->valid_fields & current_mask);
+                it++;
+              }
+              else
+              {
+                // Now we need the close operation
+                close_abstract_tree(closer, current_mask, *it,
+                                    false/*read only close*/,
+                                    record_close_operations);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              break;
+            }
+          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+            {
+#ifdef DEBUG_LEGION
+              // Can only be here if all children are disjoint
+              assert(are_all_children_disjoint());
+#endif
+              if (IS_REDUCE(closer.user.usage))
+              {
+                // If we are a reduction, we can go straight there
+                it->valid_fields -= current_mask;
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else if (proj_info.projection->depth == 1)
+              {
+                // If we are also disjoint shallow we can stay in this mode
+                open_below |= (it->valid_fields & current_mask);
+                it++;
+              }
+              else
+              {
+                // Otherwise we need a close operation
+                close_abstract_tree(closer, current_mask, *it,
+                                    false/*read only close*/,
+                                    record_close_operations);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              break;
+            }
+          case OPEN_REDUCE_PROJ:
+            {
+              // Reduce projections of the same kind can always stay open
+              // otherwise we need a close operation
+              if (closer.user.usage.redop != it->redop)
+              {
+                // We need a close operation here
+                close_abstract_tree(closer, current_mask, *it,
+                                    false/*read only close*/,
+                                    record_close_operations);
+                if (!it->valid_fields)
+                  it = state.field_states.erase(it);
+                else
+                  it++;
+              }
+              else
+              {
+                open_below |= (it->valid_fields & current_mask);
+                it++;
+              }
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
+      FieldMask open_mask = current_mask - open_below;
+      if (!!open_mask)
+        new_states.push_back(FieldState(closer.user, open_mask, 
+              proj_info.projection, proj_info.projection_domain, 
+              are_all_children_disjoint()));
+      merge_new_field_states(state, new_states);
+#ifdef DEBUG_LEGION
+      sanity_check_logical_state(state);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::flush_logical_reductions(LogicalCloser &closer,
+                                                  CurrentState &state,
+                                              FieldMask &reduction_flush_fields,
+                                                  bool record_close_operations,
+                                                  const ColorPoint &next_child,
+                                   LegionDeque<FieldState>::aligned &new_states)
+    //--------------------------------------------------------------------------
+    {
+      // If we are doing a reduction too, check to see if they are 
+      // the same in which case we can skip these fields
+      if (closer.user.usage.redop > 0)
+      {
+        LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator finder =
+          state.outstanding_reductions.find(closer.user.usage.redop);
+        // Don't need to flush fields we are reducing to with the
+        // same operation
+        if (finder != state.outstanding_reductions.end())
+          reduction_flush_fields -= finder->second;
+      }
+      // See if we still have fields to close
+      if (!!reduction_flush_fields)
+      {
+        FieldMask flushed_fields;
+        // We need to flush these fields so issue close operations
+        for (std::list<FieldState>::iterator it = 
+              state.field_states.begin(); it != 
+              state.field_states.end(); /*nothing*/)
+        {
+          FieldMask overlap = it->valid_fields & reduction_flush_fields;
+          if (!overlap)
+          {
+            it++;
+            continue;
+          }
+          FieldMask closed_child_fields;
+          perform_close_operations(closer, overlap, *it,
+                                   next_child, false/*allow_next*/,
+                                   false/*needs upgrade*/,
+                                   false/*permit leave open*/,
+                                   false/*read only close*/,
+                                   record_close_operations,
+                                   true/*record closed fields*/,
+                                   new_states, closed_child_fields);
+          // We only really flushed fields that were actually closed
+          flushed_fields |= closed_child_fields;
+          if (!it->valid_fields)
+            it = state.field_states.erase(it);
+          else
+            it++;
+        }
+        // Check to see if we have any unflushed fields
+        // These are fields which still need a close operation
+        // to be performed but only to flush the reductions
+        FieldMask unflushed = reduction_flush_fields - flushed_fields;
+        if (!!unflushed)
+          closer.record_flush_only_fields(unflushed);
+        // Then we can mark that these fields no longer have 
+        // unflushed reductions
+        clear_logical_reduction_fields(state, reduction_flush_fields);
+      }
     }
 
     //--------------------------------------------------------------------------
