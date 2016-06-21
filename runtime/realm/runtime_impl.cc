@@ -867,7 +867,8 @@ namespace Realm {
 
       if(gasnet_mem_size_in_mb > 0)
 	// use an 'owner_node' of all 1's for this
-	global_memory = new GASNetMemory(ID::make_memory(-1U, 0).convert<Memory>(), gasnet_mem_size_in_mb << 20);
+        // SJT: actually, go back to an owner node of 0 and memory_idx of all 1's for now
+	global_memory = new GASNetMemory(ID::make_memory(0, -1U).convert<Memory>(), gasnet_mem_size_in_mb << 20);
       else
 	global_memory = 0;
 
@@ -1718,7 +1719,8 @@ namespace Realm {
     MemoryImpl *RuntimeImpl::get_memory_impl(ID id)
     {
       if(id.is_memory()) {
-	if(id.memory.owner_node > ID::MAX_NODE_ID)
+        // support old encoding for global memory too
+	if((id.memory.owner_node > ID::MAX_NODE_ID) || (id.memory.mem_idx == ((1U << 12) - 1)))
 	  return global_memory;
 	else
 	  return null_check(nodes[id.memory.owner_node].memories[id.memory.mem_idx]);
@@ -1734,7 +1736,8 @@ namespace Realm {
 #endif
 
       if(id.is_instance()) {
-	if(id.instance.owner_node > ID::MAX_NODE_ID)
+        // support old encoding for global memory too
+	if((id.instance.owner_node > ID::MAX_NODE_ID) || (id.instance.mem_idx == ((1U << 12) - 1)))
 	  return global_memory;
 	else
 	  return null_check(nodes[id.instance.owner_node].memories[id.instance.mem_idx]);

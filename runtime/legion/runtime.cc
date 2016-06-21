@@ -2384,8 +2384,8 @@ namespace Legion {
       if (is_owner && manager->is_reduction_manager() && 
           manager->try_active_deletion())
       {
-        // Add a reference to this instance before doing the next call 
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+        // We still hold a reference from earlier which is necessary
+        // before making the next call
         RtEvent deferred_delete = record_deleted_instance(manager);
         manager->perform_deletion(deferred_delete);
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -5453,7 +5453,13 @@ namespace Legion {
                         runtime->address_space, sender);
       AutoLock shut(shutdown_lock);
       if (!res)
+      {
         result = false;
+#ifdef DEBUG_SHTUDOWN_HANG
+        log_shutdown.info("Received shutdown failure from %d on %d", sender,
+                          runtime->address_space);
+#endif
+      }
       observed_responses++;
       return (observed_responses == managers.size());
     }
@@ -5464,6 +5470,9 @@ namespace Legion {
     {
       // Instant death
       result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+      log_shutdown.info("Outstanding tasks on node %d", runtime->address_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5472,6 +5481,10 @@ namespace Legion {
     {
       // Instant death
       result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+      log_shutdown.info("Outstanding profiling requests on node %d", 
+                        runtime->address_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5487,6 +5500,10 @@ namespace Legion {
           if (it->second->has_recent_messages())
           {
             result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+            log_shutdown.info("Recent messages from %d to %d",
+              it->second->remote_address_space, runtime->address_space);
+#endif
             break;
           }
         }
@@ -5494,6 +5511,17 @@ namespace Legion {
       // No need for the lock here
       if (source != runtime->address_space)
       {
+#ifdef DEBUG_SHUTDOWN_HANG
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
+#endif
         send_response();
       }
       else if (result)
