@@ -5453,7 +5453,13 @@ namespace Legion {
                         runtime->address_space, sender);
       AutoLock shut(shutdown_lock);
       if (!res)
+      {
         result = false;
+#ifdef DEBUG_SHTUDOWN_HANG
+        log_shutdown.info("Received shutdown failure from %d on %d", sender,
+                          runtime->address_space);
+#endif
+      }
       observed_responses++;
       return (observed_responses == managers.size());
     }
@@ -5464,6 +5470,9 @@ namespace Legion {
     {
       // Instant death
       result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+      log_shutdown.info("Outstanding tasks on node %d", runtime->address_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5472,6 +5481,10 @@ namespace Legion {
     {
       // Instant death
       result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+      log_shutdown.info("Outstanding profiling requests on node %d", 
+                        runtime->address_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
