@@ -751,7 +751,7 @@ class State(object):
         if self.unknowns:
             print "WARNING: Found %d unknown objects!" % len(self.unknowns)
             for did in self.unknowns.iterkeys():
-                print '  Unknown DID '+str(hex(did))
+                print '  Unknown DID '+str(hex(did[0]))+' on node '+str(did[1])
         # Now update all the pointers to references
         for man in self.managers.itervalues():
             man.update_nested_references(self)

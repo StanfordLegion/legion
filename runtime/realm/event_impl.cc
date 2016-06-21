@@ -1929,7 +1929,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  } else {
 	    g = new Generation;
 	    generations[barrier_gen] = g;
-	    log_barrier.info() << "added tracker for barrier " << me.id << ", generation " << barrier_gen;
+	    log_barrier.info() << "added tracker for barrier " << me << ", generation " << barrier_gen;
 	  }
 
 	  g->handle_adjustment(timestamp, delta);
@@ -2049,7 +2049,7 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       if(trigger_gen != 0) {
-	log_barrier.info() << "barrier trigger: event=" << me.id << "/" << trigger_gen;
+	log_barrier.info() << "barrier trigger: event=" << me << "/" << trigger_gen;
 
 	// notify local waiters first
 	Barrier b = make_barrier(trigger_gen);

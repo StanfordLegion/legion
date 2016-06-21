@@ -263,7 +263,8 @@ namespace Legion {
       }
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %ld %d %ld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, manager->did); 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          LEGION_DISTRIBUTED_ID_FILTER(manager->did)); 
 #endif
     }
 
@@ -5134,7 +5135,8 @@ namespace Legion {
       if (!is_owner())
         add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Reduction View %ld %d %ld", did, local_space,
+      log_garbage.info("GC Reduction View %ld %d %ld", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
     }
