@@ -5500,6 +5500,10 @@ namespace Legion {
           if (it->second->has_recent_messages())
           {
             result = false;
+#ifdef DEBUG_SHUTDOWN_HANG
+            log_shutdown.info("Recent messages from %d to %d",
+              it->second->remote_address_space, runtime->address_space);
+#endif
             break;
           }
         }
@@ -5507,6 +5511,17 @@ namespace Legion {
       // No need for the lock here
       if (source != runtime->address_space)
       {
+#ifdef DEBUG_SHUTDOWN_HANG
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
+#endif
         send_response();
       }
       else if (result)
