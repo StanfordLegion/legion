@@ -2854,6 +2854,7 @@ namespace LegionRuntime {
       assert(tgt_mem != Memory::NO_MEMORY);
       size_t ib_size = 16 * 1024 * 1024; /*size of ib (bytes)*/
       off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+      assert(ib_offset >= 0);
       std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
       off_t ib_elmnt_size = 0;
       for (unsigned i = 0; i < oasvec.size(); i++) {
