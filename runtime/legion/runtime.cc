@@ -2384,8 +2384,8 @@ namespace Legion {
       if (is_owner && manager->is_reduction_manager() && 
           manager->try_active_deletion())
       {
-        // Add a reference to this instance before doing the next call 
-        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+        // We still hold a reference from earlier which is necessary
+        // before making the next call
         RtEvent deferred_delete = record_deleted_instance(manager);
         manager->perform_deletion(deferred_delete);
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
