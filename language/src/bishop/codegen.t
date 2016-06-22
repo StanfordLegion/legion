@@ -742,6 +742,7 @@ function codegen.mapper(node)
     mapper_init = mapper_init,
     task_rules = task_rules,
     region_rules = region_rules,
+    automata = node.automata,
   }
 end
 

@@ -113,12 +113,14 @@ function std.register_bishop_mappers()
 
   local task_rules = terralib.newsymbol(c.bishop_task_rule_t[ #mapper.task_rules ])
   local region_rules = terralib.newsymbol(c.bishop_region_rule_t[ #mapper.region_rules ])
+  local transitions =
+    terralib.newsymbol(c.bishop_matching_state_transition_t[ #mapper.automata.trans ])
   local register_body = quote end
 
   for i = 1, #mapper.task_rules do
     local task_rule = mapper.task_rules[i]
     register_body = quote
-      [register_body];
+      [register_body]
       [task_rules][ [i - 1] ] = c.bishop_task_rule_t {
         matches =
           [c.bishop_task_predicate_t]([task_rule.matches]),
@@ -133,7 +135,7 @@ function std.register_bishop_mappers()
   for i = 1, #mapper.region_rules do
     local region_rule = mapper.region_rules[i]
     register_body = quote
-      [register_body];
+      [register_body]
       [region_rules][ [i - 1] ] = c.bishop_region_rule_t {
         pre_map_task =
           [c.bishop_region_callback_fn_t]([region_rule.pre_map_task]),
@@ -143,14 +145,29 @@ function std.register_bishop_mappers()
     end
   end
 
+  for i = 1, #mapper.automata.trans do
+    local trans = mapper.automata.trans[i]
+    register_body = quote
+      [register_body]
+      [transitions][ [i - 1] ] = c.bishop_matching_state_transition_t {
+        state = [ trans.src.id ],
+        next_state = [ trans.dst.id ],
+        task_id = [ trans.sym ],
+      }
+    end
+  end
+
   local terra register()
     var num_task_rules = [#mapper.task_rules]
     var num_region_rules = [#mapper.region_rules]
+    var num_transitions = [#mapper.automata.trans]
     var [task_rules]
     var [region_rules]
+    var [transitions]
     [register_body]
     c.register_bishop_mappers([task_rules], num_task_rules,
                               [region_rules], num_region_rules,
+                              [transitions], num_transitions,
                               [mapper.mapper_init])
   end
 

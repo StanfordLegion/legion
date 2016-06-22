@@ -19,6 +19,8 @@ local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
 local symbol_table = require("regent/symbol_table")
+local regent_std = require("regent/std")
+local automata = require("bishop/automata")
 
 local type_check = {}
 
@@ -474,10 +476,14 @@ function type_check.mapper(mapper)
     local local_type_env = type_env:new_local_scope()
     return type_check.region_rule(local_type_env, rule)
   end)
+
+  mapper.automata:update_rules(task_rules)
+
   return ast.typed.Mapper {
     assignments = assignments,
     task_rules = task_rules,
     region_rules = region_rules,
+    automata = mapper.automata,
     position = mapper.position,
   }
 end

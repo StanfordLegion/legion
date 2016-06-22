@@ -57,9 +57,9 @@ local language = {
 function language:statement(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
-    node = specialize.mapper(node)
-    node = type_check.mapper(node)
     return function()
+      node = specialize.mapper(node)
+      node = type_check.mapper(node)
       return codegen.mapper(node)
     end
   end

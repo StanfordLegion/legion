@@ -48,6 +48,7 @@ LegionRuntime::Logger::Category log_bishop("bishop");
 //------------------------------------------------------------------------------
 BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
                            const std::vector<bishop_region_rule_t>& rrules,
+                   const std::vector<bishop_matching_state_transition_t>& trans,
                            bishop_mapper_state_init_fn_t init_fn,
                            MapperRuntime* rt, Machine machine,
                            Processor local_proc)
@@ -57,6 +58,11 @@ BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
 //------------------------------------------------------------------------------
 {
   log_bishop.info("bishop mapper created");
+  for (unsigned idx = 0; idx < trans.size(); ++idx)
+  {
+    const bishop_matching_state_transition_t& t = trans[idx];
+    transitions[t.state][t.task_id] = t.next_state;
+  }
   mapper_init(&mapper_state);
 }
 
@@ -67,12 +73,27 @@ BishopMapper::~BishopMapper()
   log_bishop.info("bishop mapper destroyed");
 }
 
+struct TransMsg
+{
+  UniqueID uid;
+  bishop_matching_state_t state;
+};
+
 //------------------------------------------------------------------------------
 void BishopMapper::select_task_options(const MapperContext ctx,
                                        const Task&         task,
                                        TaskOptions&        output)
 //------------------------------------------------------------------------------
 {
+  bishop_matching_state_t prev_state = 0;
+  std::map<UniqueID, bishop_matching_state_t>::iterator finder =
+    states.find(task.parent_task->get_unique_id());
+  if (finder != states.end()) prev_state = finder->second;
+
+  assert(transitions.find(prev_state) != transitions.end());
+  bishop_transition_func_t& trans = transitions[prev_state];
+  bishop_matching_state_t curr_state = trans[task.task_id];
+
   DefaultMapper::select_task_options(ctx, task, output);
   legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
@@ -84,6 +105,11 @@ void BishopMapper::select_task_options(const MapperContext ctx,
       rule.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
   }
   output = CObjectWrapper::unwrap(options_);
+
+  TransMsg msg;
+  msg.uid = task.get_unique_id();
+  msg.state = curr_state;
+  runtime->send_message(ctx, output.initial_proc, &msg, sizeof(TransMsg));
 }
 
 //------------------------------------------------------------------------------
@@ -122,104 +148,14 @@ void BishopMapper::map_task(const MapperContext ctx,
   }
 }
 
-    ////--------------------------------------------------------------------------
-    //void BishopMapper::select_task_options(Task *task)
-    ////--------------------------------------------------------------------------
-    //{
-    //  DefaultMapper::select_task_options(task);
-    //  RUN_ALL_TASK_RULES(select_task_options);
-    //}
+void BishopMapper::handle_message(const MapperContext  ctx,
+                                  const MapperMessage& message)
+{
+  const TransMsg* msg = reinterpret_cast<const TransMsg*>(message.message);
+  assert(message.size == sizeof(TransMsg));
+  states[msg->uid] = msg->state;
+}
 
-    ////--------------------------------------------------------------------------
-    //void BishopMapper::slice_domain(const Task *task, const Domain &domain,
-    //    std::vector<DomainSplit> &slices)
-    ////--------------------------------------------------------------------------
-    //{
-    //  using namespace LegionRuntime::Arrays;
-    //  log_bishop.info("[slice_domain] task %s", task->variants->name);
-    //  DefaultMapper::slice_domain(task, domain, slices);
-    //  for (unsigned i = 0; i < task_rules.size(); ++i)
-    //  {
-    //    bishop_task_rule_t& rule = task_rules[i];
-    //    if (rule.select_target_for_point)
-    //    {
-    //      legion_task_t task_ = CObjectWrapper::wrap(const_cast<Task*>(task));
-    //      // TODO: only supports 1D indexspace launch at the moment
-    //      if (rule.matches(mapper_state, task_) && domain.get_dim() == 1)
-    //      {
-    //        bool success = true;
-    //        std::vector<DomainSplit> new_slices;
-    //        Arrays::Rect<1> r = domain.get_rect<1>();
-    //        for(Arrays::GenericPointInRectIterator<1> pir(r); pir; pir++)
-    //        {
-    //          legion_domain_point_t dp_ =
-    //            CObjectWrapper::wrap(DomainPoint::from_point<1>(pir.p));
-    //          Processor target =
-    //            CObjectWrapper::unwrap(
-    //                rule.select_target_for_point(mapper_state, task_, dp_));
-    //          success = success && target != Processor::NO_PROC;
-    //          Arrays::Rect<1> subrect(pir.p, pir.p);
-    //          Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,
-    //              false, false);
-    //          new_slices.push_back(ds);
-    //        }
-    //        if (success)
-    //        {
-    //          slices.clear();
-    //          slices = new_slices;
-    //        }
-    //        else
-    //        {
-    //          log_bishop.warning("[slice_domain] launch domain is not covered "
-    //              "entirely for task %s. mapping rule would not apply.",
-    //              task->variants->name);
-    //        }
-    //      }
-    //    }
-    //  }
-    //}
+}; // namespace Mapping
 
-    ////--------------------------------------------------------------------------
-    //bool BishopMapper::pre_map_task(Task *task)
-    ////--------------------------------------------------------------------------
-    //{
-    //  log_bishop.info("[pre_map_task] task %s", task->variants->name);
-    //  bool result = DefaultMapper::pre_map_task(task);
-    //  RUN_ALL_REGION_RULES(pre_map_task);
-    //  return result;
-    //}
-
-    ////--------------------------------------------------------------------------
-    //void BishopMapper::select_task_variant(Task *task)
-    ////--------------------------------------------------------------------------
-    //{
-    //  log_bishop.info("[select_task_variant] task %s", task->variants->name);
-    //  DefaultMapper::select_task_variant(task);
-    //  RUN_ALL_TASK_RULES(select_task_variant);
-    //}
-
-    ////--------------------------------------------------------------------------
-    //bool BishopMapper::map_task(Task *task)
-    ////--------------------------------------------------------------------------
-    //{
-    //  log_bishop.info("[map_task] task %s", task->variants->name);
-    //  bool result = DefaultMapper::map_task(task);
-    //  RUN_ALL_REGION_RULES(map_task);
-    //  return result;
-    //}
-
-    ////--------------------------------------------------------------------------
-    //void BishopMapper::notify_mapping_result(const Mappable *mappable)
-    ////--------------------------------------------------------------------------
-    //{
-    //  DefaultMapper::notify_mapping_result(mappable);
-    //}
-
-    ////--------------------------------------------------------------------------
-    //void BishopMapper::notify_mapping_failed(const Mappable *mappable)
-    ////--------------------------------------------------------------------------
-    //{
-    //  DefaultMapper::notify_mapping_failed(mappable);
-    //}
-  };
-};
+}; // namespace Legion

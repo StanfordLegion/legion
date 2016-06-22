@@ -18,6 +18,9 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
+local regent_std = require("regent/std")
+local automata = require("bishop/automata")
+local regex = require("bishop/regex")
 
 local function any(values)
   local tbl = {}
@@ -304,7 +307,7 @@ function specialize.selector(node)
   local elements = terralib.newlist()
   local constraints = terralib.newlist()
 
-  for i = #node.elements, 1, -1 do
+  for i = 1, #node.elements do
     local e, c = specialize.element(node.elements[i])
     elements:insert(e)
     constraints:insertall(c)
@@ -313,10 +316,10 @@ function specialize.selector(node)
   local type
   if elements[1]:is(ast.specialized.element.Task) then
     type = "task"
-    if #elements > 1 then
-      log.error(node,
-        "task selectors with multiple elements are not supported yet")
-    end
+    --if #elements > 1 then
+    --  log.error(node,
+    --    "task selectors with multiple elements are not supported yet")
+    --end
   else assert(elements[1]:is(ast.specialized.element.Region))
     type = "region"
     if not elements[2]:is(ast.specialized.element.Task) then
@@ -368,6 +371,7 @@ local function calculate_specificity(selector)
 end
 
 local function compare_rules(rule1, rule2)
+  if rule1 == rule2 then return false end
   assert(rule2:is(rule1.node_type))
   local specificity1 = calculate_specificity(rule1.selector)
   local specificity2 = calculate_specificity(rule2.selector)
@@ -386,6 +390,15 @@ function specialize.assignment(node)
 end
 
 function specialize.mapper(node)
+  local task_mapping = {}
+  local task_inv_mapping = {}
+  for k, v in pairs(_G) do
+    if regent_std.is_task(v) then
+      task_mapping[k] = v.taskid:asvalue()
+      task_inv_mapping[task_mapping[k]] = k
+    end
+  end
+
   local flattened = terralib.newlist()
   node.rules:map(function(rule)
     rule.selectors:map(function(selector)
@@ -406,7 +419,20 @@ function specialize.mapper(node)
   end)
 
   table.sort(task_rules, compare_rules)
+  --task_rules:map(function(task_rule) print(task_rule.selector:unparse()) end)
   table.sort(region_rules, compare_rules)
+
+  local dfas =
+    task_rules:map(function(task_rule)
+      local r = regex.from_selector(task_mapping, task_rule.selector)
+      return automata.dfa_from_regex(r)
+    end)
+
+  local dfa = automata.product(dfas, task_rules)
+  dfa:renumber()
+  dfa:cache_transitions()
+  dfa:verify_rules()
+  --dfa:dot(task_inv_mapping)
 
   local assignments = node.assignments:map(specialize.assignment)
 
@@ -414,6 +440,7 @@ function specialize.mapper(node)
     task_rules = task_rules,
     region_rules = region_rules,
     assignments = assignments,
+    automata = dfa,
     position = node.position,
   }
 end

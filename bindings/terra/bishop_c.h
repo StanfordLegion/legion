@@ -102,10 +102,22 @@ typedef struct bishop_region_rule_t {
 
 typedef legion_isa_kind_t bishop_isa_t;
 
+typedef int bishop_matching_state_t;
+
+typedef legion_lowlevel_task_func_id_t bishop_matching_symbol_t;
+
+typedef struct bishop_matching_state_transition_t {
+  bishop_matching_state_t state;
+  bishop_matching_symbol_t task_id;
+  bishop_matching_state_t next_state;
+} bishop_matching_state_transition_t;
+
 void
 register_bishop_mappers(bishop_task_rule_t*,
                         unsigned,
                         bishop_region_rule_t*,
+                        unsigned,
+                        bishop_matching_state_transition_t*,
                         unsigned,
                         bishop_mapper_state_init_fn_t);
 

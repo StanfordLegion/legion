@@ -387,7 +387,7 @@ end
 
 ast:inner("specialized", { "position" })
 
-ast.specialized:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
+ast.specialized:leaf("Mapper", { "task_rules", "region_rules", "assignments", "automata" })
 
 ast.specialized:inner("rule", { "selector", "properties" })
 ast.specialized.rule:leaf("Task", {})
@@ -480,7 +480,7 @@ ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
 
 ast:inner("typed", { "position" })
 
-ast.typed:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
+ast.typed:leaf("Mapper", { "task_rules", "region_rules", "assignments", "automata" })
 ast.typed:inner("rule", { "selector", "properties" })
 ast.typed.rule:leaf("Task", {})
 ast.typed.rule:leaf("Region", {})
