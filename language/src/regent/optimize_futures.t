@@ -229,6 +229,12 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Fill) then
     return nil
 
+  elseif node:is(ast.typed.expr.Acquire) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Release) then
+    return nil
+
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return nil
 
@@ -857,6 +863,30 @@ function optimize_futures.expr_fill(cx, node)
   }
 end
 
+function optimize_futures.expr_acquire(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local conditions = node.conditions:map(
+    function(condition)
+      return concretize(optimize_futures.expr_condition(cx, condition))
+    end)
+  return node {
+    region = region,
+    conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_release(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local conditions = node.conditions:map(
+    function(condition)
+      return concretize(optimize_futures.expr_condition(cx, condition))
+    end)
+  return node {
+    region = region,
+    conditions = conditions,
+  }
+end
+
 function optimize_futures.expr_allocate_scratch_fields(cx, node)
   local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node {
@@ -1046,6 +1076,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Fill) then
     return optimize_futures.expr_fill(cx, node)
+
+  elseif node:is(ast.typed.expr.Acquire) then
+    return optimize_futures.expr_acquire(cx, node)
+
+  elseif node:is(ast.typed.expr.Release) then
+    return optimize_futures.expr_release(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return optimize_futures.expr_allocate_scratch_fields(cx, node)

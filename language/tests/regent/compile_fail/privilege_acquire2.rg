@@ -13,13 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_fill1.rg:24: invalid privileges in fill: writes($r)
---   fill(r, 0)
---      ^
+-- privilege_acquire2.rg:24: invalid privileges in acquire: reads($r)
+--   acquire(r)
+--         ^
 
 import "regent"
 
 task k(r : region(int))
-where reads(r) do
-  fill(r, 0)
+where writes(r) do
+  acquire(r)
 end

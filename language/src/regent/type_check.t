@@ -2103,56 +2103,56 @@ function type_check.expr_copy(cx, node)
 
   for _, field_path in ipairs(src.fields) do
     if not std.check_privilege(cx, std.reads, src_type, field_path) then
-      local src_region
+      local src_symbol
       if node.src.region:is(ast.specialized.expr.ID) then
-        src_region = node.src.region.value
+        src_symbol = node.src.region.value
       else
-        src_region = terralib.newsymbol()
+        src_symbol = std.newsymbol()
       end
       log.error(
         node, "invalid privileges in copy: " .. tostring(std.reads) .. "(" ..
-          (data.newtuple(src_region) .. field_path):mkstring(".") .. ")")
+          (data.newtuple(src_symbol) .. field_path):mkstring(".") .. ")")
     end
   end
   for _, field_path in ipairs(dst.fields) do
     if node.op then
       if not std.check_privilege(cx, std.reduces(node.op), dst_type, field_path)
       then
-        local dst_region
+        local dst_symbol
         if node.dst.region:is(ast.specialized.expr.ID) then
-          dst_region = node.dst.region.value
+          dst_symbol = node.dst.region.value
         else
-          dst_region = terralib.newsymbol()
+          dst_symbol = std.newsymbol()
         end
         log.error(
           node,
           "invalid privileges in copy: " .. tostring(std.reduces(node.op)) ..
-            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") ..
             ")")
       end
     else
       if not std.check_privilege(cx, std.reads, dst_type, field_path) then
-        local dst_region
+        local dst_symbol
         if node.dst.region:is(ast.specialized.expr.ID) then
-          dst_region = node.dst.region.value
+          dst_symbol = node.dst.region.value
         else
-          dst_region = terralib.newsymbol()
+          dst_symbol = std.newsymbol()
         end
         log.error(
           node, "invalid privileges in copy: " .. tostring(std.reads) ..
-            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") ..
             ")")
       end
       if not std.check_privilege(cx, std.writes, dst_type, field_path) then
-        local dst_region
+        local dst_symbol
         if node.dst.region:is(ast.specialized.expr.ID) then
-          dst_region = node.dst.region.value
+          dst_symbol = node.dst.region.value
         else
-          dst_region = terralib.newsymbol()
+          dst_symbol = std.newsymbol()
         end
         log.error(
           node, "invalid privileges in copy: " .. tostring(std.writes) ..
-            "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") ..
+            "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") ..
             ")")
       end
     end
@@ -2190,32 +2190,118 @@ function type_check.expr_fill(cx, node)
 
   for _, field_path in ipairs(dst.fields) do
     if not std.check_privilege(cx, std.reads, dst_type, field_path) then
-      local dst_region
+      local dst_symbol
       if node.dst.region:is(ast.specialized.expr.ID) then
-        dst_region = node.dst.region.value
+        dst_symbol = node.dst.region.value
       else
-        dst_region = terralib.newsymbol()
+        dst_symbol = sdt.newsymbol()
       end
       log.error(
-        node, "invalid privileges in copy: " .. tostring(std.reads) ..
-          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+        node, "invalid privileges in fill: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") .. ")")
     end
     if not std.check_privilege(cx, std.writes, dst_type, field_path) then
-      local dst_region
+      local dst_symbol
       if node.dst.region:is(ast.specialized.expr.ID) then
-        dst_region = node.dst.region.value
+        dst_symbol = node.dst.region.value
       else
-        dst_region = terralib.newsymbol()
+        dst_symbol = std.newsymbol()
       end
       log.error(
-        node, "invalid privileges in copy: " .. tostring(std.writes) ..
-          "(" .. (data.newtuple(dst_region) .. field_path):mkstring(".") .. ")")
+        node, "invalid privileges in fill: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") .. ")")
     end
   end
 
   return ast.typed.expr.Fill {
     dst = dst,
     value = value,
+    conditions = conditions,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_acquire(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
+  local expr_type = terralib.types.unit
+
+  for _, field_path in ipairs(region.fields) do
+    if not std.check_privilege(cx, std.reads, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in acquire: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in acquire: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.Acquire {
+    region = region,
+    conditions = conditions,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_release(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
+  local expr_type = terralib.types.unit
+
+  for _, field_path in ipairs(region.fields) do
+    if not std.check_privilege(cx, std.reads, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in release: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      log.error(
+        node, "invalid privileges in release: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.Release {
+    region = region,
     conditions = conditions,
     expr_type = expr_type,
     options = node.options,
@@ -2558,6 +2644,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Fill) then
     return type_check.expr_fill(cx, node)
+
+  elseif node:is(ast.specialized.expr.Acquire) then
+    return type_check.expr_acquire(cx, node)
+
+  elseif node:is(ast.specialized.expr.Release) then
+    return type_check.expr_release(cx, node)
 
   elseif node:is(ast.specialized.expr.AllocateScratchFields) then
     return type_check.expr_allocate_scratch_fields(cx, node)

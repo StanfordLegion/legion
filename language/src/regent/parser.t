@@ -981,6 +981,40 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("acquire") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Acquire {
+      region = region,
+      conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("release") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Release {
+      region = region,
+      conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("allocate_scratch_fields") then
     p:expect("(")
     local region = p:expr_region_root()
