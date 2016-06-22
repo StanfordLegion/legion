@@ -4948,7 +4948,7 @@ class Operation(object):
         prefix = ''
         for idx in range(depth):
             prefix += '  '
-        print prefix+"Performing physical dependence analysis for %s..." % str(self)
+        print prefix+"Performing physical dependence analysis for %s (UID %d)..." % (str(self),self.uid)
         # If this is a close operation itself do the close analysis
         if self.is_close():
             return self.perform_physical_close_analysis(depth, perform_checks)
