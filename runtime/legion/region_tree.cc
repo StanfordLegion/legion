@@ -1479,6 +1479,7 @@ namespace Legion {
                                                   RegionRequirement &req,
                                                   VersionInfo &version_info,
                                                   RestrictInfo &restrict_info,
+                                                ProjectionInfo &projection_info,
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
@@ -1503,7 +1504,6 @@ namespace Legion {
         restrict_info.set_check();
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
-      ProjectionInfo projection_info(op, req);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1515,9 +1515,9 @@ namespace Legion {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_user(ctx.get_id(), user, path, version_info,
-                                         restrict_info, trace_info, 
-                                         projection_info,
+      parent_node->register_logical_user(ctx.get_id(), user, path, 
+                                         version_info, restrict_info, 
+                                         trace_info, projection_info,
                                          true/*report uninitialized*/);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
@@ -10995,7 +10995,7 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->dominates(proj_info.projection_domain))
+                  it->projection_domain_dominates(proj_info.projection_domain))
               {
                 // Update the domain  
                 it->projection_domain = proj_info.projection_domain;

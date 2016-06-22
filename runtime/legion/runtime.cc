@@ -6949,6 +6949,52 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Identity Projection Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IdentityProjectionFunctor::IdentityProjectionFunctor(Legion::Runtime *rt)
+      : ProjectionFunctor(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IdentityProjectionFunctor::~IdentityProjectionFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task,
+            unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      if (point.get_dim() > 3)
+      {
+        log_task.error("Projection ID 0 is invalid for tasks whose "
+                       "points are larger than three dimensional "
+                       "unsigned integers.  Points for task %s "
+                       "have elements of %d dimensions",
+                        task->get_task_name(), point.get_dim());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
+      }
+      return upper_bound;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task, 
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_color(
+                            task->regions[index].partition, point);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Projection Function 
     /////////////////////////////////////////////////////////////
 
@@ -7723,6 +7769,8 @@ namespace Legion {
         it->second->set_runtime(external);
         register_projection_functor(it->first, it->second);
       }
+      register_projection_functor(0, 
+          new IdentityProjectionFunctor(this->external), false/*need check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13189,10 +13237,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
-                                              ProjectionFunctor *functor)
+                                              ProjectionFunctor *functor,
+                                              bool need_zero_check)
     //--------------------------------------------------------------------------
     {
-      if (pid == 0)
+      if (need_zero_check && (pid == 0))
       {
         log_run.error("ERROR: ProjectionID zero is reserved.\n");
 #ifdef DEBUG_HIGH_LEVEl
@@ -18429,6 +18478,8 @@ namespace Legion {
           return "Physical State";
         case VERSION_STATE_ALLOC:
           return "Version State";
+        case AGGREGATE_VERSION_ALLOC:
+          return "Aggregate Version";
         case TASK_IMPL_ALLOC:
           return "Task Implementation";
         case VARIANT_IMPL_ALLOC:

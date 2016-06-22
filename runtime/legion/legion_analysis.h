@@ -192,8 +192,8 @@ namespace Legion {
       void unpack_node_version_numbers(RegionTreeNode *node, 
                                        Deserializer &derez);
     protected:
-      LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
       RegionTreeNode *upper_bound_node;
+      LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
     protected:
       bool packed;
       void *packed_buffer;
@@ -285,12 +285,15 @@ namespace Legion {
      */
     struct ProjectionInfo {
     public:
-      ProjectionInfo(Operation *op, const RegionRequirement &req);
+      ProjectionInfo(void)
+        : projection(NULL), projection_domain(Domain::NO_DOMAIN) { }
+      ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
+                     const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
     public:
       ProjectionFunction *const projection;
-      const Domain &projection_domain;
+      const Domain projection_domain;
     };
 
     /**
@@ -387,10 +390,10 @@ namespace Legion {
       bool overlaps(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
+      bool projection_domain_dominates(const Domain &next_domain) const;
+    public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask) const;
-    public:
-      bool dominates(const Domain &next_domain) const;
     public:
       OpenState open_state;
       ReductionOpID redop;
@@ -400,9 +403,33 @@ namespace Legion {
     }; 
 
     /**
+     * \struct VersionNumbers 
+     * A small helper class for tracking collections of 
+     * version number objects and their sets of fields
+     */
+    struct VersionNumbers {
+    public:
+      VersionNumbers(void)
+        : single(true) { versions.single_version = NULL; }
+#ifdef DEBUG_LEGION
+      ~VersionNumbers(void)
+      { if (!single) assert(versions.multi_versions == NULL); }
+#endif
+    public:
+      FieldMask valid_fields;
+      union {
+        VersionNumber *single_version;
+        LegionMap<VersionNumber*,FieldMask>::aligned *multi_versions;
+      } versions;
+      bool single;
+    };
+
+    /**
      * \struct VersionStateInfo
      * A small helper class for tracking collections of 
      * version state objects and their sets of fields
+     * This is the same as the above class, but specialized
+     * for VersionState objects explicitly
      */
     struct VersionStateInfo {
     public:
@@ -480,8 +507,8 @@ namespace Legion {
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
     public:
-      LegionMap<VersionID,VersionStateInfo>::aligned current_version_infos;
-      LegionMap<VersionID,VersionStateInfo>::aligned previous_version_infos;
+      LegionMap<VersionID,VersionNumbers>::aligned current_version_infos;
+      LegionMap<VersionID,VersionNumbers>::aligned previous_version_infos;
     public:
       // Fields for which we have outstanding local reductions
       FieldMask outstanding_reduction_fields;
@@ -713,12 +740,32 @@ namespace Legion {
     };
 
     /**
+     * \class VersionNumber 
+     * This is a class which is the base class for two different
+     * kinds of version state objects: either normal VersionState
+     * objects or AggregateVersion State objects. Importantly, 
+     * this class provides a virtual method for getting access
+     * to the actual VersionState object for a given region.
+     */
+    class VersionNumber : public DistributedCollectable {
+    public:
+      VersionNumber(VersionID version_number, Runtime *rt, 
+                    DistributedID did, AddressSpaceID owner_space, 
+                    AddressSpaceID local_space, bool register_now);
+      virtual ~VersionNumber(void);
+    public:
+      virtual VersionState* get_version_state(RegionTreeNode *node) = 0;
+    public:
+      const VersionID version_number;
+    };
+
+    /**
      * \class VersionState
      * This class tracks the physical state information
      * for a particular version number from the persepective
      * of a given logical region.
      */
-    class VersionState : public DistributedCollectable {
+    class VersionState : public VersionNumber {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
@@ -803,6 +850,8 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
+      virtual VersionState* get_version_state(RegionTreeNode *node);
+    public:
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);
       void request_final_version_state(const FieldMask &request_mask,
@@ -853,7 +902,6 @@ namespace Legion {
                                     RtEvent done_event);
       static void process_remove_version_state_ref(const void *args);
     public:
-      const VersionID version_number;
       RegionTreeNode *const logical_node;
     protected:
       Reservation state_lock;
@@ -888,6 +936,28 @@ namespace Legion {
       LegionMap<AddressSpaceID,FieldMask>::aligned path_only_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned final_nodes;
+    };
+
+    /**
+     * \class AggregateVersion
+     * This class is used for representing a bunch of different
+     * version state objects at a specific level of the region tree
+     */
+    class AggregateVersion : public VersionNumber {
+    public:
+      static const AllocationType alloc_type = AGGREGATE_VERSION_ALLOC;
+    public:
+      AggregateVersion(VersionID vid, unsigned depth, Runtime *rt, 
+                       DistributedID did, AddressSpaceID owner_space, 
+                       AddressSpaceID local_space, bool register_now);
+      AggregateVersion(const AggregateVersion &rhs);
+      virtual ~AggregateVersion(void);
+    public:
+      AggregateVersion& operator=(const AggregateVersion &rhs);
+    public:
+      virtual VersionState* get_version_state(RegionTreeNode *node);
+    public:
+      const unsigned depth;
     };
 
     /**

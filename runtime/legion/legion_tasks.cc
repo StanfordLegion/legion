@@ -1877,7 +1877,7 @@ namespace Legion {
       // Update the region requirements for this point
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (regions[idx].handle_type == PART_PROJECTION)
+        if (regions[idx].handle_type != SINGULAR)
         {
           if (mp != NULL)
           {
@@ -1886,56 +1886,12 @@ namespace Legion {
           }
           else
           {
-            // Check to see if we're doing default projection
-            if (regions[idx].projection == 0)
-            {
-              if (index_point.get_dim() > 3)
-              {
-                log_task.error("Projection ID 0 is invalid for tasks whose "
-                               "points are larger than three dimensional "
-                               "unsigned integers.  Points for task %s "
-                               "have elements of %d dimensions",
-                                get_task_name(), index_point.get_dim());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
-              }
-              regions[idx].region = 
-                runtime->forest->get_logical_subregion_by_color(
-                    regions[idx].partition, ColorPoint(index_point));
-            }
-            else
-            {
-              ProjectionFunction *function = 
-                runtime->find_projection_function(regions[idx].projection);
-              regions[idx].region = 
-                function->project_point(this, idx, index_point);
-            }
+            ProjectionFunction *function = 
+              runtime->find_projection_function(regions[idx].projection);
+            regions[idx].region = 
+              function->project_point(this, idx, index_point);
           }
           // Update the region requirement kind 
-          regions[idx].handle_type = SINGULAR;
-        }
-        else if (regions[idx].handle_type == REG_PROJECTION)
-        {
-          if (mp != NULL)
-          {
-            // If the minimal point is not null then it should have it
-            regions[idx].region = mp->find_logical_region(idx);
-          }
-          else
-          {
-            if (regions[idx].projection != 0)
-            {
-              ProjectionFunction *function = 
-                runtime->find_projection_function(regions[idx].projection);
-              regions[idx].region = 
-                function->project_point(this, idx, index_point);
-            }
-          }
-          // Otherwise we are the default case in which 
-          // case we don't need to do anything
-          // Update the region requirement kind
           regions[idx].handle_type = SINGULAR;
         }
         // Always check to see if there are any restrictions
@@ -7969,11 +7925,13 @@ namespace Legion {
       register_predicate_dependence();
       version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
+      ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      version_infos[idx],
                                                      restrict_infos[idx],
+                                                     projection_info,
                                                      privilege_paths[idx]);
       }
       // See if we have any requirements that interferred with a close
@@ -7997,6 +7955,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        version_info,
                                                        restrict_infos[*it],
+                                                       projection_info,
                                                        privilege_paths[*it]);
           // If we still have re-run requirements, then we have
           // interfering region requirements so warn the user
@@ -10579,9 +10538,11 @@ namespace Legion {
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        ProjectionInfo projection_info(runtime, regions[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      version_infos[idx],
                                                      restrict_infos[idx],
+                                                     projection_info,
                                                      privilege_paths[idx]);
       }
       // See if we have any requirements that interferred with a close
@@ -10602,9 +10563,11 @@ namespace Legion {
           VersionInfo &version_info = version_infos[*it];
           version_info.release();
           version_info.clear();
+          ProjectionInfo projection_info(runtime, regions[*it], index_domain);
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        version_info,
                                                        restrict_infos[*it],
+                                                       projection_info,
                                                        privilege_paths[*it]);
           // If we still have re-run requirements, then we have
           // interfering region requirements so warn the user
@@ -12101,59 +12064,11 @@ namespace Legion {
       {
         if (regions[idx].handle_type == SINGULAR)
           continue;
-        else if (regions[idx].handle_type == PART_PROJECTION)
+        else 
         {
-          // Check to see if we're doing default projection
-          if (regions[idx].projection == 0)
-          {
-            for (std::vector<MinimalPoint>::iterator it = 
-                  minimal_points.begin(); it != minimal_points.end(); it++)
-            {
-              const DomainPoint &point = it->get_domain_point();
-              if (point.get_dim() > 3)
-              {
-                log_task.error("Projection ID 0 is invalid for tasks whose "
-                               "points are larger than three dimensional "
-                               "unsigned integers.  Points for task %s "
-                               "have elements of %d dimensions",
-                               get_task_name(), point.get_dim());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
-              }
-              it->add_projection_region(idx, 
-                  runtime->forest->get_logical_subregion_by_color(
-                    regions[idx].partition, ColorPoint(point)));
-            }
-          }
-          else
-          {
-            ProjectionFunction *function = 
-              runtime->find_projection_function(regions[idx].projection);
-            function->project_points(this, idx, minimal_points);
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(regions[idx].handle_type == REG_PROJECTION);
-#endif
-          if (regions[idx].projection != 0)
-          {
-            ProjectionFunction *function = 
-              runtime->find_projection_function(regions[idx].projection);
-            function->project_points(this, idx, minimal_points);
-          }
-          else
-          {
-            // Otherwise we are the default case in which 
-            // case we don't need to do anything
-            // Update the region requirement kind
-            // to be singular since all points will use 
-            // the same logical region
-            regions[idx].handle_type = SINGULAR;
-          }
+          ProjectionFunction *function = 
+            runtime->find_projection_function(regions[idx].projection);
+          function->project_points(this, idx, minimal_points);
         }
       }
     }

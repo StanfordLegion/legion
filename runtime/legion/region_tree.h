@@ -240,6 +240,7 @@ namespace Legion {
                                        RegionRequirement &req,
                                        VersionInfo &version_info,
                                        RestrictInfo &restrict_info,
+                                       ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_reduction_close_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,

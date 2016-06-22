@@ -1821,10 +1821,12 @@ namespace Legion {
       compute_parent_index();  
       begin_dependence_analysis();
       RestrictInfo restrict_info;
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       end_dependence_analysis();
     }
@@ -2882,6 +2884,7 @@ namespace Legion {
       begin_dependence_analysis();
       // Register a dependence on our predicate
       register_predicate_dependence();
+      ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         RestrictInfo restrict_info;
@@ -2889,6 +2892,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_versions[idx],
                                                      restrict_info,
+                                                     projection_info,
                                                      src_privilege_paths[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2904,6 +2908,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      restrict_info,
+                                                     projection_info,
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -5271,15 +5276,21 @@ namespace Legion {
       begin_dependence_analysis();
       // Handle a special case that involves closing to a reduction instance
       if (requirement.privilege == REDUCE)
+      {
         runtime->forest->perform_reduction_close_analysis(this, 0/*idx*/,
                                                           requirement,
                                                           version_info);
+      }
       else
+      {
+        ProjectionInfo projection_info;
         runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                      requirement,
                                                      version_info,
                                                      restrict_info,
+                                                     projection_info,
                                                      privilege_path);
+      }
       end_dependence_analysis();
     }
 
@@ -5489,10 +5500,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       begin_dependence_analysis();
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       end_dependence_analysis();
     }
@@ -5757,10 +5770,12 @@ namespace Legion {
       register_predicate_dependence();
       // First register any mapping dependences that we have
       RestrictInfo restrict_info;
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       // Now tell the forest that we have user-level coherence
       RegionTreeContext ctx = 
@@ -6331,10 +6346,12 @@ namespace Legion {
       register_predicate_dependence();
       // First register any mapping dependences that we have
       RestrictInfo restrict_info;
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       // Now tell the forest that we are relinquishing user-level coherence
       RegionTreeContext ctx = 
@@ -9053,10 +9070,12 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       begin_dependence_analysis();
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       end_dependence_analysis();
     }
@@ -9536,10 +9555,12 @@ namespace Legion {
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       end_dependence_analysis();
     }
@@ -10136,10 +10157,12 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       begin_dependence_analysis();
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info, 
+                                                   projection_info,
                                                    privilege_path);
       // If we have any restriction on ourselves, that is very bad
       if (restrict_info.has_restrictions())
@@ -10527,10 +10550,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       runtime->forest->acquire_user_coherence(ctx, requirement.region,
                                               requirement.privilege_fields);
+      ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    version_info,
                                                    restrict_info,
+                                                   projection_info,
                                                    privilege_path);
       end_dependence_analysis();
     }

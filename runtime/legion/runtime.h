@@ -1208,6 +1208,25 @@ namespace Legion {
     };
 
     /**
+     * Identity Projection Functor
+     * A class that implements the identity projection function
+     */
+    class IdentityProjectionFunctor : public ProjectionFunctor {
+    public:
+      IdentityProjectionFunctor(Legion::Runtime *rt);
+      virtual ~IdentityProjectionFunctor(void);
+    public:
+      virtual LogicalRegion project(Context ctx, Task *task,
+                                    unsigned index,
+                                    LogicalRegion upper_bound,
+                                    const DomainPoint &point);
+      virtual LogicalRegion project(Context ctx, Task *task, 
+                                    unsigned index,
+                                    LogicalPartition upper_bound,
+                                    const DomainPoint &point);
+    };
+
+    /**
      * \class ProjectionFunction
      * A class for wrapping projection functors
      */
@@ -1775,7 +1794,8 @@ namespace Legion {
                                         MapperID map_id, Processor proc);
     public:
       void register_projection_functor(ProjectionID pid,
-                                       ProjectionFunctor *func);
+                                       ProjectionFunctor *func,
+                                       bool need_zero_check = true);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);

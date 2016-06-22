@@ -1136,7 +1136,9 @@ namespace Legion {
 
     class CurrentState;
     class PhysicalState;
+    class VersionNumber;
     class VersionState;
+    class AggregateVersion;
     class VersionInfo;
     class RestrictInfo;
 
