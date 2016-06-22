@@ -194,6 +194,7 @@ def get_test_specs(include_spy):
     spy = [
         ('spy', (test_spy, (['-fflow', '1'], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
          )),
     ]
