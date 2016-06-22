@@ -1228,7 +1228,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->get_bytes(index, dp, fid, dst, bytes);
         return;
@@ -1294,7 +1294,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->put_bytes(index, dp, fid, src, bytes);
         return;
