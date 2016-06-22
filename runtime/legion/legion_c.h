@@ -62,6 +62,8 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
   NEW_OPAQUE_TYPE(legion_copy_launcher_t);
+  NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
+  NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
   NEW_OPAQUE_TYPE(legion_accessor_generic_t);
@@ -2320,7 +2322,7 @@ typedef long long int coord_t;
     bool verified /* = false*/);
 
   /**
-   * @see Legion::CopyLauncher::add_field()
+   * @see Legion::CopyLauncher::add_src_field()
    */
   void
   legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher,
@@ -2329,7 +2331,7 @@ typedef long long int coord_t;
                                      bool inst /* = true */);
 
   /**
-   * @see Legion::CopyLauncher::add_field()
+   * @see Legion::CopyLauncher::add_dst_field()
    */
   void
   legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher,
@@ -2350,6 +2352,122 @@ typedef long long int coord_t;
   void
   legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
                                            legion_phase_barrier_t bar);
+
+  // -----------------------------------------------------------------------
+  // Acquire Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::AcquireLauncher::AcquireLauncher()
+   */
+  legion_acquire_launcher_t
+  legion_acquire_launcher_create(
+    legion_logical_region_t logical_region,
+    legion_logical_region_t parent_region,
+    legion_physical_region_t physical_region,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::AcquireLauncher::~AcquireLauncher()
+   */
+  void
+  legion_acquire_launcher_destroy(legion_acquire_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::issue_acquire()
+   */
+  void
+  legion_acquire_launcher_execute(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_acquire_launcher_t launcher);
+
+  /**
+   * @see Legion::AcquireLauncher::add_field()
+   */
+  void
+  legion_acquire_launcher_add_field(legion_acquire_launcher_t launcher,
+                                    legion_field_id_t fid);
+
+  /**
+   * @see Legion::AcquireLauncher::add_wait_barrier()
+   */
+  void
+  legion_acquire_launcher_add_wait_barrier(legion_acquire_launcher_t launcher,
+                                           legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::AcquireLauncher::add_arrival_barrier()
+   */
+  void
+  legion_acquire_launcher_add_arrival_barrier(
+    legion_acquire_launcher_t launcher,
+    legion_phase_barrier_t bar);
+
+  // -----------------------------------------------------------------------
+  // Release Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::ReleaseLauncher::ReleaseLauncher()
+   */
+  legion_release_launcher_t
+  legion_release_launcher_create(
+    legion_logical_region_t logical_region,
+    legion_logical_region_t parent_region,
+    legion_physical_region_t physical_region,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t tag /* = 0 */);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::ReleaseLauncher::~ReleaseLauncher()
+   */
+  void
+  legion_release_launcher_destroy(legion_release_launcher_t handle);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::issue_release()
+   */
+  void
+  legion_release_launcher_execute(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_release_launcher_t launcher);
+
+  /**
+   * @see Legion::ReleaseLauncher::add_field()
+   */
+  void
+  legion_release_launcher_add_field(legion_release_launcher_t launcher,
+                                    legion_field_id_t fid);
+
+  /**
+   * @see Legion::ReleaseLauncher::add_wait_barrier()
+   */
+  void
+  legion_release_launcher_add_wait_barrier(legion_release_launcher_t launcher,
+                                           legion_phase_barrier_t bar);
+
+  /**
+   * @see Legion::ReleaseLauncher::add_arrival_barrier()
+   */
+  void
+  legion_release_launcher_add_arrival_barrier(
+    legion_release_launcher_t launcher,
+    legion_phase_barrier_t bar);
 
   // -----------------------------------------------------------------------
   // Must Epoch Operations

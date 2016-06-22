@@ -3355,6 +3355,154 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
 }
 
 // -----------------------------------------------------------------------
+// Acquire Operations
+// -----------------------------------------------------------------------
+
+legion_acquire_launcher_t
+legion_acquire_launcher_create(
+  legion_logical_region_t logical_region_,
+  legion_logical_region_t parent_region_,
+  legion_physical_region_t physical_region_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
+{
+  LogicalRegion logical_region = CObjectWrapper::unwrap(logical_region_);
+  LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
+  PhysicalRegion *physical_region = CObjectWrapper::unwrap(physical_region_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  AcquireLauncher *launcher =
+    new AcquireLauncher(logical_region, parent_region, *physical_region,
+                        *pred, id, tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_acquire_launcher_destroy(legion_acquire_launcher_t handle_)
+{
+  AcquireLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_acquire_launcher_execute(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_acquire_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  AcquireLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->issue_acquire(ctx, *launcher);
+}
+
+void
+legion_acquire_launcher_add_field(legion_acquire_launcher_t launcher_,
+                                  legion_field_id_t fid)
+{
+  AcquireLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_acquire_launcher_add_wait_barrier(legion_acquire_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  AcquireLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(bar);
+}
+
+void
+legion_acquire_launcher_add_arrival_barrier(
+  legion_acquire_launcher_t launcher_,
+  legion_phase_barrier_t bar_)
+{
+  AcquireLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(bar);
+}
+
+// -----------------------------------------------------------------------
+// Release Operations
+// -----------------------------------------------------------------------
+
+legion_release_launcher_t
+legion_release_launcher_create(
+  legion_logical_region_t logical_region_,
+  legion_logical_region_t parent_region_,
+  legion_physical_region_t physical_region_,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t tag /* = 0 */)
+{
+  LogicalRegion logical_region = CObjectWrapper::unwrap(logical_region_);
+  LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
+  PhysicalRegion *physical_region = CObjectWrapper::unwrap(physical_region_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  ReleaseLauncher *launcher =
+    new ReleaseLauncher(logical_region, parent_region, *physical_region,
+                        *pred, id, tag);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_release_launcher_destroy(legion_release_launcher_t handle_)
+{
+  ReleaseLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_release_launcher_execute(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_release_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  ReleaseLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->issue_release(ctx, *launcher);
+}
+
+void
+legion_release_launcher_add_field(legion_release_launcher_t launcher_,
+                                  legion_field_id_t fid)
+{
+  ReleaseLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_release_launcher_add_wait_barrier(legion_release_launcher_t launcher_,
+                                         legion_phase_barrier_t bar_)
+{
+  ReleaseLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_wait_barrier(bar);
+}
+
+void
+legion_release_launcher_add_arrival_barrier(
+  legion_release_launcher_t launcher_,
+  legion_phase_barrier_t bar_)
+{
+  ReleaseLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
+
+  launcher->add_arrival_barrier(bar);
+}
+
+// -----------------------------------------------------------------------
 // Must Epoch Operations
 // -----------------------------------------------------------------------
 
