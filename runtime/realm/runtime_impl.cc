@@ -865,8 +865,8 @@ namespace Realm {
 
       //LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
-      //LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-      //                                                  *core_reservations);
+      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
+                                                        *core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1589,7 +1589,7 @@ namespace Realm {
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
-      // LegionRuntime::LowLevel::stop_dma_worker_threads();
+      LegionRuntime::LowLevel::stop_dma_worker_threads();
       LegionRuntime::LowLevel::stop_dma_system();
       stop_activemsg_threads();
 

@@ -4221,6 +4221,7 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+#ifdef REDUCE_IN_NEW_DMA
 	// <NEWDMA>
 	mark_ready();
 	bool ok_to_run = mark_started();
@@ -4232,6 +4233,7 @@ namespace LegionRuntime {
 	}
 	return true;
 	// </NEWDMA>
+#endif
 	assert(rq != 0);
 	log_dma.debug("request %p enqueued", this);
 
@@ -4773,6 +4775,7 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+#ifdef FILL_IN_NEW_DMA
 	// <NEWDMA>
 	mark_ready();
 	bool ok_to_run = mark_started();
@@ -4784,6 +4787,7 @@ namespace LegionRuntime {
 	}
 	return true;
 	// </NEWDMA>
+#endif
 	assert(rq != 0);
 	log_dma.debug("request %p enqueued", this);
 
