@@ -338,54 +338,17 @@ class Base(object):
                 print "----------------------------------------------------------------"
             else:
                 print str(self)+' was properly deleted'
+            if isinstance(self,Manager):
+                return (True,False)
             return True
         # Special case if this is an instance that the user pinned
         # then we don't need to report this as an error
         if isinstance(self,Manager):
-            is_pinned = True
-            for kind,refs in self.base_gc_refs.iteritems():
-                if refs <> 0:
-                    is_pinned = False;
+            is_pinned = False 
+            for kind in self.base_valid_refs.iterkeys():
+                if kind == 'Never GC Reference':
+                    is_pinned = True
                     break
-            if is_pinned:
-                for kind,refs in self.base_valid_refs.iteritems():
-                    if kind == 'Maximum':
-                        continue
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for kind,refs in self.base_remote_refs.iteritems():
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for kind,refs in self.base_resource_refs.iteritems():
-                    if kind == 'Memory':
-                        continue
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for refs in self.nested_gc_refs.itervalues():
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for refs in self.nested_valid_refs.itervalues():
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for refs in self.nested_remote_refs.itervalues():
-                    if refs <> 0:
-                        is_pinned = False
-                        break
-            if is_pinned:
-                for refs in self.nested_resource_refs.itervalues():
-                    if refs <> 0:
-                        is_pinned = False
-                        break
             if is_pinned:
                 if verbose:
                     print "----------------------------------------------------------------"
@@ -398,7 +361,7 @@ class Base(object):
                     print "----------------------------------------------------------------"
                 else:
                     print "INFO: "+str(self)+' was not deleted because it was pinned by the user'
-                return True
+                return (False,True)
         print "----------------------------------------------------------------"
         print "ERROR: "+str(self)+" was not properly deleted"
         printer = TracePrinter()
@@ -407,6 +370,9 @@ class Base(object):
         self.report_references(printer, REMOTE_REF_KIND, verbose)
         self.report_references(printer, RESOURCE_REF_KIND, verbose)
         print "----------------------------------------------------------------"
+        if isinstance(self,Manager):
+            return (True,False)
+        return False
 
     def report_references(self, printer, kind, verbose):
         printer.down()
@@ -921,6 +887,7 @@ class State(object):
         leaked_futures = 0
         leaked_constraints = 0
         leaked_managers = 0
+        pinned_managers = 0
         leaked_views = 0
         leaked_states = 0
         for future in self.futures.itervalues():
@@ -930,8 +897,12 @@ class State(object):
             if not constraint.check_for_leaks(verbose): 
                 leaked_constraints += 1
         for manager in self.managers.itervalues():
-            if not manager.check_for_leaks(verbose):
-                leaked_managers += 1
+            deleted,pinned = manager.check_for_leaks(verbose)
+            if not deleted:
+                if pinned:
+                    pinned_managers += 1
+                else:
+                    leaked_managers += 1
         for view in self.views.itervalues():
             if not view.check_for_leaks(verbose):
                 leaked_views += 1
@@ -951,6 +922,10 @@ class State(object):
             print "  LEAKED MANAGERS: "+str(leaked_managers)
         else:
             print "  Leaked Managers: "+str(leaked_managers)
+        if pinned_managers > 0:
+            print "  PINNED MANAGERS: "+str(pinned_managers)
+        else:
+            print "  Pinned Managers: "+str(pinned_managers)
         if leaked_views > 0:
             print "  LEAKED VIEWS: "+str(leaked_views)
         else:
