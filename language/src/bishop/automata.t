@@ -106,8 +106,7 @@ function automata:determinize()
   local closures = {}
   local dfa_states = {}
 
-  local states = {}
-  states[self.initial] = true
+  local states = { [self.initial] = true }
   local closure = self:epsilon_closure(states)
   local hash = hash_states(closure)
   closures[hash] = closure
@@ -173,9 +172,8 @@ function automata.regex_to_nfa(r)
      r:is(regex.symbol.Class) or
      r:is(regex.symbol.Constraint) then
     local initial = state.new()
-    local final = {}
     local final_state = state.new()
-    final[final_state] = true
+    local final = { [final_state] = true }
     initial:add_transition(r.value, final_state)
     return automata.make {
       initial = initial,
@@ -338,9 +336,8 @@ function automata:verify_tags(check)
 end
 
 function automata:renumber()
-  local updated = {}
   local count = 1
-  updated[self.initial] = true
+  local updated = { [self.initial] = true }
   self.initial.id = 0
 
   local visit_next = { self.initial }

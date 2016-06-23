@@ -238,7 +238,6 @@ function optimize_match.mapper(node)
     collect_symbols(rules)
   local regexprs =
     translate_to_regex(selectors, all_symbols, all_task_symbols, symbols_by_task)
-  --regexprs:map(function(regexpr) print(regex.pretty(regexpr)) end)
 
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
   dfa:renumber()
