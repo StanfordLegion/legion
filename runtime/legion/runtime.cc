@@ -2306,8 +2306,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const size_t inst_size = manager->get_instance_size();
-      // Add a resource reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(current_instances.find(manager) == current_instances.end());
@@ -2322,15 +2320,11 @@ namespace Legion {
     void MemoryManager::unregister_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock m_lock(manager_lock);
-   #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+      AutoLock m_lock(manager_lock);
+ #ifdef DEBUG_LEGION
+      assert(current_instances.find(manager) != current_instances.end());
 #endif     
-        current_instances.erase(manager);
-      }
-      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+      current_instances.erase(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -2376,7 +2370,8 @@ namespace Legion {
           Runtime::trigger_event(info.deferred_collect);
           // Now we can delete our entry because it has been deleted
           current_instances.erase(finder);
-          remove_reference = true;
+          if (is_owner)
+            remove_reference = true;
         }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
@@ -3316,8 +3311,6 @@ namespace Legion {
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
         manager_ready.wait();
-      bool remove_duplicate_resource_ref = false;
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -3358,8 +3351,6 @@ namespace Legion {
             current_instances.find(manager);
           if (finder == current_instances.end())
             current_instances[manager] = InstanceInfo();
-          else
-            remove_duplicate_resource_ref = true;
           if (created && min_priority)
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
@@ -3397,8 +3388,6 @@ namespace Legion {
             current_instances.find(manager);
           if (finder == current_instances.end())
             current_instances[manager] = InstanceInfo();
-          else
-            remove_duplicate_resource_ref = true;
           if (min_priority)
           {
             InstanceInfo &info = current_instances[manager];
@@ -3418,10 +3407,6 @@ namespace Legion {
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(to_trigger);
-      // Remove a duplicate reference if there was one
-      if (remove_duplicate_resource_ref &&
-          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -4075,7 +4060,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4176,7 +4162,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4273,7 +4260,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -4329,7 +4317,8 @@ namespace Legion {
           assert(finder->second.current_state == COLLECTABLE_STATE);
 #endif
           current_instances.erase(finder);
-          remove_reference = true;
+          if (is_owner)
+            remove_reference = true;
         }
       }
       manager->perform_deletion(deletion_precondition);
