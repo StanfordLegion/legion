@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_keyword6.rg:25: unexpected keyword 'demand' for property 'isa'
+-- invalid_keyword6.rg:25: property 'isa' of task rule cannot get assigned by an expression of type 'compile_option_type'
 --   isa : demand;
 --     ^
 

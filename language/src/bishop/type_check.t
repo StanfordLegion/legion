@@ -104,7 +104,7 @@ function type_check.coerce_if_needed(expr, target_type)
 end
 
 function type_check.filter_constraint(value_type, type_env, constraint)
-  assert(constraint:is(ast.specialized.FilterConstraint))
+  assert(constraint:is(ast.untyped.FilterConstraint))
   local value = type_check.expr(type_env, constraint.value)
   local invalid_field_msg = "invalid filter constraint on field '" ..
     constraint.field .. "' for " .. tostring(value_type)
@@ -141,7 +141,7 @@ function type_check.filter_constraint(value_type, type_env, constraint)
 end
 
 function type_check.expr(type_env, expr)
-  if expr:is(ast.specialized.expr.Unary) then
+  if expr:is(ast.untyped.expr.Unary) then
     local rhs = type_check.expr(type_env, expr.rhs)
     if expr.op == "-" then
       local rhs_ = type_check.coerce_if_needed(rhs, int)
@@ -160,7 +160,7 @@ function type_check.expr(type_env, expr)
       log.error(expr, "unexpected unary operation")
     end
 
-  elseif expr:is(ast.specialized.expr.Binary) then
+  elseif expr:is(ast.untyped.expr.Binary) then
     local lhs = type_check.expr(type_env, expr.lhs)
     local rhs = type_check.expr(type_env, expr.rhs)
     local type_info = binary_op_types[expr.op]
@@ -192,7 +192,7 @@ function type_check.expr(type_env, expr)
       position = expr.position,
     }
 
-  elseif expr:is(ast.specialized.expr.Ternary) then
+  elseif expr:is(ast.untyped.expr.Ternary) then
     local cond = type_check.expr(type_env, expr.cond)
     local true_expr = type_check.expr(type_env, expr.true_expr)
     local false_expr = type_check.expr(type_env, expr.false_expr)
@@ -216,7 +216,7 @@ function type_check.expr(type_env, expr)
       expr_type = true_expr.expr_type,
     }
 
-  elseif expr:is(ast.specialized.expr.Index) then
+  elseif expr:is(ast.untyped.expr.Index) then
     local value = type_check.expr(type_env, expr.value)
     local index = type_check.expr(type_env, expr.index)
     if std.is_point_type(index.expr_type) then
@@ -251,7 +251,7 @@ function type_check.expr(type_env, expr)
       position = expr.position,
     }
 
-  elseif expr:is(ast.specialized.expr.Filter) then
+  elseif expr:is(ast.untyped.expr.Filter) then
     local value = type_check.expr(type_env, expr.value)
     if not std.is_list_type(value.expr_type) then
       log.error(expr.value, "filter is not valid on expressions of " ..
@@ -266,7 +266,7 @@ function type_check.expr(type_env, expr)
       position = expr.position,
     }
 
-  elseif expr:is(ast.specialized.expr.Field) then
+  elseif expr:is(ast.untyped.expr.Field) then
     local value = type_check.expr(type_env, expr.value)
     if expr.field == "memories" then
       if not std.is_processor_type(value.expr_type) then
@@ -300,7 +300,7 @@ function type_check.expr(type_env, expr)
       log.error(expr, "unknown field access on field '" .. expr.field .. "'")
     end
 
-  elseif expr:is(ast.specialized.expr.Constant) then
+  elseif expr:is(ast.untyped.expr.Constant) then
     local assigned_type = int
     if math.floor(expr.value) ~= expr.value then
       log.error(expr, "constant must be an integer value")
@@ -311,7 +311,7 @@ function type_check.expr(type_env, expr)
       position = expr.position,
     }
 
-  elseif expr:is(ast.specialized.expr.Variable) then
+  elseif expr:is(ast.untyped.expr.Variable) then
     local assigned_type = type_env:safe_lookup(expr.value)
     if not assigned_type then
       log.error(expr, "variable '$" .. expr.value ..
@@ -323,7 +323,7 @@ function type_check.expr(type_env, expr)
       position = expr.position,
     }
 
-  elseif expr:is(ast.specialized.expr.Keyword) then
+  elseif expr:is(ast.untyped.expr.Keyword) then
     local assigned_type = keyword_type_assignment[expr.value]
     if not assigned_type then
       log.error(expr, "unknown keyword '" .. expr.value .. "'")
@@ -339,59 +339,77 @@ function type_check.expr(type_env, expr)
   end
 end
 
+function type_check.pattern(type_env, type_assignment, pattern)
+  local desired_type = type_assignment[pattern.field]
+  local existing_type = type_env:safe_lookup(pattern.binder) or desired_type
+  if not desired_type then
+    log.error(pattern, "invalid pattern match on field '" ..
+    pattern.field .. "'")
+  end
+  if desired_type ~= existing_type then
+    log.error(pattern, "variable '$" .. pattern.binder .. "' was assigned" ..
+      " to two different types '" .. tostring(existing_type) ..
+      "' and '" .. tostring(desired_type) .. "'")
+  end
+  type_env:insert(pattern, pattern.binder, desired_type)
+  return ast.typed.PatternMatch(pattern)
+end
+
+function type_check.constraint(type_env, type_assignment, constraint)
+  local value = type_check.expr(type_env, constraint.value)
+  local desired_type = type_assignment[constraint.field]
+  if not desired_type then
+    log.error(constraint, "invalid constraint on field '" ..
+      constraint.field .. "'")
+  end
+  if desired_type ~= value.expr_type then
+    log.error(pattern, "constraint on field '" .. constraint.field ..
+      "' expects type '" .. tostring(desired_type) .. "', but got '" ..
+      tostring(value.expr_type) .. "'")
+  end
+  return ast.typed.Constraint(pattern)
+end
+
 function type_check.element(type_env, element)
   local element_type
   local type_assignment
   local ctor
-  if element:is(ast.specialized.element.Task) then
+  if element:is(ast.untyped.element.Task) then
     element_type = "task"
     type_assignment = element_type_assignment.task
     ctor = ast.typed.element.Task
-  elseif element:is(ast.specialized.element.Region) then
+  elseif element:is(ast.untyped.element.Region) then
     element_type = "region"
     type_assignment = element_type_assignment.region
     ctor = ast.typed.element.Region
   else
     assert(false, "unexpected element type")
   end
-  local patterns = element.patterns:map(function(pattern)
-    local desired_type = type_assignment[pattern.field]
-    local existing_type = type_env:safe_lookup(pattern.binder) or desired_type
-    assert(desired_type)
-    if desired_type ~= existing_type then
-      log.error(pattern, "variable '$" .. pattern.binder .. "' was assigned" ..
-        " to two different types '" .. tostring(existing_type) ..
-        "' and '" .. tostring(desired_type) .. "'")
-    end
-    type_env:insert(element, pattern.binder, desired_type)
-    return ast.typed.PatternMatch(pattern)
-  end)
+
+  local patterns =
+    element.patterns:map(curry2(type_check.pattern,
+      type_env, type_assignment))
+  local constraints =
+    element.constraints:map(curry2(type_check.constraint,
+      type_env, type_assignment))
+
   return ctor {
     name = element.name,
     classes = element.classes,
+    constraints = constraints,
     patterns = patterns,
     position = element.position,
-  }
-end
-
-function type_check.constraint(type_env, constraint)
-  local lhs = type_check.expr(type_env, constraint.lhs)
-  local rhs = type_check.expr(type_env, constraint.rhs)
-  if lhs.expr_type ~= rhs.expr_type then
-    log.error(constraint, "type mismatch: '" .. tostring(lhs.expr_type) ..
-      "' and '" .. tostring(rhs.expr_type) .. "'")
-  end
-  return ast.typed.Constraint {
-    lhs = lhs,
-    rhs = rhs,
-    position = constraint.position,
   }
 end
 
 function type_check.property(rule_type, type_env, property)
   local value = type_check.expr(type_env, property.value)
   local desired_types = property_type_assignment[rule_type][property.field]
-  assert(desired_types)
+  if not desired_types then
+    log.error(property,
+      "unexpected property '" .. property.field .. "' for " ..
+      rule_type .. " rule")
+  end
   local found = false
   for i = 1, #desired_types do
     if desired_types[i] == value.expr_type then
@@ -412,40 +430,68 @@ function type_check.property(rule_type, type_env, property)
   }
 end
 
+function type_check.selector_type(selector)
+  local last_elem = selector.elements[#selector.elements]
+  if last_elem:is(ast.untyped.element.Task) then
+    return "task"
+  elseif last_elem:is(ast.untyped.element.Region) then
+    return "region"
+  else
+    assert(false, "unreachable")
+  end
+end
+
 function type_check.selector(type_env, selector)
+  local selector_type = type_check.selector_type(selector)
   local elements = selector.elements:map(curry(type_check.element, type_env))
-  local constraints =
-    selector.constraints:map(curry(type_check.constraint, type_env))
+
+  if selector_type == "region" then
+    if not elements[#elements - 1]:is(ast.typed.element.Task) then
+      log.error(elements[#elements - 1],
+        "region element should be preceded by task element in selectors")
+    end
+    for idx = 1, #elements - 2 do
+      if #elements[idx].patterns > 0 or #elements[idx].constraints > 0 then
+        assert(false, "not supported yet")
+      end
+    end
+  elseif selector_type == "task" then
+    for idx = 1, #elements - 1 do
+      if #elements[idx].patterns > 0 or #elements[idx].constraints > 0 then
+        assert(false, "not supported yet")
+      end
+    end
+  end
+
   return ast.typed.Selector {
-    type = selector.type,
+    type = selector_type,
     elements = elements,
-    constraints = constraints,
     position = selector.position,
   }
 end
 
-function type_check.rule(rule_type, type_env, rule)
-  local selector = type_check.selector(type_env, rule.selector)
-  local properties =
-    rule.properties:map(curry2(type_check.property, rule_type, type_env))
-  local ctor
-  if rule_type == "task" then
-    ctor = ast.typed.rule.Task
-  else assert(rule_type == "region")
-    ctor = ast.typed.rule.Region
+function type_check.rule(type_env, rule)
+  assert(#rule.selectors > 0)
+  local rule_type = type_check.selector_type(rule.selectors[1])
+  for idx = 2, #rule.selectors do
+    local rule_type_ = type_check.selector_type(rule.selectors[idx])
+    if rule_type_ ~= rule_type then
+      log.error(rule, "rules cannot have two different types of selectors")
+    end
   end
-  return ctor {
-    selector = selector,
-    properties = properties,
-    position = rule.position,
-  }
-end
 
-function type_check.task_rule(type_env, rule)
-  return type_check.rule("task", type_env, rule)
-end
-function type_check.region_rule(type_env, rule)
-  return type_check.rule("region", type_env, rule)
+  for idx = 1, #rule.selectors do
+    local local_type_env = type_env:new_local_scope()
+    local selector, constraints =
+      type_check.selector(local_type_env, rule.selectors[idx])
+    local properties =
+      rule.properties:map(curry2(type_check.property, rule_type, local_type_env))
+    return ast.typed.Rule {
+      selector = selector,
+      properties = properties,
+      position = rule.position,
+    }
+  end
 end
 
 function type_check.assignment(type_env, assignment)
@@ -468,22 +514,13 @@ function type_check.mapper(mapper)
     return type_check.assignment(type_env, assignment)
   end)
 
-  local task_rules = mapper.task_rules:map(function(rule)
-    local local_type_env = type_env:new_local_scope()
-    return type_check.task_rule(local_type_env, rule)
+  local rules = mapper.rules:map(function(rule)
+    return type_check.rule(type_env, rule)
   end)
-  local region_rules = mapper.region_rules:map(function(rule)
-    local local_type_env = type_env:new_local_scope()
-    return type_check.region_rule(local_type_env, rule)
-  end)
-
-  mapper.automata:update_rules(task_rules)
 
   return ast.typed.Mapper {
+    rules = rules,
     assignments = assignments,
-    task_rules = task_rules,
-    region_rules = region_rules,
-    automata = mapper.automata,
     position = mapper.position,
   }
 end
