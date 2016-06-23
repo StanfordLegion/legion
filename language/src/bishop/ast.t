@@ -389,103 +389,10 @@ function ast.untyped.expr.Keyword:unparse()
   return self.value
 end
 
---ast:inner("specialized", { "position" })
---
---ast.specialized:leaf("Mapper", { "task_rules", "region_rules", "assignments", "automata" })
---
---ast.specialized:inner("rule", { "selector", "properties" })
---ast.specialized.rule:leaf("Task", {})
---ast.specialized.rule:leaf("Region", {})
---
---ast.specialized:leaf("Selector", { "type", "elements", "constraints" })
---function ast.specialized.Selector:unparse()
---  local str = table.concat(unparse_all(self.elements), " ")
---  if #self.constraints > 0 then
---    local const_str = table.concat(unparse_all(self.constraints), " and ")
---    str = str .. "[" .. const_str .. "]"
---  end
---  return str
---end
---
---ast.specialized:inner("element", { "name", "classes", "patterns" })
---function ast.specialized.element:unparse()
---  local str = ""
---  if #self.name > 0 then str = str .. "#" .. self.name[1] end
---  for i = 1, #self.classes do
---    str = str .. "." .. self.classes[i]
---  end
---  if #self.patterns > 0 then
---    local pat_str = table.concat(unparse_all(self.patterns), " and ")
---    str = str .. "[" .. pat_str .. "]"
---  end
---  return str
---end
---ast.specialized.element:leaf("Task", {})
---function ast.specialized.element.Task:unparse()
---  return "task" .. ast.specialized.element.unparse(self)
---end
---ast.specialized.element:leaf("Region", {})
---function ast.specialized.element.Region:unparse()
---  return "region" .. ast.specialized.element.unparse(self)
---end
---
---ast.specialized:leaf("Property", { "field", "value" })
---ast.specialized:leaf("Constraint", { "lhs", "rhs" })
---function ast.specialized.Constraint:unparse()
---  return self.lhs:unparse() .. "=" .. self.rhs:unparse()
---end
---ast.specialized:leaf("FilterConstraint", { "field", "value" })
---function ast.specialized.FilterConstraint:unparse()
---  return self.field .. "=" .. self.value:unparse()
---end
---ast.specialized:leaf("PatternMatch", { "field", "binder" })
---function ast.specialized.PatternMatch:unparse()
---  return self.field .. "=$" .. self.binder
---end
---ast.specialized:leaf("Assignment", { "binder", "value" })
---function ast.specialized.Assignment:unparse()
---  return "$" .. self.binder .. " = " .. self.value:unparse()
---end
---
---ast.specialized:inner("expr")
---ast.specialized.expr:leaf("Unary", { "rhs", "op" })
---function ast.specialized.expr.Unary:unparse()
---  return tostring(self.op) .. self.rhs:unparse()
---end
---ast.specialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
---function ast.specialized.expr.Binary:unparse()
---  return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
---end
---ast.specialized.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
---function ast.specialized.expr.Ternary:unparse()
---  return self.cond:unparse() .. " ? " ..
---         self.true_expr:unparse() .. " : " ..
---         self.false_expr:unparse()
---end
---ast.specialized.expr:leaf("Index", { "value", "index" })
---function ast.specialized.expr.Index:unparse()
---  return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
---end
---ast.specialized.expr:leaf("Filter", { "value", "constraints" })
---function ast.specialized.expr.Filter:unparse()
---  local const_str = table.concat(unparse_all(self.constraints), " and ")
---  return self.value:unparse() .. "[" .. const_str .. "]"
---end
---ast.specialized.expr:leaf("Field", { "value", "field" })
---function ast.specialized.expr.Field:unparse()
---  return self.value:unparse() .. "." .. self.field
---end
---ast.specialized.expr:leaf("Constant", { "value" })
---ast.specialized.expr.Constant.unparse = ast.unspecialized.expr.Constant.unparse
---ast.specialized.expr:leaf("Variable", { "value" })
---ast.specialized.expr.Variable.unparse = ast.unspecialized.expr.Variable.unparse
---ast.specialized.expr:leaf("Keyword", { "value" })
---ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
-
 ast:inner("typed", { "position" })
 
 ast.typed:leaf("Mapper", { "rules", "assignments" })
-ast.typed:leaf("Rule", { "selector", "properties" })
+ast.typed:leaf("Rule", { "rule_type", "selector", "properties" })
 
 ast.typed:leaf("Selector", { "type", "elements", })
 function ast.typed.Selector:unparse()

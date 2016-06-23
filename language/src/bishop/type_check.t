@@ -450,6 +450,11 @@ function type_check.selector(type_env, selector)
       log.error(elements[#elements - 1],
         "region element should be preceded by task element in selectors")
     end
+    if #elements[#elements].name > 0 and
+       not (#elements[#elements - 1].name > 0) then
+      log.error(elements[#elements - 1],
+        "unnamed task element cannot have a named region element")
+    end
     for idx = 1, #elements - 2 do
       if #elements[idx].patterns > 0 or #elements[idx].constraints > 0 then
         assert(false, "not supported yet")
@@ -487,6 +492,7 @@ function type_check.rule(type_env, rule)
     local properties =
       rule.properties:map(curry2(type_check.property, rule_type, local_type_env))
     return ast.typed.Rule {
+      rule_type = rule_type,
       selector = selector,
       properties = properties,
       position = rule.position,
