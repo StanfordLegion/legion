@@ -591,8 +591,11 @@ namespace Legion {
       public:
         CollectableInfo(void)
           : manager(NULL), instance_size(0), priority(0) { }
-        CollectableInfo(PhysicalManager *m, size_t size, GCPriority p)
-          : manager(m), instance_size(size), priority(p) { }
+        CollectableInfo(PhysicalManager *m, size_t size, GCPriority p);
+        CollectableInfo(const CollectableInfo &rhs);
+        ~CollectableInfo(void);
+      public:
+        CollectableInfo& operator=(const CollectableInfo &rhs);
       public:
         bool operator<(const CollectableInfo &rhs) const;
         bool operator==(const CollectableInfo &rhs) const;
@@ -607,6 +610,8 @@ namespace Legion {
       ~MemoryManager(void);
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
+    public:
+      void prepare_for_shutdown(void);
     public:
       void register_remote_instance(PhysicalManager *manager);
       void unregister_remote_instance(PhysicalManager *manager);
