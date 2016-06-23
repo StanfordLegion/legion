@@ -13,16 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_keyword6.rg:25: property 'isa' of task rule cannot get assigned by an expression of type 'compile_option_type'
---   isa : demand;
---     ^
+-- type_mismatch_index1.rg:25: indexing expression requires to have integer type, but received 'processor_type'
+--   target : processors[$proc];
+--                         ^
 
 import "bishop"
 
 mapper
 
-task {
-  isa : demand;
+task[target=$proc] {
+  target : processors[$proc];
 }
 
 end
