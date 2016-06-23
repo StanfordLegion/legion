@@ -12,15 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- Every Regent program starts with the following line.
 import "regent"
 
+-- The outermost scope of a Regent program is a Lua script. This
+-- script executes top to bottom. The line below initializes a Lua
+-- variable with the contents of a C header file.
 local c = terralib.includec("stdio.h")
 
+-- Regent tasks are declared with the task keyword. Tasks may call
+-- external C functions such as printf.
 task hello_world()
   c.printf("Hello World!\n")
 end
 
+-- Execution begins with a main task. The name "main" is arbitrary,
+-- but the task must take no arguments.
 task main()
   hello_world()
 end
+
+-- The following line starts execution. The call will not return.
 regentlib.start(main)

@@ -16,6 +16,7 @@ import "regent"
 
 local c = terralib.includec("stdio.h")
 
+-- Return types may be inferred. The following task returns an int.
 task double(i : int, x : int)
   c.printf("Hello world from task %lld!\n", i)
   return 2*x

@@ -16,22 +16,31 @@ import "regent"
 
 local c = terralib.includec("stdio.h")
 
+-- Tasks may take declare arguments and return values. The following
+-- task takes one int argument and returns an int.
 task fibonacci(n : int) : int
   if n == 0 then return 0 end
   if n == 1 then return 1 end
 
-  var f1 = fibonacci(n - 1) -- A task call implicitly returns a future.
+  -- Task calls implicitly return futures, allowing the two calls
+  -- below to execute in parallel. Futures are implicitly coerced to
+  -- concrete values when needed.
+  var f1 = fibonacci(n - 1)
   var f2 = fibonacci(n - 2)
 
-  return f1 + f2 -- Arithmetic is automatically promoted to operate on futures.
+  -- Arithmetic is automatically promoted to operate on futures.
+  return f1 + f2
 end
 
+-- A second task, this time with two arguments and no return value.
 task print_result(n : int, result : int)
   c.printf("Fibonacci(%d) = %d\n", n, result)
 end
 
 task main()
   var num_fibonacci = 7
+  -- Futures can be passed between tasks. Thus the tasks called in the
+  -- iterations of the following loop may execute in parallel.
   for i = 0, num_fibonacci do
     print_result(i, fibonacci(i))
   end
