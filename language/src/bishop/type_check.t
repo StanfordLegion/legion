@@ -24,9 +24,6 @@ local automata = require("bishop/automata")
 
 local type_check = {}
 
-local function curry(f, a) return function(...) return f(a, ...) end end
-local function curry2(f, a, b) return function(...) return f(a, b, ...) end end
-
 local element_type_assignment = {
   task = {
     index = std.point_type,
@@ -258,7 +255,7 @@ function type_check.expr(type_env, expr)
         "type '" .. tostring(value.expr_type) .. "'")
     end
     local constraints = expr.constraints:map(
-      curry2(type_check.filter_constraint, value.expr_type, type_env))
+      std.curry2(type_check.filter_constraint, value.expr_type, type_env))
     return ast.typed.expr.Filter {
       value = value,
       constraints = constraints,
@@ -363,11 +360,11 @@ function type_check.constraint(type_env, type_assignment, constraint)
       constraint.field .. "'")
   end
   if desired_type ~= value.expr_type then
-    log.error(pattern, "constraint on field '" .. constraint.field ..
+    log.error(constraint, "constraint on field '" .. constraint.field ..
       "' expects type '" .. tostring(desired_type) .. "', but got '" ..
       tostring(value.expr_type) .. "'")
   end
-  return ast.typed.Constraint(pattern)
+  return ast.typed.Constraint(constraint)
 end
 
 function type_check.element(type_env, element)
@@ -387,10 +384,10 @@ function type_check.element(type_env, element)
   end
 
   local patterns =
-    element.patterns:map(curry2(type_check.pattern,
+    element.patterns:map(std.curry2(type_check.pattern,
       type_env, type_assignment))
   local constraints =
-    element.constraints:map(curry2(type_check.constraint,
+    element.constraints:map(std.curry2(type_check.constraint,
       type_env, type_assignment))
 
   return ctor {
@@ -443,7 +440,8 @@ end
 
 function type_check.selector(type_env, selector)
   local selector_type = type_check.selector_type(selector)
-  local elements = selector.elements:map(curry(type_check.element, type_env))
+  local elements = selector.elements:map(
+    std.curry(type_check.element, type_env))
 
   if selector_type == "region" then
     if not elements[#elements - 1]:is(ast.typed.element.Task) then
@@ -456,13 +454,13 @@ function type_check.selector(type_env, selector)
         "unnamed task element cannot have a named region element")
     end
     for idx = 1, #elements - 2 do
-      if #elements[idx].patterns > 0 or #elements[idx].constraints > 0 then
+      if #elements[idx].patterns > 0 then
         assert(false, "not supported yet")
       end
     end
   elseif selector_type == "task" then
     for idx = 1, #elements - 1 do
-      if #elements[idx].patterns > 0 or #elements[idx].constraints > 0 then
+      if #elements[idx].patterns > 0 then
         assert(false, "not supported yet")
       end
     end
@@ -490,7 +488,8 @@ function type_check.rule(type_env, rule)
     local selectors = terralib.newlist()
     selectors:insert(type_check.selector(local_type_env, rule.selectors[idx]))
     local properties =
-      rule.properties:map(curry2(type_check.property, rule_type, local_type_env))
+      rule.properties:map(
+        std.curry2(type_check.property, rule_type, local_type_env))
     return ast.typed.Rule {
       rule_type = rule_type,
       selectors = selectors,

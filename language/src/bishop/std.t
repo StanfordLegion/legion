@@ -25,6 +25,14 @@ local c = terralib.includecstring [[
 local std = {}
 std.c = c
 
+function std.curry(f, a)
+  return function(...) return f(a, ...) end
+end
+
+function std.curry2(f, a, b)
+  return function(...) return f(a, b, ...) end
+end
+
 terra std.assert(x : bool, message : rawstring)
   if not x then
     var stderr = c.fdopen(2, "w")

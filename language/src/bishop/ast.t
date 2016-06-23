@@ -297,11 +297,11 @@ function ast.untyped.element:unparse()
   end
   if #self.constraints > 0 then
     local const_str = table.concat(unparse_all(self.constraints), " and ")
-    str = str .. "[" .. const_str .. "]"
+    str = str .. const_str
   end
   if #self.patterns > 0 then
     local pat_str = table.concat(unparse_all(self.patterns), " and ")
-    str = str .. "[" .. pat_str .. "]"
+    str = str .. pat_str
   end
   return str
 end
@@ -324,17 +324,17 @@ end
 
 ast.untyped:leaf("Constraint", { "field", "value" })
 function ast.untyped.Constraint:unparse()
-  return self.field .. " = " .. self.value:unparse()
+  return "[" .. self.field .. "=" .. self.value:unparse() .. "]"
 end
 
 ast.untyped:leaf("FilterConstraint", { "field", "value" })
 function ast.untyped.FilterConstraint:unparse()
-  return self.field .. " = " .. self.value:unparse()
+  return "[" ..self.field .. "=" .. self.value:unparse() .. "]"
 end
 
 ast.untyped:leaf("PatternMatch", { "field", "binder" })
 function ast.untyped.PatternMatch:unparse()
-  return self.field .. " = " .. self.binder
+  return "[" .. self.field .. "=$" .. self.binder .. "]"
 end
 
 ast.untyped:leaf("Assignment", { "binder", "value" })
@@ -400,11 +400,8 @@ function ast.typed.Selector:unparse()
 end
 
 ast.typed:inner("element", { "name", "classes", "constraints", "patterns" })
-function ast.typed.element:unparse()
-  local str = ""
-  if #self.name > 0 then str = str .. "#" .. self.name[1] end
-  return str
-end
+ast.typed.element.unparse = ast.untyped.element.unparse
+
 ast.typed.element:leaf("Task", {})
 function ast.typed.element.Task:unparse()
   return "task" .. ast.typed.element.unparse(self)
@@ -416,14 +413,11 @@ end
 
 ast.typed:leaf("Property", { "field", "value" })
 ast.typed:leaf("Constraint", { "field", "value" })
-function ast.typed.Constraint:unparse()
-  return self.lhs:unparse() .. "=" .. self.rhs:unparse()
-end
+ast.typed.Constraint.unparse = ast.untyped.Constraint.unparse
 ast.typed:leaf("FilterConstraint", { "field", "value" })
-function ast.typed.FilterConstraint:unparse()
-  return self.field .. "=" .. self.value:unparse()
-end
+ast.typed.FilterConstraint.unparse = ast.untyped.FilterConstraint.unparse
 ast.typed:leaf("PatternMatch", { "field", "binder" })
+ast.typed.PatternMatch.unparse = ast.untyped.PatternMatch.unparse
 ast.typed:leaf("Assignment", { "binder", "value" })
 function ast.typed.Assignment:unparse()
   return "$" .. self.binder .. " = " .. self.value:unparse()
@@ -464,5 +458,9 @@ ast.typed.expr:leaf("Variable", { "value" })
 ast.typed.expr.Variable.unparse = ast.untyped.expr.Variable.unparse
 ast.typed.expr:leaf("Keyword", { "value" })
 ast.typed.expr.Keyword.unparse = ast.untyped.expr.Keyword.unparse
+
+ast:inner("optimized")
+
+ast.optimized:leaf("Mapper", { "automata", "rules", "assignments" })
 
 return ast
