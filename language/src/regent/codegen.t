@@ -6285,7 +6285,6 @@ end
 function codegen.stat_must_epoch(cx, node)
   local must_epoch = terralib.newsymbol(c.legion_must_epoch_launcher_t, "must_epoch")
   local must_epoch_point = terralib.newsymbol(c.coord_t, "must_epoch_point")
-  local block_future_map = node.options.block:is(ast.options.Demand)
   local future_map = terralib.newsymbol(c.legion_future_map_t, "legion_future_map_t")
 
   local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
@@ -6296,12 +6295,6 @@ function codegen.stat_must_epoch(cx, node)
     var [future_map] = c.legion_must_epoch_launcher_execute(
       [cx.runtime], [cx.context], [must_epoch])
     c.legion_must_epoch_launcher_destroy([must_epoch])
-  end
-  if block_future_map then
-    actions = quote
-      [actions];
-      c.legion_future_map_wait_all_results([future_map]);
-    end
   end
   actions = quote
     do

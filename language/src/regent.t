@@ -46,7 +46,6 @@ local language = {
     "task",
   },
   keywords = {
-    "__block",
     "__context",
     "__cuda",
     "__delete",
