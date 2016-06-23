@@ -2282,14 +2282,7 @@ namespace Legion {
     {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            current_instances.begin(); it != current_instances.end(); it++)
-      {
-        if (is_owner)
-          it->first->perform_deletion(RtEvent::NO_RT_EVENT);
-        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          PhysicalManager::delete_physical_manager(it->first);
-      }
+      
     }
 
     //--------------------------------------------------------------------------
@@ -2302,12 +2295,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::prepare_for_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      // Only need to do things if we are the owner memory
+      if (is_owner)
+      {
+        std::vector<PhysicalManager*> instances;
+        {
+          AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+          for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+                current_instances.begin(); it != current_instances.end(); it++)
+          {
+            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+            instances.push_back(it->first);
+          }
+        }
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              instances.begin(); it != instances.end(); it++)
+        {
+          if ((*it)->try_active_deletion())
+            record_deleted_instance(*it);
+          // Remove our base resource reference
+          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            PhysicalManager::delete_physical_manager(*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::register_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
       const size_t inst_size = manager->get_instance_size();
-      // Add a resource reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(current_instances.find(manager) == current_instances.end());
@@ -2322,15 +2342,11 @@ namespace Legion {
     void MemoryManager::unregister_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock m_lock(manager_lock);
-   #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+      AutoLock m_lock(manager_lock);
+ #ifdef DEBUG_LEGION
+      assert(current_instances.find(manager) != current_instances.end());
 #endif     
-        current_instances.erase(manager);
-      }
-      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+      current_instances.erase(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -2376,7 +2392,8 @@ namespace Legion {
           Runtime::trigger_event(info.deferred_collect);
           // Now we can delete our entry because it has been deleted
           current_instances.erase(finder);
-          remove_reference = true;
+          if (is_owner)
+            remove_reference = true;
         }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
@@ -2878,7 +2895,7 @@ namespace Legion {
         // it fails then we know the instance is already deleted so whatever
         if ((priority == GC_NEVER_PRIORITY) &&
             !manager->try_add_base_valid_ref(NEVER_GC_REF, &mutator,
-                                             true/*must be valid*/))
+                                             false/*must be valid*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
@@ -3316,8 +3333,6 @@ namespace Legion {
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
         manager_ready.wait();
-      bool remove_duplicate_resource_ref = false;
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -3358,8 +3373,6 @@ namespace Legion {
             current_instances.find(manager);
           if (finder == current_instances.end())
             current_instances[manager] = InstanceInfo();
-          else
-            remove_duplicate_resource_ref = true;
           if (created && min_priority)
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
@@ -3397,8 +3410,6 @@ namespace Legion {
             current_instances.find(manager);
           if (finder == current_instances.end())
             current_instances[manager] = InstanceInfo();
-          else
-            remove_duplicate_resource_ref = true;
           if (min_priority)
           {
             InstanceInfo &info = current_instances[manager];
@@ -3418,10 +3429,6 @@ namespace Legion {
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(to_trigger);
-      // Remove a duplicate reference if there was one
-      if (remove_duplicate_resource_ref &&
-          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -3904,6 +3911,57 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<bool SMALLER>
+    MemoryManager::CollectableInfo<SMALLER>::CollectableInfo(PhysicalManager *m,
+                                                      size_t size, GCPriority p)
+      : manager(m), instance_size(size), priority(p)
+    //--------------------------------------------------------------------------
+    {
+      if (manager != NULL)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    MemoryManager::CollectableInfo<SMALLER>::CollectableInfo(
+                                                    const CollectableInfo &rhs)
+      : manager(rhs.manager), instance_size(rhs.instance_size), 
+        priority(rhs.priority)
+    //--------------------------------------------------------------------------
+    {
+      if (manager != NULL)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    MemoryManager::CollectableInfo<SMALLER>::~CollectableInfo(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((manager != NULL) && 
+          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    MemoryManager::CollectableInfo<SMALLER>& 
+      MemoryManager::CollectableInfo<SMALLER>::operator=(
+                                                     const CollectableInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((manager != NULL) && 
+          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
+      manager = rhs.manager;
+      instance_size = rhs.instance_size;
+      priority = rhs.priority;
+      if (manager != NULL)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
     bool MemoryManager::CollectableInfo<SMALLER>::operator<(
                                                const CollectableInfo &rhs) const
     //--------------------------------------------------------------------------
@@ -4075,7 +4133,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4176,7 +4235,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4273,7 +4333,8 @@ namespace Legion {
       bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      if (is_owner)
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -4329,7 +4390,8 @@ namespace Legion {
           assert(finder->second.current_state == COLLECTABLE_STATE);
 #endif
           current_instances.erase(finder);
-          remove_reference = true;
+          if (is_owner)
+            remove_reference = true;
         }
       }
       manager->perform_deletion(deletion_precondition);
@@ -16761,6 +16823,21 @@ namespace Legion {
           gc_done = current_gc_epoch->launch();
           current_gc_epoch = NULL;
         }
+      }
+      // Also try deleting any instances we have outstanding
+      std::vector<MemoryManager*> mem_managers;
+      {
+        AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+        mem_managers.resize(memory_managers.size());
+        unsigned idx = 0;
+        for (std::map<Memory,MemoryManager*>::const_iterator it = 
+              memory_managers.begin(); it != memory_managers.end(); it++, idx++)
+          mem_managers[idx] = it->second;
+      }
+      for (std::vector<MemoryManager*>::const_iterator it = 
+            mem_managers.begin(); it != mem_managers.end(); it++)
+      {
+        (*it)->prepare_for_shutdown();
       }
       if (!gc_done.has_triggered())
         gc_done.wait();
