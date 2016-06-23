@@ -184,11 +184,13 @@ def get_test_specs(include_spy):
         ('pretty', (test_run_pass, (['-fpretty', '1', '-fflow', '1'], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('examples'),
+          os.path.join('..', 'tutorial'),
          )),
         ('run_pass', (test_run_pass, (['-fflow', '1'], {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
+          os.path.join('..', 'tutorial'),
          )),
     ]
     spy = [
@@ -196,6 +198,7 @@ def get_test_specs(include_spy):
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
+          os.path.join('..', 'tutorial'),
          )),
     ]
     if include_spy:
