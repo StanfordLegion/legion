@@ -2758,7 +2758,7 @@ function type_check.stat_for_num(cx, node)
   if not node.symbol:hastype() then
     node.symbol:settype(var_type)
   end
-  assert(node.symbol:gettype() == var_type)
+  assert(std.type_eq(var_type, node.symbol:gettype()))
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
@@ -2819,7 +2819,10 @@ function type_check.stat_for_list(cx, node)
 
   -- Hack: Stuff the type back into the symbol so it's available
   -- to ptr types if necessary.
-  node.symbol:settype(var_type)
+  if not node.symbol:hastype() then
+    node.symbol:settype(var_type)
+  end
+  assert(std.type_eq(var_type, node.symbol:gettype()))
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
