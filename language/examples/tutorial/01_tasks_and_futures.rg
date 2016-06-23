@@ -12,14 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- privilege_fill1.rg:24: invalid privileges in fill: writes($r)
---   fill(r, 0)
---      ^
-
 import "regent"
 
-task k(r : region(int))
-where reads(r) do
-  fill(r, 0)
+local c = terralib.includec("stdio.h")
+
+task fibonacci(n : int) : int
+  if n == 0 then return 0 end
+  if n == 1 then return 1 end
+
+  var f1 = fibonacci(n - 1) -- A task call implicitly returns a future.
+  var f2 = fibonacci(n - 2)
+
+  return f1 + f2 -- Arithmetic is automatically promoted to operate on futures.
 end
+
+task print_result(n : int, result : int)
+  c.printf("Fibonacci(%d) = %d\n", n, result)
+end
+
+task main()
+  var num_fibonacci = 7
+  for i = 0, num_fibonacci do
+    print_result(i, fibonacci(i))
+  end
+end
+regentlib.start(main)

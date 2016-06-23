@@ -2353,6 +2353,7 @@ namespace Legion {
     void MemoryManager::deactivate_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
+      bool remove_reference = false;
       {
         AutoLock m_lock(manager_lock);
         std::map<PhysicalManager*,InstanceInfo>::iterator finder =
@@ -2375,22 +2376,21 @@ namespace Legion {
           Runtime::trigger_event(info.deferred_collect);
           // Now we can delete our entry because it has been deleted
           current_instances.erase(finder);
+          remove_reference = true;
         }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
       }
       // If we are the owner and this is a reduction instance
       // then let's just delete it now
-      if (is_owner && manager->is_reduction_manager() && 
-          manager->try_active_deletion())
+      if (remove_reference)
       {
-        // We still hold a reference from earlier which is necessary
-        // before making the next call
-        RtEvent deferred_delete = record_deleted_instance(manager);
-        manager->perform_deletion(deferred_delete);
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
           PhysicalManager::delete_physical_manager(manager);
       }
+      else if (is_owner && manager->is_reduction_manager() && 
+                manager->try_active_deletion())
+        record_deleted_instance(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -2857,6 +2857,9 @@ namespace Legion {
             manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
             // Then record it
             AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+            assert(current_instances.find(manager) != current_instances.end());
+#endif
             InstanceInfo &info = current_instances[manager];
             if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate = true; // lost the race
@@ -3313,6 +3316,8 @@ namespace Legion {
       // If the manager isn't ready yet, then we need to wait for it
       if (manager_ready.exists())
         manager_ready.wait();
+      bool remove_duplicate_resource_ref = false;
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       // If we acquired on the owner node, add our own local reference
       // and then remove the remote DID
       if (acquire)
@@ -3330,70 +3335,93 @@ namespace Legion {
         bool created;
         derez.deserialize(created);
         *created_ptr = created;
+        bool min_priority = false;
+        MapperID mapper_id = 0;
+        Processor processor = Processor::NO_PROC;
         if (created)
         {
-          bool min_priority;
           derez.deserialize(min_priority);
           if (min_priority)
           {
-            MapperID mapper_id;
             derez.deserialize(mapper_id);
-            Processor processor;
             derez.deserialize(processor);
-            // Record the instance as a max priority instance
-            bool remove_duplicate = false;
-            // No need to be safe here, we have a valid reference
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-            {
-              std::pair<MapperID,Processor> key(mapper_id,processor);
-              AutoLock m_lock(manager_lock);
-              InstanceInfo &info = current_instances[manager];
-              if (info.min_priority == NEVER_GC_REF)
-                remove_duplicate = true;
-              else
-                info.min_priority = NEVER_GC_REF;
-              info.mapper_priorities[key] = NEVER_GC_REF;
-            }
-            if (remove_duplicate && 
-                manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-              PhysicalManager::delete_physical_manager(manager);
           }
         }
+        // Record the instance as a max priority instance
+        bool remove_duplicate_valid = false;
+        // No need to be safe here, we have a valid reference
+        if (created && min_priority)
+          manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
+        {
+          AutoLock m_lock(manager_lock);
+          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
+            current_instances.find(manager);
+          if (finder == current_instances.end())
+            current_instances[manager] = InstanceInfo();
+          else
+            remove_duplicate_resource_ref = true;
+          if (created && min_priority)
+          {
+            std::pair<MapperID,Processor> key(mapper_id,processor);
+            InstanceInfo &info = current_instances[manager];
+            if (info.min_priority == NEVER_GC_REF)
+              remove_duplicate_valid = true;
+            else
+              info.min_priority = NEVER_GC_REF;
+            info.mapper_priorities[key] = NEVER_GC_REF;
+          }
+        }
+        if (remove_duplicate_valid && 
+            manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+          PhysicalManager::delete_physical_manager(manager);
       }
       else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
                (kind == CREATE_INSTANCE_LAYOUT))
       {
         bool min_priority;
         derez.deserialize(min_priority);
+        MapperID mapper_id = 0;
+        Processor processor = Processor::NO_PROC;
         if (min_priority)
         {
-          MapperID mapper_id;
           derez.deserialize(mapper_id);
-          Processor processor;
           derez.deserialize(processor);
-          bool remove_duplicate = false;
-          // No need to be safe here, we have a valid reference
+        }
+        bool remove_duplicate_valid = false;
+        if (min_priority)
           manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
+        {
+          std::pair<MapperID,Processor> key(mapper_id,processor);
+          AutoLock m_lock(manager_lock);
+          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
+            current_instances.find(manager);
+          if (finder == current_instances.end())
+            current_instances[manager] = InstanceInfo();
+          else
+            remove_duplicate_resource_ref = true;
+          if (min_priority)
           {
-            std::pair<MapperID,Processor> key(mapper_id,processor);
-            AutoLock m_lock(manager_lock);
             InstanceInfo &info = current_instances[manager];
             if (info.min_priority == NEVER_GC_REF)
-              remove_duplicate = true;
+              remove_duplicate_valid = true;
             else
               info.min_priority = NEVER_GC_REF;
             info.mapper_priorities[key] = NEVER_GC_REF;
           }
-          if (remove_duplicate && 
-              manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-            PhysicalManager::delete_physical_manager(manager);
         }
+        if (remove_duplicate_valid && 
+            manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
+          PhysicalManager::delete_physical_manager(manager);
       }
       // Trigger that we are done
       if (!preconditions.empty())
         Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(to_trigger);
+      // Remove a duplicate reference if there was one
+      if (remove_duplicate_resource_ref &&
+          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -4272,10 +4300,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::record_deleted_instance(PhysicalManager *manager)
+    void MemoryManager::record_deleted_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      RtEvent result;
+      RtEvent deletion_precondition;
+      bool remove_reference = false;
       {
         AutoLock m_lock(manager_lock);
         std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
@@ -4292,7 +4321,7 @@ namespace Legion {
         {
           finder->second.current_state = ACTIVE_COLLECTED_STATE;
           finder->second.deferred_collect = Runtime::create_rt_user_event();
-          result = finder->second.deferred_collect;
+          deletion_precondition = finder->second.deferred_collect;
         }
         else
         {
@@ -4300,13 +4329,13 @@ namespace Legion {
           assert(finder->second.current_state == COLLECTABLE_STATE);
 #endif
           current_instances.erase(finder);
+          remove_reference = true;
         }
       }
-      // if we actually deleted it here, remove our resource reference
-      if (!result.exists() &&
+      manager->perform_deletion(deletion_precondition);
+      if (remove_reference && 
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
         PhysicalManager::delete_physical_manager(manager);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4323,13 +4352,7 @@ namespace Legion {
         PhysicalManager *target_manager = it->manager;
         if (target_manager->try_active_deletion())
         {
-          // Add a resource reference to it before doing this call
-          target_manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-          RtEvent deferred_delete = record_deleted_instance(target_manager);
-          target_manager->perform_deletion(deferred_delete);
-          // Remove our reference
-          if (target_manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            PhysicalManager::delete_physical_manager(target_manager);
+          record_deleted_instance(target_manager);
           total_bytes_deleted += it->instance_size;
           // Only need to do the test if we're smaller
           if (!SMALLER || (total_bytes_deleted >= needed_size))

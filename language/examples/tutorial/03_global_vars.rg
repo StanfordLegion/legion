@@ -12,14 +12,19 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- privilege_fill1.rg:24: invalid privileges in fill: writes($r)
---   fill(r, 0)
---      ^
-
 import "regent"
 
-task k(r : region(int))
-where reads(r) do
-  fill(r, 0)
+local c = terralib.includec("stdio.h")
+
+-- Global constants can be declared at the top scope.
+-- (Regent does not support mutable global variables.)
+local global_constant = 4
+
+-- Function pointers may vary between nodes and runs.
+terra foo() end
+
+task main()
+  c.printf("The value of global_constant %d will always be the same\n", global_constant)
+  c.printf("The function pointer to foo %p may be different on different processors\n", foo)
 end
+regentlib.start(main)

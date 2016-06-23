@@ -497,6 +497,24 @@ function pretty.expr_fill(cx, node)
       ")"})
 end
 
+function pretty.expr_acquire(cx, node)
+  return join({
+      "acquire(",
+      commas({pretty.expr_region_root(cx, node.region),
+              unpack(node.conditions:map(
+                function(condition) return pretty.expr_condition(cx, condition) end))}),
+      ")"})
+end
+
+function pretty.expr_release(cx, node)
+  return join({
+      "release(",
+      commas({pretty.expr_region_root(cx, node.region),
+              unpack(node.conditions:map(
+                function(condition) return pretty.expr_condition(cx, condition) end))}),
+      ")"})
+end
+
 function pretty.expr_allocate_scratch_fields(cx, node)
   return join({
       "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
@@ -668,6 +686,12 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Fill) then
     return pretty.expr_fill(cx, node)
+
+  elseif node:is(ast.typed.expr.Acquire) then
+    return pretty.expr_acquire(cx, node)
+
+  elseif node:is(ast.typed.expr.Release) then
+    return pretty.expr_release(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return pretty.expr_allocate_scratch_fields(cx, node)

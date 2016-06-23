@@ -713,7 +713,7 @@ namespace Legion {
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
-      RtEvent record_deleted_instance(PhysicalManager *manager); 
+      void record_deleted_instance(PhysicalManager *manager); 
       void find_instances_by_state(size_t needed_size, InstanceState state, 
                      std::set<CollectableInfo<true> > &smaller_instances,
                      std::set<CollectableInfo<false> > &larger_instances) const;
