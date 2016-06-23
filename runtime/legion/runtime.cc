@@ -2873,7 +2873,7 @@ namespace Legion {
         // it fails then we know the instance is already deleted so whatever
         if ((priority == GC_NEVER_PRIORITY) &&
             !manager->try_add_base_valid_ref(NEVER_GC_REF, &mutator,
-                                             true/*must be valid*/))
+                                             false/*must be valid*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
