@@ -4845,6 +4845,7 @@ function codegen.expr_fill(cx, node)
     function(condition)
       return codegen.expr_condition(cx, condition)
     end)
+  assert(#conditions == 0) -- FIXME: Can't issue phase barriers on fills.
 
   local actions = quote
     [dst.actions]
@@ -4856,6 +4857,262 @@ function codegen.expr_fill(cx, node)
     [expr_fill_setup_list(
        cx, dst.value, dst_type, dst_type, node.dst.fields,
        value.value, value_type)]
+  end
+
+  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+end
+
+local function expr_acquire_issue_phase_barriers(values, condition_kinds, launcher)
+  local actions = terralib.newlist()
+  for i, value in ipairs(values) do
+    local conditions = condition_kinds[i]
+    for _, condition_kind in ipairs(conditions) do
+      local add_barrier
+      if condition_kind == std.awaits then
+        add_barrier = c.legion_acquire_launcher_add_wait_barrier
+      elseif condition_kind == std.arrives then
+        add_barrier = c.legion_acquire_launcher_add_arrival_barrier
+      else
+        assert(false)
+      end
+      actions:insert(quote [add_barrier]([launcher], [value].impl) end)
+    end
+  end
+  return actions
+end
+
+local function expr_acquire_extract_phase_barriers(index, values, value_types)
+  local actions = terralib.newlist()
+  local result_values = terralib.newlist()
+  local result_types = terralib.newlist()
+  for i, value in ipairs(values) do
+    local value_type = value_types[i]
+
+    local result_type = value_type.element_type
+    local result_value = terralib.newsymbol(result_type, "condition_element")
+    actions:insert(quote
+        std.assert([index] < [value].__size, "barrier index out of bounds in acquire")
+        var [result_value] = [value_type:data(value)][ [index] ]
+    end)
+    result_values:insert(result_value)
+    result_types:insert(result_type)
+  end
+  return actions, result_values, result_types
+end
+
+local function expr_acquire_setup_region(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds)
+  assert(std.is_region(dst_type))
+  assert(std.type_supports_privileges(dst_container_type))
+
+  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
+
+  local actions = terralib.newlist()
+  for i, dst_field in ipairs(dst_fields) do
+    local dst_copy_fields = data.filter(
+      function(field) return field:starts_with(dst_field) end,
+      dst_all_fields)
+
+    local dst_parent = get_container_root(
+      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+
+    for j, dst_copy_field in ipairs(dst_copy_fields) do
+      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
+
+      -- FIXME: When this is a list, a physical region won't be available.
+      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
+
+      actions:insert(quote
+        var launcher = c.legion_acquire_launcher_create(
+          [dst_value].impl, [dst_parent], [dst_physical],
+          c.legion_predicate_true(), 0, 0)
+        c.legion_acquire_launcher_add_field(
+          launcher, dst_field_id)
+        [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+        c.legion_acquire_launcher_execute([cx.runtime], [cx.context], [launcher])
+      end)
+    end
+  end
+  return actions
+end
+
+local function expr_acquire_setup_list(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds)
+  if std.is_list(dst_type) then
+    local dst_element_type = dst_type.element_type
+    local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol(uint64, "index")
+    local c_actions, c_values, c_types = expr_acquire_extract_phase_barriers(
+      index, condition_values, condition_types)
+    return quote
+      for [index] = 0, [dst_value].__size do
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
+        [expr_acquire_setup_list(
+           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds)]
+      end
+    end
+  else
+    return expr_acquire_setup_region(
+      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds)
+  end
+end
+
+function codegen.expr_acquire(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+  local conditions = node.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
+
+  local actions = quote
+    [region.actions]
+    [conditions:map(
+       function(condition) return condition.value.actions end)]
+    [emit_debuginfo(node)]
+
+    [expr_acquire_setup_list(
+       cx, region.value, region_type, region_type, node.region.fields,
+       conditions:map(function(condition) return condition.value end),
+       node.conditions:map(
+         function(condition)
+           return std.as_read(condition.value.expr_type)
+         end),
+       node.conditions:map(function(condition) return condition.conditions end))]
+  end
+
+  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+end
+
+local function expr_release_issue_phase_barriers(values, condition_kinds, launcher)
+  local actions = terralib.newlist()
+  for i, value in ipairs(values) do
+    local conditions = condition_kinds[i]
+    for _, condition_kind in ipairs(conditions) do
+      local add_barrier
+      if condition_kind == std.awaits then
+        add_barrier = c.legion_release_launcher_add_wait_barrier
+      elseif condition_kind == std.arrives then
+        add_barrier = c.legion_release_launcher_add_arrival_barrier
+      else
+        assert(false)
+      end
+      actions:insert(quote [add_barrier]([launcher], [value].impl) end)
+    end
+  end
+  return actions
+end
+
+local function expr_release_extract_phase_barriers(index, values, value_types)
+  local actions = terralib.newlist()
+  local result_values = terralib.newlist()
+  local result_types = terralib.newlist()
+  for i, value in ipairs(values) do
+    local value_type = value_types[i]
+
+    local result_type = value_type.element_type
+    local result_value = terralib.newsymbol(result_type, "condition_element")
+    actions:insert(quote
+        std.assert([index] < [value].__size, "barrier index out of bounds in release")
+        var [result_value] = [value_type:data(value)][ [index] ]
+    end)
+    result_values:insert(result_value)
+    result_types:insert(result_type)
+  end
+  return actions, result_values, result_types
+end
+
+local function expr_release_setup_region(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds)
+  assert(std.is_region(dst_type))
+  assert(std.type_supports_privileges(dst_container_type))
+
+  local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
+
+  local actions = terralib.newlist()
+  for i, dst_field in ipairs(dst_fields) do
+    local dst_copy_fields = data.filter(
+      function(field) return field:starts_with(dst_field) end,
+      dst_all_fields)
+
+    local dst_parent = get_container_root(
+      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
+
+    for j, dst_copy_field in ipairs(dst_copy_fields) do
+      local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
+      local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
+
+      -- FIXME: When this is a list, a physical region won't be available.
+      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
+
+      actions:insert(quote
+        var launcher = c.legion_release_launcher_create(
+          [dst_value].impl, [dst_parent], [dst_physical],
+          c.legion_predicate_true(), 0, 0)
+        c.legion_release_launcher_add_field(
+          launcher, dst_field_id)
+        [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
+        c.legion_release_launcher_execute([cx.runtime], [cx.context], [launcher])
+      end)
+    end
+  end
+  return actions
+end
+
+local function expr_release_setup_list(
+    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    condition_values, condition_types, condition_kinds)
+  if std.is_list(dst_type) then
+    local dst_element_type = dst_type.element_type
+    local dst_element = terralib.newsymbol(dst_element_type, "dst_element")
+    local index = terralib.newsymbol(uint64, "index")
+    local c_actions, c_values, c_types = expr_release_extract_phase_barriers(
+      index, condition_values, condition_types)
+    return quote
+      for [index] = 0, [dst_value].__size do
+        var [dst_element] = [dst_type:data(dst_value)][ [index] ]
+        [c_actions]
+        [expr_release_setup_list(
+           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           c_values, c_types, condition_kinds)]
+      end
+    end
+  else
+    return expr_release_setup_region(
+      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      condition_values, condition_types, condition_kinds)
+  end
+end
+
+function codegen.expr_release(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+  local conditions = node.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
+
+  local actions = quote
+    [region.actions]
+    [conditions:map(
+       function(condition) return condition.value.actions end)]
+    [emit_debuginfo(node)]
+
+    [expr_release_setup_list(
+       cx, region.value, region_type, region_type, node.region.fields,
+       conditions:map(function(condition) return condition.value end),
+       node.conditions:map(
+         function(condition)
+           return std.as_read(condition.value.expr_type)
+         end),
+       node.conditions:map(function(condition) return condition.conditions end))]
   end
 
   return values.value(node, expr.just(actions, quote end), terralib.types.unit)
@@ -5519,6 +5776,12 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Fill) then
     return codegen.expr_fill(cx, node)
+
+  elseif node:is(ast.typed.expr.Acquire) then
+    return codegen.expr_acquire(cx, node)
+
+  elseif node:is(ast.typed.expr.Release) then
+    return codegen.expr_release(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return codegen.expr_allocate_scratch_fields(cx, node)

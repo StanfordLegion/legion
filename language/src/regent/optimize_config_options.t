@@ -65,6 +65,8 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.stat.IndexLaunch)
     then

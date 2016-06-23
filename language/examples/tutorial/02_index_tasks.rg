@@ -12,14 +12,27 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- privilege_fill1.rg:24: invalid privileges in fill: writes($r)
---   fill(r, 0)
---      ^
-
 import "regent"
 
-task k(r : region(int))
-where reads(r) do
-  fill(r, 0)
+local c = terralib.includec("stdio.h")
+
+task double(i : int, x : int)
+  c.printf("Hello world from task %lld!\n", i)
+  return 2*x
 end
+
+task main()
+  var num_points = 4
+
+  -- Regent automatically converts loops of task calls into index
+  -- space launches. The __demand annotation is **NOT** required, but
+  -- ensures that the compiler will throw an error if the optimization
+  -- fails.
+  var total = 0
+  __demand(__parallel)
+  for i = 0, num_points do
+    total += double(i, i + 10)
+  end
+  regentlib.assert(total == 92, "check failed")
+end
+regentlib.start(main)

@@ -163,6 +163,8 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
     then
@@ -249,6 +251,9 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
+      node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
     then
