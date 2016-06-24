@@ -151,29 +151,32 @@ must be launched using the 'gasnetrun' command (see GASNET documentation).
 Both the low-level and high-level runtime have flags for controlling execution.
 Below are some of the more commonly used flags:
 
--cat <logger_name>[,logger_name]*  restricts logging to the comma separated list of loggers
+  * `-level <logger_name>=<int>`:
+    dynamic logging level for a given logger name (see 'runtime/utilities.h' for
+    how the numbers associated with each level)
 
--level <int>    dynamically restrict the logging level to all statements at
-                   the given level number and above.  See 'runtime/utilities.h' for
-                   how the numbers associated with each level.
+  * `-logfile <filename>`:
+    directs logging output to filename
 
--ll:cpu <int>   the number of CPU processors to create per process
+  * `-ll:cpu <int>`: CPU processors to create per process
 
--ll:gpu <int>   number of GPU Processors to create per process
+  * `-ll:gpu <int>`: GPU processors to create per process
 
--ll:csize <int>   size of DRAM Memory per process in MB
+  * `-ll:cpu <int>`: utility processors to create per process
 
--ll:gsize <int>    size of GASNET registered RDMA memory available per process in MB
+  * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
 
--ll:fsize <int>    size of framebuffer memory for each GPU in MB
+  * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
 
--ll:zsize <int>    size of zero-copy memory for each GPU in MB
+  * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
 
--ll:util <int>     specify the number of utility processors created per process
+  * `-ll:fsize <int>`: size of framebuffer memory for each GPU (in MB)
 
--hl:window <int>   specify the maximum number of tasks that can be created in a parent task window
+  * `-ll:zsize <int>`: size of zero-copy memory for each GPU (in MB)
 
--hl:sched <int>    minimum number of tasks to try to schedule for each invocation of the scheduler
+  * `-hl:window <int>`: maximum number of tasks that can be created in a parent task window
+
+  * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
 See default_mapper.cc for more details.
