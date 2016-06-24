@@ -97,23 +97,19 @@ we refer to you to our Supercomputing paper.
 
 http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
-The Legion repository is separated into directories described below:
+The Legion repository contains the following directories:
 
-runtime: The runtime directory contains all of the source code for the Legion runtime
-system.  The primary files that most users will be interested in are 'legion.h' and
-'lowlevel.h' which represent the interfaces to the high-level and low-level runtime
-systems for Legion respectively.
-
-apps: The applications directory currently contains two applications: saxpy and circuit.
-Saxpy is an unoptimized implementation of the saxpy kernel for illustrating
-different features of Legion.  The circuit directory contains the source code for the
-circuit simulation used in our paper on Legion.  We plan to release additional
-application examples once we figure out the necessary licensing constraints.
-
-tools: The tools directory contains the source code for the 'legion_spy' debugging
-tool that we use for doing correctness and performance debugging in Legion.  We also
-have a 'legion_prof' tool that does performance profiling of Legion application
-runs and can be used for generating both statistics and execution diagrams.
+  * `tutorial`: Source code for the [tutorials](/tutorial/).
+  * `examples`: Larger examples for advanced programming techniques.
+  * `apps`: Several complete Legion applications.
+  * `language`: The [Regent programming language](http://regent-lang.org/) compiler and examples.
+  * `runtime`: The core runtime components:
+    * `legion`: The Legion runtime itself (see `legion.h`).
+    * `realm`: The Realm low-level runtime (see `realm.h`).
+    * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
+  * `tools`: Miscellaneous tools:
+    * `legion_spy.py`: A debugging tool renders task dependencies.
+    * `legion_prof.py`: A task-level profiler.
 
 Dependencies
 ==================================================================================
@@ -137,8 +133,8 @@ compilation of the application.  At the top of the Makefile there are several
 different variables that can be used to control how the application is built.
 By default, applications are compiled in debug mode.  This can be changed by
 commenting out the 'DEBUG' variable.  Users can statically control the minimum
-level of logging information printed by the runtime by setting the 'OUTPUT_LEVEL'
-variable.  Choices for 'OUTPUT_LEVEL' can be seen at the top of 'runtime/utilities.h'.
+level of logging information printed by the runtime by setting the `OUTPUT_LEVEL`
+variable.  Choices for 'OUTPUT_LEVEL' can be seen at the top of `runtime/utilities.h`.
 The 'SHARED_LOWLEVEL' runtime variable controls whether the application is compiled
 to run on the shared-low-level runtime, or if the variable is not set, the application
 will be targeted at the GASNET-GPU generic low-level runtime.
@@ -152,7 +148,7 @@ Both the low-level and high-level runtime have flags for controlling execution.
 Below are some of the more commonly used flags:
 
   * `-level <logger_name>=<int>`:
-    dynamic logging level for a given logger name (see 'runtime/utilities.h' for
+    dynamic logging level for a given logger name (see `runtime/utilities.h` for
     how the numbers associated with each level)
 
   * `-logfile <filename>`:
