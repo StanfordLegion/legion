@@ -364,7 +364,11 @@ function type_check.constraint(type_env, type_assignment, constraint)
       "' expects type '" .. tostring(desired_type) .. "', but got '" ..
       tostring(value.expr_type) .. "'")
   end
-  return ast.typed.Constraint(constraint)
+  return ast.typed.Constraint {
+    field = constraint.field,
+    value = value,
+    position = constraint.position,
+  }
 end
 
 function type_check.element(type_env, element)
