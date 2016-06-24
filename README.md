@@ -117,12 +117,14 @@ runs and can be used for generating both statistics and execution diagrams.
 
 Dependencies
 ==================================================================================
-We have only tested Legion running on Linux based systems.  An implementation of
-the POSIX threads library is required for running all Legion applications.  For
-running applications on clusters and GPUs, we require at least CUDA 4.2 and
-and an installation of GASNET.  Verify that the correct locations of these installations
-are set in 'runtime/runtime.mk'.  At least Python 2.4 is required to run the
-'legion_spy' debugging tool.
+
+  * Linux, OS X, or another Unix
+  * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * *Optional*: Python 2.7 (used for profiling/debugging tools)
+  * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
+  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
+  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: HDF5 (for file I/O)
 
 Running Programs
 ==================================================================================
