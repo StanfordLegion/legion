@@ -149,7 +149,9 @@ influence the build. These may either be set on the command-line
 
   * `DEBUG=<0,1>`: controls optimization level and enables various
     dynamic checks which are too expensive for release builds.
-  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time logging level.
+  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time logging
+    level (see `runtime/realm/logging.h` for a list of logging level
+    names).
   * `USE_CUDA=<0,1>`: enables CUDA support.
   * `USE_GASNET=<0,1>`: enables GASNET support.
   * `USE_LLVM=<0,1>`: enables LLVM support.
@@ -161,10 +163,10 @@ Legion and Realm accept command-line arguments for various runtime
 parameters. Below are some of the more commonly used flags:
 
   * `-level <logger_name>=<int>`:
-    dynamic logging level for a given logger name (see `runtime/utilities.h` for
-    how the numbers associated with each level)
+    dynamic logging level for a given logger name (see `runtime/realm/logging.h` for
+    the list of logging levels)
   * `-logfile <filename>`:
-    directs logging output to filename
+    directs logging output to `filename`
   * `-ll:cpu <int>`: CPU processors to create per process
   * `-ll:gpu <int>`: GPU processors to create per process
   * `-ll:cpu <int>`: utility processors to create per process
