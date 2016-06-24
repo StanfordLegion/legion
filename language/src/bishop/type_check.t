@@ -485,14 +485,13 @@ function type_check.rule(type_env, rule)
 
   for idx = 1, #rule.selectors do
     local local_type_env = type_env:new_local_scope()
-    local selectors = terralib.newlist()
-    selectors:insert(type_check.selector(local_type_env, rule.selectors[idx]))
+    local selector = type_check.selector(local_type_env, rule.selectors[idx])
     local properties =
       rule.properties:map(
         std.curry2(type_check.property, rule_type, local_type_env))
     return ast.typed.Rule {
       rule_type = rule_type,
-      selectors = selectors,
+      selector = selector,
       properties = properties,
       position = rule.position,
     }

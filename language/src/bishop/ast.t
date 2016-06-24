@@ -392,7 +392,7 @@ end
 ast:inner("typed", { "position" })
 
 ast.typed:leaf("Mapper", { "rules", "assignments" })
-ast.typed:leaf("Rule", { "rule_type", "selectors", "properties" })
+ast.typed:leaf("Rule", { "rule_type", "selector", "properties" })
 
 ast.typed:leaf("Selector", { "type", "elements", })
 function ast.typed.Selector:unparse()

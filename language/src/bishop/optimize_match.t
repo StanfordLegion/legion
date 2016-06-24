@@ -36,12 +36,11 @@ local function traverse_element(rules, fn)
   local results = terralib.newlist()
   for ridx = 1, #rules do
     local rule = rules[ridx]
-    assert(#rule.selectors == 1)
     local elements = terralib.newlist()
-    local num_elements = #rule.selectors[1].elements
+    local num_elements = #rule.selector.elements
     if rule.rule_type == "region" then num_elements = num_elements - 1 end
     for eidx = 1, num_elements do
-      local r = fn(rule.selectors[1].elements[eidx])
+      local r = fn(rule.selector.elements[eidx])
       if r then elements:insert(r) end
     end
     if #elements > 0 then results:insert(elements) end
@@ -229,11 +228,40 @@ local function translate_to_regex(selectors, all_symbols, all_task_symbols, symb
   end)
 end
 
+local function calculate_specificity(selector)
+  local s = { 0, 0, 0, 0 }
+  for i = 1, #selector.elements do
+    local e = selector.elements[i]
+    if #e.name > 0 then s[1] = s[1] + 1 end
+    if #e.classes > 0 then s[2] = s[2] + 1 end
+    if #e.constraints > 0 then s[3] = s[3] + 1 end
+  end
+  s[4] = #selector.elements
+  return s
+end
+
+local function compare_rules(rule1, rule2)
+  if rule1 == rule2 then return false end
+  assert(rule2:is(rule1.node_type))
+  local specificity1 = calculate_specificity(rule1.selector)
+  local specificity2 = calculate_specificity(rule2.selector)
+  for i = 1, 4 do
+    if specificity1[i] < specificity2[i] then
+      return true
+    elseif specificity1[i] > specificity2[i] then
+      return false
+    end
+  end
+  return false
+end
+
 local optimize_match = {}
 
 function optimize_match.mapper(node)
   fetch_task_ids()
   local rules = node.rules
+  table.sort(rules, compare_rules)
+  rules:map(function(rule) print(rule.selector:unparse()) end)
   local selectors, all_symbols, all_task_symbols, symbols_by_task =
     collect_symbols(rules)
   local regexprs =
@@ -242,19 +270,19 @@ function optimize_match.mapper(node)
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
   dfa:renumber()
   local function check(idx, depth)
-    local num_task_elements = #rules[idx].selectors[1].elements
+    local num_task_elements = #rules[idx].selector.elements
     if rules[idx].rule_type == "region" then
       num_task_elements = num_task_elements - 1
     end
     local min_length = num_task_elements
     for eidx = 1, num_task_elements do
-      local elem = rules[idx].selectors[1].elements[eidx]
+      local elem = rules[idx].selector.elements[eidx]
       min_length = min_length + #elem.classes
       min_length = min_length + #elem.constraints
     end
 
     if num_task_elements > depth then
-      assert(false, "error: selector " .. rules[idx].selectors[1]:unparse() ..
+      assert(false, "error: selector " .. rules[idx].selector:unparse() ..
       " cannot have a path shorter than " .. tostring(min_length) ..
       " on state digram (length " .. tostring(depth).." found)")
     end
