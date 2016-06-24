@@ -5017,12 +5017,15 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
       if (req.flags & VERIFIED_FLAG)
         return NO_ERROR;
+      // Copy privilege fields for check
+      std::set<FieldID> privilege_fields(req.privilege_fields);
       // Try our original region requirements first
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, bad_field, skip_privilege);
+          check_privilege_internal(req, *it, privilege_fields, bad_field,
+                                   skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -5038,7 +5041,8 @@ namespace Legion {
             created_requirements.end(); it++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, bad_field, skip_privilege);
+          check_privilege_internal(req, *it, privilege_fields, bad_field,
+                                   skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -5054,6 +5058,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionErrorType SingleTask::check_privilege_internal(
         const RegionRequirement &req, const RegionRequirement &our_req,
+        std::set<FieldID>& privilege_fields,
         FieldID &bad_field, bool skip_privilege) const
     //--------------------------------------------------------------------------
     {
@@ -5082,34 +5087,38 @@ namespace Legion {
         // Note we can use the parent since all the regions/partitions
         // in the same region tree have the same field space
         for (std::set<FieldID>::const_iterator fit = 
-              req.privilege_fields.begin(); fit != 
-              req.privilege_fields.end(); fit++)
+              privilege_fields.begin(); fit != 
+              privilege_fields.end(); )
         {
-          if (our_req.privilege_fields.find(*fit) == 
+          if (our_req.privilege_fields.find(*fit) != 
               our_req.privilege_fields.end())
-            // Indicate we should keep going
-            return ERROR_BAD_PARENT_REGION;
-        }
-        // Only need to do this check if there were overlapping fields
-        if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
-        {
-          // Handle the special case where the parent has WRITE_DISCARD
-          // privilege and the sub-task wants any other kind of privilege.  
-          // This case is ok because the parent could write something
-          // and then hand it off to the child.
-          if (our_req.privilege != WRITE_DISCARD)
           {
-            if ((req.handle_type == SINGULAR) || 
-                (req.handle_type == REG_PROJECTION))
-              return ERROR_BAD_REGION_PRIVILEGES;
-            else
-              return ERROR_BAD_PARTITION_PRIVILEGES;
+            // Only need to do this check if there were overlapping fields
+            if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
+            {
+              // Handle the special case where the parent has WRITE_DISCARD
+              // privilege and the sub-task wants any other kind of privilege.  
+              // This case is ok because the parent could write something
+              // and then hand it off to the child.
+              if (our_req.privilege != WRITE_DISCARD)
+              {
+                if ((req.handle_type == SINGULAR) || 
+                    (req.handle_type == REG_PROJECTION))
+                  return ERROR_BAD_REGION_PRIVILEGES;
+                else
+                  return ERROR_BAD_PARTITION_PRIVILEGES;
+              }
+            }
+            privilege_fields.erase(fit++);
           }
+          else
+            ++fit;
         }
-        // If we make it here then we are good
-        return NO_ERROR;
       }
-      return ERROR_BAD_PARENT_REGION;
+
+      if (!privilege_fields.empty()) return ERROR_BAD_PARENT_REGION;
+        // If we make it here then we are good
+      return NO_ERROR;
     }
 
     //--------------------------------------------------------------------------

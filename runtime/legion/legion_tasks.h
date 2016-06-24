@@ -499,6 +499,7 @@ namespace Legion {
     protected:
       LegionErrorType check_privilege_internal(const RegionRequirement &req,
                                       const RegionRequirement &parent_req,
+                                      std::set<FieldID>& privilege_fields,
                                       FieldID &bad_field, 
                                       bool skip_privileges) const;
     public:
