@@ -815,7 +815,7 @@ task toplevel()
   --var rp_duplicate = partition(aliased, all_nodes, duplicate_coloring)
   --c.legion_coloring_destroy(duplicate_coloring)
 
-  ----__demand(__spmd, __block)
+  ----__demand(__spmd)
   --for j = 0, 1 do
   --  __demand(__parallel)
   --  for i = 0, num_pieces do
@@ -834,7 +834,7 @@ task toplevel()
 
   --var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
 
-  __demand(__spmd, __block)
+  __demand(__spmd)
   for j = 0, 1 do
     for i = 0, num_pieces do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
@@ -855,7 +855,7 @@ task toplevel()
   var simulation_success = true
   var steps = conf.steps
   var num_loops = conf.num_loops
-  __demand(__spmd, __block)
+  __demand(__spmd)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 

@@ -12,18 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_for7.rg:23: iterator for loop expected symbol of type int1d(int32, $r), got ptr(int32, $r)
+--   for x : ptr(int, r) in r do end
+--     ^
+
 import "regent"
 
-local c = terralib.includec("stdio.h")
-
--- Global constants are simply Lua variables, defined at the top
--- scope. (Regent does not support mutable global variables.)
-local global_constant = 4
-
--- Function pointers (such as to printf) may vary between nodes and runs.
-
-task main()
-  c.printf("The value of global_constant %d will always be the same\n", global_constant)
-  c.printf("The function pointer to printf %p may be different on different processors\n", c.printf)
+task f(r : region(ispace(int1d), int))
+  for x : ptr(int, r) in r do end
 end
-regentlib.start(main)
+f:compile()

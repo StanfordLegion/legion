@@ -134,22 +134,22 @@ local function check_options_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.stat.While) then
-      check(cx, node, data.set({"block", "spmd", "trace"}))
+      check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForNum) then
-      check(cx, node, data.set({"block", "parallel", "spmd", "trace"}))
+      check(cx, node, data.set({"parallel", "spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForList) then
-      check(cx, node, data.set({"block", "spmd", "trace", "vectorize"}))
+      check(cx, node, data.set({"spmd", "trace", "vectorize"}))
 
     elseif node:is(ast.typed.stat.Repeat) then
-      check(cx, node, data.set({"block", "spmd", "trace"}))
+      check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.MustEpoch) then
-      check(cx, node, data.set({"block"}))
+      check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.stat.Block) then
-      check(cx, node, data.set({"block", "spmd", "trace"}))
+      check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.Var) or
       node:is(ast.typed.stat.VarUnpack) or

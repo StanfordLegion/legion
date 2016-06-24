@@ -63,8 +63,6 @@ function parser.option_name(p, required)
     return "trace"
   elseif p:nextif("__vectorize") then
     return "vectorize"
-  elseif p:nextif("__block") then
-    return "block"
   elseif required then
     p:error("expected option name")
   end
