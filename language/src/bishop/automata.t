@@ -366,7 +366,7 @@ function automata:update_rules(rules)
   end
 end
 
-function automata:dot(symbol_mapping, tag_mapping)
+function automata:dot(symbol_mapping, tag_mapping, state_mapping)
   self:cache_transitions()
   print("digraph G {")
   for _, tuple in pairs(self.trans) do
@@ -384,7 +384,12 @@ function automata:dot(symbol_mapping, tag_mapping)
     elseif self.final[state] then
       color = ",fillcolor=\"slateblue1\",style=\"filled\""
     end
-    local label = "state " .. tostring(state.id)
+    local label
+    if state_mapping then
+      label = state_mapping(state)
+    else
+      label = "state " .. tostring(state.id)
+    end
     if tag_mapping then
       for tag, _ in pairs(state.tags) do
         label = label .. "\\n" .. tag_mapping[tag]

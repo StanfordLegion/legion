@@ -68,6 +68,27 @@ local function fetch_task_signatures()
   return task_signatures
 end
 
+local function fetch_call_graph()
+  local call_graph = {}
+  if std.config["standalone"] then return call_graph end
+  local regent_std = require("regent/std")
+  local regent_ast = require("regent/ast")
+  for k, v in pairs(_G) do
+    if regent_std.is_task(v) then
+      call_graph[k] = {}
+      local task_ast = v.ast
+      local function record_callees(node)
+        if node:is(regent_ast.typed.expr.Call) and
+           regent_std.is_task(node.fn.value) then
+          call_graph[k][node.fn.value.name:mkstring()] = true
+        end
+      end
+      regent_ast.traverse_node_postorder(record_callees, task_ast)
+    end
+  end
+  return call_graph
+end
+
 local function traverse_element(rules, fn)
   local results = terralib.newlist()
   for ridx = 1, #rules do
@@ -304,7 +325,15 @@ local function print_dfa(dfa, all_symbols, rules)
   for idx = 1, #rules do
     tag_mapping[idx] = rules[idx].selector:unparse()
   end
-  dfa:dot(symbol_mapping, tag_mapping)
+  local function state_mapping(state)
+    local label = "state " .. tostring(state.id)
+    if state.last_task_symbol then
+      label = label .. "\\n" ..
+        "current task: " .. state.last_task_symbol.task_name
+    end
+    return label
+  end
+  dfa:dot(symbol_mapping, tag_mapping, state_mapping)
 end
 
 local function print_signatures(task_signatures)
@@ -323,6 +352,64 @@ local function print_signatures(task_signatures)
   end
 end
 
+local function record_last_task_symbol(dfa, all_task_symbols)
+  local visited = { [dfa.initial] = true }
+  local visit_next = { dfa.initial }
+  while #visit_next > 0 do
+    local state = visit_next[#visit_next]
+    visit_next[#visit_next] = nil
+    local last_task_symbol = state.last_task_symbol
+    for id, next_state in pairs(state.trans) do
+      if not visited[next_state] then
+        local sym = all_task_symbols[id] or last_task_symbol
+        assert(not next_state.last_task_symbol or
+               next_state.last_task_symbol == sym)
+        next_state.last_task_symbol = sym
+        visited[next_state] = true
+        visit_next[#visit_next + 1] = next_state
+      end
+    end
+  end
+end
+
+local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task, call_graph)
+  local visited = { [dfa.initial] = true }
+  local visit_next = { dfa.initial }
+  while #visit_next > 0 do
+    local state = visit_next[#visit_next]
+    visit_next[#visit_next] = nil
+    local last_task_symbol = state.last_task_symbol
+    if last_task_symbol and call_graph[last_task_symbol.task_name] then
+      local callees = call_graph[last_task_symbol.task_name]
+      local symbol_ids = {}
+      for _, sym in pairs(symbols_by_task[last_task_symbol]) do
+        symbol_ids[sym.value] = true
+      end
+
+      local trans = {}
+      for id, next_state in pairs(state.trans) do
+        local sym = all_task_symbols[id]
+        if not sym and symbol_ids[id] then trans[id] = next_state
+        elseif sym and callees[sym.task_name] then trans[id] = next_state end
+      end
+      state.trans = trans
+    elseif not last_task_symbol then
+      local trans = {}
+      for id, next_state in pairs(state.trans) do
+        local sym = all_task_symbols[id]
+        if sym then trans[id] = next_state end
+      end
+      state.trans = trans
+    end
+    for id, next_state in pairs(state.trans) do
+      if not visited[next_state] then
+        visited[next_state] = true
+        visit_next[#visit_next + 1] = next_state
+      end
+    end
+  end
+end
+
 local optimize_match = {}
 
 function optimize_match.mapper(node)
@@ -330,12 +417,16 @@ function optimize_match.mapper(node)
   table.sort(rules, compare_rules)
 
   local task_signatures = fetch_task_signatures()
+  local call_graph = fetch_call_graph()
   local selectors, all_symbols, all_task_symbols, symbols_by_task =
     collect_symbols(rules, task_signatures)
   local regexprs =
     translate_to_regex(selectors, all_symbols, all_task_symbols, symbols_by_task)
 
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
+  record_last_task_symbol(dfa, all_task_symbols)
+  prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task, call_graph)
+
   dfa:renumber()
   local function check(idx, depth)
     local num_task_elements = #rules[idx].selector.elements
