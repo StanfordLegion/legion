@@ -31,6 +31,7 @@ local function fetch_task_signatures()
       local signature = {
         task_id = v.taskid:asvalue(),
         reqs = terralib.newlist(),
+        region_params = {},
       }
       local task_params = v.ast.params
       local num_reqs = 0
@@ -39,6 +40,8 @@ local function fetch_task_signatures()
         local param_type_in_signature =
           regent_std.as_read(task_params[idx].param_type)
         if regent_std.is_region(param_type_in_signature) then
+          local param_name = task_params[idx].symbol:hasname()
+          local req_indices = {}
           local privileges, privilege_field_paths =
             regent_std.find_task_privileges(param_type_in_signature,
                                      v:getprivileges(),
@@ -59,13 +62,46 @@ local function fetch_task_signatures()
               req.field_ids:insert(field_id)
             end
             signature.reqs[num_reqs] = req
+            req_indices[num_reqs] = true
           end
+          signature.region_params[param_name] = req_indices
         end
       end
       task_signatures[k] = signature
     end
   end
   return task_signatures
+end
+
+local function check_rules_against_signatures(rules, task_signatures)
+  if std.config["standalone"] then return end
+  for ridx = 1, #rules do
+    local rule = rules[ridx]
+    local num_elements = #rule.selector.elements
+    if rule.rule_type == "region" then
+      num_elements = num_elements - 1
+    end
+    for eidx = 1, num_elements do
+      local elem = rule.selector.elements[eidx]
+      elem.name:map(function(name)
+        if not task_signatures[name] then
+          log.error(elem, "task '" .. name .. "' does not exist")
+        end
+      end)
+    end
+    if rule.rule_type == "region" then
+      local task_elem = rule.selector.elements[num_elements]
+      local region_elem = rule.selector.elements[num_elements + 1]
+      task_elem.name:map(function(task_name)
+        region_elem.name:map(function(region_name)
+          if not task_signatures[task_name].region_params[region_name] then
+            log.error(region_elem, "parameter '" .. region_name ..
+              "' either does not exist or have a non-region type")
+          end
+        end)
+      end)
+    end
+  end
 end
 
 local function fetch_call_graph()
@@ -417,6 +453,8 @@ function optimize_match.mapper(node)
   table.sort(rules, compare_rules)
 
   local task_signatures = fetch_task_signatures()
+  check_rules_against_signatures(rules, task_signatures)
+
   local call_graph = fetch_call_graph()
   local selectors, all_symbols, all_task_symbols, symbols_by_task =
     collect_symbols(rules, task_signatures)
