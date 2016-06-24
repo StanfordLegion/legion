@@ -99,7 +99,7 @@ http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
 The Legion repository contains the following directories:
 
-  * `tutorial`: Source code for the [tutorials](/tutorial/).
+  * `tutorial`: Source code for the [tutorials](http://legion.stanford.edu/tutorial/).
   * `examples`: Larger examples for advanced programming techniques.
   * `apps`: Several complete Legion applications.
   * `language`: The [Regent programming language](http://regent-lang.org/) compiler and examples.
