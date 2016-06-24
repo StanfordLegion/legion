@@ -116,6 +116,8 @@ The Legion repository contains the following directories:
 
 ## Dependencies
 
+To get started with Legion, you'll need:
+
   * Linux, OS X, or another Unix
   * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: Python 2.7 (used for profiling/debugging tools)
@@ -124,30 +126,25 @@ The Legion repository contains the following directories:
   * *Optional*: LLVM 3.5 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
-## Running Programs
+## Installing
 
-When running applications users must set the 'LG_RT_DIR' environment variable to 
-point to the 'runtime' directory for the repository.  Makefiles will report an error
-if the environment variable is not set.
+Legion is currently compiled with each application. To try a Legion
+application, just call `make` in the directory in question. The
+`LG_RT_DIR` variable is used to locate the Legion `runtime`
+directory. For example:
 
-Each application has a Makefile in its directory that is used to control the 
-compilation of the application.  At the top of the Makefile there are several
-different variables that can be used to control how the application is built.
-By default, applications are compiled in debug mode.  This can be changed by
-commenting out the 'DEBUG' variable.  Users can statically control the minimum
-level of logging information printed by the runtime by setting the `OUTPUT_LEVEL`
-variable.  Choices for 'OUTPUT_LEVEL' can be seen at the top of `runtime/utilities.h`.
-The 'SHARED_LOWLEVEL' runtime variable controls whether the application is compiled
-to run on the shared-low-level runtime, or if the variable is not set, the application
-will be targeted at the GASNET-GPU generic low-level runtime.
+```
+git clone https://github.com/StanfordLegion/legion.git
+export LG_RT_DIR="$PWD/legion/runtime"
+cd legion/examples/full_circuit
+make
+./ckt_sim
+```
 
-After compilation, programs are launched differently depending on their target
-platform.  Applications targeted at the shared-low-level runtime can be run
-as a regular process, while applications targeted at the general low-level runtime
-must be launched using the 'gasnetrun' command (see GASNET documentation).
+## Command-Line Flags
 
-Both the low-level and high-level runtime have flags for controlling execution.
-Below are some of the more commonly used flags:
+Legion and Realm accept command-line arguments for several execution
+parameters. Below are some of the more commonly used flags:
 
   * `-level <logger_name>=<int>`:
     dynamic logging level for a given logger name (see `runtime/utilities.h` for
