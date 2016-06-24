@@ -15,6 +15,8 @@
 
 -- Bishop Standard Libary
 
+local config = require("bishop/config")
+
 local c = terralib.includecstring [[
 #include "legion_c.h"
 #include "bishop_c.h"
@@ -24,6 +26,8 @@ local c = terralib.includecstring [[
 
 local std = {}
 std.c = c
+
+std.config, std.args = config.args()
 
 function std.curry(f, a)
   return function(...) return f(a, ...) end

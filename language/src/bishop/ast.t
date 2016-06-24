@@ -461,6 +461,7 @@ ast.typed.expr.Keyword.unparse = ast.untyped.expr.Keyword.unparse
 
 ast:inner("optimized")
 
-ast.optimized:leaf("Mapper", { "automata", "rules", "assignments" })
+ast.optimized:leaf("Mapper", { "automata", "rules", "assignments",
+                               "task_signatures" })
 
 return ast

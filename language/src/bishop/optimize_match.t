@@ -22,14 +22,50 @@ local data = require("regent/data")
 local automata = require("bishop/automata")
 local regex = require("bishop/regex")
 
-local task_id_map = {}
-local function fetch_task_ids()
+local function fetch_task_signatures()
+  local task_signatures = {}
+  if std.config["standalone"] then return task_signatures end
   local regent_std = require("regent/std")
   for k, v in pairs(_G) do
     if regent_std.is_task(v) then
-      task_id_map[k] = v.taskid:asvalue()
+      local signature = {
+        task_id = v.taskid:asvalue(),
+        reqs = terralib.newlist(),
+      }
+      local task_params = v.ast.params
+      local num_reqs = 0
+      local field_id = 100 -- should be consistent with Regent's numbering
+      for idx = 1, #task_params do
+        local param_type_in_signature =
+          regent_std.as_read(task_params[idx].param_type)
+        if regent_std.is_region(param_type_in_signature) then
+          local privileges, privilege_field_paths =
+            regent_std.find_task_privileges(param_type_in_signature,
+                                     v:getprivileges(),
+                                     v:get_coherence_modes(),
+                                     v:get_flags())
+          for fidx = 1, #privilege_field_paths do
+            num_reqs = num_reqs + 1
+            local req = {
+              privilege = privileges[fidx],
+              fields = terralib.newlist(),
+              field_ids = terralib.newlist(),
+            }
+            local fields = privilege_field_paths[fidx]
+            for fidx_ = 1, #fields do
+              -- XXX: might not be correct with nested fieldspace
+              field_id = field_id + 1
+              req.fields:insert(fields[fidx_])
+              req.field_ids:insert(field_id)
+            end
+            signature.reqs[num_reqs] = req
+          end
+        end
+      end
+      task_signatures[k] = signature
     end
   end
+  return task_signatures
 end
 
 local function traverse_element(rules, fn)
@@ -48,7 +84,7 @@ local function traverse_element(rules, fn)
   if #results > 0 then return results end
 end
 
-local function collect_symbols(rules)
+local function collect_symbols(rules, task_signatures)
   -- collect all symbol hashes to assign consistent numbers
   local num_tasks = 0
   local all_task_ids = {}
@@ -57,10 +93,11 @@ local function collect_symbols(rules)
   local num_classes = 0
   local all_class_ids = {}
 
-  for _, task_id in pairs(task_id_map) do
-    all_task_ids[task_id] = task_id
+  for _, sig in pairs(task_signatures) do
+    all_task_ids[sig.task_id] = sig.task_id
     num_tasks = num_tasks + 1
   end
+
   traverse_element(rules, function(elem)
     elem.constraints:map(function(constraint)
       all_constraint_ids[constraint:unparse()] = num_constraints
@@ -85,6 +122,7 @@ local function collect_symbols(rules)
 
   local all_symbols = {}
   local all_task_symbols = {}
+
   local function update_symbol(hash, symbol)
     local id = all_ids[hash]
     if not all_symbols[id] then
@@ -94,15 +132,17 @@ local function collect_symbols(rules)
     return id
   end
 
+  for name, sig in pairs(task_signatures) do
+    all_task_symbols[sig.task_id] = regex.symbol.TaskId {
+      value = sig.task_id,
+      task_name = name,
+    }
+    all_symbols[sig.task_id] = all_task_symbols[sig.task_id]
+  end
+
   local selectors = traverse_element(rules, function(elem)
     local name = elem.name:map(function(name)
-      local id = update_symbol(task_id_map[name],
-        regex.symbol.TaskId {
-          value = 0,
-          task_name = name,
-        })
-      all_task_symbols[id] = all_symbols[id]
-      return id
+      return task_signatures[name].task_id
     end)
     local classes = elem.classes:map(function(class)
       return update_symbol(class,
@@ -255,15 +295,43 @@ local function compare_rules(rule1, rule2)
   return false
 end
 
+local function print_dfa(dfa, all_symbols, rules)
+  local symbol_mapping = {}
+  for idx, symbol in pairs(all_symbols) do
+    symbol_mapping[idx] = regex.pretty(symbol)
+  end
+  local tag_mapping = {}
+  for idx = 1, #rules do
+    tag_mapping[idx] = rules[idx].selector:unparse()
+  end
+  dfa:dot(symbol_mapping, tag_mapping)
+end
+
+local function print_signatures(task_signatures)
+  for name, sig in pairs(task_signatures) do
+    print("task name: " .. name)
+    print("  task id: " .. tostring(sig.task_id))
+    print("  # region requirements: " .. tostring(#sig.reqs))
+    for ridx = 1, #sig.reqs do
+      local req = sig.reqs[ridx]
+      print("  privilege: " .. tostring(req.privilege))
+      for fidx = 1, #req.fields do
+        print("    field " .. req.fields[fidx]:mkstring() .. ": " ..
+          tostring(req.field_ids[fidx]))
+      end
+    end
+  end
+end
+
 local optimize_match = {}
 
 function optimize_match.mapper(node)
-  fetch_task_ids()
   local rules = node.rules
   table.sort(rules, compare_rules)
-  rules:map(function(rule) print(rule.selector:unparse()) end)
+
+  local task_signatures = fetch_task_signatures()
   local selectors, all_symbols, all_task_symbols, symbols_by_task =
-    collect_symbols(rules)
+    collect_symbols(rules, task_signatures)
   local regexprs =
     translate_to_regex(selectors, all_symbols, all_task_symbols, symbols_by_task)
 
@@ -288,12 +356,14 @@ function optimize_match.mapper(node)
     end
   end
   dfa:verify_tags(check)
+  --print_dfa(dfa, all_symbols, rules)
+  --print_signatures(task_signatures)
 
   return ast.optimized.Mapper {
     automata = dfa,
     rules = node.rules,
     assignments = node.assignments,
-    position = node.position,
+    task_signatures = task_signatures,
   }
 end
 
