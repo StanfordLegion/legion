@@ -279,7 +279,7 @@ namespace Legion {
       HLR_DEFER_COMPOSITE_NODE_TASK_ID,
       HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
       HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
-      HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
+      HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -347,7 +347,7 @@ namespace Legion {
         "Deferred Composite View Creation",                       \
         "Deferred Mapper Message",                                \
         "Update View References for Version State",               \
-        "Deferred Remove Version State Valid Ref",                \
+        "Deferred Remove Version Number Valid Ref",               \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \

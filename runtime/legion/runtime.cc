@@ -20609,9 +20609,9 @@ namespace Legion {
             VersionState::process_view_references(args);
             break;
           }
-        case HLR_REMOVE_VERSION_STATE_REF_TASK_ID:
+        case HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID:
           {
-            VersionState::process_remove_version_state_ref(args);
+            VersionNumber::process_remove_version_number_ref(args);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:

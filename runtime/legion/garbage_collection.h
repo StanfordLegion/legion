@@ -55,7 +55,8 @@ namespace Legion {
       MAPPING_ACQUIRE_REF = 16,
       NEVER_GC_REF = 17,
       CONTEXT_REF = 18,
-      LAST_SOURCE_REF = 19,
+      LEVEL_INFO_REF = 19,
+      LAST_SOURCE_REF = 20,
     };
 
     enum ReferenceKind {
@@ -84,6 +85,7 @@ namespace Legion {
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Never GC Reference",                         \
+      "Level Info Reference",                       \
       "Context Reference",                          \
     }
 

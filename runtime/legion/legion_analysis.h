@@ -88,11 +88,88 @@ namespace Legion {
     };
 
     /**
+     * \struct VersionNumbers 
+     * A small helper class for tracking collections of 
+     * version number objects and their sets of fields
+     */
+    struct VersionNumbers {
+    public:
+      VersionNumbers(void)
+        : single(true) { versions.single_version = NULL; }
+#ifdef DEBUG_LEGION
+      ~VersionNumbers(void)
+      { if (!single) assert(versions.multi_versions == NULL); }
+#endif
+    public:
+      FieldMask valid_fields;
+      union {
+        VersionNumber *single_version;
+        LegionMap<VersionNumber*,FieldMask>::aligned *multi_versions;
+      } versions;
+      bool single;
+    };
+
+    /**
+     * \struct VersionStateInfo
+     * A small helper class for tracking collections of 
+     * version state objects and their sets of fields
+     * This is the same as the above class, but specialized
+     * for VersionState objects explicitly
+     */
+    struct VersionStateInfo {
+    public:
+      VersionStateInfo(void)
+        : single(true) { states.single_state = NULL; }
+#ifdef DEBUG_LEGION
+      ~VersionStateInfo(void)
+      { if (!single) assert(states.multi_states == NULL); }
+#endif
+    public:
+      FieldMask valid_fields;
+      union {
+        VersionState *single_state;
+        LegionMap<VersionState*,FieldMask>::aligned *multi_states;
+      } states;
+      bool single;
+    };
+
+    /**
      * \class VersionInfo
      * A class for tracking version information about region usage
      */
     class VersionInfo {
     public:
+      struct LevelInfo {
+      public:
+        LevelInfo(void) : level_mask(0) { }
+        LevelInfo(const LevelInfo &rhs);
+        ~LevelInfo(void);
+      public:
+        LevelInfo& operator=(const LevelInfo &rhs);
+      public:
+        inline void set_path_only(void) { level_mask |= 0x1; }
+        inline void set_needs_final(void) { level_mask |= 0x2; }
+        inline void set_close_top(void) { level_mask |= 0x4; }
+        inline void set_close_level(void) { level_mask |= 0x8; }
+        inline void set_leave_open(void) { level_mask |= 0x10; }
+        inline void set_split_node(void) { level_mask |= 0x20; }
+      public:
+        inline bool path_only(void) const { return (0x1 & level_mask); }
+        inline bool needs_final(void) const { return (0x2 & level_mask); }
+        inline bool close_top(void) const { return (0x4 & level_mask); }
+        inline bool close_level(void) const { return (0x8 & level_mask); }
+        inline bool leave_open(void) const { return (0x10 & level_mask); }
+        inline bool split_node(void) const { return (0x20 & level_mask); }
+      public:
+        void add_current_version(VersionNumber *version, const FieldMask &mask);
+        void add_advance_version(VersionNumber *version, const FieldMask &mask);
+      public:
+        VersionNumbers current_versions;
+        VersionNumbers advance_versions;
+        FieldMask advance_mask;
+        unsigned level_mask;
+      };
+
       struct NodeInfo {
       public:
         NodeInfo(void) : physical_state(NULL), field_versions(NULL), 
@@ -136,7 +213,14 @@ namespace Legion {
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      inline NodeInfo& find_tree_node_info(RegionTreeNode *node)
+      LevelInfo* configure_level(unsigned level,
+                                 bool path_only, bool needs_final,
+                                 bool close_top, bool close_node,
+                                 bool leave_open, bool split_node,
+                                 bool capture_advance_mask,
+                                 const FieldMask &advance_mask);
+    public:
+      inline NodeInfo& find_tree_node_info(RegionTreeNode *node) 
         { return node_infos[node]; }
     public:
       void set_upper_bound_node(RegionTreeNode *node);
@@ -191,6 +275,8 @@ namespace Legion {
                                      RegionTreeNode *node);
       void unpack_node_version_numbers(RegionTreeNode *node, 
                                        Deserializer &derez);
+    protected:
+      std::vector<LevelInfo*> level_infos;
     protected:
       RegionTreeNode *upper_bound_node;
       LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
@@ -400,53 +486,7 @@ namespace Legion {
       ProjectionFunction *projection;
       Domain projection_domain;
       unsigned rebuild_timeout;
-    }; 
-
-    /**
-     * \struct VersionNumbers 
-     * A small helper class for tracking collections of 
-     * version number objects and their sets of fields
-     */
-    struct VersionNumbers {
-    public:
-      VersionNumbers(void)
-        : single(true) { versions.single_version = NULL; }
-#ifdef DEBUG_LEGION
-      ~VersionNumbers(void)
-      { if (!single) assert(versions.multi_versions == NULL); }
-#endif
-    public:
-      FieldMask valid_fields;
-      union {
-        VersionNumber *single_version;
-        LegionMap<VersionNumber*,FieldMask>::aligned *multi_versions;
-      } versions;
-      bool single;
-    };
-
-    /**
-     * \struct VersionStateInfo
-     * A small helper class for tracking collections of 
-     * version state objects and their sets of fields
-     * This is the same as the above class, but specialized
-     * for VersionState objects explicitly
-     */
-    struct VersionStateInfo {
-    public:
-      VersionStateInfo(void)
-        : single(true) { states.single_state = NULL; }
-#ifdef DEBUG_LEGION
-      ~VersionStateInfo(void)
-      { if (!single) assert(states.multi_states == NULL); }
-#endif
-    public:
-      FieldMask valid_fields;
-      union {
-        VersionState *single_state;
-        LegionMap<VersionState*,FieldMask>::aligned *multi_states;
-      } states;
-      bool single;
-    };
+    };  
 
     /**
      * \class CurrentState 
@@ -749,12 +789,23 @@ namespace Legion {
      */
     class VersionNumber : public DistributedCollectable {
     public:
+      struct RemoveVersionNumberRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionNumber *proxy_this;
+        ReferenceSource ref_kind;
+      };
+    public:
       VersionNumber(VersionID version_number, Runtime *rt, 
                     DistributedID did, AddressSpaceID owner_space, 
                     AddressSpaceID local_space, bool register_now);
       virtual ~VersionNumber(void);
     public:
       virtual VersionState* get_version_state(RegionTreeNode *node) = 0;
+    public:
+      void remove_version_number_ref(ReferenceSource ref_kind, 
+                                     RtEvent done_event);
+      static void process_remove_version_number_ref(const void *args);
     public:
       const VersionID version_number;
     };
@@ -796,13 +847,7 @@ namespace Legion {
         HLRTaskID hlr_id;
         DistributedID did;
         LogicalView *view;
-      };
-      struct RemoveVersionStateRefArgs {
-      public:
-        HLRTaskID hlr_id;
-        VersionState *proxy_this;
-        ReferenceSource ref_kind;
-      };
+      }; 
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
@@ -896,11 +941,7 @@ namespace Legion {
       static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
       static void process_version_state_response(Runtime *rt,
-                              Deserializer &derez, AddressSpaceID source);
-    public:
-      void remove_version_state_ref(ReferenceSource ref_kind, 
-                                    RtEvent done_event);
-      static void process_remove_version_state_ref(const void *args);
+                              Deserializer &derez, AddressSpaceID source); 
     public:
       RegionTreeNode *const logical_node;
     protected:
