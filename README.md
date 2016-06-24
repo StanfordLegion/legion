@@ -157,7 +157,7 @@ influence the build. These may either be set on the command-line
 
 ## Command-Line Flags
 
-Legion and Realm accept command-line arguments for several execution
+Legion and Realm accept command-line arguments for various runtime
 parameters. Below are some of the more commonly used flags:
 
   * `-level <logger_name>=<int>`:
