@@ -1,13 +1,14 @@
-Legion 
-==================================================================================
+# Legion 
+
 
 [Legion](http://legion.stanford.edu) is a parallel programming model
 for distributed, heterogeneous machines.
 
-Branches
-==================================================================================
+## Branches
+
 The Legion team uses this repository for active development, so please make sure you're
 using the right branch for your needs:
+
   * stable [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=stable)](https://travis-ci.org/StanfordLegion/legion/branches) - This is the default branch if you clone the
 repository.  It is generally about a month behind the master branch, allowing us to get some
 mileage on larger changes before foisting them on everybody.  Most users of Legion should use this
@@ -22,8 +23,8 @@ are a user of "bleeding-edge" Legion functionality, you will probably need to be
   * lots of other feature branches - These exist as necessary for larger changes, and users will
 generally want to steer clear of them.  :)
 
-Overview
-==================================================================================
+## Overview
+
 Legion is a programming model and runtime system designed for decoupling the specification
 of parallel algorithms from their mapping onto distributed heterogeneous architectures.  Since
 running on the target class of machines requires distributing not just computation but data
@@ -97,6 +98,8 @@ we refer to you to our Supercomputing paper.
 
 http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
+## Contents
+
 The Legion repository contains the following directories:
 
   * `tutorial`: Source code for the [tutorials](http://legion.stanford.edu/tutorial/).
@@ -111,8 +114,7 @@ The Legion repository contains the following directories:
     * `legion_spy.py`: A debugging tool renders task dependencies.
     * `legion_prof.py`: A task-level profiler.
 
-Dependencies
-==================================================================================
+## Dependencies
 
   * Linux, OS X, or another Unix
   * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
@@ -122,8 +124,8 @@ Dependencies
   * *Optional*: LLVM 3.5 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
-Running Programs
-==================================================================================
+## Running Programs
+
 When running applications users must set the 'LG_RT_DIR' environment variable to 
 point to the 'runtime' directory for the repository.  Makefiles will report an error
 if the environment variable is not set.
@@ -150,35 +152,24 @@ Below are some of the more commonly used flags:
   * `-level <logger_name>=<int>`:
     dynamic logging level for a given logger name (see `runtime/utilities.h` for
     how the numbers associated with each level)
-
   * `-logfile <filename>`:
     directs logging output to filename
-
   * `-ll:cpu <int>`: CPU processors to create per process
-
   * `-ll:gpu <int>`: GPU processors to create per process
-
   * `-ll:cpu <int>`: utility processors to create per process
-
   * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
-
   * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
-
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
-
   * `-ll:fsize <int>`: size of framebuffer memory for each GPU (in MB)
-
   * `-ll:zsize <int>`: size of zero-copy memory for each GPU (in MB)
-
   * `-hl:window <int>`: maximum number of tasks that can be created in a parent task window
-
   * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
 See default_mapper.cc for more details.
 
-Developing Programs
-==================================================================================
+## Developing Programs
+
 To develop a new legion application, begin by creating a new directory in the
 applications directory.  Make a copy of the 'Makefile.template' file in the
 'apps' directory to use as the Makefile.  Fill in the appropriate fields
@@ -193,8 +184,8 @@ the 'legion.h' header file is currently in progress.
 To extend the default mapper, you will also need to include 'default_mapper.h'
 into whatever file has the declaration for your custom mapper.
 
-Debugging Programs
-==================================================================================
+## Debugging Programs
+
 Legion currently has two primary tools for doing debugging.  The first is the 
 'legion_spy' tool contained in the 'tools' directory.  To use legion spy, first
 add the '-DLEGION_SPY' flag to 'CC_FLAGS' in the Makefile of your application
@@ -217,8 +208,8 @@ physical state of all region trees on every instance of the high-level runtime.
 For applications compiled in DEBUG mode, simply pass the '-hl:tree' flag as input
 to dump the files.
 
-Other Features
-==================================================================================
+## Other Features
+
 - Bounds Checks: Users can enable dynamic pointer checks of all physical region
 accesses by compiling with the '-DBOUNDS_CHECKS' flag.
 
@@ -229,4 +220,3 @@ in program order by compiling with the '-DINORDER_EXECUTION' flag and then passi
 - Dynamic Independence Tests: Users can request the high-level runtime perform 
 dynamic independence tests between regions and partitions by compiling with
 the '-DDYNAMIC_TESTS' flag and then passing '-hl:dynamic' flag as input.
-
