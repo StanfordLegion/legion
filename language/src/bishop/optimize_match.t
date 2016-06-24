@@ -446,6 +446,52 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
   end
 end
 
+function merge_indistinguishable_states(dfa, all_task_symbols)
+  local states = { dfa.initial }
+  local visited = { [dfa.initial] = true}
+  while #states > 0 do
+    local state = states[#states]
+    states[#states] = nil
+
+    local closure = {}
+    for sym, next_state in pairs(state.trans) do
+      if not all_task_symbols[sym] then
+        closure[next_state] = sym
+      end
+    end
+    local mergeable = {}
+    for next_state, sym in pairs(closure) do
+      local all_symbols = {}
+      for sym, _ in pairs(state.trans) do all_symbols[sym] = true end
+      for sym, _ in pairs(next_state.trans) do all_symbols[sym] = true end
+      local indistinguishable = true
+      for sym, _ in pairs(all_symbols) do
+        if state.trans[sym] and next_state.trans[sym] and
+           state.trans[sym].id ~= next_state.trans[sym].id then
+          indistinguishable = false
+          break
+        end
+      end
+      if indistinguishable then
+        mergeable[sym] = next_state
+      end
+    end
+    local trans = {}
+    for sym, next_state in pairs(state.trans) do
+      if mergeable[sym] ~= next_state then
+        trans[sym] = next_state
+      end
+    end
+    state.trans = trans
+    for _, next_state in pairs(state.trans) do
+      if not visited[next_state] then
+        visited[next_state] = true
+        states[#states + 1] = next_state
+      end
+    end
+  end
+end
+
 local optimize_match = {}
 
 function optimize_match.mapper(node)
@@ -464,6 +510,7 @@ function optimize_match.mapper(node)
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
   record_last_task_symbol(dfa, all_task_symbols)
   prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task, call_graph)
+  merge_indistinguishable_states(dfa, all_task_symbols)
 
   dfa:renumber()
   local function check(idx, depth)
@@ -488,6 +535,7 @@ function optimize_match.mapper(node)
   --print_dfa(dfa, all_symbols, rules)
   --print_signatures(task_signatures)
 
+  dfa.symbols_by_task = symbols_by_task
   return ast.optimized.Mapper {
     automata = dfa,
     rules = node.rules,

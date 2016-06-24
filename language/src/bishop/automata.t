@@ -356,16 +356,6 @@ function automata:renumber()
   end
 end
 
-function automata:update_rules(rules)
-  for state, _ in pairs(self.states) do
-    if #state.rules > 0 then
-      for idx = 1, #state.rules do
-        state.rules[idx] = rules[state.rule_indicies[idx]]
-      end
-    end
-  end
-end
-
 function automata:dot(symbol_mapping, tag_mapping, state_mapping)
   self:cache_transitions()
   print("digraph G {")
