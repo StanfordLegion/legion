@@ -141,6 +141,20 @@ make
 ./ckt_sim
 ```
 
+## Build Flags
+
+The Legion Makefile template includes several variables which
+influence the build. These may either be set on the command-line
+(e.g. `DEBUG=0 make` or at the top of each application's Makefile).
+
+  * `DEBUG=<0,1>`: controls optimization level and enables various
+    dynamic checks which are too expensive for release builds.
+  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time logging level.
+  * `USE_CUDA=<0,1>`: enables CUDA support.
+  * `USE_GASNET=<0,1>`: enables GASNET support.
+  * `USE_LLVM=<0,1>`: enables LLVM support.
+  * `USE_HDF=<0,1>`: enables HDF5 support.
+
 ## Command-Line Flags
 
 Legion and Realm accept command-line arguments for several execution
