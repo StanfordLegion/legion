@@ -1,9 +1,8 @@
 Legion 
 ==================================================================================
 
-The Legion homepage is now at [legion.stanford.edu](http://legion.stanford.edu).
-
-Publicly visible repository for the Legion parallel programming project at Stanford University.
+[Legion](http://legion.stanford.edu) is a parallel programming model
+for distributed, heterogeneous machines.
 
 Branches
 ==================================================================================
