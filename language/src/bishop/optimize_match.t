@@ -535,6 +535,7 @@ function optimize_match.mapper(node)
   --print_dfa(dfa, all_symbols, rules)
   --print_signatures(task_signatures)
 
+  dfa:cache_transitions()
   dfa.all_symbols = all_symbols
   return ast.optimized.Mapper {
     automata = dfa,

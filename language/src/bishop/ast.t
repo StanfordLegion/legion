@@ -238,8 +238,8 @@ end
 
 function ast.trivial_pos()
   return ast.Position {
-    source = "",
-    line = 0,
+    filename = "",
+    linenumber = 0,
     offset = 0,
   }
 end
@@ -296,11 +296,11 @@ function ast.untyped.element:unparse()
     str = str .. "." .. self.classes[i]
   end
   if #self.constraints > 0 then
-    local const_str = table.concat(unparse_all(self.constraints), " and ")
+    local const_str = table.concat(unparse_all(self.constraints), "")
     str = str .. const_str
   end
   if #self.patterns > 0 then
-    local pat_str = table.concat(unparse_all(self.patterns), " and ")
+    local pat_str = table.concat(unparse_all(self.patterns), "")
     str = str .. pat_str
   end
   return str
