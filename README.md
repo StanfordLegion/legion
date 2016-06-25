@@ -216,25 +216,24 @@ Second, recompile with `DEBUG=1 CC_FLAGS="-DLEGION_SPY" make`, and run
 the application with `-logfile spy.log`. This captures a trace of the
 application's execution with Legion Spy, a tool for analyzing task
 dependencies. Legion Spy contains a second implementation of Legion's
-runtime analysis, which can be used to sanity check the correctness of
-the runtime itself:
-
-```bash
-$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
-```
+runtime analysis, which can be used to check the correctness of the
+runtime itself by calling `legion_spy.py -lpa` on the log file.
 
 Legion Spy can also be used to generate graphs of the applications
-logical and physical dependencies. The following command will generate
-a number of PDF files in the current directory:
+logical and physical dependencies, with `legion_spy.py -dez`. This
+will generate a number of PDF files in the current directory.
 
 ```bash
+DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make
+./app -logfile spy.log
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
 $LG_RT_DIR/../tools/legion_spy.py -dez spy.log
 ```
 
 ## Profiling
 
-Legion contains a task-level profiler. The profiler is enabled by
-default (at compile-time), so no special flags are required. However,
+Legion contains a task-level profiler. The profiler is built by
+default, so no special compile-time flags are required. However,
 it is recommended to build with `DEBUG=0 make` to avoid any undesired
 performance issues.
 
@@ -243,6 +242,8 @@ is the number of nodes to be profiled. The profiler itself runs
 offline, after the application run has completed:
 
 ```bash
+DEBUG=0 make
+./app -hl:prof 1 -logfile prof_%.log
 $LG_RT_DIR/../tools/legion_prof.py prof_*.log
 ```
 
