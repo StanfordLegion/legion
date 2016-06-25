@@ -144,8 +144,8 @@ make
 ## Build Flags
 
 The Legion Makefile template includes several variables which
-influence the build. These may either be set on the command-line
-(e.g. `DEBUG=0 make` or at the top of each application's Makefile).
+influence the build. These may either be set in the environment
+(e.g. `DEBUG=0 make`) or at the top of each application's Makefile.
 
   * `DEBUG=<0,1>`: controls optimization level and enables various
     dynamic checks which are too expensive for release builds.
