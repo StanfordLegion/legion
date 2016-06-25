@@ -193,7 +193,7 @@ See default_mapper.cc for more details.
 
 ## Developing Programs
 
-To start a new Legion application, make a directory and copy
+To start a new Legion application, make a new directory and copy
 `apps/Makefile.template` into your directory under the name
 `Makefile`. Fill in the appropriate fields at the top of the Makefile
 with the filenames needed for your application.
