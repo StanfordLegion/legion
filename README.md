@@ -118,7 +118,7 @@ The Legion repository contains the following directories:
 
 To get started with Legion, you'll need:
 
-  * Linux, OS X, or another Unix
+  * Linux, macOS, or another Unix
   * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: Python 2.7 (used for profiling/debugging tools)
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
