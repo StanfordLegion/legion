@@ -193,11 +193,14 @@ See default_mapper.cc for more details.
 
 ## Developing Programs
 
-To develop a new legion application, begin by creating a new directory in the
-applications directory.  Make a copy of the 'Makefile.template' file in the
-'apps' directory to use as the Makefile.  Fill in the appropriate fields
-at the top of the Makefile so that they contain the file names for each of
-the different files needed for your application.
+To start a new Legion application, make a directory and copy
+`apps/Makefile.template` into your directory under the name
+`Makefile`. Fill in the appropriate fields at the top of the Makefile
+with the filenames needed for your application.
+
+Most Legion APIs are described in `legion.h`; a smaller number are
+described in the various header files in the `runtime/realm`
+directory. The default mapper is available in `default_mapper.h`.
 
 To begin writing Legion applications you should only need to include the 
 'legion.h' header file.  The Makefile guarantees this file will be in the
@@ -207,7 +210,7 @@ the 'legion.h' header file is currently in progress.
 To extend the default mapper, you will also need to include 'default_mapper.h'
 into whatever file has the declaration for your custom mapper.
 
-## Debugging Programs
+## Debugging
 
 Legion has a number of tools to aid in debugging programs.
 
@@ -234,6 +237,21 @@ a number of PDF files in the current directory:
 
 ```
 .../tools/legion_spy.py -dez spy.log
+```
+
+## Profiling
+
+Legion contains a task-level profiler. The profiler is enabled by
+default (at compile-time), so no special flags are required. However,
+it is recommended to build with `DEBUG=0 make` to avoid any undesired
+performance issues.
+
+Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
+is the number of nodes to be profiled. The profiler itself runs
+offline, after the application run has completed:
+
+```
+.../tools/legion_prof.py prof_*.log
 ```
 
 ## Other Features
