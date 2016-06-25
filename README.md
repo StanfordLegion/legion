@@ -133,7 +133,7 @@ application, just call `make` in the directory in question. The
 `LG_RT_DIR` variable is used to locate the Legion `runtime`
 directory. For example:
 
-```
+```bash
 git clone https://github.com/StanfordLegion/legion.git
 export LG_RT_DIR="$PWD/legion/runtime"
 cd legion/examples/full_circuit
@@ -219,16 +219,16 @@ dependencies. Legion Spy contains a second implementation of Legion's
 runtime analysis, which can be used to sanity check the correctness of
 the runtime itself:
 
-```
-.../tools/legion_spy.py -lpa spy.log
+```bash
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
 ```
 
 Legion Spy can also be used to generate graphs of the applications
 logical and physical dependencies. The following command will generate
 a number of PDF files in the current directory:
 
-```
-.../tools/legion_spy.py -dez spy.log
+```bash
+$LG_RT_DIR/../tools/legion_spy.py -dez spy.log
 ```
 
 ## Profiling
@@ -242,8 +242,8 @@ Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
 is the number of nodes to be profiled. The profiler itself runs
 offline, after the application run has completed:
 
-```
-.../tools/legion_prof.py prof_*.log
+```bash
+$LG_RT_DIR/../tools/legion_prof.py prof_*.log
 ```
 
 ## Other Features
