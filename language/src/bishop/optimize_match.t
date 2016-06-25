@@ -352,7 +352,7 @@ local function compare_rules(rule1, rule2)
   return false
 end
 
-local function print_dfa(dfa, all_symbols, rules)
+local function dump_dfa(dfa, all_symbols, rules, filename)
   local symbol_mapping = {}
   for idx, symbol in pairs(all_symbols) do
     symbol_mapping[idx] = regex.pretty(symbol)
@@ -369,7 +369,12 @@ local function print_dfa(dfa, all_symbols, rules)
     end
     return label
   end
-  dfa:dot(symbol_mapping, tag_mapping, state_mapping)
+  dfa:dot {
+    filename = filename,
+    symbol_mapping = symbol_mapping,
+    tag_mapping = tag_mapping,
+    state_mapping = state_mapping,
+  }
 end
 
 local function print_signatures(task_signatures)
@@ -532,7 +537,9 @@ function optimize_match.mapper(node)
     end
   end
   dfa:verify_tags(check)
-  --print_dfa(dfa, all_symbols, rules)
+  if std.config["dump-dfa"] ~= "" then
+    dump_dfa(dfa, all_symbols, rules, std.config["dump-dfa"])
+  end
   --print_signatures(task_signatures)
 
   dfa:cache_transitions()

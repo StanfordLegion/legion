@@ -356,15 +356,26 @@ function automata:renumber()
   end
 end
 
-function automata:dot(symbol_mapping, tag_mapping, state_mapping)
+function automata:dot(options)
+  local filename = options.filename
+  local symbol_mapping = options.symbol_mapping
+  local tag_mapping = options.tag_mapping
+  local state_mapping = options.state_mapping
+
   self:cache_transitions()
-  print("digraph G {")
+  local dump = print
+  local file
+  if filename then
+    file = io.open(filename, "w")
+    dump = function(msg) file:write(msg .. "\n") end
+  end
+  dump("digraph G {")
   for _, tuple in pairs(self.trans) do
     local label
     if is_epsilon(tuple.sym) then label = "ε"
     elseif symbol_mapping then label = symbol_mapping[tuple.sym]
     else label = tostring(tuple.sym) end
-    print("    " .. tostring(tuple.src.id) .. " -> " .. tostring(tuple.dst.id)
+    dump("    " .. tostring(tuple.src.id) .. " -> " .. tostring(tuple.dst.id)
       .. " [ label=\"" .. label .. "\" ];")
   end
   for state, _ in pairs(self.states) do
@@ -385,10 +396,11 @@ function automata:dot(symbol_mapping, tag_mapping, state_mapping)
         label = label .. "\\n" .. tag_mapping[tag]
       end
     end
-    print("    " .. tostring(state.id) .. " [label=\"" .. label ..
+    dump("    " .. tostring(state.id) .. " [label=\"" .. label ..
       "\"" .. color .. "]")
   end
-  print("}")
+  dump("}")
+  if filename then file:close() end
 end
 
 return automata

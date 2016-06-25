@@ -19,6 +19,7 @@ local config = {}
 local default_options = {
   ["standalone"] = false,
   ["taskid-map"] = "",
+  ["dump-dfa"] = "",
 }
 
 local option = {
