@@ -17,6 +17,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
+local regex = require("bishop/regex")
 local regent_std = require("regent/std")
 
 local c = terralib.includecstring [[
@@ -727,22 +728,144 @@ function codegen.mapper_init(assignments)
   return mapper_init, mapper_state_type
 end
 
+function codegen.automata(automata, mapper_state_type)
+  automata:cache_transitions()
+  local all_symbols = automata.all_symbols
+  local state_to_transition_impl = terralib.newlist()
+  for state, _ in pairs(automata.states) do
+    local state_var = terralib.newsymbol(&opaque)
+    local task_var = terralib.newsymbol(c.legion_task_t)
+    local result_var = terralib.newsymbol(c.legion_task_id_t)
+    local body = quote end
+    for sym, next_state in pairs(state.trans) do
+      local symbol = all_symbols[sym]
+      if symbol:is(regex.symbol.TaskId) then
+        body = quote
+          [body]
+          if c.legion_task_get_task_id([task_var]) == [sym] then
+            return [next_state.id]
+          end
+        end
+      elseif symbol:is(regex.symbol.Constraint) then
+        -- TODO: handle constraints from unification
+        local binders = {}
+        local value = codegen.expr(binders, state_var, symbol.constraint.value)
+        if symbol.constraint.field == "isa" then
+          body = quote
+            [body]
+            do
+              [value.actions]
+              var proc = c.legion_task_get_target_proc([task_var])
+              if proc.id ~= c.NO_PROC.id and
+                 c.bishop_processor_get_isa(proc) == [value.value] then
+                  return [next_state.id]
+              end
+            end
+          end
+        else
+          assert(false, "not supported yet")
+        end
+      else
+        assert(false, "not supported yet")
+      end
+    end
+    body = quote
+      [body]
+      return [state.id]
+    end
+    state_to_transition_impl[state.id] =
+      terra([state_var], [task_var]) : c.bishop_matching_state_t
+        [body]
+      end
+  end
+  return state_to_transition_impl
+end
+
+function codegen.test(rules)
+  local str = rules[1].selector:unparse()
+  for idx = 2, #rules do
+    str = str .. ", " .. rules[idx].selector:unparse()
+  end
+  return {
+    select_task_options =
+      terra(ptr : &opaque,
+            rt : c.legion_mapper_runtime_t,
+            ctx : c.legion_mapper_context_t,
+            task : c.legion_task_t,
+            options : c.legion_task_options_t)
+        c.bishop_logger_info([terralib.constant(rawstring, str)])
+      end,
+    map_task =
+      terra(ptr : &opaque,
+            rt : c.legion_mapper_runtime_t,
+            ctx : c.legion_mapper_context_t,
+            task : c.legion_task_t,
+            input : c.legion_map_task_input_t,
+            output : c.legion_map_task_output_t)
+        c.bishop_logger_info([terralib.constant(rawstring, str)])
+      end,
+  }
+end
+
+local function hash_tags(tags)
+  local tbl = {}
+  for tag, _ in pairs(tags) do
+    tbl[#tbl + 1] = tag
+  end
+  table.sort(tbl)
+  local str = ""
+  for idx = 1, #tbl do
+    str = str .. "-" .. tbl[idx]
+  end
+  return str
+end
+
 function codegen.mapper(node)
   local mapper_init, mapper_state_type =
     codegen.mapper_init(node.assignments)
-  local task_rules =
-    node.task_rules:map(function(rule)
-      return codegen.task_rule(mapper_state_type, rule)
-    end)
-  local region_rules =
-    node.region_rules:map(function(rule)
-      return codegen.region_rule(mapper_state_type, rule)
-    end)
+
+  local rules = node.rules
+
+  local dfa = node.automata
+  dfa:cache_transitions()
+
+  local state_to_mapper_impl_id = {}
+  local next_mapper_impl_id = 0
+  local rule_hash_to_mapper_impl_id = {}
+  local mapper_impl_id_to_mapper_impl = terralib.newlist()
+
+  for state, _ in pairs(dfa.states) do
+    if dfa.final[state] then
+      local hash = hash_tags(state.tags)
+      if not rule_hash_to_mapper_impl_id[hash] then
+        local selected_rules = terralib.newlist()
+        for idx = 1, #rules do
+          if state.tags[idx] then
+            selected_rules:insert(rules[idx])
+          end
+        end
+        local mapper_impl = codegen.test(selected_rules)
+        rule_hash_to_mapper_impl_id[hash] = next_mapper_impl_id
+        mapper_impl_id_to_mapper_impl[next_mapper_impl_id] = mapper_impl
+        state_to_mapper_impl_id[state.id] = next_mapper_impl_id
+        next_mapper_impl_id = next_mapper_impl_id + 1
+      else
+        local mapper_impl_id = rule_hash_to_mapper_impl_id[hash]
+        state_to_mapper_impl_id[state.id] = mapper_impl_id
+      end
+    else
+      state_to_mapper_impl_id[state.id] = -1
+    end
+  end
+
+  local state_to_transition_impl =
+    codegen.automata(dfa, mapper_state_type)
+
   return {
     mapper_init = mapper_init,
-    task_rules = task_rules,
-    region_rules = region_rules,
-    automata = node.automata,
+    state_to_mapper_impl_id = state_to_mapper_impl_id,
+    state_to_transition_impl = state_to_transition_impl,
+    mapper_impl_id_to_mapper_impl = mapper_impl_id_to_mapper_impl,
   }
 end
 

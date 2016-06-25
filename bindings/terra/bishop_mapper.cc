@@ -29,40 +29,20 @@ namespace Mapping {
 
 LegionRuntime::Logger::Category log_bishop("bishop");
 
-#define RUN_ALL_REGION_RULES(CALLBACK)                               \
-    for (unsigned i = 0; i < region_rules.size(); ++i)               \
-    {                                                                \
-      bishop_region_rule_t& rule = region_rules[i];                  \
-      if (rule.CALLBACK)                                             \
-      {                                                              \
-        legion_task_t task_ = CObjectWrapper::wrap(task);            \
-        for (unsigned idx = 0; idx < task->regions.size(); ++idx)    \
-        {                                                            \
-          legion_region_requirement_t req_ =                         \
-            CObjectWrapper::wrap(&task->regions[idx]);               \
-          rule.CALLBACK(mapper_state, task_, req_, idx);             \
-        }                                                            \
-      }                                                              \
-    }                                                                \
-
 //------------------------------------------------------------------------------
-BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
-                           const std::vector<bishop_region_rule_t>& rrules,
-                   const std::vector<bishop_matching_state_transition_t>& trans,
+BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
+                           const std::vector<bishop_transition_fn_t>& trans,
+                   const map<bishop_matching_state_t, unsigned>& state_impl_map,
                            bishop_mapper_state_init_fn_t init_fn,
                            MapperRuntime* rt, Machine machine,
                            Processor local_proc)
   : DefaultMapper(rt, machine, local_proc, "bishop"),
-    task_rules(trules), region_rules(rrules), mapper_init(init_fn),
-    runtime_(CObjectWrapper::wrap(rt))
+    mapper_impls(impls), transitions(trans),
+    state_to_mapper_impl_id(state_impl_map),
+    mapper_init(init_fn), runtime_(CObjectWrapper::wrap(rt))
 //------------------------------------------------------------------------------
 {
   log_bishop.info("bishop mapper created");
-  for (unsigned idx = 0; idx < trans.size(); ++idx)
-  {
-    const bishop_matching_state_transition_t& t = trans[idx];
-    transitions[t.state][t.task_id] = t.next_state;
-  }
   mapper_init(&mapper_state);
 }
 
@@ -90,25 +70,37 @@ void BishopMapper::select_task_options(const MapperContext ctx,
     states.find(task.parent_task->get_unique_id());
   if (finder != states.end()) prev_state = finder->second;
 
-  assert(transitions.find(prev_state) != transitions.end());
-  bishop_transition_func_t& trans = transitions[prev_state];
-  bishop_matching_state_t curr_state = trans[task.task_id];
+  bishop_transition_fn_t& trans_fn = transitions[prev_state];
+  bishop_matching_state_t curr_state = 0;
+  legion_task_t task_ = CObjectWrapper::wrap_const(&task);
+  while (true)
+  {
+    curr_state = trans_fn(mapper_state, task_);
+    if (curr_state == prev_state) break;
+    trans_fn = transitions[curr_state];
+    prev_state = curr_state;
+  }
+
+#ifdef DEBUG_LEGION
+  assert(curr_state != 0);
+#endif
+
+  log_bishop.info("[select_task_options] task id %d, uid %llu, name %s, state %d",
+      task.task_id, task.get_unique_id(), task.get_task_name(),
+      curr_state);
+  bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
 
   DefaultMapper::select_task_options(ctx, task, output);
   legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
-  legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   legion_task_options_t options_ = CObjectWrapper::wrap(output);
-  for (unsigned i = 0; i < task_rules.size(); ++i)
-  {
-    bishop_task_rule_t& rule = task_rules[i];
-    if (rule.select_task_options)
-      rule.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
-  }
+  if (impl.select_task_options)
+    impl.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
   output = CObjectWrapper::unwrap(options_);
 
   TransMsg msg;
   msg.uid = task.get_unique_id();
   msg.state = curr_state;
+  states[msg.uid] = msg.state;
   runtime->send_message(ctx, output.initial_proc, &msg, sizeof(TransMsg));
 }
 
@@ -134,18 +126,22 @@ void BishopMapper::map_task(const MapperContext ctx,
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   legion_map_task_input_t input_ = CObjectWrapper::wrap_const(&input);
   legion_map_task_output_t output_ = CObjectWrapper::wrap(&output);
-  for (unsigned i = 0; i < task_rules.size(); ++i)
-  {
-    bishop_task_rule_t& rule = task_rules[i];
-    if (rule.map_task)
-      rule.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
-  }
-  for (unsigned i = 0; i < region_rules.size(); ++i)
-  {
-    bishop_region_rule_t& rule = region_rules[i];
-    if (rule.map_task)
-      rule.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
-  }
+
+  bishop_matching_state_t curr_state = 0;
+  std::map<UniqueID, bishop_matching_state_t>::iterator finder =
+    states.find(task.get_unique_id());
+#ifdef DEBUG_LEGION
+  assert(finder != states.end());
+#endif
+  curr_state = finder->second;
+
+  log_bishop.info("[map_task] task id %d, uid %llu, name %s, state %d",
+      task.task_id, task.get_unique_id(), task.get_task_name(),
+      curr_state);
+
+  bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
+  if (impl.map_task)
+    impl.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
 }
 
 void BishopMapper::handle_message(const MapperContext  ctx,
@@ -153,7 +149,18 @@ void BishopMapper::handle_message(const MapperContext  ctx,
 {
   const TransMsg* msg = reinterpret_cast<const TransMsg*>(message.message);
   assert(message.size == sizeof(TransMsg));
+  // TODO: need to erase tasks from states once they finished (post_task_map)
   states[msg->uid] = msg->state;
+}
+
+//------------------------------------------------------------------------------
+bishop_mapper_impl_t& BishopMapper::get_mapper_impl(bishop_matching_state_t st)
+//------------------------------------------------------------------------------
+{
+#ifdef DEBUG_LEGION
+  assert(state_to_mapper_impl_id.find(st) != state_to_mapper_impl_id.end());
+#endif
+  return mapper_impls[state_to_mapper_impl_id[st]];
 }
 
 }; // namespace Mapping
