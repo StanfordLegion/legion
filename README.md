@@ -202,14 +202,6 @@ Most Legion APIs are described in `legion.h`; a smaller number are
 described in the various header files in the `runtime/realm`
 directory. The default mapper is available in `default_mapper.h`.
 
-To begin writing Legion applications you should only need to include the 
-'legion.h' header file.  The Makefile guarantees this file will be in the
-include path for you application when compiling.  More documentation of
-the 'legion.h' header file is currently in progress.
-
-To extend the default mapper, you will also need to include 'default_mapper.h'
-into whatever file has the declaration for your custom mapper.
-
 ## Debugging
 
 Legion has a number of tools to aid in debugging programs.
@@ -257,9 +249,9 @@ offline, after the application run has completed:
 ## Other Features
 
 - Inorder Execution: Users can force the high-level runtime to execute
-all tasks in program order by passing '-hl:inorder' flag on the
+all tasks in program order by passing `-hl:inorder` flag on the
 command-line.
 
 - Dynamic Independence Tests: Users can request the high-level runtime
 perform dynamic independence tests between regions and partitions by
-passing '-hl:dynamic' flag on the command-line.
+passing `-hl:dynamic` flag on the command-line.
