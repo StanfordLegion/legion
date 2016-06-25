@@ -141,11 +141,11 @@ make
 ./ckt_sim
 ```
 
-## Build Flags
+## Makefile Variables
 
-The Legion Makefile template includes several variables which
-influence the build. These may either be set in the environment
-(e.g. `DEBUG=0 make`) or at the top of each application's Makefile.
+The Legion Makefile includes several variables which influence the
+build. These may either be set in the environment (e.g. `DEBUG=0
+make`) or at the top of each application's Makefile.
 
   * `DEBUG=<0,1>`: controls optimization level and enables various
     dynamic checks which are too expensive for release builds.
@@ -156,6 +156,16 @@ influence the build. These may either be set in the environment
   * `USE_GASNET=<0,1>`: enables GASNET support.
   * `USE_LLVM=<0,1>`: enables LLVM support.
   * `USE_HDF=<0,1>`: enables HDF5 support.
+
+## Build Flags
+
+In addition to Makefile variables, compilation is influenced by a
+number of build flags. These flags may be added to the environment
+variable `CC_FLAGS` (or again set inside the Makefile).
+
+  * `CC_FLAGS=-DLEGION_SPY`: enables Legion Spy.
+  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables more privilege checks.
+  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables dynamic bounds checks on region accesses.
 
 ## Command-Line Flags
 
