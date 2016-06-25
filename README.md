@@ -209,37 +209,39 @@ into whatever file has the declaration for your custom mapper.
 
 ## Debugging Programs
 
-Legion currently has two primary tools for doing debugging.  The first is the 
-'legion_spy' tool contained in the 'tools' directory.  To use legion spy, first
-add the '-DLEGION_SPY' flag to 'CC_FLAGS' in the Makefile of your application
-and recompile in DEBUG mode.  The run your application with the following flags
-'-cat legion_spy -level 1' and dump the results of standard error to a file.  
-Then run legion spy as follows:
+Legion has a number of tools to aid in debugging programs.
 
-python legion_spy -l -p <file>
+First, compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make`
+and run the application again. This enables dynamic checks for
+privilege and out-of-bounds errors in the application. If the
+application runs without terminating in an error, then continue on to
+Legion Spy.
 
-The legion spy tool will parse the results of the log file.  The '-l' flag will
-check the results of the logical region dependence analysis.  If there are any 
-errors they should be reported to the Legion developers.  The '-p' file will
-dump event graphs corresponding to all of the low-level runtime event dependencies
-between any tasks, copies, reductions, or inline mapping operations.  These graphs
-are useful for illustrating the actual dependencies computed in the physical states
-of the region trees.
+Second, recompile with `DEBUG=1 CC_FLAGS="-DLEGION_SPY" make`, and run
+the application with `-logfile spy.log`. This captures a trace of the
+application's execution with Legion Spy, a tool for analyzing task
+dependencies. Legion Spy contains a second implementation of Legion's
+runtime analysis, which can be used to sanity check the correctness of
+the runtime itself:
 
-The other tool available in Legion for debugging is the log files capturing the
-physical state of all region trees on every instance of the high-level runtime.
-For applications compiled in DEBUG mode, simply pass the '-hl:tree' flag as input
-to dump the files.
+```
+.../tools/legion_spy.py -lpa spy.log
+```
+
+Legion Spy can also be used to generate graphs of the applications
+logical and physical dependencies. The following command will generate
+a number of PDF files in the current directory:
+
+```
+.../tools/legion_spy.py -dez spy.log
+```
 
 ## Other Features
 
-- Bounds Checks: Users can enable dynamic pointer checks of all physical region
-accesses by compiling with the '-DBOUNDS_CHECKS' flag.
+- Inorder Execution: Users can force the high-level runtime to execute
+all tasks in program order by passing '-hl:inorder' flag on the
+command-line.
 
-- Inorder Execution: Users can force the high-level runtime to execute all tasks
-in program order by compiling with the '-DINORDER_EXECUTION' flag and then passing
-'-hl:inorder' flag as an input to the application.
-
-- Dynamic Independence Tests: Users can request the high-level runtime perform 
-dynamic independence tests between regions and partitions by compiling with
-the '-DDYNAMIC_TESTS' flag and then passing '-hl:dynamic' flag as input.
+- Dynamic Independence Tests: Users can request the high-level runtime
+perform dynamic independence tests between regions and partitions by
+passing '-hl:dynamic' flag on the command-line.
