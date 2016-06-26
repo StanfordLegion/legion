@@ -766,6 +766,7 @@ local function merge_region_properties(rules)
 end
 
 local function tostring_selectors(rules)
+  if #rules == 0 then return "default policy" end
   local str = rules[1].selector:unparse()
   for idx = 2, #rules do
     str = str .. ", " .. rules[idx].selector:unparse()
@@ -984,6 +985,12 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
   local rule_hash_to_mapper_impl_id = {}
   local mapper_impl_id_to_mapper_impl = terralib.newlist()
 
+  local function add_mapper_impl(hash, state_id, impl_id, impl)
+    rule_hash_to_mapper_impl_id[hash] = impl_id
+    state_to_mapper_impl_id[state_id] = impl_id
+    mapper_impl_id_to_mapper_impl[impl_id] = impl
+  end
+
   for state, _ in pairs(automata.states) do
     if automata.final[state] then
       local hash = hash_tags(state.tags)
@@ -1002,19 +1009,32 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
                            mapper_state_type)
         --print(tostring_selectors(selected_rules))
         --map_task:printpretty()
-        rule_hash_to_mapper_impl_id[hash] = next_mapper_impl_id
-        mapper_impl_id_to_mapper_impl[next_mapper_impl_id] = {
+        add_mapper_impl(hash, state.id, next_mapper_impl_id, {
           select_task_options = select_task_options,
           map_task = map_task,
-        }
-        state_to_mapper_impl_id[state.id] = next_mapper_impl_id
+        })
         next_mapper_impl_id = next_mapper_impl_id + 1
       else
         local mapper_impl_id = rule_hash_to_mapper_impl_id[hash]
         state_to_mapper_impl_id[state.id] = mapper_impl_id
       end
-    else
-      state_to_mapper_impl_id[state.id] = -1
+    end
+  end
+
+  -- generate default implementations for states with no matching rules
+  local empty_list = terralib.newlist()
+  local select_task_options =
+    codegen.select_task_options(empty_list, automata, signatures,
+                                mapper_state_type)
+  local map_task =
+    codegen.map_task(empty_list, automata, signatures,
+                     mapper_state_type)
+  for state, _ in pairs(automata.states) do
+    if not automata.final[state] then
+      add_mapper_impl("", state.id, next_mapper_impl_id, {
+        select_task_options = select_task_options,
+        map_task = map_task,
+      })
     end
   end
 

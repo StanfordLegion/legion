@@ -50,7 +50,7 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
   {
     BishopMapper* mapper =
       new BishopMapper(mapper_impls, transitions, state_to_mapper_impl_id,
-                       mapper_init, rt, machine, *it);
+                       0, mapper_init, rt, machine, *it);
     runtime->replace_default_mapper(mapper, *it);
   }
 }

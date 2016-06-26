@@ -37,6 +37,7 @@ namespace Legion {
 				BishopMapper(const std::vector<bishop_mapper_impl_t>&,
                      const std::vector<bishop_transition_fn_t>&,
                      const std::map<bishop_matching_state_t, unsigned>&,
+                     std::map<UniqueID, bishop_matching_state_t>*,
                      bishop_mapper_state_init_fn_t,
                      MapperRuntime*, Machine, Processor);
 				~BishopMapper();
@@ -58,11 +59,18 @@ namespace Legion {
 
         bishop_mapper_impl_t& get_mapper_impl(bishop_matching_state_t state);
 
+        bishop_matching_state_t get_current_state(const Task& task);
+
+        void set_current_state(const Task& task, bishop_matching_state_t state);
+
+        void set_current_state(UniqueID task, bishop_matching_state_t state);
+
       private:
         std::vector<bishop_mapper_impl_t> mapper_impls;
         std::vector<bishop_transition_fn_t> transitions;
         std::map<bishop_matching_state_t, unsigned> state_to_mapper_impl_id;
-        std::map<UniqueID, bishop_matching_state_t> states;
+        std::map<UniqueID, bishop_matching_state_t>* states;
+        bool shared_states;
 
         bishop_mapper_state_init_fn_t mapper_init;
         bishop_mapper_state_t mapper_state;
