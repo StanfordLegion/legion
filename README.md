@@ -206,40 +206,54 @@ directory. The default mapper is available in `default_mapper.h`.
 
 Legion has a number of tools to aid in debugging programs.
 
-First, compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make`
-and run the application again. This enables dynamic checks for
-privilege and out-of-bounds errors in the application. If the
-application runs without terminating in an error, then continue on to
-Legion Spy.
+### Extended Correctness Checks
 
-Second, recompile with `DEBUG=1 CC_FLAGS="-DLEGION_SPY" make`, and run
-the application with `-logfile spy.log`. This captures a trace of the
-application's execution with Legion Spy, a tool for analyzing task
-dependencies. Legion Spy contains a second implementation of Legion's
-runtime analysis, which can be used to check the correctness of the
-runtime itself by calling `legion_spy.py -lpa` on the log file.
+Compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+make` and rerun the application. This enables dynamic checks for
+privilege and out-of-bounds errors in the application. (These checks
+are not enabled by default because they are relatively expensive.) If
+the application runs without terminating with an error, then continue
+on to Legion Spy.
 
-Legion Spy can also be used to generate graphs of the applications
-logical and physical dependencies, with `legion_spy.py -dez`. This
-will generate a number of PDF files in the current directory.
+### Legion Spy
+
+Legion provides a task-level visualization tool called Legion
+Spy. This captures the logical and physical dependence graphs. These
+may help, for example, as a sanity check to ensure the the correct
+sequence of tasks is being launched (and the tasks have the correct
+dependencies). Legion Spy also has a self-checking mode which can
+validate the correctness of the runtime's logical and physical
+dependence algorithms.
+
+To capture a trace, invoke the application with `-hl:spy -logfile
+spy.log`. (No special compile-time flags are required.) Then call the
+post-processing script to render PDF files of the dependence graphs:
 
 ```bash
-DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make
-./app -logfile spy.log
-$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
+./app -hl:spy -logfile spy.log
 $LG_RT_DIR/../tools/legion_spy.py -dez spy.log
+```
+
+To run Legion Spy's self-checking mode, Legion must be built with the
+flag `-DLEGION_SPY`. Following this, the application can be run again,
+and the post-processing script used to validate the trace.
+
+```bash
+DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
+./app -hl:spy -logfile spy.log
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
 ```
 
 ## Profiling
 
-Legion contains a task-level profiler. The profiler is built by
-default, so no special compile-time flags are required. However,
-it is recommended to build with `DEBUG=0 make` to avoid any undesired
-performance issues.
+Legion contains a task-level profiler. No special compile-time flags
+are required. However, it is recommended to build with `DEBUG=0 make`
+to avoid any undesired performance issues.
 
 Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
-is the number of nodes to be profiled. The profiler itself runs
-offline, after the application run has completed:
+is the number of nodes to be profiled. (Note: `N` may be smaller than
+the total node count, to capture a subset of machines.) The profiler
+itself runs offline, after the application run has completed:
 
 ```bash
 DEBUG=0 make
