@@ -219,7 +219,7 @@ on to Legion Spy.
 
 Legion provides a task-level visualization tool called Legion
 Spy. This captures the logical and physical dependence graphs. These
-may help, for example, as a sanity check to ensure the the correct
+may help, for example, as a sanity check to ensure that the correct
 sequence of tasks is being launched (and the tasks have the correct
 dependencies). Legion Spy also has a self-checking mode which can
 validate the correctness of the runtime's logical and physical
