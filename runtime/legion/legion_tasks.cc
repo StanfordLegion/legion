@@ -3930,6 +3930,20 @@ namespace Legion {
       // Already hold the lock from the caller
       std::set<LogicalRegion> top_regions;
       runtime->forest->get_all_regions(handle, top_regions);
+      // See if we can aggregate this with any of the previous created
+      // region requirements
+      for (std::deque<RegionRequirement>::iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        std::set<LogicalRegion>::const_iterator finder = 
+          top_regions.find(it->region);
+        if (finder == top_regions.end())
+          continue;
+        it->privilege_fields.insert(fid);
+        top_regions.erase(finder);
+        if (top_regions.empty())
+          return;
+      }
       RemoteTask *outermost = find_outermost_context();
       for (std::set<LogicalRegion>::const_iterator it = top_regions.begin();
             it != top_regions.end(); it++)
