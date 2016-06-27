@@ -82,7 +82,6 @@ void BishopMapper::select_task_options(const MapperContext ctx,
       curr_state);
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
 
-  //DefaultMapper::select_task_options(ctx, task, output);
   legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_task_options_t options_ = CObjectWrapper::wrap(output);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
@@ -119,7 +118,6 @@ void BishopMapper::map_task(const MapperContext ctx,
   bishop_matching_state_t curr_state = get_current_state(task);
   set_current_state(task, curr_state);
 
-  DefaultMapper::map_task(ctx, task, input, output);
   legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   legion_map_task_input_t input_ = CObjectWrapper::wrap_const(&input);
@@ -132,6 +130,11 @@ void BishopMapper::map_task(const MapperContext ctx,
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
   if (impl.map_task)
     impl.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
+
+  // TODO: this should be controlled from Bishop
+  VariantInfo chosen = default_find_preferred_variant(task, ctx,
+      true, true, output.target_procs.begin()->kind());
+  output.chosen_variant = chosen.variant;
 }
 
 void BishopMapper::handle_message(const MapperContext  ctx,
@@ -168,7 +171,7 @@ bishop_matching_state_t BishopMapper::get_current_state(const Task& task)
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   {
     bishop_matching_state_t prev_state = parent_state;
-    bishop_transition_fn_t& trans_fn = transitions[prev_state];
+    bishop_transition_fn_t trans_fn = transitions[prev_state];
     while (true)
     {
       curr_state = trans_fn(mapper_state, task_);

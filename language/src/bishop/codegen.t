@@ -250,7 +250,7 @@ function codegen.expr(binders, state_var, node)
         [actions]
         [value] = [ binders[node.value] ]
       end
-    else 
+    else
       actions = quote
         [actions]
         [value] = [state_var].[node.value]
@@ -279,417 +279,6 @@ function codegen.expr(binders, state_var, node)
     value = value,
   }
 end
-
---function codegen.task_rule(state_type, node)
---  local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
---  local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
---  local task_var = terralib.newsymbol(c.legion_task_t)
---  local options_var = terralib.newsymbol(c.legion_task_options_t)
---  local map_task_input_var = terralib.newsymbol(c.legion_map_task_input_t)
---  local map_task_output_var = terralib.newsymbol(c.legion_map_task_output_t)
---  local is_matched = terralib.newsymbol(bool)
---  local point_var = terralib.newsymbol(c.legion_domain_point_t, "dp_")
---  local selector = node.selector
---  local position_string = node.position.filename .. ":" ..
---    tostring(node.position.linenumber)
---  assert(#selector.elements > 0)
---  local first_element = selector.elements[1]
---  assert(first_element:is(ast.typed.element.Task))
---  local binders = {}
---  local state_var = terralib.newsymbol(&state_type)
---
---  local selector_body = quote var [is_matched] = true end
---  if #first_element.name > 0 then
---    assert(#first_element.name == 1)
---    local task_name = first_element.name[1]
---    if not rawget(_G, task_name) then
---      log.error(first_element,
---        "task '" .. task_name .. "' does not exist")
---    end
---    selector_body = quote
---      [selector_body]
---      var name = c.legion_task_get_name([task_var])
---      [is_matched] = [is_matched] and (c.strcmp(name, [task_name]) == 0)
---    end
---  end
---
---  local select_task_options_pattern_matches = quote end
---  local map_task_pattern_matches = quote end
---  local predicate_pattern_matches = quote end
---  first_element.patterns:map(function(pattern)
---    if pattern.field == "index" then
---      local binder = terralib.newsymbol(c.legion_domain_point_t, pattern.binder)
---      binders[pattern.binder] = binder
---      select_task_options_pattern_matches = quote
---        [select_task_options_pattern_matches]
---        var [binder]
---        [binder].dim = 1
---        [binder].point_data[0] = 0
---      end
---      map_task_pattern_matches = quote
---        [map_task_pattern_matches]
---        var [binder] = c.legion_task_get_index_point([task_var])
---      end
---    else
---      log.error(node, "field " .. pattern.field ..
---      " is not supported for pattern match")
---    end
---  end)
---
---  local select_task_options_body = quote end
---  local map_task_body = quote end
---
---  node.properties:map(function(property)
---    if property.field == "target" then
---      local value = codegen.expr(binders, state_var, property.value)
---      if std.is_processor_list_type(property.value.expr_type) then
---        local result = terralib.newsymbol(c.legion_processor_t)
---        value.actions = quote
---          [value.actions]
---          var [result]
---          if [value.value].size > 0 then
---            [result] = [value.value].list[0]
---          else
---            [result] = c.bishop_get_no_processor()
---          end
---        end
---        value.value = result
---      end
---
---      select_task_options_body = quote
---        [select_task_options_body]
---        [value.actions]
---        [options_var].initial_proc = [value.value]
---      end
---      map_task_body = quote
---        [map_task_body]
---        [value.actions]
---        c.legion_map_task_output_target_procs_clear([map_task_output_var])
---        c.legion_map_task_output_target_procs_add([map_task_output_var], [value.value])
---      end
---
---    elseif property.field == "priority" then
---      local value = codegen.expr(binders, state_var, property.value)
---      map_task_body = quote
---        [map_task_body]
---        [value.actions]
---        c.legion_map_task_output_task_priority_set([map_task_output_var], [value.value])
---      end
---    else
---      assert(false, "unsupported")
---    end
---  end)
---
---  local constraint_checks = quote end
---  selector.constraints:map(function(constraint)
---    local lhs = codegen.expr(binders, state_var, constraint.lhs)
---    local rhs = codegen.expr(binders, state_var, constraint.rhs)
---    constraint_checks = quote
---      [constraint_checks]
---      do
---        [lhs.actions]
---        [rhs.actions]
---        [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
---      end
---    end
---  end)
---
---  local terra matches(ptr        : &opaque,
---                      [task_var])
---    var [state_var] = [&state_type](ptr)
---    [selector_body]
---    [predicate_pattern_matches]
---    [constraint_checks]
---    if [is_matched] then
---      c.bishop_logger_info("[slice_domain] rule at %s matches",
---        position_string)
---    else
---      c.bishop_logger_info("[slice_domain] rule at %s was not applied",
---        position_string)
---    end
---    return [is_matched]
---  end
---
---  local function early_out(callback)
---    return quote
---      if not [is_matched] then
---        c.bishop_logger_info(["[" .. callback .. "] rule at %s was not applied"],
---          position_string)
---        return
---      end
---    end
---  end
---
---  local terra select_task_options(ptr        : &opaque,
---                                  [rt_var],
---                                  [ctx_var],
---                                  [task_var],
---                                  [options_var])
---    var [state_var] = [&state_type](ptr)
---    [selector_body]
---    [early_out("select_task_options")]
---    [select_task_options_pattern_matches]
---    [constraint_checks]
---    [early_out("select_task_options")]
---    c.bishop_logger_info("[select_task_options] rule at %s matches",
---      position_string)
---    [select_task_options_body]
---  end
---
---  local terra map_task(ptr        : &opaque,
---                       [rt_var],
---                       [ctx_var],
---                       [task_var],
---                       [map_task_input_var],
---                       [map_task_output_var])
---    var [state_var] = [&state_type](ptr)
---    [selector_body]
---    [early_out("map_task")]
---    [map_task_pattern_matches]
---    [constraint_checks]
---    [early_out("map_task")]
---    c.bishop_logger_info("[map_task] rule at %s matches", position_string)
---    [map_task_body]
---  end
---
---  return {
---    matches = matches,
---    select_task_options = select_task_options,
---    map_task = map_task,
---  }
---end
---
---function codegen.region_rule(state_type, node)
---  local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
---  local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
---  local task_var = terralib.newsymbol(c.legion_task_t)
---  local map_task_input_var = terralib.newsymbol(c.legion_map_task_input_t)
---  local map_task_output_var = terralib.newsymbol(c.legion_map_task_output_t)
---  local is_matched = terralib.newsymbol(bool, "is_matched")
---  local selector_body = quote var [is_matched] = true end
---  local selector = node.selector
---  local position_string = node.position.filename .. ":" ..
---    tostring(node.position.linenumber)
---  assert(#selector.elements > 1)
---  local first_element = selector.elements[1]
---  assert(first_element:is(ast.typed.element.Region))
---  local first_task_element = selector.elements[2]
---  assert(first_task_element:is(ast.typed.element.Task))
---  local binders = {}
---  local state_var = terralib.newsymbol(&state_type)
---
---  if #first_task_element.name > 0 then
---    assert(#first_task_element.name == 1)
---    local task_name = first_task_element.name[1]
---    local regent_task = rawget(_G, task_name)
---    if not regent_task then
---      log.error(first_task_element,
---        "task '" .. task_name .. "' does not exist")
---    end
---    selector_body = quote
---      [selector_body]
---      var name = c.legion_task_get_name([task_var])
---      [is_matched] = [is_matched] and (c.strcmp(name, [task_name]) == 0)
---    end
---  end
---
---  local pattern_matches = quote end
---  first_task_element.patterns:map(function(pattern)
---    if pattern.field == "target" then
---      local binder = terralib.newsymbol(c.legion_processor_t, pattern.binder)
---      binders[pattern.binder] = binder
---      pattern_matches = quote
---        [pattern_matches]
---        var [binder]
---        [binder] = c.legion_task_get_target_proc([task_var])
---      end
---    elseif pattern.field == "isa" then
---      local binder = terralib.newsymbol(pattern.binder)
---      binders[pattern.binder] = binder
---      pattern_matches = quote
---        [pattern_matches]
---        var [binder]
---        do
---          var proc = c.legion_task_get_target_proc([task_var])
---          [binder] = c.bishop_processor_get_isa(proc)
---        end
---      end
---    else
---      log.error(node, "field " .. pattern.field ..
---      " is not supported for pattern match")
---    end
---  end)
---
---  local constraint_checks = quote end
---  selector.constraints:map(function(constraint)
---    local lhs = codegen.expr(binders, state_var, constraint.lhs)
---    local rhs = codegen.expr(binders, state_var, constraint.rhs)
---    constraint_checks = quote
---      [constraint_checks]
---      do
---        [lhs.actions]
---        [rhs.actions]
---        [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
---      end
---    end
---  end)
---
---  local map_task_body = quote end
---  local start_idx_var = terralib.newsymbol(int)
---  local end_idx_var = terralib.newsymbol(int)
---  local idx_assignments = terralib.newlist()
---
---  if #first_element.name > 0 then
---    if #first_task_element.name == 0 then
---      log.error(first_task_element,
---        "unnamed task element cannot have a named region element")
---    end
---
---    local param_name = first_element.name[1]
---    local task_name = first_task_element.name[1]
---    local regent_task = rawget(_G, task_name)
---    assert(regent_task, "unreachable")
---    local task_params = regent_task.ast.params
---    local param_type = nil
---    local accum_idx, start_idx, end_idx = 0, 0, 0
---    for _, param in pairs(task_params) do
---      local param_type_in_signature = regent_std.as_read(param.param_type)
---      if regent_std.is_region(param_type_in_signature) then
---        local privileges =
---          regent_std.find_task_privileges(param_type_in_signature,
---                                   regent_task:getprivileges(),
---                                   regent_task:get_coherence_modes(),
---                                   regent_task:get_flags())
---        if param.symbol:hasname() == param_name then
---          param_type = param_type_in_signature
---          start_idx = accum_idx
---          end_idx = start_idx + #privileges
---        end
---        accum_idx = accum_idx + #privileges
---      end
---    end
---    if not param_type then
---      log.error(first_element,
---        "parameter '" .. first_element.name[1] ..
---        "' either does not exist or have a non-region type")
---    end
---    idx_assignments = quote
---      [start_idx_var] = start_idx
---      [end_idx_var] = end_idx
---    end
---  else
---    idx_assignments = quote
---      [start_idx_var] = 0
---      [end_idx_var] = c.legion_task_get_regions_size([task_var])
---    end
---  end
---
---  node.properties:map(function(property)
---    if property.field == "target" then
---      local value = codegen.expr(binders, state_var, property.value)
---      if std.is_memory_list_type(property.value.expr_type) then
---        local result = terralib.newsymbol(c.legion_memory_t)
---        value.actions = quote
---          [value.actions]
---          var [result]
---          if [value.value].size > 0 then
---            [result] = [value.value].list[0]
---          else
---            [result] = c.bishop_get_no_memory()
---          end
---        end
---        value.value = result
---      end
---
---      map_task_body = quote
---        [map_task_body]
---        [value.actions]
---        do
---          var [start_idx_var], [end_idx_var]
---          [idx_assignments]
---          for idx = [start_idx_var], [end_idx_var] do
---            var req : c.legion_region_requirement_t =
---              c.legion_task_get_region([task_var], idx)
---            var fields_size =
---              c.legion_region_requirement_get_instance_fields_size(req)
---            var fields : &c.legion_field_id_t =
---              [&c.legion_field_id_t](
---                c.malloc([sizeof(c.legion_field_id_t)] * fields_size))
---            c.legion_region_requirement_get_instance_fields(req, fields,
---              fields_size)
---
---            var layout = c.legion_layout_constraint_set_create()
---            var priv = c.legion_region_requirement_get_privilege(req)
---            var redop = c.legion_region_requirement_get_redop(req)
---            c.legion_layout_constraint_set_add_memory_constraint(
---              layout,
---              c.legion_memory_kind([value.value]))
---            c.legion_layout_constraint_set_add_field_constraint(
---              layout, fields, fields_size, false, false)
---
---            if priv == c.REDUCE then
---              c.legion_layout_constraint_set_add_specialized_constraint(
---                layout, c.REDUCTION_FOLD_SPECIALIZE, redop)
---            elseif priv ~= c.NO_ACCESS then
---              var dims : uint[4]
---              dims[0], dims[1], dims[2], dims[3] =
---                c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
---              c.legion_layout_constraint_set_add_ordering_constraint(
---                layout, dims, 4, false)
---            end
---
---            var region = c.legion_region_requirement_get_region(req)
---            var inst : c.legion_physical_instance_t
---            var created : bool
---            var success =
---              c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
---                [rt_var], [ctx_var], [value.value],
---                layout, &region, 1, &inst, &created, true, 0, true)
---            std.assert(success, "instance creation should succeed")
---
---            c.legion_map_task_output_chosen_instances_set(
---              [map_task_output_var], idx, &inst, 1)
---
---            c.legion_physical_instance_destroy(inst)
---            c.legion_layout_constraint_set_destroy(layout)
---            c.free(fields)
---          end
---        end
---      end
---    else
---      assert(false, "unsupported")
---    end
---  end)
---
---  local early_out = quote
---    if not [is_matched] then
---      c.bishop_logger_info("[map_task] rule at %s was not applied",
---        position_string)
---      return
---    end
---  end
---
---  local terra map_task(ptr        : &opaque,
---                       [rt_var],
---                       [ctx_var],
---                       [task_var],
---                       [map_task_input_var],
---                       [map_task_output_var])
---    var [state_var] = [&state_type](ptr)
---    [selector_body]
---    [early_out]
---    [pattern_matches]
---    [constraint_checks]
---    [early_out]
---    c.bishop_logger_info("[map_task] rule at %s matches", position_string)
---    [map_task_body]
---  end
---
---  return {
---    pre_map_task = 0,
---    map_task = map_task,
---  }
---end
 
 local function expr_constant(c)
   return ast.typed.expr.Constant {
@@ -752,17 +341,36 @@ local default_region_properties = {
   },
 }
 
-local function merge_region_properties(rules)
-  local properties = {}
-  for key, value in pairs(default_region_properties) do
-    properties[key] = value
-  end
-  for idx = 1, #rules do
-    for _, property in pairs(rules[idx].properties) do
-      properties[property.field] = property.value
+local function merge_region_properties(rules, signature)
+  local all_properties = terralib.newlist()
+  local num_reqs = 0
+  if signature.reqs then num_reqs = #signature.reqs end
+  for idx = 1, num_reqs do
+    local properties = {}
+    for key, value in pairs(default_region_properties) do
+      properties[key] = value
     end
+    if regent_std.is_reduce(signature.reqs[idx].privilege) then
+      properties.create.value = "demand"
+    end
+    for ridx = 1, #rules do
+      local rule = rules[ridx]
+      local region_elem =
+        rule.selector.elements[#rule.selector.elements]
+      local matched = #region_elem.name == 0
+      region_elem.name:map(function(name)
+        matched = matched or
+          signature.region_params[name][idx]
+      end)
+      if matched then
+        for _, property in pairs(rules[ridx].properties) do
+          properties[property.field] = property.value
+        end
+      end
+    end
+    all_properties:insert(properties)
   end
-  return properties
+  return all_properties
 end
 
 local function tostring_selectors(rules)
@@ -785,6 +393,13 @@ function codegen.pattern_match(binders, task_var, elem)
         [actions]
         var [binder] = c.legion_task_get_index_point([task_var])
       end
+    elseif pattern.field == "target" then
+      local binder = terralib.newsymbol(c.legion_processor_t, pattern.binder)
+      binders[pattern.binder] = binder
+      actions = quote
+        [actions]
+        var [binder] = c.legion_task_get_target_proc([task_var])
+      end
     else
       log.error(elem, "field " .. pattern.field ..
       " is not supported for pattern match")
@@ -793,7 +408,7 @@ function codegen.pattern_match(binders, task_var, elem)
   return actions
 end
 
-function codegen.select_task_options(rules, automata, signatures,
+function codegen.select_task_options(rules, automata, signature,
                                      mapper_state_type)
   local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
   local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
@@ -852,7 +467,7 @@ function codegen.select_task_options(rules, automata, signatures,
   end
 end
 
-function codegen.map_task(rules, automata, signatures, mapper_state_type)
+function codegen.map_task(rules, automata, signature, mapper_state_type)
   local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
   local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
   local task_var = terralib.newsymbol(c.legion_task_t)
@@ -882,8 +497,8 @@ function codegen.map_task(rules, automata, signatures, mapper_state_type)
     [last_elems:map(std.curry2(codegen.pattern_match, binders, task_var))]
   end
 
+  -- generate task mapping code
   local task_properties = merge_task_properties(task_rules)
-  local region_properties = merge_task_properties(region_rules)
   for key, value_ast in pairs(task_properties) do
     local value = codegen.expr(binders, state_var, value_ast)
     if key == "target" then
@@ -916,6 +531,124 @@ function codegen.map_task(rules, automata, signatures, mapper_state_type)
       end
     end
   end
+
+  -- generate region mapping code
+  body = quote
+    [body]
+    c.legion_map_task_output_chosen_instances_clear_all([map_task_output_var])
+  end
+  local rule_properties = merge_region_properties(region_rules, signature)
+  for idx = 1, #rule_properties do
+    local layout_var = terralib.newsymbol(c.legion_layout_constraint_set_t)
+    local req_var = terralib.newsymbol(c.legion_region_requirement_t)
+    local inst_var = terralib.newsymbol(c.legion_physical_instance_t)
+    local fields_var =
+      terralib.newsymbol(
+          c.legion_field_id_t[#signature.reqs[idx].fields])
+    local region_var = terralib.newsymbol(c.legion_logical_region_t)
+
+    local layout_init = quote
+      var [layout_var] = c.legion_layout_constraint_set_create()
+      var [req_var] = c.legion_task_get_region([task_var], [idx - 1])
+      var fields_size = [#signature.reqs[idx].fields]
+      var [fields_var]
+      c.legion_region_requirement_get_privilege_fields([req_var],
+        [fields_var], fields_size)
+      c.legion_layout_constraint_set_add_field_constraint(
+        [layout_var], [fields_var], fields_size, false, false)
+
+      var priv = c.legion_region_requirement_get_privilege([req_var])
+      if priv == c.REDUCE then
+        var redop = c.legion_region_requirement_get_redop([req_var])
+        c.legion_layout_constraint_set_add_specialized_constraint(
+          [layout_var], c.REDUCTION_FOLD_SPECIALIZE, redop)
+      elseif priv ~= c.NO_ACCESS then
+        var dims : uint[4]
+        dims[0], dims[1], dims[2], dims[3] =
+          c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
+        c.legion_layout_constraint_set_add_ordering_constraint(
+          [layout_var], dims, 4, false)
+      end
+    end
+
+    local target =
+      codegen.expr(binders, state_var, rule_properties[idx].target)
+    if std.is_memory_list_type(rule_properties[idx].target.expr_type) then
+      local result = terralib.newsymbol(c.legion_memory_t)
+      target.actions = quote
+        [target.actions]
+        var [result]
+        if [target.value].size > 0 then
+          [result] = [target.value].list[0]
+        else
+          [result] = c.bishop_get_no_memory()
+        end
+      end
+      target.value = result
+    end
+
+    layout_init = quote
+      [layout_init]
+      c.legion_layout_constraint_set_add_memory_constraint(
+        [layout_var],
+        c.legion_memory_kind([target.value]))
+    end
+
+    local inst_creation = quote
+      var [inst_var]
+      var [region_var] = c.legion_region_requirement_get_region([req_var])
+    end
+    local level = rule_properties[idx].create.value
+    if level == "demand" then
+      inst_creation = quote
+        [inst_creation]
+        var success =
+          c.legion_mapper_runtime_create_physical_instance_layout_constraint(
+            [rt_var], [ctx_var], [target.value],
+            [layout_var], &[region_var], 1, &[inst_var], true, 0)
+        std.assert(success, "instance creation should succeed")
+      end
+    elseif level == "allow" then
+      inst_creation = quote
+        [inst_creation]
+        var created : bool
+        var success =
+          c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
+            [rt_var], [ctx_var], [target.value],
+            [layout_var], &[region_var], 1, &[inst_var], &created, true, 0, false)
+        std.assert(success, "instance creation should succeed")
+      end
+    elseif level == "forbid" then
+      inst_creation = quote
+        [inst_creation]
+        var success =
+          c.legion_mapper_runtime_find_physical_instance_layout_constraint(
+            [rt_var], [ctx_var], [target.value],
+            [layout_var], &[region_var], 1, &[inst_var], true, false)
+        std.assert(success, "instance creation should succeed")
+      end
+    else
+      assert(false, "unreachable")
+    end
+
+    local cleanup_action = quote
+      c.legion_physical_instance_destroy([inst_var])
+      c.legion_layout_constraint_set_destroy([layout_var])
+    end
+
+    body = quote
+      [body]
+      do
+        [target.actions]
+        [layout_init]
+        [inst_creation]
+        c.legion_map_task_output_chosen_instances_add(
+          [map_task_output_var], &[inst_var], 1)
+        [cleanup_action]
+      end
+    end
+  end
+
 
   local selector_summary =
     terralib.constant(rawstring, tostring_selectors(rules))
@@ -993,7 +726,7 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
 
   for state, _ in pairs(automata.states) do
     if automata.final[state] then
-      local hash = hash_tags(state.tags)
+      local hash = hash_tags(state.tags) .. "@" .. state.last_task_symbol.task_name
       if not rule_hash_to_mapper_impl_id[hash] then
         local selected_rules = terralib.newlist()
         for idx = 1, #rules do
@@ -1001,14 +734,14 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
             selected_rules:insert(rules[idx])
           end
         end
+        local signature =
+          signatures[state.last_task_symbol.task_name]
         local select_task_options =
-          codegen.select_task_options(selected_rules, automata, signatures,
+          codegen.select_task_options(selected_rules, automata, signature,
                                       mapper_state_type)
         local map_task =
-          codegen.map_task(selected_rules, automata, signatures,
+          codegen.map_task(selected_rules, automata, signature,
                            mapper_state_type)
-        --print(tostring_selectors(selected_rules))
-        --map_task:printpretty()
         add_mapper_impl(hash, state.id, next_mapper_impl_id, {
           select_task_options = select_task_options,
           map_task = map_task,
@@ -1021,19 +754,28 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
     end
   end
 
-  -- generate default implementations for states with no matching rules
-  local empty_list = terralib.newlist()
-  local select_task_options =
-    codegen.select_task_options(empty_list, automata, signatures,
-                                mapper_state_type)
-  local map_task =
-    codegen.map_task(empty_list, automata, signatures,
-                     mapper_state_type)
+  -- the rest of states shouldn't be reachable by transitions
+  -- so, put a default implementation that asserts when arrived
+  local terra default_select_task_options(ptr : &opaque,
+                                          rt : c.legion_mapper_runtime_t,
+                                          ctx : c.legion_mapper_context_t,
+                                          task : c.legion_task_t,
+                                          options : c.legion_task_options_t)
+    std.assert(false, "illegal transition to a non-final state")
+  end
+  local terra default_map_task(ptr : &opaque,
+                               rt : c.legion_mapper_runtime_t,
+                               ctx : c.legion_mapper_context_t,
+                               task : c.legion_task_t,
+                               input : c.legion_map_task_input_t,
+                               output : c.legion_map_task_output_t)
+    std.assert(false, "illegal transition to a non-final state")
+  end
   for state, _ in pairs(automata.states) do
     if not automata.final[state] then
       add_mapper_impl("", state.id, next_mapper_impl_id, {
-        select_task_options = select_task_options,
-        map_task = map_task,
+        select_task_options = default_select_task_options,
+        map_task = default_map_task,
       })
     end
   end

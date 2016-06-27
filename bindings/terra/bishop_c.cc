@@ -45,12 +45,14 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
                               			const set<Processor> &local_procs)
 {
   MapperRuntime* rt = runtime->get_mapper_runtime();
+  map<UniqueID, bishop_matching_state_t>* shared_states =
+    new map<UniqueID, bishop_matching_state_t>();
   for (set<Processor>::const_iterator it = local_procs.begin();
        it != local_procs.end(); it++)
   {
     BishopMapper* mapper =
       new BishopMapper(mapper_impls, transitions, state_to_mapper_impl_id,
-                       0, mapper_init, rt, machine, *it);
+                       shared_states, mapper_init, rt, machine, *it);
     runtime->replace_default_mapper(mapper, *it);
   }
 }

@@ -35,7 +35,6 @@ local function fetch_task_signatures()
       }
       local task_params = v.ast.params
       local num_reqs = 0
-      local field_id = 100 -- should be consistent with Regent's numbering
       for idx = 1, #task_params do
         local param_type_in_signature =
           regent_std.as_read(task_params[idx].param_type)
@@ -54,6 +53,8 @@ local function fetch_task_signatures()
               fields = terralib.newlist(),
               field_ids = terralib.newlist(),
             }
+            -- XXX: should be consistent with Regent's numbering
+            local field_id = 100
             local fields = privilege_field_paths[fidx]
             for fidx_ = 1, #fields do
               -- XXX: might not be correct with nested fieldspace
