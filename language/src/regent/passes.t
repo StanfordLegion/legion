@@ -49,7 +49,7 @@ function passes.optimize(node)
     node = flow_to_ast.entry(node)
   end
   if std.config["index-launches"] then node = optimize_loops.entry(node) end
-  if std.config["futures"] then node = optimize_futures.entry(node) end
+  if std.config["future"] then node = optimize_futures.entry(node) end
   if std.config["leaf"] then node = optimize_config_options.entry(node) end
   if std.config["mapping"] then node = optimize_inlines.entry(node) end
   if std.config["trace"] then node = optimize_traces.entry(node) end
