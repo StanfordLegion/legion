@@ -42,7 +42,7 @@ end
 local passes = {}
 
 function passes.optimize(node)
-  if std.config["task-inlines"] then node = inline_tasks.entry(node) end
+  if std.config["inline"] then node = inline_tasks.entry(node) end
   if std.config["flow"] then
     node = flow_from_ast.entry(node)
     if std.config["flow-spmd"] then node = flow_spmd.entry(node) end
