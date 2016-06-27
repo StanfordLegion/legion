@@ -100,19 +100,19 @@ http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
 ## Contents
 
-The Legion repository contains the following directories:
+This repository includes the following contents:
 
   * `tutorial`: Source code for the [tutorials](http://legion.stanford.edu/tutorial/).
   * `examples`: Larger examples for advanced programming techniques.
   * `apps`: Several complete Legion applications.
   * `language`: The [Regent programming language](http://regent-lang.org/) compiler and examples.
   * `runtime`: The core runtime components:
-    * `legion`: The Legion runtime itself (see `legion.h`).
-    * `realm`: The Realm low-level runtime (see `realm.h`).
-    * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
+      * `legion`: The Legion runtime itself (see `legion.h`).
+      * `realm`: The Realm low-level runtime (see `realm.h`).
+      * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
   * `tools`: Miscellaneous tools:
-    * `legion_spy.py`: A debugging tool renders task dependencies.
-    * `legion_prof.py`: A task-level profiler.
+      * `legion_spy.py`: A [visualization tool](http://legion.stanford.edu/debugging/#legion-spy) for task dependencies.
+      * `legion_prof.py`: A task-level [profiler](http://legion.stanford.edu/profiling/#legion-prof).
 
 ## Dependencies
 
@@ -149,9 +149,8 @@ make`) or at the top of each application's Makefile.
 
   * `DEBUG=<0,1>`: controls optimization level and enables various
     dynamic checks which are too expensive for release builds.
-  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time logging
-    level (see `runtime/realm/logging.h` for a list of logging level
-    names).
+  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time [logging
+    level](http://legion.stanford.edu/debugging/#logging-infrastructure).
   * `USE_CUDA=<0,1>`: enables CUDA support.
   * `USE_GASNET=<0,1>`: enables GASNET support.
   * `USE_LLVM=<0,1>`: enables LLVM support.
@@ -163,23 +162,22 @@ In addition to Makefile variables, compilation is influenced by a
 number of build flags. These flags may be added to the environment
 variable `CC_FLAGS` (or again set inside the Makefile).
 
-  * `CC_FLAGS=-DLEGION_SPY`: enables Legion Spy.
-  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables more privilege checks.
-  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables dynamic bounds checks on region accesses.
+  * `CC_FLAGS=-DLEGION_SPY`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
+  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
+  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
 
 ## Command-Line Flags
 
 Legion and Realm accept command-line arguments for various runtime
 parameters. Below are some of the more commonly used flags:
 
-  * `-level <logger_name>=<int>`:
-    dynamic logging level for a given logger name (see `runtime/realm/logging.h` for
-    the list of logging levels)
+  * `-level <category>=<int>`:
+    sets [logging level](http://legion.stanford.edu/debugging/#logging-infrastructure) for `category`
   * `-logfile <filename>`:
-    directs logging output to `filename`
+    directs [logging output](http://legion.stanford.edu/debugging/#logging-infrastructure) to `filename`
   * `-ll:cpu <int>`: CPU processors to create per process
   * `-ll:gpu <int>`: GPU processors to create per process
-  * `-ll:util <int>`: utility processors to create per process
+  * `-ll:cpu <int>`: utility processors to create per process
   * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
   * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
@@ -189,7 +187,7 @@ parameters. Below are some of the more commonly used flags:
   * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
-See default_mapper.cc for more details.
+See `default_mapper.cc` for more details.
 
 ## Developing Programs
 
