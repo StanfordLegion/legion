@@ -22,7 +22,7 @@ local default_options = {
 
   -- Main user-facing optimization flags:
   ["cuda"] = true,
-  ["index-launches"] = true,
+  ["index-launch"] = true,
   ["inline"] = true,
   ["future"] = true,
   ["leaf"] = true,

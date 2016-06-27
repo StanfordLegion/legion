@@ -48,7 +48,7 @@ function passes.optimize(node)
     if std.config["flow-spmd"] then node = flow_spmd.entry(node) end
     node = flow_to_ast.entry(node)
   end
-  if std.config["index-launches"] then node = optimize_loops.entry(node) end
+  if std.config["index-launch"] then node = optimize_loops.entry(node) end
   if std.config["future"] then node = optimize_futures.entry(node) end
   if std.config["leaf"] then node = optimize_config_options.entry(node) end
   if std.config["mapping"] then node = optimize_inlines.entry(node) end
