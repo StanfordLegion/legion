@@ -51,7 +51,7 @@ function passes.optimize(node)
   if std.config["index-launches"] then node = optimize_loops.entry(node) end
   if std.config["futures"] then node = optimize_futures.entry(node) end
   if std.config["leaf"] then node = optimize_config_options.entry(node) end
-  if std.config["inlines"] then node = optimize_inlines.entry(node) end
+  if std.config["mapping"] then node = optimize_inlines.entry(node) end
   if std.config["trace"] then node = optimize_traces.entry(node) end
   if std.config["no-dynamic-branches"] then node = optimize_divergence.entry(node) end
   if std.config["vectorize"] then node = vectorize_loops.entry(node) end

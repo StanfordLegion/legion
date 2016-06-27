@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-finlines", "0"]]
+-- [["-fmapping", "0"]]
 
 -- FIXME: This is hitting a bug in inline optimization.
 
