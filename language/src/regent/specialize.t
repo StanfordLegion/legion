@@ -717,6 +717,13 @@ end
 
 function specialize.expr_call(cx, node)
   local fn = specialize.expr(cx, node.fn)
+
+  if not (fn:is(ast.specialized.expr.Function) or
+          fn:is(ast.specialized.expr.ID))
+  then
+    log.error(fn, "unable to specialize complex expression in function call position")
+  end
+
   if terralib.isfunction(fn.value) or
     terralib.isoverloadedfunction(fn.value) or
     terralib.ismacro(fn.value) or
