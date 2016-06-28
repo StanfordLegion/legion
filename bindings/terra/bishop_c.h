@@ -46,6 +46,15 @@ typedef
       legion_task_options_t);
 
 typedef
+  void (*bishop_slice_task_fn_t)(
+      bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
+      legion_task_t,
+      legion_slice_task_input_t,
+      legion_slice_task_output_t);
+
+typedef
   void (*bishop_map_task_fn_t)(
       bishop_mapper_state_t,
       legion_mapper_runtime_t,
@@ -67,6 +76,7 @@ typedef
 
 typedef struct bishop_mapper_impl_t {
   bishop_select_task_options_fn_t select_task_options;
+  bishop_slice_task_fn_t slice_task;
   bishop_map_task_fn_t map_task;
 } bishop_mapper_impl_t;
 

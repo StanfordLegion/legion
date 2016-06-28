@@ -139,6 +139,7 @@ function std.register_bishop_mappers()
       [register_body]
       [mapper_impls][i] = c.bishop_mapper_impl_t {
         select_task_options = [mapper_impl.select_task_options],
+        slice_task = [mapper_impl.slice_task],
         map_task = [mapper_impl.map_task],
       }
     end

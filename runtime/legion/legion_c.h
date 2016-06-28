@@ -83,6 +83,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_task_layout_constraint_set_t);
+  NEW_OPAQUE_TYPE(legion_slice_task_output_t);
   NEW_OPAQUE_TYPE(legion_map_task_input_t);
   NEW_OPAQUE_TYPE(legion_map_task_output_t);
   NEW_OPAQUE_TYPE(legion_physical_instance_t);
@@ -238,7 +239,7 @@ typedef long long int coord_t;
   } legion_memory_t;
 
   /**
-   * @see Legion::Mapper::DomainSplit
+   * @see Legion::Mapper::TaskSlice
    */
   typedef struct legion_task_slice_t {
     legion_domain_t domain;
@@ -281,6 +282,10 @@ typedef long long int coord_t;
     bool stealable;
     bool map_locally;
   } legion_task_options_t;
+
+  typedef struct legion_slice_task_input_t {
+    legion_domain_t domain;
+  } legion_slice_task_input_t;
 
   /**
    * Interface for a Legion C registration callback.
@@ -3797,6 +3802,26 @@ typedef long long int coord_t;
    */
   void
   legion_physical_instance_destroy(legion_physical_instance_t instance);
+
+  // -----------------------------------------------------------------------
+  // Slice Task Output
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::Mapping::Mapper::SliceTaskOutput:slices
+   */
+  void
+  legion_slice_task_output_slices_add(
+      legion_slice_task_output_t output,
+      legion_task_slice_t slice);
+
+  /**
+   * @see Legion::Mapping::Mapper::SliceTaskOutput:verify_correctness
+   */
+  void
+  legion_slice_task_output_verify_correctness_set(
+      legion_slice_task_output_t output,
+      bool verify_correctness);
 
   // -----------------------------------------------------------------------
   // Map Task Input/Output

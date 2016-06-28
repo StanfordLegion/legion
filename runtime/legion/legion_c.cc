@@ -5413,6 +5413,28 @@ legion_physical_instance_destroy(legion_physical_instance_t instance_)
 }
 
 // -----------------------------------------------------------------------
+// Slice Task Output
+// -----------------------------------------------------------------------
+
+void
+legion_slice_task_output_slices_add(
+    legion_slice_task_output_t output_,
+    legion_task_slice_t slice_)
+{
+  Mapper::SliceTaskOutput* output = CObjectWrapper::unwrap(output_);
+  Mapper::TaskSlice slice = CObjectWrapper::unwrap(slice_);
+  output->slices.push_back(slice);
+}
+
+void
+legion_slice_task_output_verify_correctness_set(
+    legion_slice_task_output_t output_,
+    bool verify_correctness)
+{
+  CObjectWrapper::unwrap(output_)->verify_correctness = verify_correctness;
+}
+
+// -----------------------------------------------------------------------
 // Map Task Input/Output
 // -----------------------------------------------------------------------
 
