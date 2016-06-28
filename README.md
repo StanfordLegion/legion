@@ -100,29 +100,30 @@ http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
 ## Contents
 
-The Legion repository contains the following directories:
+This repository includes the following contents:
 
   * `tutorial`: Source code for the [tutorials](http://legion.stanford.edu/tutorial/).
   * `examples`: Larger examples for advanced programming techniques.
   * `apps`: Several complete Legion applications.
   * `language`: The [Regent programming language](http://regent-lang.org/) compiler and examples.
   * `runtime`: The core runtime components:
-    * `legion`: The Legion runtime itself (see `legion.h`).
-    * `realm`: The Realm low-level runtime (see `realm.h`).
-    * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
+      * `legion`: The Legion runtime itself (see `legion.h`).
+      * `realm`: The Realm low-level runtime (see `realm.h`).
+      * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
   * `tools`: Miscellaneous tools:
-    * `legion_spy.py`: A debugging tool renders task dependencies.
-    * `legion_prof.py`: A task-level profiler.
+      * `legion_spy.py`: A [visualization tool](http://legion.stanford.edu/debugging/#legion-spy) for task dependencies.
+      * `legion_prof.py`: A task-level [profiler](http://legion.stanford.edu/profiling/#legion-prof).
 
 ## Dependencies
 
 To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
-  * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * A C++ 98 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: Python 2.7 (used for profiling/debugging tools)
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
-  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
+  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
+     [installation instructions](http://legion.stanford.edu/gasnet/))
   * *Optional*: LLVM 3.5 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
@@ -149,11 +150,10 @@ make`) or at the top of each application's Makefile.
 
   * `DEBUG=<0,1>`: controls optimization level and enables various
     dynamic checks which are too expensive for release builds.
-  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time logging
-    level (see `runtime/realm/logging.h` for a list of logging level
-    names).
+  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time [logging
+    level](http://legion.stanford.edu/debugging/#logging-infrastructure).
   * `USE_CUDA=<0,1>`: enables CUDA support.
-  * `USE_GASNET=<0,1>`: enables GASNET support.
+  * `USE_GASNET=<0,1>`: enables GASNet support (see [installation instructions](http://legion.stanford.edu/gasnet/)).
   * `USE_LLVM=<0,1>`: enables LLVM support.
   * `USE_HDF=<0,1>`: enables HDF5 support.
 
@@ -163,23 +163,22 @@ In addition to Makefile variables, compilation is influenced by a
 number of build flags. These flags may be added to the environment
 variable `CC_FLAGS` (or again set inside the Makefile).
 
-  * `CC_FLAGS=-DLEGION_SPY`: enables Legion Spy.
-  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables more privilege checks.
-  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables dynamic bounds checks on region accesses.
+  * `CC_FLAGS=-DLEGION_SPY`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
+  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
+  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
 
 ## Command-Line Flags
 
 Legion and Realm accept command-line arguments for various runtime
 parameters. Below are some of the more commonly used flags:
 
-  * `-level <logger_name>=<int>`:
-    dynamic logging level for a given logger name (see `runtime/realm/logging.h` for
-    the list of logging levels)
+  * `-level <category>=<int>`:
+    sets [logging level](http://legion.stanford.edu/debugging/#logging-infrastructure) for `category`
   * `-logfile <filename>`:
-    directs logging output to `filename`
+    directs [logging output](http://legion.stanford.edu/debugging/#logging-infrastructure) to `filename`
   * `-ll:cpu <int>`: CPU processors to create per process
   * `-ll:gpu <int>`: GPU processors to create per process
-  * `-ll:util <int>`: utility processors to create per process
+  * `-ll:cpu <int>`: utility processors to create per process
   * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
   * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
@@ -189,7 +188,7 @@ parameters. Below are some of the more commonly used flags:
   * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
-See default_mapper.cc for more details.
+See `default_mapper.cc` for more details.
 
 ## Developing Programs
 
@@ -206,40 +205,57 @@ directory. The default mapper is available in `default_mapper.h`.
 
 Legion has a number of tools to aid in debugging programs.
 
-First, compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make`
-and run the application again. This enables dynamic checks for
-privilege and out-of-bounds errors in the application. If the
-application runs without terminating in an error, then continue on to
-Legion Spy.
+### Extended Correctness Checks
 
-Second, recompile with `DEBUG=1 CC_FLAGS="-DLEGION_SPY" make`, and run
-the application with `-logfile spy.log`. This captures a trace of the
-application's execution with Legion Spy, a tool for analyzing task
-dependencies. Legion Spy contains a second implementation of Legion's
-runtime analysis, which can be used to check the correctness of the
-runtime itself by calling `legion_spy.py -lpa` on the log file.
+Compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+make` and rerun the application. This enables dynamic checks for
+privilege and out-of-bounds errors in the application. (These checks
+are not enabled by default because they are relatively expensive.) If
+the application runs without terminating with an error, then continue
+on to Legion Spy.
 
-Legion Spy can also be used to generate graphs of the applications
-logical and physical dependencies, with `legion_spy.py -dez`. This
-will generate a number of PDF files in the current directory.
+### Legion Spy
+
+Legion provides a task-level visualization tool called Legion
+Spy. This captures the logical and physical dependence graphs. These
+may help, for example, as a sanity check to ensure that the correct
+sequence of tasks is being launched (and the tasks have the correct
+dependencies). Legion Spy also has a self-checking mode which can
+validate the correctness of the runtime's logical and physical
+dependence algorithms.
+
+To capture a trace, invoke the application with `-hl:spy -logfile
+spy_%.log`. (No special compile-time flags are required.) This will
+produce a log file per node. Call the post-processing script to render
+PDF files of the dependence graphs:
 
 ```bash
-DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" make
-./app -logfile spy.log
-$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
-$LG_RT_DIR/../tools/legion_spy.py -dez spy.log
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
+```
+
+To run Legion Spy's self-checking mode, Legion must be built with the
+flag `-DLEGION_SPY`. Following this, the application can be run again,
+and the script used to validate (or render) the trace.
+
+```bash
+DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy_*.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
 
 ## Profiling
 
-Legion contains a task-level profiler. The profiler is built by
-default, so no special compile-time flags are required. However,
-it is recommended to build with `DEBUG=0 make` to avoid any undesired
-performance issues.
+Legion contains a task-level profiler. No special compile-time flags
+are required. However, it is recommended to build with `DEBUG=0 make`
+to avoid any undesired performance issues.
 
 Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
-is the number of nodes to be profiled. The profiler itself runs
-offline, after the application run has completed:
+is the number of nodes to be profiled. (`N` can be less than the total
+node count---this profiles a subset of the nodes.) This will produce a
+log file per node. The profiler itself runs offline and produces an
+HTML file which can be loaded in a web browser.
 
 ```bash
 DEBUG=0 make

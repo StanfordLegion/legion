@@ -15,8 +15,8 @@
 -- Bishop Language Entry Point
 
 local parser = require("bishop/parser")
-local specialize = require("bishop/specialize")
 local type_check = require("bishop/type_check")
+local optimize_match = require("bishop/optimize_match")
 local codegen = require("bishop/codegen")
 local std = require("bishop/std")
 
@@ -57,9 +57,9 @@ local language = {
 function language:statement(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
-    node = specialize.mapper(node)
     node = type_check.mapper(node)
     return function()
+      node = optimize_match.mapper(node)
       return codegen.mapper(node)
     end
   end

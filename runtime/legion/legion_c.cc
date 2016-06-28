@@ -5364,7 +5364,6 @@ legion_map_task_output_chosen_instances_clear_each(
     size_t idx_)
 {
   Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
-  output->chosen_instances.reserve(idx_);
   output->chosen_instances[idx_].clear();
 }
 
@@ -5390,7 +5389,6 @@ legion_map_task_output_chosen_instances_set(
     size_t instances_size_)
 {
   Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
-  output->chosen_instances.reserve(idx_);
   std::vector<PhysicalInstance>& chosen_instances =
     output->chosen_instances[idx_];
   chosen_instances.clear();
@@ -5413,6 +5411,15 @@ legion_map_task_output_target_procs_add(
 {
   Mapper::MapTaskOutput* output = CObjectWrapper::unwrap(output_);
   output->target_procs.push_back(CObjectWrapper::unwrap(proc_));
+}
+
+legion_processor_t
+legion_map_task_output_target_procs_get(
+    legion_map_task_output_t output_,
+    size_t idx_)
+{
+  return CObjectWrapper::wrap(
+      CObjectWrapper::unwrap(output_)->target_procs[idx_]);
 }
 
 void

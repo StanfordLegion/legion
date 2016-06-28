@@ -3802,6 +3802,14 @@ typedef long long int coord_t;
       legion_processor_t proc);
 
   /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
+   */
+  legion_processor_t
+  legion_map_task_output_target_procs_get(
+      legion_map_task_output_t output,
+      size_t idx);
+
+  /**
    * @see Legion::Mapping::Mapper::MapTaskOutput:task_priority
    */
   void

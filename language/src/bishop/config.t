@@ -12,38 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Configuration and Command Line Parsing
+-- Bishop Configuration and Command Line Parsing
 
 local config = {}
 
 local default_options = {
-  -- Main user-facing correctness flags:
-  ["bounds-checks"] = false,
-
-  -- Main user-facing optimization flags:
-  ["cuda"] = true,
-  ["index-launch"] = true,
-  ["inline"] = true,
-  ["future"] = true,
-  ["leaf"] = true,
-  ["mapping"] = true,
-  ["vectorize"] = true,
-
-  -- Dataflow optimization flags:
-  ["flow"] = false,
-  ["flow-spmd"] = false,
-  ["flow-spmd-shardsize"] = 1,
-
-  -- Miscellaneous, internal or special-purpose flags:
-  ["aligned-instances"] = false,
-  ["cached-iterators"] = false,
-  ["debug"] = false,
-  ["no-dynamic-branches"] = true,
-  ["no-dynamic-branches-assert"] = false,
-  ["pretty"] = false,
-  ["layout-constraints"] = true,
-  ["trace"] = true,
-  ["validate"] = true,
+  ["standalone"] = false,
+  ["taskid-map"] = "",
+  ["dump-dfa"] = "",
 }
 
 local option = {
@@ -71,17 +47,19 @@ function config.parse_args(rawargs)
   local arg_i = 1
   while rawargs[i] do
     local arg = rawargs[i]
-    if string.sub(arg, 1, 2) == "-f" then
-      local k = string.sub(rawargs[i], 3)
+    if string.sub(arg, 1, 8) == "-bishop:" then
+      local k = string.sub(rawargs[i], 9)
       if default_options[k] == nil then
         error("unknown option " .. rawargs[i])
       end
-      if rawargs[i+1] == nil or tonumber(rawargs[i+1]) == nil then
+      if rawargs[i+1] == nil then
         error("option " .. rawargs[i] .. " missing argument")
       end
-      local v = tonumber(rawargs[i+1])
+      local v = rawargs[i+1]
       if type(default_options[k]) == "boolean" then
-        v = v~= 0
+        v = tonumber(v)~= 0
+      elseif type(default_options[k]) == "number" then
+        v = tonumber(v)
       end
       options[k] = v
       i = i + 1
