@@ -5413,6 +5413,15 @@ legion_map_task_output_target_procs_add(
   output->target_procs.push_back(CObjectWrapper::unwrap(proc_));
 }
 
+legion_processor_t
+legion_map_task_output_target_procs_get(
+    legion_map_task_output_t output_,
+    size_t idx_)
+{
+  return CObjectWrapper::wrap(
+      CObjectWrapper::unwrap(output_)->target_procs[idx_]);
+}
+
 void
 legion_map_task_output_task_priority_set(
     legion_map_task_output_t output_,
