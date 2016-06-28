@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Regent Loop Optimizer
+-- Regent Index Launch Optimizer
 --
 -- Attempts to determine which loops can be transformed into index
 -- space task launches.
@@ -307,11 +307,11 @@ local function analyze_is_loop_invariant(cx, node)
     node, true)
 end
 
-local optimize_index_launch_loops = {}
+local optimize_index_launch = {}
 
 local function ignore(...) end
 
-function optimize_index_launch_loops.stat_for_num(cx, node)
+function optimize_index_launch.stat_for_num(cx, node)
   local log_pass = ignore
   local log_fail = ignore
   if node.options.parallel:is(ast.options.Demand) then
@@ -541,40 +541,40 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   }
 end
 
-local optimize_loops = {}
+local optimize_index_launches = {}
 
-local function optimize_loops_node(cx)
+local function optimize_index_launches_node(cx)
   return function(node)
     if node:is(ast.typed.stat.ForNum) then
-      return optimize_index_launch_loops.stat_for_num(cx, node)
+      return optimize_index_launch.stat_for_num(cx, node)
     end
     return node
   end
 end
 
-function optimize_loops.block(cx, node)
-  return ast.map_node_postorder(optimize_loops_node(cx), node)
+function optimize_index_launches.block(cx, node)
+  return ast.map_node_postorder(optimize_index_launches_node(cx), node)
 end
 
-function optimize_loops.top_task(cx, node)
+function optimize_index_launches.top_task(cx, node)
   local cx = cx:new_task_scope(node.prototype:get_constraints())
-  local body = optimize_loops.block(cx, node.body)
+  local body = optimize_index_launches.block(cx, node.body)
 
   return node { body = body }
 end
 
-function optimize_loops.top(cx, node)
+function optimize_index_launches.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    return optimize_loops.top_task(cx, node)
+    return optimize_index_launches.top_task(cx, node)
 
   else
     return node
   end
 end
 
-function optimize_loops.entry(node)
+function optimize_index_launches.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_loops.top(cx, node)
+  return optimize_index_launches.top(cx, node)
 end
 
-return optimize_loops
+return optimize_index_launches

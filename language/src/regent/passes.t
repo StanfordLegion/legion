@@ -21,8 +21,8 @@ local inline_tasks = require("regent/inline_tasks")
 local optimize_config_options = require("regent/optimize_config_options")
 local optimize_divergence = require("regent/optimize_divergence")
 local optimize_futures = require("regent/optimize_futures")
+local optimize_index_launches = require("regent/optimize_index_launches")
 local optimize_inlines = require("regent/optimize_inlines")
-local optimize_loops = require("regent/optimize_loops")
 local optimize_traces = require("regent/optimize_traces")
 local parser = require("regent/parser")
 local pretty = require("regent/pretty")
@@ -48,7 +48,7 @@ function passes.optimize(node)
     if std.config["flow-spmd"] then node = flow_spmd.entry(node) end
     node = flow_to_ast.entry(node)
   end
-  if std.config["index-launch"] then node = optimize_loops.entry(node) end
+  if std.config["index-launch"] then node = optimize_index_launches.entry(node) end
   if std.config["future"] then node = optimize_futures.entry(node) end
   if std.config["leaf"] then node = optimize_config_options.entry(node) end
   if std.config["mapping"] then node = optimize_inlines.entry(node) end
