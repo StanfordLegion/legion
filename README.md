@@ -119,10 +119,11 @@ This repository includes the following contents:
 To get started with Legion, you'll need:
 
   * Linux, macOS, or another Unix
-  * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * A C++ 98 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: Python 2.7 (used for profiling/debugging tools)
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
-  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
+  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
+     [installation instructions](http://legion.stanford.edu/gasnet/))
   * *Optional*: LLVM 3.5 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
@@ -152,7 +153,7 @@ make`) or at the top of each application's Makefile.
   * `OUTPUT_LEVEL=<level_name>`: controls the compile-time [logging
     level](http://legion.stanford.edu/debugging/#logging-infrastructure).
   * `USE_CUDA=<0,1>`: enables CUDA support.
-  * `USE_GASNET=<0,1>`: enables GASNET support.
+  * `USE_GASNET=<0,1>`: enables GASNet support (see [installation instructions](http://legion.stanford.edu/gasnet/)).
   * `USE_LLVM=<0,1>`: enables LLVM support.
   * `USE_HDF=<0,1>`: enables HDF5 support.
 
