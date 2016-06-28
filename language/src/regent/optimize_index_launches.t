@@ -204,7 +204,7 @@ local function analyze_is_side_effect_free_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.options)
+      node:is(ast.annotation)
     then
       return true
 
@@ -290,7 +290,7 @@ local function analyze_is_loop_invariant_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.options)
+      node:is(ast.annotation)
     then
       return true
 
@@ -314,7 +314,7 @@ local function ignore(...) end
 function optimize_index_launch.stat_for_num(cx, node)
   local log_pass = ignore
   local log_fail = ignore
-  if node.options.parallel:is(ast.options.Demand) then
+  if node.annotations.parallel:is(ast.annotation.Demand) then
     log_pass = ignore -- log.warn
     log_fail = log.error
   end
@@ -536,7 +536,7 @@ function optimize_index_launch.stat_for_num(cx, node)
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end

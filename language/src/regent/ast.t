@@ -417,26 +417,26 @@ function ast.trivial_span()
   }
 end
 
--- Options
+-- Annotation
 
-ast:inner("options")
+ast:inner("annotation")
 
--- Options: Dispositions
-ast.options:leaf("Allow", {"value"}, true)
-ast.options:leaf("Demand", {"value"}, true)
-ast.options:leaf("Forbid", {"value"}, true)
+-- Annotation: Dispositions
+ast.annotation:leaf("Allow", {"value"}, true)
+ast.annotation:leaf("Demand", {"value"}, true)
+ast.annotation:leaf("Forbid", {"value"}, true)
 
--- Options: Values
-ast.options:leaf("Unroll", {"value"}, true)
+-- Annotation: Values
+ast.annotation:leaf("Unroll", {"value"}, true)
 
--- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
-                         "vectorize"},
-                 false, true)
+-- Annotation: Sets
+ast.annotation:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+                            "vectorize"},
+                    false, true)
 
-function ast.default_options()
-  local allow = ast.options.Allow { value = false }
-  return ast.options.Set {
+function ast.default_annotations()
+  local allow = ast.annotation.Allow { value = false }
+  return ast.annotation.Set {
     cuda = allow,
     inline = allow,
     parallel = allow,
@@ -489,7 +489,7 @@ ast.unspecialized:inner("disjointness_kind")
 ast.unspecialized.disjointness_kind:leaf("Aliased")
 ast.unspecialized.disjointness_kind:leaf("Disjoint")
 
-ast.unspecialized:inner("expr", {"options"})
+ast.unspecialized:inner("expr", {"annotations"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
 ast.unspecialized.expr:leaf("FieldAccess", {"value", "field_names"})
@@ -548,7 +548,7 @@ ast.unspecialized.expr:leaf("Deref", {"value"})
 
 ast.unspecialized:leaf("Block", {"stats"})
 
-ast.unspecialized:inner("stat", {"options"})
+ast.unspecialized:inner("stat", {"annotations"})
 ast.unspecialized.stat:leaf("If", {"cond", "then_block", "elseif_blocks",
                                    "else_block"})
 ast.unspecialized.stat:leaf("Elseif", {"cond", "block"})
@@ -568,7 +568,7 @@ ast.unspecialized.stat:leaf("Expr", {"expr"})
 ast.unspecialized.stat:leaf("Escape", {"expr"})
 ast.unspecialized.stat:leaf("RawDelete", {"value"})
 
-ast.unspecialized:inner("top", {"options"})
+ast.unspecialized:inner("top", {"annotations"})
 ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
                                     "privileges", "coherence_modes", "flags",
                                     "conditions", "constraints", "body"})
@@ -618,7 +618,7 @@ ast.specialized.condition_kind:leaf("Arrives")
 ast.specialized.condition_kind:leaf("Awaits")
 ast.specialized:leaf("Condition", {"conditions", "variables"})
 
-ast.specialized:inner("expr", {"options"})
+ast.specialized:inner("expr", {"annotations"})
 ast.specialized.expr:leaf("ID", {"value"})
 ast.specialized.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.specialized.expr:leaf("IndexAccess", {"value", "index"})
@@ -679,7 +679,7 @@ ast.specialized.expr:leaf("LuaTable", {"value"})
 
 ast.specialized:leaf("Block", {"stats"})
 
-ast.specialized:inner("stat", {"options"})
+ast.specialized:inner("stat", {"annotations"})
 ast.specialized.stat:leaf("If", {"cond", "then_block", "elseif_blocks",
                                  "else_block"})
 ast.specialized.stat:leaf("Elseif", {"cond", "block"})
@@ -698,7 +698,7 @@ ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 ast.specialized.stat:leaf("RawDelete", {"value"})
 
-ast.specialized:inner("top", {"options"})
+ast.specialized:inner("top", {"annotations"})
 ast.specialized.top:leaf("Task", {"name", "params", "return_type",
                                   "privileges", "coherence_modes", "flags",
                                   "conditions", "constraints", "body",
@@ -713,7 +713,7 @@ ast.specialized.top:leaf("QuoteStat", {"block"})
 
 ast.typed = ast:inner("typed", {"span"})
 
-ast.typed:inner("expr", {"options", "expr_type"})
+ast.typed:inner("expr", {"annotations", "expr_type"})
 ast.typed.expr:leaf("Internal", {"value"}) -- internal use only
 
 ast.typed.expr:leaf("ID", {"value"})
@@ -778,7 +778,7 @@ ast.typed.expr:leaf("FutureGetResult", {"value"})
 
 ast.typed:leaf("Block", {"stats"})
 
-ast.typed:inner("stat", {"options"})
+ast.typed:inner("stat", {"annotations"})
 ast.typed.stat:leaf("If", {"cond", "then_block", "elseif_blocks", "else_block"})
 ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
@@ -807,7 +807,7 @@ ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
 ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
 
-ast.typed:inner("top", {"options"})
+ast.typed:inner("top", {"annotations"})
 ast.typed.top:leaf("Fspace", {"name", "fspace"})
 ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",

@@ -145,7 +145,7 @@ function type_check.expr_region_root(cx, node)
     fields = type_check.region_fields(
       cx, node.fields, region_symbol, data.newtuple(), value_type),
     expr_type = region_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -361,7 +361,7 @@ function type_check.expr_condition(cx, node)
         conditions = conditions,
         value = value,
         expr_type = std.as_read(value.expr_type),
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end)
@@ -412,7 +412,7 @@ function type_check.expr_id(cx, node)
   return ast.typed.expr.ID {
     value = node.value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -421,7 +421,7 @@ function type_check.expr_constant(cx, node)
   return ast.typed.expr.Constant {
     value = node.value,
     expr_type = node.expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -437,7 +437,7 @@ function type_check.expr_function(cx, node)
   return ast.typed.expr.Function {
     value = node.value,
     expr_type = untyped,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -503,7 +503,7 @@ function type_check.expr_field_access(cx, node)
     value = value,
     field_name = node.field_name,
     expr_type = field_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -547,7 +547,7 @@ function type_check.expr_index_access(cx, node)
       value = value,
       index = index,
       expr_type = subregion,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   elseif std.is_cross_product(value_type) then
@@ -585,7 +585,7 @@ function type_check.expr_index_access(cx, node)
       value = value,
       index = index,
       expr_type = subpartition,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   elseif std.is_region(value_type) then
@@ -608,7 +608,7 @@ function type_check.expr_index_access(cx, node)
       value = value,
       index = index,
       expr_type = result_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   elseif std.is_list(value_type) then
@@ -632,7 +632,7 @@ function type_check.expr_index_access(cx, node)
         value = value,
         index = index,
         expr_type = expr_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     else
@@ -648,7 +648,7 @@ function type_check.expr_index_access(cx, node)
         value = value,
         index = index,
         expr_type = expr_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end
@@ -677,7 +677,7 @@ function type_check.expr_index_access(cx, node)
       value = value,
       index = index,
       expr_type = result_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   end
@@ -712,7 +712,7 @@ function type_check.expr_method_call(cx, node)
     method_name = node.method_name,
     args = args,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -841,7 +841,7 @@ function type_check.expr_call(cx, node)
     args = args,
     conditions = conditions,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
   if expr_type == untyped then
@@ -910,7 +910,7 @@ function type_check.expr_cast(cx, node)
     fn = fn,
     arg = arg,
     expr_type = to_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -921,7 +921,7 @@ function type_check.expr_ctor_list_field(cx, node)
   return ast.typed.expr.CtorListField {
     value = value,
     expr_type = value_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -933,7 +933,7 @@ function type_check.expr_ctor_rec_field(cx, node)
     name = node.name,
     value = value,
     expr_type = value_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -966,7 +966,7 @@ function type_check.expr_ctor(cx, node)
     fields = fields,
     named = node.named,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -974,7 +974,7 @@ end
 function type_check.expr_raw_context(cx, node)
   return ast.typed.expr.RawContext {
     expr_type = std.c.legion_context_t,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1010,7 +1010,7 @@ function type_check.expr_raw_fields(cx, node)
     region = region,
     fields = privilege_fields,
     expr_type = fields_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1035,7 +1035,7 @@ function type_check.expr_raw_physical(cx, node)
     region = region,
     fields = privilege_fields,
     expr_type = physical_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1043,7 +1043,7 @@ end
 function type_check.expr_raw_runtime(cx, node)
   return ast.typed.expr.RawRuntime {
     expr_type = std.c.legion_runtime_t,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1070,7 +1070,7 @@ function type_check.expr_raw_value(cx, node)
   return ast.typed.expr.RawValue {
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1084,7 +1084,7 @@ function type_check.expr_isnull(cx, node)
   return ast.typed.expr.Isnull {
     pointer = pointer,
     expr_type = bool,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1107,7 +1107,7 @@ function type_check.expr_new(cx, node)
     region = region,
     extent = extent,
     expr_type = node.pointer_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1120,7 +1120,7 @@ function type_check.expr_null(cx, node)
   return ast.typed.expr.Null {
     pointer_type = pointer_type,
     expr_type = pointer_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1142,7 +1142,7 @@ function type_check.expr_dynamic_cast(cx, node)
   return ast.typed.expr.DynamicCast {
     value = value,
     expr_type = node.expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1181,7 +1181,7 @@ function type_check.expr_static_cast(cx, node)
     value = value,
     parent_region_map = parent_region_map,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1207,7 +1207,7 @@ function type_check.expr_unsafe_cast(cx, node)
   return ast.typed.expr.UnsafeCast {
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1238,7 +1238,7 @@ function type_check.expr_ispace(cx, node)
     extent = extent,
     start = start,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1283,7 +1283,7 @@ function type_check.expr_region(cx, node)
     ispace = ispace,
     fspace_type = node.fspace_type,
     expr_type = region,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1374,7 +1374,7 @@ function type_check.expr_partition(cx, node)
     coloring = coloring,
     colors = colors,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1425,7 +1425,7 @@ function type_check.expr_partition_equal(cx, node)
     region = region,
     colors = colors,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1490,7 +1490,7 @@ function type_check.expr_partition_by_field(cx, node)
     region = region,
     colors = colors,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1585,7 +1585,7 @@ function type_check.expr_image(cx, node)
     partition = partition,
     region = region,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1680,7 +1680,7 @@ function type_check.expr_preimage(cx, node)
     region = region,
     parent = parent,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1714,7 +1714,7 @@ function type_check.expr_cross_product(cx, node)
   return ast.typed.expr.CrossProduct {
     args = args,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1734,7 +1734,7 @@ function type_check.expr_cross_product_array(cx, node)
     disjointness = disjointness,
     colorings = colorings,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1766,7 +1766,7 @@ function type_check.expr_list_slice_partition(cx, node)
     partition = partition,
     indices = indices,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1806,7 +1806,7 @@ function type_check.expr_list_duplicate_partition(cx, node)
     partition = partition,
     indices = indices,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1838,7 +1838,7 @@ function type_check.expr_list_cross_product(cx, node)
     rhs = rhs,
     shallow = node.shallow,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1865,7 +1865,7 @@ function type_check.expr_list_cross_product_complete(cx, node)
     lhs = lhs,
     product = product,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1883,7 +1883,7 @@ function type_check.expr_list_phase_barriers(cx, node)
   return ast.typed.expr.ListPhaseBarriers {
     product = product,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1916,7 +1916,7 @@ function type_check.expr_list_invert(cx, node)
     product = product,
     barriers = barriers,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1938,7 +1938,7 @@ function type_check.expr_list_range(cx, node)
     start = start,
     stop = stop,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1953,7 +1953,7 @@ function type_check.expr_phase_barrier(cx, node)
   return ast.typed.expr.PhaseBarrier {
     value = value,
     expr_type = std.phase_barrier,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1972,7 +1972,7 @@ function type_check.expr_dynamic_collective(cx, node)
     op = node.op,
     arrivals = arrivals,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -1988,7 +1988,7 @@ function type_check.expr_dynamic_collective_get_result(cx, node)
   return ast.typed.expr.DynamicCollectiveGetResult {
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2007,7 +2007,7 @@ function type_check.expr_advance(cx, node)
   return ast.typed.expr.Advance {
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2034,7 +2034,7 @@ function type_check.expr_arrive(cx, node)
     barrier = barrier,
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2050,7 +2050,7 @@ function type_check.expr_await(cx, node)
   return ast.typed.expr.Await {
     barrier = barrier,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2164,7 +2164,7 @@ function type_check.expr_copy(cx, node)
     op = node.op,
     conditions = conditions,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2218,7 +2218,7 @@ function type_check.expr_fill(cx, node)
     value = value,
     conditions = conditions,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2261,7 +2261,7 @@ function type_check.expr_acquire(cx, node)
     region = region,
     conditions = conditions,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2304,7 +2304,7 @@ function type_check.expr_release(cx, node)
     region = region,
     conditions = conditions,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2317,7 +2317,7 @@ function type_check.expr_allocate_scratch_fields(cx, node)
   return ast.typed.expr.AllocateScratchFields {
     region = region,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2344,7 +2344,7 @@ function type_check.expr_with_scratch_fields(cx, node)
     region = region,
     field_ids = field_ids,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2383,7 +2383,7 @@ function type_check.expr_unary(cx, node)
     op = node.op,
     rhs = rhs,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2489,7 +2489,7 @@ function type_check.expr_binary(cx, node)
     lhs = lhs,
     rhs = rhs,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2507,7 +2507,7 @@ function type_check.expr_deref(cx, node)
   return ast.typed.expr.Deref {
     value = value,
     expr_type = expr_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2697,7 +2697,7 @@ function type_check.stat_if(cx, node)
     elseif_blocks = node.elseif_blocks:map(
       function(block) return type_check.stat_elseif(cx, block) end),
     else_block = type_check.block(else_cx, node.else_block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2713,7 +2713,7 @@ function type_check.stat_elseif(cx, node)
   return ast.typed.stat.Elseif {
     cond = cond,
     block = type_check.block(body_cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2729,7 +2729,7 @@ function type_check.stat_while(cx, node)
   return ast.typed.stat.While {
     cond = cond,
     block = type_check.block(body_cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2767,7 +2767,7 @@ function type_check.stat_for_num(cx, node)
     symbol = node.symbol,
     values = values,
     block = type_check.block(cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2831,7 +2831,7 @@ function type_check.stat_for_list(cx, node)
     symbol = node.symbol,
     value = value,
     block = type_check.block(cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2847,7 +2847,7 @@ function type_check.stat_repeat(cx, node)
   return ast.typed.stat.Repeat {
     block = type_check.block(cx, node.block),
     until_cond = until_cond,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2860,7 +2860,7 @@ function type_check.stat_must_epoch(cx, node)
   local cx = cx:new_local_scope(true)
   return ast.typed.stat.MustEpoch {
     block = type_check.block(cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2869,7 +2869,7 @@ function type_check.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return ast.typed.stat.Block {
     block = type_check.block(cx, node.block),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2908,7 +2908,7 @@ function type_check.stat_var(cx, node)
     symbols = node.symbols,
     types = types,
     values = values,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2970,7 +2970,7 @@ function type_check.stat_var_unpack(cx, node)
     fields = node.fields,
     field_types = field_types,
     value = value,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -2998,14 +2998,14 @@ function type_check.stat_return(cx, node)
 
   return ast.typed.stat.Return {
     value = value,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
 
 function type_check.stat_break(cx, node)
   return ast.typed.stat.Break {
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3032,7 +3032,7 @@ function type_check.stat_assignment(cx, node)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3062,7 +3062,7 @@ function type_check.stat_reduce(cx, node)
     op = node.op,
     lhs = lhs,
     rhs = rhs,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3073,7 +3073,7 @@ function type_check.stat_expr(cx, node)
 
   return ast.typed.stat.Expr {
     expr = value,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3088,7 +3088,7 @@ function type_check.stat_raw_delete(cx, node)
 
   return ast.typed.stat.RawDelete {
     value = value,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3161,7 +3161,7 @@ function type_check.top_task_param(cx, node, mapping)
   return ast.typed.top.TaskParam {
     symbol = node.symbol,
     param_type = param_type,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3247,7 +3247,7 @@ function type_check.top_task(cx, node)
     },
     region_divergence = false,
     prototype = prototype,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -3257,7 +3257,7 @@ function type_check.top_fspace(cx, node)
   return ast.typed.top.Fspace {
     name = node.name,
     fspace = node.fspace,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end

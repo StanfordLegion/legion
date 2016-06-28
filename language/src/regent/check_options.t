@@ -50,12 +50,12 @@ end
 local function check(cx, node, allowed_set)
   -- Sanity check the allowed set.
   for option, _ in pairs(allowed_set) do
-    assert(node.options[option]:is(ast.options))
+    assert(node.annotations[option]:is(ast.annotation))
   end
 
   -- Check that only options in the allowed_set are enabled.
-  for option, value in pairs(node.options) do
-    if ast.is_node(value) and not value:is(ast.options.Allow) and
+  for option, value in pairs(node.annotations) do
+    if ast.is_node(value) and not value:is(ast.annotation.Allow) and
       not allowed_set[option]
     then
       log.error(node, "option " .. render_option(option, value) ..
@@ -172,7 +172,7 @@ local function check_options_node(cx)
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or
       node:is(ast.location) or
-      node:is(ast.options) or
+      node:is(ast.annotation) or
       node:is(ast.TaskConfigOptions)
     then
       -- Pass

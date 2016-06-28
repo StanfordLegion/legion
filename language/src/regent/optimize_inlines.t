@@ -246,14 +246,14 @@ local function map_regions(diff)
         result:insert(
           ast.typed.stat.MapRegions {
             region_types = region_types,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           })
       elseif polarity == remote then
         result:insert(
           ast.typed.stat.UnmapRegions {
             region_types = region_types,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           })
       else

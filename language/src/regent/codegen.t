@@ -1471,17 +1471,17 @@ function rawref:reduce(cx, value, op)
     lhs = ast.typed.expr.Internal {
       value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
       expr_type = ref_type,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     },
     rhs = ast.typed.expr.Internal {
       value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
       expr_type = value_type,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     },
     expr_type = ref_type,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.trivial_span(),
   }
 
@@ -2610,11 +2610,11 @@ function codegen.expr_call(cx, node)
           value = ast.typed.expr.Internal {
             value = future_value,
             expr_type = future_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           expr_type = value_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         })
     end
@@ -4388,11 +4388,11 @@ function codegen.expr_dynamic_collective_get_result(cx, node)
         value = ast.typed.expr.Internal {
           value = future_value,
           expr_type = future_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         },
         expr_type = expr_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
     })
   end
@@ -5253,7 +5253,7 @@ local lift_unary_op_to_futures = terralib.memoize(
           ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           },
       }),
@@ -5271,14 +5271,14 @@ local lift_unary_op_to_futures = terralib.memoize(
                 rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
-                options = ast.default_options(),
+                annotations = ast.default_annotations(),
                 span = ast.trivial_span(),
               },
-              options = ast.default_options(),
+              annotations = ast.default_annotations(),
               span = ast.trivial_span(),
             },
         }),
@@ -5291,7 +5291,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -5334,13 +5334,13 @@ local lift_binary_op_to_futures = terralib.memoize(
          ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
       }),
@@ -5358,20 +5358,20 @@ local lift_binary_op_to_futures = terralib.memoize(
                 lhs = ast.typed.expr.ID {
                   value = lhs_symbol,
                   expr_type = lhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
-                options = ast.default_options(),
+                annotations = ast.default_annotations(),
                 span = ast.trivial_span(),
               },
-              options = ast.default_options(),
+              annotations = ast.default_annotations(),
               span = ast.trivial_span(),
             },
         }),
@@ -5384,7 +5384,7 @@ local lift_binary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -5410,13 +5410,13 @@ function codegen.expr_unary(cx, node)
       fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = node.span,
       },
       args = terralib.newlist({node.rhs}),
       conditions = terralib.newlist(),
       expr_type = expr_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -5486,13 +5486,13 @@ function codegen.expr_binary(cx, node)
       fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = node.span,
       },
       args = terralib.newlist({node.lhs, node.rhs}),
       conditions = terralib.newlist(),
       expr_type = expr_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -6108,7 +6108,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         value = node.value,
         block = node.orig_block,
         span = node.span,
-        options = node.options,
+        annotations = node.annotations,
       })
   end
   local symbol = node.symbol:getsymbol()
@@ -6345,12 +6345,12 @@ function codegen.stat_index_launch(cx, node)
               expr.just(quote end, partition.value),
               partition_type),
             expr_type = partition_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           index = arg.index,
           expr_type = arg.expr_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         }):read(cx)
       args:insert(region)
@@ -6586,7 +6586,7 @@ function codegen.stat_index_launch(cx, node)
     local rhs = ast.typed.expr.Internal {
       value = values.value(node, expr.just(quote end, rh), future_type),
       expr_type = future_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
 
@@ -6594,7 +6594,7 @@ function codegen.stat_index_launch(cx, node)
       rhs = ast.typed.expr.FutureGetResult {
         value = rhs,
         expr_type = rhs_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end
@@ -6603,7 +6603,7 @@ function codegen.stat_index_launch(cx, node)
       op = node.reduce_op,
       lhs = terralib.newlist({node.reduce_lhs}),
       rhs = terralib.newlist({rhs}),
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
 
@@ -7013,7 +7013,7 @@ end
 function codegen.top_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
-  if node.options.cuda:is(ast.options.Demand) then
+  if node.annotations.cuda:is(ast.annotation.Demand) then
     node = node { region_divergence = false }
   end
 
@@ -7144,11 +7144,11 @@ function codegen.top_task(cx, node)
               expr.just(quote end, `([future_type]{ __result = [future] })),
               future_type),
             expr_type = future_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           expr_type = param_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
       }):read(cx)
 
@@ -7472,10 +7472,10 @@ end
 
 function codegen.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    if not (node.options.cuda:is(ast.options.Demand) and
+    if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())
     then
-      if node.options.cuda:is(ast.options.Demand) then
+      if node.annotations.cuda:is(ast.annotation.Demand) then
         log.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
@@ -7491,8 +7491,8 @@ function codegen.top(cx, node)
       return cpu_task
     else
       local cpu_node = node {
-        options = node.options {
-          cuda = ast.options.Forbid { value = false }
+        annotations = node.annotations {
+          cuda = ast.annotation.Forbid { value = false }
         }
       }
       local cpu_task = node.prototype

@@ -44,14 +44,14 @@ local function apply_tracing_node(cx)
       node:is(ast.typed.stat.Repeat) or
       node:is(ast.typed.stat.Block)
     then
-      if not node.options.trace:is(ast.options.Demand) then
+      if not node.annotations.trace:is(ast.annotation.Demand) then
         return node
       end
 
       local trace_id = ast.typed.expr.Constant {
         value = cx.next_trace_id,
         expr_type = c.legion_trace_id_t,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = node.span,
       }
       cx.next_trace_id = cx.next_trace_id + 1
@@ -60,14 +60,14 @@ local function apply_tracing_node(cx)
       stats:insert(
         ast.typed.stat.BeginTrace {
           trace_id = trace_id,
-          options = ast.default_options(),
+          annotations = ast.default_annotations(),
           span = node.span,
       })
       stats:insertall(node.block.stats)
       stats:insert(
         ast.typed.stat.EndTrace {
           trace_id = trace_id,
-          options = ast.default_options(),
+          annotations = ast.default_annotations(),
           span = node.span,
       })
 

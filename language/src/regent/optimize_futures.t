@@ -459,7 +459,7 @@ local function concretize(node)
     return ast.typed.expr.FutureGetResult {
       value = node,
       expr_type = expr_type.result_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   end
@@ -474,7 +474,7 @@ local function promote(node, expected_type)
     return ast.typed.expr.Future {
       value = node,
       expr_type = expected_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   elseif not std.type_eq(expr_type, expected_type) then
@@ -1377,12 +1377,12 @@ function optimize_futures.top_task_param(cx, param)
             ast.typed.expr.ID {
               value = param.symbol,
               expr_type = std.rawref(&param.param_type),
-              options = param.options,
+              annotations = param.annotations,
               span = param.span,
             },
             new_type),
       }),
-      options = param.options,
+      annotations = param.annotations,
       span = param.span,
     }
 
