@@ -155,6 +155,30 @@ legion_domain_point_from_point_3d(legion_point_3d_t p_)
   return CObjectWrapper::wrap(DomainPoint::from_point<3>(p));
 }
 
+legion_point_1d_t
+legion_domain_point_get_point_1d(legion_domain_point_t p_)
+{
+  DomainPoint p = CObjectWrapper::unwrap(p_);
+
+  return CObjectWrapper::wrap(p.get_point<1>());
+}
+
+legion_point_2d_t
+legion_domain_point_get_point_2d(legion_domain_point_t p_)
+{
+  DomainPoint p = CObjectWrapper::unwrap(p_);
+
+  return CObjectWrapper::wrap(p.get_point<2>());
+}
+
+legion_point_3d_t
+legion_domain_point_get_point_3d(legion_domain_point_t p_)
+{
+  DomainPoint p = CObjectWrapper::unwrap(p_);
+
+  return CObjectWrapper::wrap(p.get_point<3>());
+}
+
 legion_domain_point_t
 legion_domain_point_nil()
 {
@@ -223,7 +247,7 @@ legion_domain_point_iterator_next(legion_domain_point_iterator_t handle_)
     next = handle->p;
     (*handle)++;
   }
-  return next;
+  return CObjectWrapper::wrap(next);
 }
 
 // -------------------------------------------------------

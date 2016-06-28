@@ -479,6 +479,24 @@ typedef long long int coord_t;
   legion_domain_point_from_point_3d(legion_point_3d_t p);
 
   /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_1d_t
+  legion_domain_point_get_point_1d(legion_domain_point_t p);
+
+  /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_2d_t
+  legion_domain_point_get_point_2d(legion_domain_point_t p);
+
+  /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_3d_t
+  legion_domain_point_get_point_3d(legion_domain_point_t p);
+
+  /**
    * @see Legion::DomainPoint::nil()
    */
   legion_domain_point_t
