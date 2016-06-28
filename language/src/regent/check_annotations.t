@@ -39,7 +39,7 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
-local check_options = {}
+local check_annotations = {}
 
 local function render_option(option, value)
   local value_name = string.lower(
@@ -64,7 +64,7 @@ local function check(cx, node, allowed_set)
   end
 end
 
-local function check_options_node(cx)
+local function check_annotations_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.Call) then
@@ -183,48 +183,48 @@ local function check_options_node(cx)
   end
 end
 
-local function check_options_top(cx, node)
-  ast.traverse_node_postorder(check_options_node(cx), node)
+local function check_annotations_top(cx, node)
+  ast.traverse_node_postorder(check_annotations_node(cx), node)
 end
 
-function check_options.top_task(cx, node)
-  check_options_top(cx, node)
+function check_annotations.top_task(cx, node)
+  check_annotations_top(cx, node)
 end
 
-function check_options.top_fspace(cx, node)
+function check_annotations.top_fspace(cx, node)
   check(cx, node, data.set({}))
 end
 
-function check_options.top_quote_expr(cx, node)
+function check_annotations.top_quote_expr(cx, node)
   check(cx, node, data.set({}))
 end
 
-function check_options.top_quote_stat(cx, node)
+function check_annotations.top_quote_stat(cx, node)
   check(cx, node, data.set({}))
 end
 
-function check_options.top(cx, node)
+function check_annotations.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    return check_options.top_task(cx, node)
+    return check_annotations.top_task(cx, node)
 
   elseif node:is(ast.typed.top.Fspace) then
-    return check_options.top_fspace(cx, node)
+    return check_annotations.top_fspace(cx, node)
 
   elseif node:is(ast.typed.top.QuoteExpr) then
-    return check_options.top_quote_expr(cx, node)
+    return check_annotations.top_quote_expr(cx, node)
 
   elseif node:is(ast.typed.top.QuoteStat) then
-    return check_options.top_quote_stat(cx, node)
+    return check_annotations.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 
-function check_options.entry(node)
+function check_annotations.entry(node)
   local cx = context.new_global_scope()
-  check_options.top(cx, node)
+  check_annotations.top(cx, node)
   return node
 end
 
-return check_options
+return check_annotations

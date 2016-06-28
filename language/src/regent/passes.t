@@ -15,7 +15,7 @@
 -- Regent Compiler Passes
 
 local ast = require("regent/ast")
-local check_options = require("regent/check_options")
+local check_annotations = require("regent/check_annotations")
 local codegen = require("regent/codegen")
 local inline_tasks = require("regent/inline_tasks")
 local optimize_config_options = require("regent/optimize_config_options")
@@ -63,7 +63,7 @@ function passes.compile(node, allow_pretty)
     local env = environment_function()
     local node = specialize.entry(env, node)
     node = type_check.entry(node)
-    check_options.entry(node)
+    check_annotations.entry(node)
     node = passes.optimize(node)
     if std.config["validate"] then validate.entry(node) end
     if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
