@@ -47,6 +47,7 @@ extern "C" {
 #define NEW_OPAQUE_TYPE(T) typedef struct T { void *impl; } T
   NEW_OPAQUE_TYPE(legion_runtime_t);
   NEW_OPAQUE_TYPE(legion_context_t);
+  NEW_OPAQUE_TYPE(legion_domain_point_iterator_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
   NEW_OPAQUE_TYPE(legion_point_coloring_t);
@@ -425,6 +426,13 @@ typedef long long int coord_t;
   legion_domain_from_rect_3d(legion_rect_3d_t r);
 
   /**
+   * @see Legion::Domain::Domain(Legion::IndexSpace)
+   */
+  legion_domain_t
+  legion_domain_from_index_space(legion_runtime_t runtime,
+                                 legion_index_space_t is);
+
+  /**
    * @see Legion::Domain::get_rect()
    */
   legion_rect_1d_t
@@ -447,14 +455,6 @@ typedef long long int coord_t;
    */
   size_t
   legion_domain_get_volume(legion_domain_t d);
-
-  /**
-   * @see Legion::Domain::Domain(
-   *        Legion::IndexSpace)
-   */
-  legion_domain_t
-  legion_domain_from_index_space(legion_runtime_t runtime_,
-                                 legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations
@@ -499,6 +499,38 @@ typedef long long int coord_t;
                                 legion_context_t ctx,
                                 legion_domain_point_t point,
                                 legion_logical_region_t region);
+
+  // -----------------------------------------------------------------------
+  // Domain Point Iterator
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Domain::DomainPointIterator::DomainPointIterator()
+   */
+  legion_domain_point_iterator_t
+  legion_domain_point_iterator_create(legion_domain_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Domain::DomainPointIterator::~DomainPointIterator()
+   */
+  void
+  legion_domain_point_iterator_destroy(legion_domain_point_iterator_t handle);
+
+  /**
+   * @see Legion::Domain::DomainPointIterator::any_left
+   */
+  bool
+  legion_domain_point_iterator_has_next(legion_domain_point_iterator_t handle);
+
+  /**
+   * @see Legion::Domain::DomainPointIterator::step()
+   */
+  legion_domain_point_t
+  legion_domain_point_iterator_next(legion_domain_point_iterator_t handle);
 
   // -----------------------------------------------------------------------
   // Coloring Operations

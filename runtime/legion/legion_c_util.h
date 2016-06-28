@@ -123,6 +123,7 @@ namespace Legion {
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
+      NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);

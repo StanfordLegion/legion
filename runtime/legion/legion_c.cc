@@ -85,6 +85,16 @@ legion_domain_from_rect_3d(legion_rect_3d_t r_)
   return CObjectWrapper::wrap(Domain::from_rect<3>(r));
 }
 
+legion_domain_t
+legion_domain_from_index_space(legion_runtime_t runtime_,
+                               legion_index_space_t is_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace is = CObjectWrapper::unwrap(is_);
+
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(is));
+}
+
 legion_rect_1d_t
 legion_domain_get_rect_1d(legion_domain_t d_)
 {
@@ -115,16 +125,6 @@ legion_domain_get_volume(legion_domain_t d_)
   Domain d = CObjectWrapper::unwrap(d_);
 
   return d.get_volume();
-}
-
-legion_domain_t
-legion_domain_from_index_space(legion_runtime_t runtime_,
-                               legion_index_space_t is_)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  IndexSpace is = CObjectWrapper::unwrap(is_);
-
-  return CObjectWrapper::wrap(runtime->get_index_space_domain(is));
 }
 
 // -----------------------------------------------------------------------
@@ -182,6 +182,48 @@ legion_domain_point_safe_cast(legion_runtime_t runtime_,
 
   DomainPoint result = runtime->safe_cast(ctx, point, region);
   return CObjectWrapper::wrap(result);
+}
+
+// -----------------------------------------------------------------------
+// Domain Point Iterator
+// -----------------------------------------------------------------------
+
+legion_domain_point_iterator_t
+legion_domain_point_iterator_create(legion_domain_t handle_)
+{
+  Domain handle = CObjectWrapper::unwrap(handle_);
+
+  Domain::DomainPointIterator *it = new Domain::DomainPointIterator(handle);
+  return CObjectWrapper::wrap(it);
+}
+
+void
+legion_domain_point_iterator_destroy(legion_domain_point_iterator_t handle_)
+{
+  Domain::DomainPointIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+bool
+legion_domain_point_iterator_has_next(legion_domain_point_iterator_t handle_)
+{
+  Domain::DomainPointIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  return *handle;
+}
+
+legion_domain_point_t
+legion_domain_point_iterator_next(legion_domain_point_iterator_t handle_)
+{
+  Domain::DomainPointIterator *handle = CObjectWrapper::unwrap(handle_);
+
+  DomainPoint next = DomainPoint::nil();
+  if (handle) {
+    next = handle->p;
+    (*handle)++;
+  }
+  return next;
 }
 
 // -------------------------------------------------------
