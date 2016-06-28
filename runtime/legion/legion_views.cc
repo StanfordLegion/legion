@@ -4274,7 +4274,8 @@ namespace Legion {
       // Now do our capture and update the closer
       if (new_node->capture_instances(closer, capture_mask, &valid_views))
         changed = true;
-      new_node->capture_reductions(capture_mask, &reduction_views);
+      if (changed)
+        new_node->capture_reductions(capture_mask, &reduction_views);
       closer.update_capture_mask(logical_node, capture_mask);
       return changed;
     }

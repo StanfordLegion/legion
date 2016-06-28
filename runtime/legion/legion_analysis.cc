@@ -4150,6 +4150,12 @@ namespace Legion {
       // open then we don't make the view dirty
       node->update_valid_views(state, valid_mask,
                                true /*dirty*/, composite_view);
+      if (!!state->reduction_mask)
+      {
+        FieldMask reduc_overlap = state->reduction_mask & valid_mask;
+        if (!!reduc_overlap)
+          node->invalidate_reduction_views(state, reduc_overlap);
+      }
       return composite_view;
     }
 
