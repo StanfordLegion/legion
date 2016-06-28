@@ -4044,6 +4044,18 @@ legion_index_iterator_next_span(legion_index_iterator_t handle_,
 // Task Operations
 //------------------------------------------------------------------------
 
+legion_unique_id_t
+legion_task_get_unique_id(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->get_unique_id();
+}
+
+legion_mapping_tag_id_t
+legion_task_get_tag(legion_task_t task_)
+{
+  return CObjectWrapper::unwrap(task_)->tag;
+}
+
 void
 legion_task_id_attach_name(legion_runtime_t runtime_,
                            legion_task_id_t task_id,
