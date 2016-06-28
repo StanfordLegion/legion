@@ -467,6 +467,95 @@ function codegen.select_task_options(rules, automata, signature,
   end
 end
 
+function codegen.slice_task(rules, automata, signature, mapper_state_type)
+  local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
+  local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
+  local task_var = terralib.newsymbol(c.legion_task_t)
+  local slice_task_output_var = terralib.newsymbol(c.legion_slice_task_output_t)
+  local state_var = terralib.newsymbol(&mapper_state_type)
+  local point_var = terralib.newsymbol(c.legion_domain_point_t)
+  local body = quote end
+
+  local task_rules =
+    data.filter(function(rule) return rule.rule_type == "task" end, rules)
+  local last_elems =
+    task_rules:map(function(rule)
+      return rule.selector.elements[#rule.selector.elements]
+    end)
+  local binders = {}
+  -- TODO: handle binder naming collision
+  last_elems:map(function(elem)
+    elem.patterns:map(function(pattern)
+      if pattern.field == "index" then
+        local binder =
+          terralib.newsymbol(c.legion_domain_point_t, pattern.binder)
+        binders[pattern.binder] = binder
+        body = quote
+          [body]
+          var [binder] = [point_var]
+        end
+      end
+    end)
+  end)
+
+  local task_properties = merge_task_properties(task_rules)
+  local target = task_properties.target
+  local value = codegen.expr(binders, state_var, target)
+  -- TODO: distribute across slices processors in the list,
+  --       instead of assigning all to the first processor
+  if std.is_processor_list_type(target.expr_type) then
+    local result = terralib.newsymbol(c.legion_processor_t)
+    value.actions = quote
+      [value.actions]
+      var [result]
+      if [value.value].size > 0 then
+        [result] = [value.value].list[0]
+      else
+        [result] = c.bishop_get_no_processor()
+      end
+    end
+    value.value = result
+  end
+
+  body = quote
+    [body]
+    [value.actions]
+    var singleton : c.legion_domain_t
+    var dim = [point_var].dim
+    singleton.dim = dim
+    for idx = 0, dim do
+      var c = [point_var].point_data[idx]
+      singleton.rect_data[idx] = c
+      singleton.rect_data[idx + dim] = c
+    end
+    var slice = c.legion_task_slice_t {
+      domain = singleton,
+      proc = [value.value],
+      recurse = false,
+      stealable = false,
+    }
+    c.legion_slice_task_output_slices_add([slice_task_output_var], slice)
+  end
+
+  local selector_summary =
+    terralib.constant(rawstring, tostring_selectors(task_rules))
+  return terra(ptr : &opaque, [rt_var], [ctx_var], [task_var],
+               slice_task_input : c.legion_slice_task_input_t,
+               [slice_task_output_var])
+    c.bishop_logger_debug("[slice_task] merged from %s",
+                          selector_summary)
+    var [state_var] = [&mapper_state_type](ptr)
+    var iterator = c.legion_domain_point_iterator_create(slice_task_input.domain)
+    while c.legion_domain_point_iterator_has_next(iterator) do
+      var [point_var] = c.legion_domain_point_iterator_next(iterator)
+      [body]
+    end
+    -- TODO: set true when in debug mode
+    c.legion_slice_task_output_verify_correctness_set([slice_task_output_var], false)
+    c.legion_domain_point_iterator_destroy(iterator)
+  end
+end
+
 function codegen.map_task(rules, automata, signature, mapper_state_type)
   local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
   local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
@@ -793,11 +882,15 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
         local select_task_options =
           codegen.select_task_options(selected_rules, automata, signature,
                                       mapper_state_type)
+        local slice_task =
+          codegen.slice_task(selected_rules, automata, signature,
+                               mapper_state_type)
         local map_task =
           codegen.map_task(selected_rules, automata, signature,
                            mapper_state_type)
         add_mapper_impl(hash, state.id, next_mapper_impl_id, {
           select_task_options = select_task_options,
+          slice_task = slice_task,
           map_task = map_task,
         })
         next_mapper_impl_id = next_mapper_impl_id + 1
@@ -812,6 +905,8 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
   local default_select_task_options =
     codegen.select_task_options(empty_list, automata, nil,
                                 mapper_state_type)
+  local default_slice_task =
+    codegen.slice_task(empty_list, automata, nil, mapper_state_type)
   local default_map_task =
     codegen.map_task(empty_list, automata, nil, mapper_state_type)
   local more_specific_map_task_impls = {}
@@ -834,6 +929,7 @@ function codegen.rules(rules, automata, signatures, mapper_state_type)
       assert(map_task_impl)
       add_mapper_impl("", state.id, mapper_impl_id, {
         select_task_options = default_select_task_options,
+        slice_task = default_slice_task,
         map_task = map_task_impl,
       })
     end

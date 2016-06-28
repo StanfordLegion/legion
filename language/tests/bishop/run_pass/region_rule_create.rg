@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- TODO: future optimization is broken for this test
+-- FIXME: future optimization is broken for this test
 -- runs-with:
 -- [["-ffuture", "0"]]
 

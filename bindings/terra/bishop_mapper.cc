@@ -105,7 +105,17 @@ void BishopMapper::slice_task(const MapperContext    ctx,
                               SliceTaskOutput&       output)
 //------------------------------------------------------------------------------
 {
-  DefaultMapper::slice_task(ctx, task, input, output);
+  bishop_matching_state_t curr_state = get_current_state(task);
+  set_current_state(task, curr_state);
+
+  legion_mapper_context_t ctx_ = CObjectWrapper::wrap(ctx);
+  legion_task_t task_ = CObjectWrapper::wrap_const(&task);
+  legion_slice_task_input_t input_ = CObjectWrapper::wrap_const(input);
+  legion_slice_task_output_t output_ = CObjectWrapper::wrap(&output);
+
+  bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
+  if (impl.slice_task)
+    impl.slice_task(mapper_state, runtime_, ctx_, task_, input_, output_);
 }
 
 //------------------------------------------------------------------------------
