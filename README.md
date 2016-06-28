@@ -225,22 +225,24 @@ validate the correctness of the runtime's logical and physical
 dependence algorithms.
 
 To capture a trace, invoke the application with `-hl:spy -logfile
-spy.log`. (No special compile-time flags are required.) Then call the
-post-processing script to render PDF files of the dependence graphs:
+spy_%.log`. (No special compile-time flags are required.) This will
+produce a log file per node. Call the post-processing script to render
+PDF files of the dependence graphs:
 
 ```bash
-./app -hl:spy -logfile spy.log
-$LG_RT_DIR/../tools/legion_spy.py -dez spy.log
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
 
 To run Legion Spy's self-checking mode, Legion must be built with the
 flag `-DLEGION_SPY`. Following this, the application can be run again,
-and the post-processing script used to validate the trace.
+and the script used to validate (or render) the trace.
 
 ```bash
 DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
-./app -hl:spy -logfile spy.log
-$LG_RT_DIR/../tools/legion_spy.py -lpa spy.log
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy_*.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
 
 ## Profiling
