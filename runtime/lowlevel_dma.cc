@@ -2837,6 +2837,8 @@ namespace LegionRuntime {
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
+#define IB_MAX_SIZE (16 * 1024 * 1024)
+
     Buffer simple_create_intermediate_buffer(gasnet_node_t tgt_node, Memory::Kind kind, const Domain& domain,
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
                                              DomainLinearization linearization)
@@ -2852,9 +2854,6 @@ namespace LegionRuntime {
           tgt_mem = *it;
         }
       assert(tgt_mem != Memory::NO_MEMORY);
-      size_t ib_size = 16 * 1024 * 1024; /*size of ib (bytes)*/
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
-      assert(ib_offset >= 0);
       std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
       off_t ib_elmnt_size = 0;
       for (unsigned i = 0; i < oasvec.size(); i++) {
@@ -2869,6 +2868,13 @@ namespace LegionRuntime {
         oasvec_src.push_back(oas_src);
         oasvec_dst.push_back(oas_dst);
       }
+      size_t ib_size; /*size of ib (bytes)*/
+      if (domain.get_volume() * ib_elmnt_size < IB_MAX_SIZE)
+        ib_size = domain.get_volume() * ib_elmnt_size;
+      else
+        ib_size = IB_MAX_SIZE;
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+      assert(ib_offset >= 0);
       Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, linearization, tgt_mem);
       return ib_buf;
     }
@@ -3041,13 +3047,7 @@ namespace LegionRuntime {
             else
               hdf_inst = RegionInstance::NO_INST;
 
-            if (idx != mem_path.size() - 1) {
-              cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
-            } else {
-              cur_buf = dst_buf;
-              oasvec_src = oasvec;
-              oasvec.clear();
-            }
+            
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
             if (DIM == 0) {
@@ -3061,16 +3061,40 @@ namespace LegionRuntime {
                 assert(data->num_elmts > 0);
                 Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
                 Domain new_domain = Domain::from_rect<1>(new_rect);
+                if (idx != mem_path.size() - 1) {
+                  cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
+                              mem_path[idx].kind(), new_domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                } else {
+                  cur_buf = dst_buf;
+                  oasvec_src = oasvec;
+                  oasvec.clear();
+                }
                 create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, new_domain, oasvec_src, 1024 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
               } else {
+                if (idx != mem_path.size() - 1) {
+                  cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
+                              mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                } else {
+                  cur_buf = dst_buf;
+                  oasvec_src = oasvec;
+                  oasvec.clear();
+                }
                 create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024 /*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
               }
             }
             else {
+              if (idx != mem_path.size() - 1) {
+                cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
+                            mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              } else {
+                cur_buf = dst_buf;
+                oasvec_src = oasvec;
+                oasvec.clear();
+              }
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);

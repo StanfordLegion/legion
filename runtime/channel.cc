@@ -391,7 +391,7 @@ namespace LegionRuntime {
 
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
-        //printf("update_write: offset = %ld, size = %lu, pre = %ld, next = %ld\n", offset, size, pre_xd_guid, next_xd_guid);
+        //printf("update_write: offset = %ld, size = %lu, pre = %lx, next = %lx\n", offset, size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
@@ -417,7 +417,7 @@ namespace LegionRuntime {
         else {
           bytes_write += size;
         }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes[%lx]: %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
+        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
       }
 
       template<unsigned DIM>
@@ -475,9 +475,9 @@ namespace LegionRuntime {
           } else {
             simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
           }
-          //printf("[MemcpyXferDes] offset_idx = %d, oas_vec.size() = %lu, nbytes = %lu\n", offset_idx, oas_vec.size(), nbytes);
           if (nbytes == 0)
             break;
+          //printf("[MemcpyXferDes] guid = %lx, offset_idx = %lld, oas_vec.size() = %lu, nbytes = %lu\n", guid, offset_idx, oas_vec.size(), nbytes);
           while (nbytes > 0) {
             size_t req_size = nbytes;
             if (src_buf.is_ib) {
