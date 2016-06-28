@@ -14,7 +14,7 @@
 
 -- TODO: future optimization is broken for this test
 -- runs-with:
--- [["-ffutures", "0"]]
+-- [["-ffuture", "0"]]
 
 import "regent"
 import "bishop"
