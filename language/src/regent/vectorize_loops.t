@@ -997,7 +997,10 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Block) then
     return vectorize_loops.stat_block(node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return node
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
     return node
 
   elseif node:is(ast.typed.stat.Var) then

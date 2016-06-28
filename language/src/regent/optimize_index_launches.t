@@ -311,25 +311,10 @@ local optimize_index_launch = {}
 
 local function ignore(...) end
 
-function optimize_index_launch.stat_for_num(cx, node)
-  local log_pass = ignore
-  local log_fail = ignore
-  if node.annotations.parallel:is(ast.annotation.Demand) then
-    log_pass = ignore -- log.warn
-    log_fail = log.error
-  end
-
-  if node.values[3] and not (
-    node.values[3]:is(ast.typed.expr.Constant) and
-    node.values[3].value == 1)
-  then
-    log_fail(node, "loop optimization failed: stride not equal to 1")
-    return node
-  end
-
+local function optimize_loop_body(cx, node, log_pass, log_fail)
   if #node.block.stats == 0 then
     log_fail(node, "loop optimization failed: body is empty")
-    return node
+    return
   end
 
   local loop_cx = cx:new_local_scope()
@@ -340,11 +325,11 @@ function optimize_index_launch.stat_for_num(cx, node)
     local stat = node.block.stats[i]
     if not stat:is(ast.typed.stat.Var) then
       log_fail(stat, "loop optimization failed: preamble statement is not a variable")
-      return node
+      return
     end
     if not analyze_is_side_effect_free(cx, stat) then
       log_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
-      return node
+      return
     end
 
     for i, symbol in ipairs(stat.symbols) do
@@ -374,18 +359,18 @@ function optimize_index_launch.stat_for_num(cx, node)
     reduce_op = body.op
   else
     log_fail(body, "loop optimization failed: body is not a function call")
-    return node
+    return
   end
 
   local task = call.fn.value
   if not std.is_task(task) then
     log_fail(call, "loop optimization failed: function is not a task")
-    return node
+    return
   end
 
   if #call.conditions > 0 then
     log_fail(call, "FIXME: handle analysis of ad-hoc conditions")
-    return node
+    return
   end
 
   if reduce_lhs then
@@ -449,7 +434,7 @@ function optimize_index_launch.stat_for_num(cx, node)
   for i, arg in ipairs(args) do
     if not analyze_is_side_effect_free(cx, arg) then
       log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
-      return node
+      return
     end
 
     local arg_invariant = analyze_is_loop_invariant(loop_cx, arg)
@@ -473,7 +458,7 @@ function optimize_index_launch.stat_for_num(cx, node)
 
       if not (arg_variant or arg_invariant) then
         log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
-        return node
+        return
       end
     end
 
@@ -483,7 +468,7 @@ function optimize_index_launch.stat_for_num(cx, node)
         for _, variables in pairs(task:get_conditions()) do
           if variables[i] then
             log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
-            return node
+            return
           end
         end
       end
@@ -494,7 +479,7 @@ function optimize_index_launch.stat_for_num(cx, node)
       -- would have to be (at a minimum) invariant though other
       -- restrictions may apply.
       log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is a list of regions")
-      return node
+      return
     end
 
     -- Tests for non-interference.
@@ -504,7 +489,7 @@ function optimize_index_launch.stat_for_num(cx, node)
           cx, task, arg_type, regions_previously_used, mapping)
         if not passed then
           log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
-          return node
+          return
         end
       end
 
@@ -513,7 +498,7 @@ function optimize_index_launch.stat_for_num(cx, node)
           cx, task, arg_type, partition_type, mapping)
         if not passed then
           log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
-          return node
+          return
         end
       end
     end
@@ -528,14 +513,76 @@ function optimize_index_launch.stat_for_num(cx, node)
   end
 
   log_pass("loop optimization succeeded")
-  return ast.typed.stat.IndexLaunch {
-    symbol = node.symbol,
-    domain = node.values,
+  return {
     preamble = preamble,
     call = call,
     reduce_lhs = reduce_lhs,
     reduce_op = reduce_op,
     args_provably = args_provably,
+  }
+end
+
+function optimize_index_launch.stat_for_num(cx, node)
+  local log_pass = ignore
+  local log_fail = ignore
+  if node.annotations.parallel:is(ast.annotation.Demand) then
+    log_pass = ignore -- log.warn
+    log_fail = log.error
+  end
+
+  if node.values[3] and not (
+    node.values[3]:is(ast.typed.expr.Constant) and
+    node.values[3].value == 1)
+  then
+    log_fail(node, "loop optimization failed: stride not equal to 1")
+    return node
+  end
+
+  local body = optimize_loop_body(cx, node, log_pass, log_fail)
+  if not body then
+    return node
+  end
+
+  return ast.typed.stat.IndexLaunchNum {
+    symbol = node.symbol,
+    values = node.values,
+    preamble = body.preamble,
+    call = body.call,
+    reduce_lhs = body.reduce_lhs,
+    reduce_op = body.reduce_op,
+    args_provably = body.args_provably,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function optimize_index_launch.stat_for_list(cx, node)
+  local log_pass = ignore
+  local log_fail = ignore
+  if node.annotations.parallel:is(ast.annotation.Demand) then
+    log_pass = ignore -- log.warn
+    log_fail = log.error
+  end
+
+  local value_type = std.as_read(node.value.expr_type)
+  if not (std.is_ispace(value_type) or std.is_region(value_type)) then
+    log_fail(node, "loop optimization failed: domain is not a ispace or region")
+    return node
+  end
+
+  local body = optimize_loop_body(cx, node, log_pass, log_fail)
+  if not body then
+    return node
+  end
+
+  return ast.typed.stat.IndexLaunchList {
+    symbol = node.symbol,
+    value = node.value,
+    preamble = body.preamble,
+    call = body.call,
+    reduce_lhs = body.reduce_lhs,
+    reduce_op = body.reduce_op,
+    args_provably = body.args_provably,
     annotations = node.annotations,
     span = node.span,
   }
@@ -547,6 +594,8 @@ local function optimize_index_launches_node(cx)
   return function(node)
     if node:is(ast.typed.stat.ForNum) then
       return optimize_index_launch.stat_for_num(cx, node)
+    elseif node:is(ast.typed.stat.ForList) then
+      return optimize_index_launch.stat_for_list(cx, node)
     end
     return node
   end

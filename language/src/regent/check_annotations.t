@@ -140,7 +140,7 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({"parallel", "spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForList) then
-      check(cx, node, data.set({"spmd", "trace", "vectorize"}))
+      check(cx, node, data.set({"parallel", "spmd", "trace", "vectorize"}))
 
     elseif node:is(ast.typed.stat.Repeat) then
       check(cx, node, data.set({"spmd", "trace"}))

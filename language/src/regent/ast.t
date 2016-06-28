@@ -789,8 +789,12 @@ ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
 ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
-ast.typed.stat:leaf("IndexLaunch", {"symbol", "domain", "preamble", "call",
-                                    "reduce_lhs", "reduce_op", "args_provably"})
+ast.typed.stat:leaf("IndexLaunchNum", {"symbol", "values", "preamble", "call",
+                                       "reduce_lhs", "reduce_op",
+                                       "args_provably"})
+ast.typed.stat:leaf("IndexLaunchList", {"symbol", "value", "preamble", "call",
+                                        "reduce_lhs", "reduce_op",
+                                        "args_provably"})
 ast:leaf("IndexLaunchArgsProvably", {"invariant", "variant"})
 ast.typed.stat:leaf("Var", {"symbols", "types", "values"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})

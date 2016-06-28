@@ -6314,11 +6314,9 @@ function codegen.stat_block(cx, node)
   end
 end
 
-function codegen.stat_index_launch(cx, node)
+local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
-  local domain = codegen.expr_list(cx, node.domain):map(function(value) return value:read(cx) end)
-  local domain_types = node.domain:map(function(domain) return std.as_read(domain.expr_type) end)
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
@@ -6363,9 +6361,7 @@ function codegen.stat_index_launch(cx, node)
     end)
 
   local actions = quote
-    [domain[1].actions];
-    [domain[2].actions];
-    -- Ignore domain[3] because we know it is a constant.
+    [actions]
     [fn.actions];
     [data.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
@@ -6497,47 +6493,75 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
-  local domain1, domain2, domain_setup
-  if not cx.must_epoch then
-    domain1 = domain[1].value
-    domain2 = domain[2].value
-    domain_setup = quote end
-  else
-    domain1 = terralib.newsymbol(domain_types[1], "domain1")
-    domain2 = terralib.newsymbol(domain_types[2], "domain2")
-    domain_setup = quote
-      var launch_size = std.fmax([domain[2].value] - [domain[1].value], 0)
-      var [domain1] = [cx.must_epoch_point]
-      var [domain2] = [cx.must_epoch_point] + launch_size
+  local must_epoch_setup = quote end
+  if cx.must_epoch then
+    -- FIXME: This is totally broken. It is not safe to edit the loop
+    -- bounds to avoid collisions with other index launches, and on
+    -- top of that this code won't successfully number single task
+    -- launches correctly unless they follow very specific patterns.
+    must_epoch_setup = quote
+      var launch_size = c.legion_domain_get_volume([domain])
       [cx.must_epoch_point] = [cx.must_epoch_point] + launch_size
     end
   end
 
+  local point = terralib.newsymbol(c.legion_domain_point_t, "point")
+
+  local symbol_type = node.symbol:gettype()
   local symbol = node.symbol:getsymbol()
+  local symbol_setup
+  if std.is_bounded_type(symbol_type) then
+    local fields = symbol_type.index_type.fields
+    if fields then
+      local dim = #fields
+      local get_point = c["legion_domain_point_get_point_" .. dim .. "d"]
+      symbol_setup = quote
+        var pt = [get_point]([point])
+        var [symbol] = [symbol_type] {
+          __ptr = [symbol_type.index_type.impl_type] {
+            [data.range(dim):map(function(i) return `(pt.x[ [i] ]) end)]
+          }
+        }
+      end
+    else
+      symbol_setup = quote
+        var [symbol] = [symbol_type] {
+          __ptr = c.legion_domain_point_get_point_1d([point]).x[0]
+        }
+      end
+    end
+  else
+    -- Otherwise symbol_type has to be some simple integral type.
+    assert(symbol_type:isintegral())
+    symbol_setup = quote
+      var [symbol] = c.legion_domain_point_get_point_1d([point]).x[0]
+    end
+  end
+
   local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
   local launcher_setup = quote
-    [domain_setup]
+    [must_epoch_setup]
     var [argument_map] = c.legion_argument_map_create()
-    for [symbol] = [domain1], [domain2] do
-      var [task_args]
-      [task_args_setup]
-      c.legion_argument_map_set_point(
-        [argument_map],
-        c.legion_domain_point_from_point_1d(
-          c.legion_point_1d_t { x = arrayof(c.coord_t, [symbol]) }),
-        [task_args], true)
+    do
+      var it = c.legion_domain_point_iterator_create([domain])
+      while c.legion_domain_point_iterator_has_next(it) do
+        var [point] = c.legion_domain_point_iterator_next(it)
+        [symbol_setup]
+
+        var [task_args]
+        [task_args_setup]
+        c.legion_argument_map_set_point(
+          [argument_map], [point], [task_args], true)
+      end
+      c.legion_domain_point_iterator_destroy(it)
     end
+
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:gettaskid()],
-      c.legion_domain_from_rect_1d(
-        c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [domain1]) },
-          hi = c.legion_point_1d_t { x = arrayof(c.coord_t, [domain2] - 1) },
-        }),
-      g_args, [argument_map],
+      [domain], g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)
     [args_setup]
   end
@@ -6639,6 +6663,47 @@ function codegen.stat_index_launch(cx, node)
     [launcher_cleanup]
   end
   return actions
+end
+
+function codegen.stat_index_launch_num(cx, node)
+  local values = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
+
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local actions = quote
+    [values:map(function(value) return value.actions end)]
+    var [domain] = c.legion_domain_from_rect_1d(
+      c.legion_rect_1d_t {
+        lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[1].value]) },
+        hi = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[2].value] - 1) },
+      })
+  end
+
+  return stat_index_launch_setup(cx, node, domain, actions)
+end
+
+function codegen.stat_index_launch_list(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local actions
+  if std.is_ispace(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = c.legion_index_space_get_domain(
+        [cx.runtime], [value.value].impl)
+    end
+  elseif std.is_region(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = c.legion_index_space_get_domain(
+        [cx.runtime], [value.value].impl.index_space)
+    end
+  else
+    assert(false)
+  end
+
+  return stat_index_launch_setup(cx, node, domain, actions)
 end
 
 function codegen.stat_var(cx, node)
@@ -6944,8 +7009,11 @@ function codegen.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return codegen.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return codegen.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return codegen.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return codegen.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return codegen.stat_var(cx, node)
