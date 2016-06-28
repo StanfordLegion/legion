@@ -250,9 +250,10 @@ are required. However, it is recommended to build with `DEBUG=0 make`
 to avoid any undesired performance issues.
 
 Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
-is the number of nodes to be profiled. (Note: `N` may be smaller than
-the total node count, to capture a subset of machines.) The profiler
-itself runs offline, after the application run has completed:
+is the number of nodes to be profiled. (`N` can be less than the total
+node count---this profiles a subset of the nodes.) This will produce a
+log file per node. The profiler itself runs offline and produces an
+HTML file which can be loaded in a web browser.
 
 ```bash
 DEBUG=0 make
