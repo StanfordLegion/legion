@@ -12,10 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- FIXME: future optimization is broken for this test
--- runs-with:
--- [["-ffuture", "0"]]
-
 import "regent"
 import "bishop"
 
