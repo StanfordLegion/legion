@@ -18,8 +18,9 @@ local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
 local regex = require("bishop/regex")
-local regent_std = require("regent/std")
 local data = require("regent/data")
+local regent_std = require("regent/std")
+local regent_codegen_hooks = require("regent/codegen_hooks")
 
 local c = terralib.includecstring [[
 #include "legion_c.h"
@@ -942,7 +943,6 @@ function codegen.automata(automata)
   local all_symbols = automata.all_symbols
   local state_to_transition_impl = terralib.newlist()
   for state, _ in pairs(automata.states) do
-    local state_var = terralib.newsymbol(&opaque)
     local task_var = terralib.newsymbol(c.legion_task_t)
     local result_var = terralib.newsymbol(c.legion_task_id_t)
     local body = quote end
@@ -958,7 +958,7 @@ function codegen.automata(automata)
       elseif symbol:is(regex.symbol.Constraint) then
         -- TODO: handle constraints from unification
         local binders = {}
-        local value = codegen.expr(binders, state_var, symbol.constraint.value)
+        local value = codegen.expr(binders, nil, symbol.constraint.value)
         if symbol.constraint.field == "isa" then
           body = quote
             [body]
@@ -983,7 +983,7 @@ function codegen.automata(automata)
       return [state.id]
     end
     state_to_transition_impl[state.id] =
-      terra([state_var], [task_var]) : c.bishop_matching_state_t
+      terra([task_var]) : c.bishop_matching_state_t
         [body]
       end
   end
@@ -998,8 +998,28 @@ function codegen.mapper(node)
     codegen.rules(node.rules, node.automata, node.task_signatures,
                   mapper_state_type)
 
-  local state_to_transition_impl =
-    codegen.automata(node.automata)
+  local state_to_transition_impl = codegen.automata(node.automata)
+
+  -- install codegen hook for regent
+  local transition_impls = terralib.newlist()
+  for idx = 0, #state_to_transition_impl + 1 do
+    transition_impls:insert(state_to_transition_impl[idx])
+  end
+  local transition_impl_tbl =
+    terralib.constant(`arrayof([c.bishop_transition_fn_t], [transition_impls]))
+  regent_codegen_hooks.set_update_mapping_tag(
+    terra(task : c.legion_task_t)
+      var tag = c.legion_task_get_tag(task)
+      var prev_tag = tag
+      while true do
+        var fn : c.bishop_transition_fn_t =
+          [transition_impl_tbl][prev_tag]
+        tag = fn(task)
+        if tag == prev_tag then break end
+        prev_tag = tag
+      end
+      return tag
+    end)
 
   return {
     mapper_init = mapper_init,

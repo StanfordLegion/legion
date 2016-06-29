@@ -71,7 +71,6 @@ typedef unsigned int bishop_matching_state_t;
 
 typedef
   bishop_matching_state_t (*bishop_transition_fn_t)(
-      bishop_mapper_state_t,
       legion_task_t);
 
 typedef struct bishop_mapper_impl_t {
