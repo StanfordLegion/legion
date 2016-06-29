@@ -139,7 +139,7 @@ local function traverse_element(rules, fn)
     end
     if #elements > 0 then results:insert(elements) end
   end
-  if #results > 0 then return results end
+  return results
 end
 
 local function collect_symbols(rules, task_signatures)
