@@ -865,6 +865,9 @@ namespace Legion {
         output.slices = finder->second;
         return;
       }
+      // Figure out how many points are in this index space task
+      const size_t total_points = input.domain.get_volume();
+
 #if 1
       // The two-level decomposition doesn't work so for now do a
       // simple one-level decomposition across all the processors.
@@ -877,7 +880,7 @@ namespace Legion {
         case 1:
           {
             Rect<1> point_rect = input.domain.get_rect<1>();
-            Point<1> blocking_factor(procs.size());
+            Point<1> blocking_factor((total_points + procs.size())/procs.size());
             default_decompose_points<1>(point_rect, procs,
                   blocking_factor, false/*recurse*/,
                   stealing_enabled, output.slices);
@@ -907,9 +910,6 @@ namespace Legion {
           assert(false);
       }
 #else
-      // Figure out how many points are in this index space task
-      const size_t total_points = input.domain.get_volume();
-
       // Do two-level slicing, first slice into slices that fit on a
       // node and then slice across the processors of the right kind
       // on the local node. If we only have one node though, just break
