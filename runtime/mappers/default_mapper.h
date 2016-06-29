@@ -348,7 +348,7 @@ namespace Legion {
                               bool recurse, bool stealable,
                               std::vector<TaskSlice> &slices);
       template<int DIM>
-      static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
+      static LegionRuntime::Arrays::Point<DIM> default_select_num_blocks(
                             long long int factor, const LegionRuntime::Arrays::
                             Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
