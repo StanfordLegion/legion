@@ -18,6 +18,9 @@
 
 #include "legion_types.h"
 #include "legion_constraint.h"
+#include "legion.h"
+
+#include <iostream>
 
 namespace Legion {
   namespace Mapping { 
@@ -94,6 +97,9 @@ namespace Legion {
     protected:   
       PhysicalInstanceImpl impl;
       std::set<FieldID>  fields;
+
+      friend std::ostream& operator<<(std::ostream& os,
+				      const PhysicalInstance& p);
     };
 
     /**
