@@ -5555,16 +5555,16 @@ function codegen.expr_future(cx, node)
     local actions = quote
       [actions]
       [size_actions]
-      var [buffer] = c.malloc(terralib.sizeof(content_type) + [size_value])
+      var buffer_size = terralib.sizeof(content_type) + [size_value]
+      var [buffer] = c.malloc(buffer_size)
       std.assert([buffer] ~= nil, "malloc failed in future")
       var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(content_type)
       [ser_actions]
       std.assert(
-        [data_ptr] - [&uint8]([buffer]) ==
-          terralib.sizeof(content_type) + [size_value],
+        [data_ptr] - [&uint8]([buffer]) == buffer_size,
         "mismatch in data serialized in future")
       var [result] = c.legion_future_from_buffer(
-        [cx.runtime], [&opaque](&[buffer]), [size_value])
+        [cx.runtime], [&opaque]([buffer]), buffer_size)
       c.free([buffer])
     end
 
