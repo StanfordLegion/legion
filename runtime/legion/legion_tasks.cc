@@ -5536,9 +5536,10 @@ namespace Legion {
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
             const void *name; size_t name_size;
-            runtime->retrieve_semantic_information(
+            if(!runtime->retrieve_semantic_information(
                 regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                name, name_size, false, false);
+                name, name_size, true/*can fail*/, false))
+	      name = "(no name)";
             log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }
