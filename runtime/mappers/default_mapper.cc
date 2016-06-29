@@ -880,7 +880,7 @@ namespace Legion {
         case 1:
           {
             Rect<1> point_rect = input.domain.get_rect<1>();
-            Point<1> blocking_factor((total_points + procs.size())/procs.size());
+            Point<1> blocking_factor((total_points + procs.size() - 1)/procs.size());
             default_decompose_points<1>(point_rect, procs,
                   blocking_factor, false/*recurse*/,
                   stealing_enabled, output.slices);
