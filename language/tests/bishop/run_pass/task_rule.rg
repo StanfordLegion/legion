@@ -22,7 +22,7 @@ local c = bishoplib.c
 
 mapper
 
-task#foo[index=$p] {
+task task#foo[index=$p] {
   target : processors[isa=x86][($p[0] + 2) % processors[isa=x86].size];
 }
 
