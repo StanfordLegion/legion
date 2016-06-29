@@ -865,8 +865,51 @@ namespace Legion {
         output.slices = finder->second;
         return;
       }
+#if 1
+      // The two-level decomposition doesn't work so for now do a
+      // simple one-level decomposition across all the processors.
+      Machine::ProcessorQuery all_procs(machine);
+      all_procs.only_kind(local[0].kind());
+      std::vector<Processor> procs(all_procs.begin(), all_procs.end());
+
+      switch (input.domain.get_dim())
+      {
+        case 1:
+          {
+            Rect<1> point_rect = input.domain.get_rect<1>();
+            Point<1> blocking_factor(procs.size());
+            default_decompose_points<1>(point_rect, procs,
+                  blocking_factor, false/*recurse*/,
+                  stealing_enabled, output.slices);
+            break;
+          }
+        case 2:
+          {
+            Rect<2> point_rect = input.domain.get_rect<2>();
+            Point<2> blocking_factor =
+              default_select_blocking_factor<2>(procs.size(), point_rect);
+            default_decompose_points<2>(point_rect, procs,
+                blocking_factor, false/*recurse*/,
+                stealing_enabled, output.slices);
+            break;
+          }
+        case 3:
+          {
+            Rect<3> point_rect = input.domain.get_rect<3>();
+            Point<3> blocking_factor =
+              default_select_blocking_factor<3>(procs.size(), point_rect);
+            default_decompose_points<3>(point_rect, procs,
+                blocking_factor, false/*recurse*/,
+                stealing_enabled, output.slices);
+            break;
+          }
+        default: // don't support other dimensions right now
+          assert(false);
+      }
+#else
       // Figure out how many points are in this index space task
       const size_t total_points = input.domain.get_volume();
+
       // Do two-level slicing, first slice into slices that fit on a
       // node and then slice across the processors of the right kind
       // on the local node. If we only have one node though, just break
@@ -974,6 +1017,8 @@ namespace Legion {
         default: // don't support other dimensions right now
           assert(false);
       }
+#endif
+
       // Save the result in the cache
       cached_slices[input.domain] = output.slices;
     }
