@@ -326,10 +326,29 @@ local function merge_task_properties(rules)
   return properties
 end
 
+local default_task_target_binder = std.newsymbol()
+
+local default_region_pattern_matches = terralib.newlist({
+  ast.typed.PatternMatch {
+    field = "target",
+    binder = default_task_target_binder,
+    position = ast.trivial_pos(),
+  }
+})
+
 local default_region_properties = {
   create = expr_keyword("allow", std.compile_option_type),
   target = ast.typed.expr.Filter {
-    value = expr_keyword("memories", std.memory_list_type),
+    value = ast.typed.expr.Field {
+      value = ast.typed.expr.Variable {
+        value = default_task_target_binder,
+        expr_type = std.processor_type,
+        position = ast.trivial_pos(),
+      },
+      field = "memories",
+      expr_type = std.memory_list_type,
+      position = ast.trivial_pos(),
+    },
     constraints = terralib.newlist {
       ast.typed.FilterConstraint {
         field = "kind",
@@ -383,27 +402,36 @@ local function tostring_selectors(rules)
   return str
 end
 
-function codegen.pattern_match(binders, task_var, elem)
+function codegen.pattern_match(binders, task_var, pattern)
+  local actions = quote end
+  if pattern.field == "index" then
+    local binder =
+      terralib.newsymbol(c.legion_domain_point_t, pattern.binder)
+    binders[pattern.binder] = binder
+    actions = quote
+      [actions]
+      var [binder] = c.legion_task_get_index_point([task_var])
+    end
+  elseif pattern.field == "target" then
+    local binder = terralib.newsymbol(c.legion_processor_t, pattern.binder)
+    binders[pattern.binder] = binder
+    actions = quote
+      [actions]
+      var [binder] = c.legion_task_get_target_proc([task_var])
+    end
+  else
+    log.error(elem, "field " .. pattern.field ..
+    " is not supported for pattern match")
+  end
+  return actions
+end
+
+function codegen.elem_pattern_match(binders, task_var, elem)
   local actions = quote end
   elem.patterns:map(function(pattern)
-    if pattern.field == "index" then
-      local binder =
-        terralib.newsymbol(c.legion_domain_point_t, pattern.binder)
-      binders[pattern.binder] = binder
-      actions = quote
-        [actions]
-        var [binder] = c.legion_task_get_index_point([task_var])
-      end
-    elseif pattern.field == "target" then
-      local binder = terralib.newsymbol(c.legion_processor_t, pattern.binder)
-      binders[pattern.binder] = binder
-      actions = quote
-        [actions]
-        var [binder] = c.legion_task_get_target_proc([task_var])
-      end
-    else
-      log.error(elem, "field " .. pattern.field ..
-      " is not supported for pattern match")
+    actions = quote
+      [actions]
+      [codegen.pattern_match(binders, task_var, pattern)]
     end
   end)
   return actions
@@ -426,7 +454,7 @@ function codegen.select_task_options(rules, automata, signature,
     end)
   -- TODO: handle binder naming collision
   local body = quote
-    [last_elems:map(std.curry2(codegen.pattern_match, binders, task_var))]
+    [last_elems:map(std.curry2(codegen.elem_pattern_match, binders, task_var))]
   end
 
   local properties = merge_task_properties(task_rules)
@@ -584,7 +612,9 @@ function codegen.map_task(rules, automata, signature, mapper_state_type)
   -- TODO: handle binder naming collision
   -- TODO: handle pattern match on tasks differently than that on regions
   local body = quote
-    [last_elems:map(std.curry2(codegen.pattern_match, binders, task_var))]
+    [default_region_pattern_matches:map(std.curry2(codegen.pattern_match,
+                                                   binders, task_var))]
+    [last_elems:map(std.curry2(codegen.elem_pattern_match, binders, task_var))]
   end
 
   -- generate task mapping code
