@@ -698,12 +698,20 @@ function codegen.map_task(rules, automata, signature, mapper_state_type)
 
         var region = c.legion_region_requirement_get_region(req)
         var inst : c.legion_physical_instance_t
-        var created : bool
-        var success =
-          c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
-            [rt_var], [ctx_var], memory,
-            layout, &region, 1, &inst, &created, true, 0, false)
-        std.assert(success, "instance creation should succeed")
+        if priv == c.REDUCE then
+          var success =
+            c.legion_mapper_runtime_create_physical_instance_layout_constraint(
+              [rt_var], [ctx_var], memory,
+              layout, &region, 1, &inst, true, 0)
+          std.assert(success, "instance creation should succeed")
+        elseif priv ~= c.NO_ACCESS then
+          var created : bool
+          var success =
+            c.legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
+              [rt_var], [ctx_var], memory,
+              layout, &region, 1, &inst, &created, true, 0, false)
+          std.assert(success, "instance creation should succeed")
+        end
         c.legion_map_task_output_chosen_instances_add(
           [map_task_output_var], &inst, 1)
         c.legion_physical_instance_destroy(inst)
