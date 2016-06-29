@@ -406,7 +406,25 @@ namespace Realm {
     public:
       int dim;
       coord_t point_data[MAX_POINT_DIM];
+
+      friend std::ostream& operator<<(std::ostream& os, const DomainPoint& dp);
     };
+
+    inline /*friend */std::ostream& operator<<(std::ostream& os,
+					       const DomainPoint& dp)
+    {
+      switch(dp.dim) {
+      case 0: { os << '[' << dp.point_data[0] << ']'; break; }
+      case 1: { os << '(' << dp.point_data[0] << ')'; break; }
+      case 2: { os << '(' << dp.point_data[0]
+		   << ',' << dp.point_data[1] << ')'; break; }
+      case 3: { os << '(' << dp.point_data[0]
+		   << ',' << dp.point_data[1]
+		   << ',' << dp.point_data[2] << ')'; break; }
+      default: assert(0);
+      }
+      return os;
+    }
 
     class DomainLinearization {
     public:
