@@ -413,7 +413,7 @@ function codegen.select_task_options(rules, automata, signature,
   local rt_var = terralib.newsymbol(c.legion_mapper_runtime_t)
   local ctx_var = terralib.newsymbol(c.legion_mapper_context_t)
   local task_var = terralib.newsymbol(c.legion_task_t)
-  local options_var = terralib.newsymbol(c.legion_task_options_t)
+  local options_var = terralib.newsymbol(&c.legion_task_options_t)
   local state_var = terralib.newsymbol(&mapper_state_type)
 
   local binders = {}

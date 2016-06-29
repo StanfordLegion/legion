@@ -43,7 +43,7 @@ typedef
       legion_mapper_runtime_t,
       legion_mapper_context_t,
       legion_task_t,
-      legion_task_options_t);
+      legion_task_options_t*);
 
 typedef
   void (*bishop_slice_task_fn_t)(

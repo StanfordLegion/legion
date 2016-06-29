@@ -45,7 +45,6 @@ BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
     mapper_init(init_fn), runtime_(CObjectWrapper::wrap(rt))
 //------------------------------------------------------------------------------
 {
-  log_bishop.info("bishop mapper created");
   mapper_init(&mapper_state);
   if (states == 0)
   {
@@ -58,7 +57,6 @@ BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
 BishopMapper::~BishopMapper()
 //------------------------------------------------------------------------------
 {
-  log_bishop.info("bishop mapper destroyed");
   if (!shared_states) delete states;
 }
 
@@ -74,10 +72,13 @@ void BishopMapper::select_task_options(const MapperContext ctx,
                                        TaskOptions&        output)
 //------------------------------------------------------------------------------
 {
+  log_bishop.debug("[select_task_options] start @ processor %llx",
+      local_proc.id);
+
   bishop_matching_state_t curr_state = get_current_state(task);
   set_current_state(task, curr_state);
 
-  log_bishop.info("[select_task_options] task id %d, uid %llu, name %s, state %d",
+  log_bishop.debug("[select_task_options] task id %d, uid %llu, name %s, state %d",
       task.task_id, task.get_unique_id(), task.get_task_name(),
       curr_state);
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
@@ -86,15 +87,14 @@ void BishopMapper::select_task_options(const MapperContext ctx,
   legion_task_options_t options_ = CObjectWrapper::wrap(output);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   if (impl.select_task_options)
-    impl.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
+    impl.select_task_options(mapper_state, runtime_, ctx_, task_, &options_);
   output = CObjectWrapper::unwrap(options_);
 
-  if (!shared_states)
   {
     TransMsg msg;
     msg.uid = task.get_unique_id();
     msg.state = curr_state;
-    runtime->send_message(ctx, output.initial_proc, &msg, sizeof(TransMsg));
+    runtime->broadcast(ctx, &msg, sizeof(TransMsg));
   }
 }
 
@@ -105,6 +105,7 @@ void BishopMapper::slice_task(const MapperContext    ctx,
                               SliceTaskOutput&       output)
 //------------------------------------------------------------------------------
 {
+  log_bishop.debug("[slice_task] start @ processor %llx", local_proc.id);
   bishop_matching_state_t curr_state = get_current_state(task);
   set_current_state(task, curr_state);
 
@@ -116,6 +117,13 @@ void BishopMapper::slice_task(const MapperContext    ctx,
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
   if (impl.slice_task)
     impl.slice_task(mapper_state, runtime_, ctx_, task_, input_, output_);
+
+  {
+    TransMsg msg;
+    msg.uid = task.get_unique_id();
+    msg.state = curr_state;
+    runtime->broadcast(ctx, &msg, sizeof(TransMsg));
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -125,6 +133,7 @@ void BishopMapper::map_task(const MapperContext ctx,
                             MapTaskOutput&      output)
 //------------------------------------------------------------------------------
 {
+  log_bishop.debug("[map_task] start @ processor %llx", local_proc.id);
   bishop_matching_state_t curr_state = get_current_state(task);
   set_current_state(task, curr_state);
 
@@ -133,7 +142,7 @@ void BishopMapper::map_task(const MapperContext ctx,
   legion_map_task_input_t input_ = CObjectWrapper::wrap_const(&input);
   legion_map_task_output_t output_ = CObjectWrapper::wrap(&output);
 
-  log_bishop.info("[map_task] task id %d, uid %llu, name %s, state %d",
+  log_bishop.debug("[map_task] task id %d, uid %llu, name %s, state %d",
       task.task_id, task.get_unique_id(), task.get_task_name(),
       curr_state);
 
@@ -151,8 +160,9 @@ void BishopMapper::handle_message(const MapperContext  ctx,
                                   const MapperMessage& message)
 {
   const TransMsg* msg = reinterpret_cast<const TransMsg*>(message.message);
-  log_bishop.info("[handle_message] from processor %llx: uid %llu state %d",
-      message.sender.id, msg->uid, msg->state);
+  log_bishop.debug(
+      "[handle_message] from %llx to %llx: uid %llu state %d",
+      message.sender.id, local_proc.id, msg->uid, msg->state);
   assert(message.size == sizeof(TransMsg));
   // TODO: need to erase tasks from states once they finished (post_task_map)
   set_current_state(msg->uid, msg->state);
@@ -172,10 +182,33 @@ bishop_mapper_impl_t& BishopMapper::get_mapper_impl(bishop_matching_state_t st)
 bishop_matching_state_t BishopMapper::get_current_state(const Task& task)
 //------------------------------------------------------------------------------
 {
-  bishop_matching_state_t parent_state = 0;
   std::map<UniqueID, bishop_matching_state_t>::iterator finder =
-    states->find(task.parent_task->get_unique_id());
-  if (finder != states->end()) parent_state = finder->second;
+    states->find(task.get_unique_id());
+  if (finder != states->end())
+  {
+    log_bishop.debug("[get_current_state] current state from map: %d",
+        finder->second);
+    return finder->second;
+  }
+
+  bishop_matching_state_t parent_state = 0;
+  assert(task.parent_task || task.tag);
+  if (task.tag != 0)
+  {
+    std::map<UniqueID, bishop_matching_state_t>::iterator finder =
+      states->find(task.tag);
+    if (finder != states->end()) parent_state = finder->second;
+    log_bishop.debug("[get_current_state] parent state from tag: %d",
+        parent_state);
+  }
+  else if(task.parent_task)
+  {
+    std::map<UniqueID, bishop_matching_state_t>::iterator finder =
+      states->find(task.parent_task->get_unique_id());
+    if (finder != states->end()) parent_state = finder->second;
+    log_bishop.debug("[get_current_state] parent state from task object: %d",
+        parent_state);
+  }
 
   bishop_matching_state_t curr_state = 0;
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
@@ -185,6 +218,8 @@ bishop_matching_state_t BishopMapper::get_current_state(const Task& task)
     while (true)
     {
       curr_state = trans_fn(mapper_state, task_);
+      log_bishop.debug("[get_current_state] state %d --> state %d",
+          prev_state, curr_state);
       if (curr_state == prev_state) break;
       trans_fn = transitions[curr_state];
       prev_state = curr_state;

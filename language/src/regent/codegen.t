@@ -2546,9 +2546,10 @@ function codegen.expr_call(cx, node)
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
+      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:gettaskid()], [task_args],
-        c.legion_predicate_true(), 0, 0)
+        c.legion_predicate_true(), 0, tag)
       [args_setup]
     end
 
@@ -3200,8 +3201,9 @@ function codegen.expr_region(cx, node)
   if not cx.task_meta:get_config_options().inner then
     actions = quote
       [actions];
+      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
       var il = c.legion_inline_launcher_create_logical_region(
-        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, tag);
       [field_ids:map(
          function(field_id)
            return `(c.legion_inline_launcher_add_field(il, [field_id], true))
@@ -4610,8 +4612,9 @@ local function expr_copy_setup_region(
 
   local launcher = terralib.newsymbol(c.legion_copy_launcher_t, "launcher")
   actions:insert(quote
+      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
     var [launcher] = c.legion_copy_launcher_create(
-      c.legion_predicate_true(), 0, 0)
+      c.legion_predicate_true(), 0, tag)
   end)
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
@@ -4925,9 +4928,10 @@ local function expr_acquire_setup_region(
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
       actions:insert(quote
+      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
         var launcher = c.legion_acquire_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, 0)
+          c.legion_predicate_true(), 0, tag)
         c.legion_acquire_launcher_add_field(
           launcher, dst_field_id)
         [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -5053,9 +5057,10 @@ local function expr_release_setup_region(
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
       actions:insert(quote
+      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
         var launcher = c.legion_release_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, 0)
+          c.legion_predicate_true(), 0, tag)
         c.legion_release_launcher_add_field(
           launcher, dst_field_id)
         [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -6289,7 +6294,8 @@ function codegen.stat_must_epoch(cx, node)
 
   local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
   local actions = quote
-    var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
+    var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+    var [must_epoch] = c.legion_must_epoch_launcher_create(0, tag)
     var [must_epoch_point] = 0
     [codegen.block(cx, node.block)]
     var [future_map] = c.legion_must_epoch_launcher_execute(
@@ -6559,10 +6565,11 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
+    var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:gettaskid()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, 0)
+      c.legion_predicate_true(), false, 0, tag)
     [args_setup]
   end
 
