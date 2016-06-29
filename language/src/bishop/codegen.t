@@ -754,13 +754,18 @@ function codegen.map_task(rules, automata, signature, mapper_state_type)
             [fields_var], fields_size)
           c.legion_layout_constraint_set_add_field_constraint(
             [layout_var], [fields_var], fields_size, false, false)
+        end
 
-          var priv = c.legion_region_requirement_get_privilege([req_var])
-          if priv == c.REDUCE then
+        if privilege == c.REDUCE then
+          layout_init = quote
+            [layout_init]
             var redop = c.legion_region_requirement_get_redop([req_var])
             c.legion_layout_constraint_set_add_specialized_constraint(
               [layout_var], c.REDUCTION_FOLD_SPECIALIZE, redop)
-          elseif priv ~= c.NO_ACCESS then
+          end
+        else
+          layout_init = quote
+            [layout_init]
             var dims : uint[4]
             dims[0], dims[1], dims[2], dims[3] =
               c.DIM_X, c.DIM_Y, c.DIM_Z, c.DIM_F
