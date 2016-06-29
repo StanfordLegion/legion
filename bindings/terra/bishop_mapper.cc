@@ -87,7 +87,7 @@ void BishopMapper::select_task_options(const MapperContext ctx,
   legion_task_options_t options_ = CObjectWrapper::wrap(output);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   if (impl.select_task_options)
-    impl.select_task_options(mapper_state, runtime_, ctx_, task_, options_);
+    impl.select_task_options(mapper_state, runtime_, ctx_, task_, &options_);
   output = CObjectWrapper::unwrap(options_);
 
   {
