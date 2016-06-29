@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Code Generation
+-- Regent Code Generation
 
 local ast = require("regent/ast")
 local data = require("regent/data")
@@ -20,6 +20,7 @@ local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local traverse_symbols = require("regent/traverse_symbols")
+local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = {}
 
 -- Configuration Variables
@@ -2543,13 +2544,15 @@ function codegen.expr_call(cx, node)
       future = terralib.newsymbol(c.legion_future_t, "future")
     end
 
+    local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
-      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:gettaskid()], [task_args],
-        c.legion_predicate_true(), 0, tag)
+        c.legion_predicate_true(), 0, [tag])
       [args_setup]
     end
 
@@ -3198,12 +3201,14 @@ function codegen.expr_region(cx, node)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   if not cx.task_meta:get_config_options().inner then
     actions = quote
       [actions];
-      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
-        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, tag);
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [field_ids:map(
          function(field_id)
            return `(c.legion_inline_launcher_add_field(il, [field_id], true))
@@ -4611,10 +4616,12 @@ local function expr_copy_setup_region(
   local actions = terralib.newlist()
 
   local launcher = terralib.newsymbol(c.legion_copy_launcher_t, "launcher")
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   actions:insert(quote
-      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
-      c.legion_predicate_true(), 0, tag)
+      c.legion_predicate_true(), 0, [tag])
   end)
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
@@ -4927,11 +4934,13 @@ local function expr_acquire_setup_region(
       -- FIXME: When this is a list, a physical region won't be available.
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
+      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
-      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+        var [tag] = 0
+        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_acquire_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, tag)
+          c.legion_predicate_true(), 0, [tag])
         c.legion_acquire_launcher_add_field(
           launcher, dst_field_id)
         [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -5056,11 +5065,13 @@ local function expr_release_setup_region(
       -- FIXME: When this is a list, a physical region won't be available.
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
+      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
-      var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+        var [tag] = 0
+        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_release_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, tag)
+          c.legion_predicate_true(), 0, [tag])
         c.legion_release_launcher_add_field(
           launcher, dst_field_id)
         [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -6293,9 +6304,11 @@ function codegen.stat_must_epoch(cx, node)
   local future_map = terralib.newsymbol(c.legion_future_map_t, "legion_future_map_t")
 
   local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local actions = quote
-    var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
-    var [must_epoch] = c.legion_must_epoch_launcher_create(0, tag)
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
     var [must_epoch_point] = 0
     [codegen.block(cx, node.block)]
     var [future_map] = c.legion_must_epoch_launcher_execute(
@@ -6545,6 +6558,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   end
 
   local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local launcher_setup = quote
     [must_epoch_setup]
     var [argument_map] = c.legion_argument_map_create()
@@ -6565,11 +6579,12 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
-    var tag = [c.legion_mapping_tag_id_t](c.legion_task_get_unique_id([cx.task]))
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:gettaskid()],
       [domain], g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, tag)
+      c.legion_predicate_true(), false, 0, [tag])
     [args_setup]
   end
 
