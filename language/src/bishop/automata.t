@@ -44,6 +44,10 @@ do
   end
 end
 
+function state:clear_transition(sym)
+  self.trans[sym] = nil
+end
+
 function state:add_transition(sym, next_state)
   assert(not self.trans[sym] or self.trans[sym] == next_state)
   self.trans[sym] = next_state
@@ -306,6 +310,44 @@ function automata.product(dfas)
     initial = product_initial,
     final = product_final,
   }
+end
+
+function automata:unfold_loop_once(state_to_unfold)
+  self:cache_transitions()
+  local new_states = {}
+  local sym_to_self = {}
+  for sym, next_state in pairs(state_to_unfold.trans) do
+    if next_state == state_to_unfold then
+      new_states[sym] = state.new()
+      sym_to_self[sym] = true
+    end
+  end
+
+  for _, new_state in pairs(new_states) do
+    for sym, _ in pairs(sym_to_self) do
+      new_state:add_transition(sym, new_state)
+    end
+  end
+
+  local new_trans = {}
+  for sym, next_state in pairs(state_to_unfold.trans) do
+    if new_states[sym] then
+      new_trans[sym] = new_states[sym]
+    else
+      for _, new_state in pairs(new_states) do
+        new_state:add_transition(sym, next_state)
+      end
+    end
+  end
+
+  for state, _ in pairs(self.states) do
+    for sym, next_state in pairs(state.trans) do
+      if next_state == state_to_unfold then
+        state:clear_transition(sym)
+        state:add_transition(sym, new_states[sym])
+      end
+    end
+  end
 end
 
 function automata:verify_tags(check)

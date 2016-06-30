@@ -123,7 +123,24 @@ local function fetch_call_graph()
       regent_ast.traverse_node_postorder(record_callees, task_ast)
     end
   end
-  return call_graph
+  local all_callers = {}
+  local all_callees = {}
+  for caller, callees in pairs(call_graph) do
+    all_callers[caller] = true
+    for callee, _ in pairs(callees) do
+      all_callees[callee] = true
+    end
+  end
+  local toplevel_task = nil
+  for caller, _ in pairs(all_callers) do
+    if not all_callees[caller] then
+      assert(not toplevel_task)
+      toplevel_task = caller
+    end
+  end
+
+  assert(toplevel_task)
+  return call_graph, toplevel_task
 end
 
 local function traverse_element(rules, fn)
@@ -414,7 +431,8 @@ local function record_last_task_symbol(dfa, all_task_symbols)
   end
 end
 
-local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task, call_graph)
+local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task,
+                                            call_graph, toplevel_task)
   local visited = { [dfa.initial] = true }
   local visit_next = { dfa.initial }
   while #visit_next > 0 do
@@ -436,10 +454,11 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
       end
       state.trans = trans
     elseif not last_task_symbol then
+      assert(state == dfa.initial)
       local trans = {}
       for id, next_state in pairs(state.trans) do
         local sym = all_task_symbols[id]
-        if sym then trans[id] = next_state end
+        if sym.task_name == toplevel_task then trans[id] = next_state end
       end
       state.trans = trans
     end
@@ -507,15 +526,19 @@ function optimize_match.mapper(node)
   local task_signatures = fetch_task_signatures()
   check_rules_against_signatures(rules, task_signatures)
 
-  local call_graph = fetch_call_graph()
   local selectors, all_symbols, all_task_symbols, symbols_by_task =
     collect_symbols(rules, task_signatures)
   local regexprs =
     translate_to_regex(selectors, all_symbols, all_task_symbols, symbols_by_task)
 
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
+  dfa:unfold_loop_once(dfa.initial)
   record_last_task_symbol(dfa, all_task_symbols)
-  prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task, call_graph)
+
+  local call_graph, toplevel_task = fetch_call_graph()
+  prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task,
+                               call_graph, toplevel_task)
+
   merge_indistinguishable_states(dfa, all_task_symbols)
 
   dfa:renumber()
