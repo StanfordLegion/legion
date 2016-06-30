@@ -525,6 +525,15 @@ function merge_indistinguishable_states(dfa, all_task_symbols)
   end
 end
 
+local function verify_task_symbols(dfa)
+  dfa:cache_transitions()
+  for state, _ in pairs(dfa.states) do
+    assert(state.last_task_symbol or state == dfa.initial,
+           "fatal error: state should either be initial or " ..
+           "correspond to one task")
+  end
+end
+
 local optimize_match = {}
 
 function optimize_match.mapper(node)
@@ -548,6 +557,7 @@ function optimize_match.mapper(node)
                                call_graph, toplevel_task)
 
   merge_indistinguishable_states(dfa, all_task_symbols)
+  verify_task_symbols(dfa)
 
   dfa:renumber()
   local function check(idx, depth)
