@@ -189,10 +189,11 @@ local function collect_symbols(rules, task_signatures)
     all_ids[hash] = id
   end
   for hash, id in pairs(all_constraint_ids) do
-    all_ids[hash] = id + num_tasks
+    all_ids[hash] = id + num_tasks + 1 -- task symbol starts from 1
   end
   for hash, id in pairs(all_class_ids) do
-    all_ids[hash] = id + num_tasks + num_constraints
+    all_ids[hash] =
+      id + num_tasks + num_constraints + 1 -- task symbol starts from 1
   end
 
   local all_symbols = {}
@@ -255,8 +256,7 @@ local function collect_symbols(rules, task_signatures)
       end
       for _, task_symbol in pairs(task_symbols) do
         elem.classes:map(function(id)
-          local symbol = all_symbols[id]
-          symbols_by_task[task_symbol][id] = all_symbols[symbol]
+          symbols_by_task[task_symbol][id] = all_symbols[id]
         end)
         elem.constraints:map(function(id)
           symbols_by_task[task_symbol][id] = all_symbols[id]
@@ -303,15 +303,20 @@ local function translate_to_regex(selectors, all_symbols, all_task_symbols, symb
 
         local symbols = symbols_by_task[task_symbol]
         local required = {}
+        local constrained = {}
         if #elem.classes > 0 then
           elem.classes:map(function(id) required[id] = true end)
         end
         if #elem.constraints > 0 then
-          elem.constraints:map(function(id) required[id] = true end)
+          elem.constraints:map(function(id)
+            required[id] = true
+            constrained[all_symbols[id].constraint.field] = true
+          end)
         end
 
         for idx, symbol in pairs(all_symbols) do
-          if symbols[idx] then
+          local sym = symbols[idx]
+          if sym then
             if required[idx] then
               task_exprs:insert(regex.expr.Concat {
                 values = terralib.newlist {
@@ -321,7 +326,8 @@ local function translate_to_regex(selectors, all_symbols, all_task_symbols, symb
                   }
                 }
               })
-            else
+            elseif sym:is(regex.symbol.Constraint) and
+                   not constrained[sym.constraint.field] then
               task_exprs:insert(regex.expr.Kleene {
                 value = symbol
               })
@@ -458,7 +464,9 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
       local trans = {}
       for id, next_state in pairs(state.trans) do
         local sym = all_task_symbols[id]
-        if sym.task_name == toplevel_task then trans[id] = next_state end
+        if sym and sym.task_name == toplevel_task then
+          trans[id] = next_state
+        end
       end
       state.trans = trans
     end
