@@ -12,20 +12,57 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ll:cpu", "3"]]
+
 import "regent"
 import "bishop"
 
+local c = bishoplib.c
+
 mapper
+
+$procs = processors[isa=x86]
+
+task#ta {
+  target : $procs[1];
+}
 
 end
 
-task tc() end
-task tb() tc() end
-task ta() end
+function get_proc()
+  return rexpr
+    c.legion_runtime_get_executing_processor(__runtime(), __context())
+  end
+end
+
+fspace fs
+{
+  x : int,
+  y : int,
+}
+
+task tc(idx : int, r : region(fs))
+where reads(r.x) do
+end
+
+task tb(idx : int, r : region(fs))
+where reads(r.x), reads writes(r.y) do
+  tc(idx, r)
+end
+
+task ta(idx : int, r : region(fs))
+where reads(r.x), reads writes(r.y) do
+  var proc = [get_proc()]
+  var procs = c.bishop_all_processors()
+  tb(idx, r)
+  regentlib.assert(procs.list[idx].id == proc.id, "test failed in ta")
+end
 
 task toplevel()
-  ta()
-  tb()
+  var r = region(ispace(ptr, 10), fs)
+  new(ptr(fs, r), 10)
+  ta(1, r)
 end
 
 bishoplib.register_bishop_mappers()

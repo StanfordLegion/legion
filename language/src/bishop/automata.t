@@ -325,7 +325,7 @@ function automata:unfold_loop_once(state_to_unfold)
 
   for _, new_state in pairs(new_states) do
     for sym, _ in pairs(sym_to_self) do
-      new_state:add_transition(sym, new_state)
+      new_state:add_transition(sym, new_states[sym])
     end
   end
 

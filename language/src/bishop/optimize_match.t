@@ -417,6 +417,14 @@ local function print_signatures(task_signatures)
   end
 end
 
+local function add_trivial_loops(dfa, all_task_symbols)
+  for id, _ in pairs(all_task_symbols) do
+    if not dfa.initial.trans[id] then
+      dfa.initial:add_transition(id, dfa.initial)
+    end
+  end
+end
+
 local function record_last_task_symbol(dfa, all_task_symbols)
   local visited = { [dfa.initial] = true }
   local visit_next = { dfa.initial }
@@ -549,6 +557,7 @@ function optimize_match.mapper(node)
     translate_to_regex(selectors, all_symbols, all_task_symbols, symbols_by_task)
 
   local dfa = automata.product(regexprs:map(automata.regex_to_dfa))
+  add_trivial_loops(dfa, all_task_symbols)
   dfa:unfold_loop_once(dfa.initial)
   record_last_task_symbol(dfa, all_task_symbols)
 
