@@ -131,16 +131,14 @@ local function fetch_call_graph()
       all_callees[callee] = true
     end
   end
-  local toplevel_task = nil
+  local toplevel_tasks = {}
   for caller, _ in pairs(all_callers) do
     if not all_callees[caller] then
-      assert(not toplevel_task)
-      toplevel_task = caller
+      toplevel_tasks[caller] = true
     end
   end
 
-  assert(toplevel_task)
-  return call_graph, toplevel_task
+  return call_graph, toplevel_tasks
 end
 
 local function traverse_element(rules, fn)
@@ -373,7 +371,7 @@ local function compare_rules(rule1, rule2)
       return false
     end
   end
-  return false
+  return rule1.position.linenumber < rule2.position.linenumber
 end
 
 local function dump_dfa(dfa, all_symbols, rules, filename)
@@ -383,7 +381,13 @@ local function dump_dfa(dfa, all_symbols, rules, filename)
   end
   local tag_mapping = {}
   for idx = 1, #rules do
-    tag_mapping[idx] = rules[idx].selector:unparse()
+    local _, filename =
+      string.match(rules[idx].position.filename,
+                   "(.-)([^\\/]-%.?([^%.\\/]*))$")
+    tag_mapping[idx] =
+      rules[idx].selector:unparse() .. " (" ..
+      filename .. ":" ..
+      tostring(rules[idx].position.linenumber) .. ")"
   end
   local function state_mapping(state)
     local label = "state " .. tostring(state.id)
@@ -446,7 +450,7 @@ local function record_last_task_symbol(dfa, all_task_symbols)
 end
 
 local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task,
-                                            call_graph, toplevel_task)
+                                            call_graph, toplevel_tasks)
   local visited = { [dfa.initial] = true }
   local visit_next = { dfa.initial }
   while #visit_next > 0 do
@@ -472,7 +476,7 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
       local trans = {}
       for id, next_state in pairs(state.trans) do
         local sym = all_task_symbols[id]
-        if sym and sym.task_name == toplevel_task then
+        if sym and toplevel_tasks[sym.task_name] then
           trans[id] = next_state
         end
       end
@@ -561,9 +565,9 @@ function optimize_match.mapper(node)
   dfa:unfold_loop_once(dfa.initial)
   record_last_task_symbol(dfa, all_task_symbols)
 
-  local call_graph, toplevel_task = fetch_call_graph()
+  local call_graph, toplevel_tasks = fetch_call_graph()
   prune_impossible_transitions(dfa, all_task_symbols, symbols_by_task,
-                               call_graph, toplevel_task)
+                               call_graph, toplevel_tasks)
 
   merge_indistinguishable_states(dfa, all_task_symbols)
   verify_task_symbols(dfa)

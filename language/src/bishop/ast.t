@@ -393,6 +393,15 @@ ast:inner("typed", { "position" })
 
 ast.typed:leaf("Mapper", { "rules", "assignments" })
 ast.typed:leaf("Rule", { "rule_type", "selector", "properties" })
+function ast.typed.Rule:unparse()
+  local str = self.selector:unparse()
+  str = str .. " {\n"
+  for i = 1, #self.properties do
+    str = str .. "  " .. self.properties[i]:unparse() .. "\n"
+  end
+  str = str .. "}\n"
+  return str
+end
 
 ast.typed:leaf("Selector", { "type", "elements", })
 function ast.typed.Selector:unparse()
@@ -412,6 +421,7 @@ function ast.typed.element.Region:unparse()
 end
 
 ast.typed:leaf("Property", { "field", "value" })
+ast.typed.Property.unparse = ast.untyped.Property.unparse
 ast.typed:leaf("Constraint", { "field", "value" })
 ast.typed.Constraint.unparse = ast.untyped.Constraint.unparse
 ast.typed:leaf("FilterConstraint", { "field", "value" })
