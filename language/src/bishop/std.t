@@ -16,6 +16,7 @@
 -- Bishop Standard Libary
 
 local config = require("bishop/config")
+local log = require("bishop/log")
 
 local c = terralib.includecstring [[
 #include "legion_c.h"
@@ -121,6 +122,11 @@ function std.quote_binary_op(op, lhs, rhs)
 end
 
 function std.register_bishop_mappers()
+  if not rawget(_G, "__bishop_jit_mappers__") then
+    log.warn(nil, "No mapper is given. Ignoring register request...")
+    return
+  end
+
   local mapper = __bishop_jit_mappers__()
   local num_mapper_impls = #mapper.mapper_impl_id_to_mapper_impl + 1
   local mapper_impls =
