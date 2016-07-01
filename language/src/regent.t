@@ -40,6 +40,7 @@ local language = {
   name = "legion",
   entrypoints = {
     "__demand",
+    "__forbid",
     "fspace",
     "rexpr",
     "rquote",
