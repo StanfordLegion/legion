@@ -139,7 +139,15 @@ function std.register_bishop_mappers()
     terralib.newsymbol(uint[ num_state_to_mapper_impl_id ])
   local register_body = quote end
 
-  for i = 0, #mapper.mapper_impl_id_to_mapper_impl do
+  register_body = quote
+    [register_body]
+    [mapper_impls][0] = c.bishop_mapper_impl_t {
+      select_task_options = [c.bishop_select_task_options_fn_t](0),
+      slice_task = [c.bishop_slice_task_fn_t](0),
+      map_task = [c.bishop_map_task_fn_t](0),
+    }
+  end
+  for i = 1, #mapper.mapper_impl_id_to_mapper_impl do
     local mapper_impl = mapper.mapper_impl_id_to_mapper_impl[i]
     register_body = quote
       [register_body]
@@ -159,7 +167,11 @@ function std.register_bishop_mappers()
     end
   end
 
-  for i = 0, #mapper.state_to_mapper_impl_id do
+  register_body = quote
+    [register_body]
+    [state_to_mapper_impl_id][0] = 0
+  end
+  for i = 1, #mapper.state_to_mapper_impl_id do
     register_body = quote
       [register_body]
       [state_to_mapper_impl_id][i] = [ mapper.state_to_mapper_impl_id[i] ]

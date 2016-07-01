@@ -130,6 +130,7 @@ bishop_mapper_impl_t& BishopMapper::get_mapper_impl(bishop_matching_state_t st)
 {
 #ifdef DEBUG_LEGION
   assert(state_to_mapper_impl_id.find(st) != state_to_mapper_impl_id.end());
+  assert(st != 0);
 #endif
   return mapper_impls[state_to_mapper_impl_id[st]];
 }
