@@ -2875,6 +2875,12 @@ typedef long long int coord_t;
    * @see Legion::Mappable::get_unique_id
    */
   legion_unique_id_t
+  legion_context_get_unique_id(legion_context_t ctx);
+
+  /**
+   * @see Legion::Mappable::get_unique_id
+   */
+  legion_unique_id_t
   legion_task_get_unique_id(legion_task_t task);
 
   /**

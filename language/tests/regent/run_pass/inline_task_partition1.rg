@@ -14,6 +14,14 @@
 
 import "regent"
 
+local c = regentlib.c
+
+struct ret
+{
+  v : int,
+  id : uint64,
+}
+
 __demand(__inline)
 task foo(x : region(ispace(int1d), int),
          cs : ispace(int1d),
@@ -31,10 +39,11 @@ where reads writes(x) do
   for e in x do
     sum += @e
   end
-  return sum
+  return ret { v = sum, id = c.legion_context_get_unique_id(__context()) }
 end
 
 task main()
+  var id_main = c.legion_context_get_unique_id(__context())
   var size : int1d = 4
   var is = ispace(int1d, size)
   var cs = ispace(int1d, size)
@@ -42,8 +51,12 @@ task main()
   var p = partition(equal, r, cs)
 
   var x = 0
-  x += foo(r, cs, p, 10)
-  x += foo(r, cs, p, 20)
+  var ret_foo = foo(r, cs, p, 10)
+  regentlib.assert(id_main == ret_foo.id, "test failed")
+  x += ret_foo.v
+  ret_foo = foo(r, cs, p, 20)
+  regentlib.assert(id_main == ret_foo.id, "test failed")
+  x += ret_foo.v
   regentlib.assert(x == 132, "test failed")
 end
 
