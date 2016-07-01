@@ -850,54 +850,38 @@ local function hash_tags(tags)
 end
 
 function codegen.rules(rules, automata, signatures, mapper_state_type)
-  local state_to_mapper_impl_id = {}
-  local next_mapper_impl_id = 1
-  local rule_hash_to_mapper_impl_id = {}
-  local mapper_impl_id_to_mapper_impl = terralib.newlist()
-
-  local function add_mapper_impl(hash, state_id, impl_id, impl)
-    rule_hash_to_mapper_impl_id[hash] = impl_id
-    state_to_mapper_impl_id[state_id] = impl_id
-    mapper_impl_id_to_mapper_impl[impl_id] = impl
-  end
+  local state_to_mapper_impl = terralib.newlist()
 
   for state, _ in pairs(automata.states) do
     if state ~= automata.initial then
       -- every state now has a single task that it matches with
       assert(state.last_task_symbol)
-      local hash = hash_tags(state.tags) .. "@" .. state.last_task_symbol.task_name
-      if not rule_hash_to_mapper_impl_id[hash] then
-        local selected_rules = terralib.newlist()
-        for idx = 1, #rules do
-          if state.tags[idx] then
-            selected_rules:insert(rules[idx])
-          end
+      local selected_rules = terralib.newlist()
+      for idx = 1, #rules do
+        if state.tags[idx] then
+          selected_rules:insert(rules[idx])
         end
-        local signature =
-          signatures[state.last_task_symbol.task_name]
-        local select_task_options =
-          codegen.select_task_options(selected_rules, automata, signature,
-                                      mapper_state_type)
-        local slice_task =
-          codegen.slice_task(selected_rules, automata, signature,
-                               mapper_state_type)
-        local map_task =
-          codegen.map_task(selected_rules, automata, signature,
-                           mapper_state_type)
-        add_mapper_impl(hash, state.id, next_mapper_impl_id, {
-          select_task_options = select_task_options,
-          slice_task = slice_task,
-          map_task = map_task,
-        })
-        next_mapper_impl_id = next_mapper_impl_id + 1
-      else
-        local mapper_impl_id = rule_hash_to_mapper_impl_id[hash]
-        state_to_mapper_impl_id[state.id] = mapper_impl_id
       end
+      local signature =
+        signatures[state.last_task_symbol.task_name]
+      local select_task_options =
+        codegen.select_task_options(selected_rules, automata, signature,
+                                    mapper_state_type)
+      local slice_task =
+        codegen.slice_task(selected_rules, automata, signature,
+                             mapper_state_type)
+      local map_task =
+        codegen.map_task(selected_rules, automata, signature,
+                         mapper_state_type)
+      state_to_mapper_impl[state.id] = {
+        select_task_options = select_task_options,
+        slice_task = slice_task,
+        map_task = map_task,
+      }
     end
   end
 
-  return state_to_mapper_impl_id, mapper_impl_id_to_mapper_impl
+  return state_to_mapper_impl
 end
 
 function codegen.automata(automata)
@@ -955,9 +939,9 @@ function codegen.mapper(node)
   local mapper_init, mapper_state_type =
     codegen.mapper_init(node.assignments)
 
-  local state_to_mapper_impl_id, mapper_impl_id_to_mapper_impl =
-    codegen.rules(node.rules, node.automata, node.task_signatures,
-                  mapper_state_type)
+  local state_to_mapper_impl = codegen.rules(node.rules, node.automata,
+                                             node.task_signatures,
+                                             mapper_state_type)
 
   local state_to_transition_impl = codegen.automata(node.automata)
 
@@ -984,9 +968,8 @@ function codegen.mapper(node)
 
   return {
     mapper_init = mapper_init,
-    state_to_mapper_impl_id = state_to_mapper_impl_id,
     state_to_transition_impl = state_to_transition_impl,
-    mapper_impl_id_to_mapper_impl = mapper_impl_id_to_mapper_impl,
+    state_to_mapper_impl = state_to_mapper_impl,
   }
 end
 
