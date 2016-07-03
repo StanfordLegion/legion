@@ -1468,31 +1468,31 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for getting access to semantic info
       //------------------------------------------------------------------------
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
