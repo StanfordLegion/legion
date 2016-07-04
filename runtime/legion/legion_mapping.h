@@ -18,6 +18,9 @@
 
 #include "legion_types.h"
 #include "legion_constraint.h"
+#include "legion.h"
+
+#include <iostream>
 
 namespace Legion {
   namespace Mapping { 
@@ -51,6 +54,7 @@ namespace Legion {
       unsigned long get_instance_id(void) const;
     public:
       LogicalRegion get_logical_region(void) const;
+      LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been
       // garbage collected, this is just a sample, using the
@@ -94,6 +98,9 @@ namespace Legion {
     protected:   
       PhysicalInstanceImpl impl;
       std::set<FieldID>  fields;
+
+      friend std::ostream& operator<<(std::ostream& os,
+				      const PhysicalInstance& p);
     };
 
     /**
@@ -497,6 +504,39 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a task. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The mapper
+       * is told which region requirement this instance creation request is
+       * with respect to and the resulting instance must have sufficient space
+       * for all the fields. The runtime will also provide the actual target
+       * instance where the data will be ultimately copied. The mapper can
+       * use this instance as a guide for where the data will ultimately
+       * be placed and laid out.
+       */
+      struct CreateTaskTemporaryInput {
+        unsigned                                region_requirement_index; 
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateTaskTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_task_temporary_instance(
+                                   const MapperContext              ctx,
+                                   const Task&                      task,
+                                   const CreateTaskTemporaryInput&  input,
+                                         CreateTaskTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
        *  Speculate
        * ----------------------------------------------------------------------
        * The speculate mapper call asks the mapper to make a 
@@ -589,6 +629,36 @@ namespace Legion {
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output) = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a mapping. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateInlineTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateInlineTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_inline_temporary_instance(
+                                 const MapperContext                ctx,
+                                 const InlineMapping&               inline_op,
+                                 const CreateInlineTemporaryInput&  input,
+                                       CreateInlineTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
 
       // No speculation for inline mappings
 
@@ -669,6 +739,40 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output) = 0;
+      //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a copy. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The mapper
+       * is told which region requirement this instance creation request is
+       * with respect to and the resulting instance must have sufficient space
+       * for all the fields. The runtime will also provide the actual target
+       * instance where the data will be ultimately copied. The mapper can
+       * use this instance as a guide for where the data will ultimately
+       * be placed and laid out.
+       */
+      struct CreateCopyTemporaryInput {
+        unsigned                                region_requirement_index; 
+        bool                                    src_requirement;
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateCopyTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_copy_temporary_instance(
+                                   const MapperContext              ctx,
+                                   const Copy&                      copy,
+                                   const CreateCopyTemporaryInput&  input,
+                                         CreateCopyTemporaryOutput& output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -764,6 +868,36 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a close. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateCloseTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateCloseTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output) = 0;
       //------------------------------------------------------------------------
 
       // No speculation for close operations
@@ -885,6 +1019,36 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output) = 0;
+      //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a release. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateReleaseTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateReleaseTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_release_temporary_instance(
+                                const MapperContext                 ctx,
+                                const Release&                      release,
+                                const CreateReleaseTemporaryInput&  input,
+                                      CreateReleaseTemporaryOutput& output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -1462,31 +1626,31 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for getting access to semantic info
       //------------------------------------------------------------------------
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 

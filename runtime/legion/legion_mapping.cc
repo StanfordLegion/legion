@@ -118,6 +118,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintID PhysicalInstance::get_layout_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->layout->constraints->layout_id;
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {
@@ -194,6 +203,14 @@ namespace Legion {
       if (impl == NULL)
         return;
       impl->remove_space_fields(fields);
+    }
+
+    //--------------------------------------------------------------------------
+    /*friend*/ std::ostream& operator<<(std::ostream& os,
+					const PhysicalInstance& p)
+    //--------------------------------------------------------------------------
+    {
+      return os << p.impl->get_instance();
     }
 
     /////////////////////////////////////////////////////////////
@@ -838,73 +855,80 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
         TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
         bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, task_id, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, task_id,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, fid, tag,result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, fid, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+   bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------

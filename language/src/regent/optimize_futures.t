@@ -295,7 +295,19 @@ function analyze_var_flow.stat_block(cx, node)
   analyze_var_flow.block(cx, node.block)
 end
 
-function analyze_var_flow.stat_index_launch(cx, node)
+function analyze_var_flow.stat_index_launch_num(cx, node)
+  local reduce_lhs = node.reduce_lhs and
+    analyze_var_flow.expr(cx, node.reduce_lhs)
+
+  if reduce_lhs then
+    for v, _ in pairs(reduce_lhs) do
+      local var_flow = cx:get_flow(v)
+      var_flow[true] = true
+    end
+  end
+end
+
+function analyze_var_flow.stat_index_launch_list(cx, node)
   local reduce_lhs = node.reduce_lhs and
     analyze_var_flow.expr(cx, node.reduce_lhs)
 
@@ -382,8 +394,11 @@ function analyze_var_flow.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return analyze_var_flow.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return analyze_var_flow.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return analyze_var_flow.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return analyze_var_flow.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return analyze_var_flow.stat_var(cx, node)
@@ -459,7 +474,7 @@ local function concretize(node)
     return ast.typed.expr.FutureGetResult {
       value = node,
       expr_type = expr_type.result_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   end
@@ -474,7 +489,7 @@ local function promote(node, expected_type)
     return ast.typed.expr.Future {
       value = node,
       expr_type = expected_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
   elseif not std.type_eq(expr_type, expected_type) then
@@ -1168,8 +1183,8 @@ function optimize_futures.stat_block(cx, node)
   }
 end
 
-function optimize_futures.stat_index_launch(cx, node)
-  local domain = node.domain:map(
+function optimize_futures.stat_index_launch_num(cx, node)
+  local values = node.values:map(
     function(value) return concretize(optimize_futures.expr(cx, value)) end)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
@@ -1195,7 +1210,39 @@ function optimize_futures.stat_index_launch(cx, node)
   end
 
   return node {
-    domain = domain,
+    values = values,
+    call = call,
+    reduce_lhs = reduce_lhs,
+  }
+end
+
+function optimize_futures.stat_index_launch_list(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  local call = optimize_futures.expr(cx, node.call)
+  local reduce_lhs = node.reduce_lhs and
+    optimize_futures.expr(cx, node.reduce_lhs)
+
+  local args = terralib.newlist()
+  for i, arg in ipairs(call.args) do
+    if std.is_future(std.as_read(arg.expr_type)) and
+      not node.args_provably.invariant[i]
+    then
+      arg = concretize(arg)
+    end
+    args:insert(arg)
+  end
+  call.args = args
+
+  if reduce_lhs then
+    local call_type = std.as_read(call.expr_type)
+    local reduce_type = std.as_read(reduce_lhs.expr_type)
+    if std.is_future(call_type) and not std.is_future(reduce_type) then
+      call.expr_type = call_type.result_type
+    end
+  end
+
+  return node {
+    value = value,
     call = call,
     reduce_lhs = reduce_lhs,
   }
@@ -1331,8 +1378,11 @@ function optimize_futures.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return optimize_futures.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return optimize_futures.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return optimize_futures.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return optimize_futures.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return optimize_futures.stat_var(cx, node)
@@ -1377,12 +1427,12 @@ function optimize_futures.top_task_param(cx, param)
             ast.typed.expr.ID {
               value = param.symbol,
               expr_type = std.rawref(&param.param_type),
-              options = param.options,
+              annotations = param.annotations,
               span = param.span,
             },
             new_type),
       }),
-      options = param.options,
+      annotations = param.annotations,
       span = param.span,
     }
 

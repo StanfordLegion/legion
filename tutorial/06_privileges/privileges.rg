@@ -25,10 +25,19 @@ fspace output {
   z : double,
 }
 
+-- The vast majority of task arguments are pass-by-value. Regions are
+-- instead pass-by-reference. This means that tasks may modify the
+-- contents of their region arguments.
 task init(is : ispace(int1d),
           input_lr : region(is, input))
-where writes(input_lr.{x, y}) do
+-- Tasks declare privileges on region arguments to indicate what
+-- regions they will read or write. This task will write to its region
+-- argument.
+where writes(input_lr) do
   for i in is do
+    -- Privileges are enforced by the type system. These region
+    -- accesses are legal because of the write privilege declared
+    -- above.
     input_lr[i].x = c.drand48()
     input_lr[i].y = c.drand48()
   end
@@ -38,6 +47,8 @@ task daxpy(is : ispace(int1d),
            input_lr : region(is, input),
            output_lr : region(is, output),
            alpha : double)
+-- Multiple privileges may be specified at once. Privileges may also
+-- apply to specific fields. (Multiple fields can be named with braces.)
 where reads writes(output_lr.z), reads(input_lr.{x, y}) do
   for i in is do
     output_lr[i].z = alpha*input_lr[i].x + input_lr[i].y
@@ -62,6 +73,8 @@ task main()
   var input_lr = region(is, input)
   var output_lr = region(is, output)
 
+  -- Privileges are also required for task calls. The main task has
+  -- read-write privileges on any regions it created.
   init(is, input_lr)
 
   var alpha = c.drand48()

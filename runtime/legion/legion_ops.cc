@@ -417,6 +417,116 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *result= 
+        select_temporary_instance(dst, index, needed_fields);
+#ifdef DEBUG_LEGION
+      assert(result->is_instance_manager());
+#endif
+      InstanceView *view = 
+        parent_ctx->create_instance_top_view(result, runtime->address_space);
+      return view->as_materialized_view();
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* Operation::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for interhited types
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::validate_temporary_instance(PhysicalManager *result,
+                                  std::set<PhysicalManager*> &previous_managers,
+           const std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                                  const FieldMask &needed_fields,
+                                  LogicalRegion needed_region,
+                                  MapperManager *mapper,
+                                  const char *mapper_call_name) const 
+    //--------------------------------------------------------------------------
+    {
+      if (!!(needed_fields - result->layout->allocated_fields))
+      {
+        // Doesn't have all the fields
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. The temporary instance selected for %s "
+                      "(UID %lld) did not have space for all the necessary "
+                      "fields.", mapper_call_name, mapper->get_mapper_name(),
+                      get_logging_name(), unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      std::vector<LogicalRegion> needed_regions(1, needed_region);
+      if (!result->meets_regions(needed_regions))
+      {
+        // Doesn't meet the needed region
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. The temporary instance selected for %s "
+                      "(UID %lld) is not large enough for the necessary "
+                      "logical region.", mapper_call_name, 
+                      mapper->get_mapper_name(), get_logging_name(),
+                      unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator
+        finder = acquired.find(result);
+      if (finder == acquired.end())
+      {
+        // Not acquired, these must be acquired so we can properly
+        // check that it is a fresh instance 
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. The temporary instance selected for %s "
+                      "(UID %lld) was not properly acquired.",
+                      mapper_call_name, mapper->get_mapper_name(),
+                      get_logging_name(), unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!finder->second.second || 
+          (previous_managers.find(result) != previous_managers.end()))
+      {
+        // Not a fresh instance 
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. The temporary instance selected for %s "
+                      "(UID %lld) is not a freshly created instance.",
+                      mapper_call_name, mapper->get_mapper_name(),
+                      get_logging_name(), unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::log_temporary_instance(PhysicalManager *result, 
+                           unsigned index, const FieldMask &needed_fields) const 
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> fields;
+      result->region_node->column_source->get_field_set(needed_fields, fields); 
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+      {
+        LegionSpy::log_temporary_instance(unique_op_id, index, 
+                                          *it, result->instance.id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::complete_mapping(RtEvent wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
@@ -1786,14 +1896,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    const char* MapOp::get_logging_name(void)
+    const char* MapOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[MAP_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind MapOp::get_operation_kind(void)
+    Operation::OpKind MapOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return MAP_OP_KIND;
@@ -2077,6 +2187,44 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* MapOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateInlineTemporaryInput input;
+      Mapper::CreateInlineTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        // Do the mapper call now
+        mapper->invoke_inline_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            requirement.region, mapper, "create_inline_temporary_instance");
+      }
+      else
+        mapper->invoke_inline_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
     }
 
     //--------------------------------------------------------------------------
@@ -2848,14 +2996,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* CopyOp::get_logging_name(void)
+    const char* CopyOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[COPY_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind CopyOp::get_operation_kind(void)
+    Operation::OpKind CopyOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return COPY_OP_KIND;
@@ -3408,6 +3556,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateCopyTemporaryInput input;
+      Mapper::CreateCopyTemporaryOutput output;
+      input.region_requirement_index = index;
+      input.src_requirement = current_src;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_copy_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            current_src ? src_requirements[index].region :
+                          dst_requirements[index].region, mapper,
+            "create_copy_temporary_instance");
+      }
+      else
+        mapper->invoke_copy_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID CopyOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -3890,14 +4079,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* FenceOp::get_logging_name(void)
+    const char* FenceOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[FENCE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind FenceOp::get_operation_kind(void)
+    Operation::OpKind FenceOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return FENCE_OP_KIND;
@@ -4062,14 +4251,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* FrameOp::get_logging_name(void)
+    const char* FrameOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[FRAME_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind FrameOp::get_operation_kind(void)
+    Operation::OpKind FrameOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return FRAME_OP_KIND;
@@ -4275,14 +4464,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* DeletionOp::get_logging_name(void)
+    const char* DeletionOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[DELETION_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind DeletionOp::get_operation_kind(void)
+    Operation::OpKind DeletionOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return DELETION_OP_KIND;
@@ -4789,14 +4978,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* InterCloseOp::get_logging_name(void)
+    const char* InterCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[INTER_CLOSE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind InterCloseOp::get_operation_kind(void)
+    Operation::OpKind InterCloseOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return INTER_CLOSE_OP_KIND;
@@ -4926,6 +5115,43 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* InterCloseOp::select_temporary_instance(
+           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateCloseTemporaryInput input;
+      Mapper::CreateCloseTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_close_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            requirement.region, mapper, "create_close_temporary_instance");
+      }
+      else
+        mapper->invoke_close_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
     }
 
     //--------------------------------------------------------------------------
@@ -5146,14 +5372,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* ReadCloseOp::get_logging_name(void)
+    const char* ReadCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[READ_CLOSE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind ReadCloseOp::get_operation_kind(void)
+    Operation::OpKind ReadCloseOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return READ_CLOSE_OP_KIND;
@@ -5248,14 +5474,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* PostCloseOp::get_logging_name(void)
+    const char* PostCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[POST_CLOSE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind PostCloseOp::get_operation_kind(void)
+    Operation::OpKind PostCloseOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return POST_CLOSE_OP_KIND;
@@ -5396,6 +5622,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalManager* PostCloseOp::select_temporary_instance(
+           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateCloseTemporaryInput input;
+      Mapper::CreateCloseTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_close_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            requirement.region, mapper, "create_close_temporary_instance");
+      }
+      else
+        mapper->invoke_close_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
     void PostCloseOp::report_profiling_results(void)
     //--------------------------------------------------------------------------
     {
@@ -5482,14 +5745,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* VirtualCloseOp::get_logging_name(void)
+    const char* VirtualCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[VIRTUAL_CLOSE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind VirtualCloseOp::get_operation_kind(void)
+    Operation::OpKind VirtualCloseOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return VIRTUAL_CLOSE_OP_KIND;
@@ -5732,14 +5995,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* AcquireOp::get_logging_name(void)
+    const char* AcquireOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[ACQUIRE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind AcquireOp::get_operation_kind(void)
+    Operation::OpKind AcquireOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return ACQUIRE_OP_KIND;
@@ -6308,14 +6571,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* ReleaseOp::get_logging_name(void)
+    const char* ReleaseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[RELEASE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind ReleaseOp::get_operation_kind(void)
+    Operation::OpKind ReleaseOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return RELEASE_OP_KIND;
@@ -6551,6 +6814,43 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* ReleaseOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateReleaseTemporaryInput input;
+      Mapper::CreateReleaseTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_release_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            logical_region, mapper, "create_release_temporary_instance");
+      }
+      else
+        mapper->invoke_release_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
     }
 
     //--------------------------------------------------------------------------
@@ -6797,14 +7097,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* DynamicCollectiveOp::get_logging_name(void)
+    const char* DynamicCollectiveOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[DYNAMIC_COLLECTIVE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind DynamicCollectiveOp::get_operation_kind(void)
+    Operation::OpKind DynamicCollectiveOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return DYNAMIC_COLLECTIVE_OP_KIND;
@@ -6913,14 +7213,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* FuturePredOp::get_logging_name(void)
+    const char* FuturePredOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[FUTURE_PRED_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind FuturePredOp::get_operation_kind(void)
+    Operation::OpKind FuturePredOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return FUTURE_PRED_OP_KIND;
@@ -7071,14 +7371,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* NotPredOp::get_logging_name(void)
+    const char* NotPredOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[NOT_PRED_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind NotPredOp::get_operation_kind(void)
+    Operation::OpKind NotPredOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return NOT_PRED_OP_KIND;
@@ -7231,14 +7531,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* AndPredOp::get_logging_name(void)
+    const char* AndPredOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[AND_PRED_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind AndPredOp::get_operation_kind(void)
+    Operation::OpKind AndPredOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return AND_PRED_OP_KIND;
@@ -7452,14 +7752,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* OrPredOp::get_logging_name(void)
+    const char* OrPredOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[OR_PRED_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind OrPredOp::get_operation_kind(void)
+    Operation::OpKind OrPredOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return OR_PRED_OP_KIND;
@@ -7756,14 +8056,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* MustEpochOp::get_logging_name(void)
+    const char* MustEpochOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[MUST_EPOCH_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind MustEpochOp::get_operation_kind(void)
+    Operation::OpKind MustEpochOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return MUST_EPOCH_OP_KIND;
@@ -8915,14 +9215,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* PendingPartitionOp::get_logging_name(void)
+    const char* PendingPartitionOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[PENDING_PARTITION_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind PendingPartitionOp::get_operation_kind(void)
+    Operation::OpKind PendingPartitionOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return PENDING_PARTITION_OP_KIND;
@@ -9194,14 +9494,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* DependentPartitionOp::get_logging_name(void)
+    const char* DependentPartitionOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[DEPENDENT_PARTITION_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind DependentPartitionOp::get_operation_kind(void)
+    Operation::OpKind DependentPartitionOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return DEPENDENT_PARTITION_OP_KIND;
@@ -9523,14 +9823,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* FillOp::get_logging_name(void)
+    const char* FillOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[FILL_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind FillOp::get_operation_kind(void)
+    Operation::OpKind FillOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return FILL_OP_KIND;
@@ -10130,14 +10430,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* AttachOp::get_logging_name(void)
+    const char* AttachOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[ATTACH_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind AttachOp::get_operation_kind(void)
+    Operation::OpKind AttachOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return ATTACH_OP_KIND;
@@ -10517,14 +10817,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* DetachOp::get_logging_name(void)
+    const char* DetachOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[DETACH_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind DetachOp::get_operation_kind(void)
+    Operation::OpKind DetachOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return DETACH_OP_KIND;
@@ -10758,14 +11058,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* TimingOp::get_logging_name(void)
+    const char* TimingOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[TIMING_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TimingOp::get_operation_kind(void)
+    Operation::OpKind TimingOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return TIMING_OP_KIND;

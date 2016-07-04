@@ -47,6 +47,7 @@ extern "C" {
 #define NEW_OPAQUE_TYPE(T) typedef struct T { void *impl; } T
   NEW_OPAQUE_TYPE(legion_runtime_t);
   NEW_OPAQUE_TYPE(legion_context_t);
+  NEW_OPAQUE_TYPE(legion_domain_point_iterator_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
   NEW_OPAQUE_TYPE(legion_point_coloring_t);
@@ -82,6 +83,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_task_layout_constraint_set_t);
+  NEW_OPAQUE_TYPE(legion_slice_task_output_t);
   NEW_OPAQUE_TYPE(legion_map_task_input_t);
   NEW_OPAQUE_TYPE(legion_map_task_output_t);
   NEW_OPAQUE_TYPE(legion_physical_instance_t);
@@ -237,7 +239,7 @@ typedef long long int coord_t;
   } legion_memory_t;
 
   /**
-   * @see Legion::Mapper::DomainSplit
+   * @see Legion::Mapper::TaskSlice
    */
   typedef struct legion_task_slice_t {
     legion_domain_t domain;
@@ -280,6 +282,10 @@ typedef long long int coord_t;
     bool stealable;
     bool map_locally;
   } legion_task_options_t;
+
+  typedef struct legion_slice_task_input_t {
+    legion_domain_t domain;
+  } legion_slice_task_input_t;
 
   /**
    * Interface for a Legion C registration callback.
@@ -425,6 +431,13 @@ typedef long long int coord_t;
   legion_domain_from_rect_3d(legion_rect_3d_t r);
 
   /**
+   * @see Legion::Domain::Domain(Legion::IndexSpace)
+   */
+  legion_domain_t
+  legion_domain_from_index_space(legion_runtime_t runtime,
+                                 legion_index_space_t is);
+
+  /**
    * @see Legion::Domain::get_rect()
    */
   legion_rect_1d_t
@@ -447,14 +460,6 @@ typedef long long int coord_t;
    */
   size_t
   legion_domain_get_volume(legion_domain_t d);
-
-  /**
-   * @see Legion::Domain::Domain(
-   *        Legion::IndexSpace)
-   */
-  legion_domain_t
-  legion_domain_from_index_space(legion_runtime_t runtime_,
-                                 legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations
@@ -479,6 +484,24 @@ typedef long long int coord_t;
   legion_domain_point_from_point_3d(legion_point_3d_t p);
 
   /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_1d_t
+  legion_domain_point_get_point_1d(legion_domain_point_t p);
+
+  /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_2d_t
+  legion_domain_point_get_point_2d(legion_domain_point_t p);
+
+  /**
+   * @see Legion::DomainPoint::get_point()
+   */
+  legion_point_3d_t
+  legion_domain_point_get_point_3d(legion_domain_point_t p);
+
+  /**
    * @see Legion::DomainPoint::nil()
    */
   legion_domain_point_t
@@ -499,6 +522,38 @@ typedef long long int coord_t;
                                 legion_context_t ctx,
                                 legion_domain_point_t point,
                                 legion_logical_region_t region);
+
+  // -----------------------------------------------------------------------
+  // Domain Point Iterator
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Domain::DomainPointIterator::DomainPointIterator()
+   */
+  legion_domain_point_iterator_t
+  legion_domain_point_iterator_create(legion_domain_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Domain::DomainPointIterator::~DomainPointIterator()
+   */
+  void
+  legion_domain_point_iterator_destroy(legion_domain_point_iterator_t handle);
+
+  /**
+   * @see Legion::Domain::DomainPointIterator::any_left
+   */
+  bool
+  legion_domain_point_iterator_has_next(legion_domain_point_iterator_t handle);
+
+  /**
+   * @see Legion::Domain::DomainPointIterator::step()
+   */
+  legion_domain_point_t
+  legion_domain_point_iterator_next(legion_domain_point_iterator_t handle);
 
   // -----------------------------------------------------------------------
   // Coloring Operations
@@ -2817,6 +2872,24 @@ typedef long long int coord_t;
   // -----------------------------------------------------------------------
 
   /**
+   * @see Legion::Mappable::get_unique_id
+   */
+  legion_unique_id_t
+  legion_context_get_unique_id(legion_context_t ctx);
+
+  /**
+   * @see Legion::Mappable::get_unique_id
+   */
+  legion_unique_id_t
+  legion_task_get_unique_id(legion_task_t task);
+
+  /**
+   * @see Legion::Mappable::tag
+   */
+  legion_mapping_tag_id_t
+  legion_task_get_tag(legion_task_t task);
+
+  /**
    * @see Legion::Runtime::attach_name()
    */
   void
@@ -3749,6 +3822,26 @@ typedef long long int coord_t;
   legion_physical_instance_destroy(legion_physical_instance_t instance);
 
   // -----------------------------------------------------------------------
+  // Slice Task Output
+  // -----------------------------------------------------------------------
+
+  /**
+   * @see Legion::Mapping::Mapper::SliceTaskOutput:slices
+   */
+  void
+  legion_slice_task_output_slices_add(
+      legion_slice_task_output_t output,
+      legion_task_slice_t slice);
+
+  /**
+   * @see Legion::Mapping::Mapper::SliceTaskOutput:verify_correctness
+   */
+  void
+  legion_slice_task_output_verify_correctness_set(
+      legion_slice_task_output_t output,
+      bool verify_correctness);
+
+  // -----------------------------------------------------------------------
   // Map Task Input/Output
   // -----------------------------------------------------------------------
 
@@ -3800,6 +3893,14 @@ typedef long long int coord_t;
   legion_map_task_output_target_procs_add(
       legion_map_task_output_t output,
       legion_processor_t proc);
+
+  /**
+   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
+   */
+  legion_processor_t
+  legion_map_task_output_target_procs_get(
+      legion_map_task_output_t output,
+      size_t idx);
 
   /**
    * @see Legion::Mapping::Mapper::MapTaskOutput:task_priority

@@ -667,6 +667,9 @@ function std.type_eq(a, b, mapping)
     end
     return std.type_eq(a:gettype(), b:gettype(), mapping)
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
+    if not std.type_eq(a.index_type, b.index_type, mapping) then
+      return false
+    end
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
     end

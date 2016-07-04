@@ -246,14 +246,14 @@ local function map_regions(diff)
         result:insert(
           ast.typed.stat.MapRegions {
             region_types = region_types,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           })
       elseif polarity == remote then
         result:insert(
           ast.typed.stat.UnmapRegions {
             region_types = region_types,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           })
       else
@@ -401,7 +401,12 @@ function optimize_inlines.stat_block(cx, node)
     block_in_usage, block_out_usage)
 end
 
-function optimize_inlines.stat_index_launch(cx, node)
+function optimize_inlines.stat_index_launch_num(cx, node)
+  local usage = analyze_usage(cx, node)
+  return annotate(node, usage, usage)
+end
+
+function optimize_inlines.stat_index_launch_list(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
@@ -468,8 +473,11 @@ function optimize_inlines.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return optimize_inlines.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return optimize_inlines.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return optimize_inlines.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return optimize_inlines.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return optimize_inlines.stat_var(cx, node)

@@ -17,26 +17,33 @@
 local config = {}
 
 local default_options = {
-  ["aligned-instances"] = false,
+  -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
-  ["cached-iterators"] = false,
+
+  -- Main user-facing optimization flags:
   ["cuda"] = true,
+  ["index-launch"] = true,
+  ["inline"] = true,
+  ["future"] = true,
+  ["leaf"] = true,
+  ["mapping"] = true,
+  ["vectorize"] = true,
+
+  -- Dataflow optimization flags:
+  ["flow"] = false,
+  ["flow-spmd"] = false,
+  ["flow-spmd-shardsize"] = 1,
+
+  -- Miscellaneous, internal or special-purpose flags:
+  ["aligned-instances"] = false,
+  ["cached-iterators"] = false,
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["pretty"] = false,
-  ["index-launches"] = true,
-  ["futures"] = true,
-  ["inlines"] = true,
   ["layout-constraints"] = true,
-  ["leaf"] = true,
   ["trace"] = true,
-  ["vectorize"] = true,
   ["validate"] = true,
-  ["task-inlines"] = true,
-  ["flow"] = false,
-  ["flow-spmd"] = false,
-  ["flow-spmd-shardsize"] = 1,
 }
 
 local option = {

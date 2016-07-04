@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Code Generation
+-- Regent Code Generation
 
 local ast = require("regent/ast")
 local data = require("regent/data")
@@ -20,6 +20,7 @@ local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local traverse_symbols = require("regent/traverse_symbols")
+local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = {}
 
 -- Configuration Variables
@@ -1471,17 +1472,17 @@ function rawref:reduce(cx, value, op)
     lhs = ast.typed.expr.Internal {
       value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
       expr_type = ref_type,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     },
     rhs = ast.typed.expr.Internal {
       value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
       expr_type = value_type,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     },
     expr_type = ref_type,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.trivial_span(),
   }
 
@@ -2543,12 +2544,15 @@ function codegen.expr_call(cx, node)
       future = terralib.newsymbol(c.legion_future_t, "future")
     end
 
+    local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
     local launcher_setup = quote
       var [task_args]
       [task_args_setup]
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var [launcher] = c.legion_task_launcher_create(
         [fn.value:gettaskid()], [task_args],
-        c.legion_predicate_true(), 0, 0)
+        c.legion_predicate_true(), 0, [tag])
       [args_setup]
     end
 
@@ -2610,11 +2614,11 @@ function codegen.expr_call(cx, node)
           value = ast.typed.expr.Internal {
             value = future_value,
             expr_type = future_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           expr_type = value_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         })
     end
@@ -3197,11 +3201,14 @@ function codegen.expr_region(cx, node)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   if not cx.task_meta:get_config_options().inner then
     actions = quote
       [actions];
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
-        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
       [field_ids:map(
          function(field_id)
            return `(c.legion_inline_launcher_add_field(il, [field_id], true))
@@ -4388,11 +4395,11 @@ function codegen.expr_dynamic_collective_get_result(cx, node)
         value = ast.typed.expr.Internal {
           value = future_value,
           expr_type = future_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         },
         expr_type = expr_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
     })
   end
@@ -4609,9 +4616,12 @@ local function expr_copy_setup_region(
   local actions = terralib.newlist()
 
   local launcher = terralib.newsymbol(c.legion_copy_launcher_t, "launcher")
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   actions:insert(quote
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
-      c.legion_predicate_true(), 0, 0)
+      c.legion_predicate_true(), 0, [tag])
   end)
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
@@ -4924,10 +4934,13 @@ local function expr_acquire_setup_region(
       -- FIXME: When this is a list, a physical region won't be available.
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
+      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
+        var [tag] = 0
+        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_acquire_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, 0)
+          c.legion_predicate_true(), 0, [tag])
         c.legion_acquire_launcher_add_field(
           launcher, dst_field_id)
         [expr_acquire_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -5052,10 +5065,13 @@ local function expr_release_setup_region(
       -- FIXME: When this is a list, a physical region won't be available.
       local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
 
+      local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
+        var [tag] = 0
+        [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_release_launcher_create(
           [dst_value].impl, [dst_parent], [dst_physical],
-          c.legion_predicate_true(), 0, 0)
+          c.legion_predicate_true(), 0, [tag])
         c.legion_release_launcher_add_field(
           launcher, dst_field_id)
         [expr_release_issue_phase_barriers(condition_values, condition_kinds, launcher)]
@@ -5253,7 +5269,7 @@ local lift_unary_op_to_futures = terralib.memoize(
           ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           },
       }),
@@ -5271,14 +5287,14 @@ local lift_unary_op_to_futures = terralib.memoize(
                 rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
-                options = ast.default_options(),
+                annotations = ast.default_annotations(),
                 span = ast.trivial_span(),
               },
-              options = ast.default_options(),
+              annotations = ast.default_annotations(),
               span = ast.trivial_span(),
             },
         }),
@@ -5291,7 +5307,7 @@ local lift_unary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -5334,13 +5350,13 @@ local lift_binary_op_to_futures = terralib.memoize(
          ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
-            options = ast.default_options(),
+            annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
       }),
@@ -5358,20 +5374,20 @@ local lift_binary_op_to_futures = terralib.memoize(
                 lhs = ast.typed.expr.ID {
                   value = lhs_symbol,
                   expr_type = lhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 rhs = ast.typed.expr.ID {
                   value = rhs_symbol,
                   expr_type = rhs_type,
-                  options = ast.default_options(),
+                  annotations = ast.default_annotations(),
                   span = ast.trivial_span(),
                 },
                 expr_type = expr_type,
-                options = ast.default_options(),
+                annotations = ast.default_annotations(),
                 span = ast.trivial_span(),
               },
-              options = ast.default_options(),
+              annotations = ast.default_annotations(),
               span = ast.trivial_span(),
             },
         }),
@@ -5384,7 +5400,7 @@ local lift_binary_op_to_futures = terralib.memoize(
       },
       region_divergence = false,
       prototype = task,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
     task:settype(
@@ -5410,13 +5426,13 @@ function codegen.expr_unary(cx, node)
       fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = node.span,
       },
       args = terralib.newlist({node.rhs}),
       conditions = terralib.newlist(),
       expr_type = expr_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -5486,13 +5502,13 @@ function codegen.expr_binary(cx, node)
       fn = ast.typed.expr.Function {
         value = task,
         expr_type = task:gettype(),
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = node.span,
       },
       args = terralib.newlist({node.lhs, node.rhs}),
       conditions = terralib.newlist(),
       expr_type = expr_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
     return codegen.expr(cx, call)
@@ -5555,16 +5571,16 @@ function codegen.expr_future(cx, node)
     local actions = quote
       [actions]
       [size_actions]
-      var [buffer] = c.malloc(terralib.sizeof(content_type) + [size_value])
+      var buffer_size = terralib.sizeof(content_type) + [size_value]
+      var [buffer] = c.malloc(buffer_size)
       std.assert([buffer] ~= nil, "malloc failed in future")
       var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(content_type)
       [ser_actions]
       std.assert(
-        [data_ptr] - [&uint8]([buffer]) ==
-          terralib.sizeof(content_type) + [size_value],
+        [data_ptr] - [&uint8]([buffer]) == buffer_size,
         "mismatch in data serialized in future")
       var [result] = c.legion_future_from_buffer(
-        [cx.runtime], [&opaque](&[buffer]), [size_value])
+        [cx.runtime], [&opaque]([buffer]), buffer_size)
       c.free([buffer])
     end
 
@@ -6108,7 +6124,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         value = node.value,
         block = node.orig_block,
         span = node.span,
-        options = node.options,
+        annotations = node.annotations,
       })
   end
   local symbol = node.symbol:getsymbol()
@@ -6285,23 +6301,19 @@ end
 function codegen.stat_must_epoch(cx, node)
   local must_epoch = terralib.newsymbol(c.legion_must_epoch_launcher_t, "must_epoch")
   local must_epoch_point = terralib.newsymbol(c.coord_t, "must_epoch_point")
-  local block_future_map = node.options.block:is(ast.options.Demand)
   local future_map = terralib.newsymbol(c.legion_future_map_t, "legion_future_map_t")
 
   local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   local actions = quote
-    var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+    var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
     var [must_epoch_point] = 0
     [codegen.block(cx, node.block)]
     var [future_map] = c.legion_must_epoch_launcher_execute(
       [cx.runtime], [cx.context], [must_epoch])
     c.legion_must_epoch_launcher_destroy([must_epoch])
-  end
-  if block_future_map then
-    actions = quote
-      [actions];
-      c.legion_future_map_wait_all_results([future_map]);
-    end
   end
   actions = quote
     do
@@ -6321,11 +6333,9 @@ function codegen.stat_block(cx, node)
   end
 end
 
-function codegen.stat_index_launch(cx, node)
+local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
-  local domain = codegen.expr_list(cx, node.domain):map(function(value) return value:read(cx) end)
-  local domain_types = node.domain:map(function(domain) return std.as_read(domain.expr_type) end)
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
@@ -6352,12 +6362,12 @@ function codegen.stat_index_launch(cx, node)
               expr.just(quote end, partition.value),
               partition_type),
             expr_type = partition_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           index = arg.index,
           expr_type = arg.expr_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
         }):read(cx)
       args:insert(region)
@@ -6370,9 +6380,7 @@ function codegen.stat_index_launch(cx, node)
     end)
 
   local actions = quote
-    [domain[1].actions];
-    [domain[2].actions];
-    -- Ignore domain[3] because we know it is a constant.
+    [actions]
     [fn.actions];
     [data.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
@@ -6504,48 +6512,79 @@ function codegen.stat_index_launch(cx, node)
     end
   end
 
-  local domain1, domain2, domain_setup
-  if not cx.must_epoch then
-    domain1 = domain[1].value
-    domain2 = domain[2].value
-    domain_setup = quote end
-  else
-    domain1 = terralib.newsymbol(domain_types[1], "domain1")
-    domain2 = terralib.newsymbol(domain_types[2], "domain2")
-    domain_setup = quote
-      var launch_size = std.fmax([domain[2].value] - [domain[1].value], 0)
-      var [domain1] = [cx.must_epoch_point]
-      var [domain2] = [cx.must_epoch_point] + launch_size
+  local must_epoch_setup = quote end
+  if cx.must_epoch then
+    -- FIXME: This is totally broken. It is not safe to edit the loop
+    -- bounds to avoid collisions with other index launches, and on
+    -- top of that this code won't successfully number single task
+    -- launches correctly unless they follow very specific patterns.
+    must_epoch_setup = quote
+      var launch_size = c.legion_domain_get_volume([domain])
       [cx.must_epoch_point] = [cx.must_epoch_point] + launch_size
     end
   end
 
+  local point = terralib.newsymbol(c.legion_domain_point_t, "point")
+
+  local symbol_type = node.symbol:gettype()
   local symbol = node.symbol:getsymbol()
-  local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
-  local launcher_setup = quote
-    [domain_setup]
-    var [argument_map] = c.legion_argument_map_create()
-    for [symbol] = [domain1], [domain2] do
-      var [task_args]
-      [task_args_setup]
-      c.legion_argument_map_set_point(
-        [argument_map],
-        c.legion_domain_point_from_point_1d(
-          c.legion_point_1d_t { x = arrayof(c.coord_t, [symbol]) }),
-        [task_args], true)
+  local symbol_setup
+  if std.is_bounded_type(symbol_type) then
+    local fields = symbol_type.index_type.fields
+    if fields then
+      local dim = #fields
+      local get_point = c["legion_domain_point_get_point_" .. dim .. "d"]
+      symbol_setup = quote
+        var pt = [get_point]([point])
+        var [symbol] = [symbol_type] {
+          __ptr = [symbol_type.index_type.impl_type] {
+            [data.range(dim):map(function(i) return `(pt.x[ [i] ]) end)]
+          }
+        }
+      end
+    else
+      symbol_setup = quote
+        var [symbol] = [symbol_type] {
+          __ptr = c.legion_domain_point_get_point_1d([point]).x[0]
+        }
+      end
     end
+  else
+    -- Otherwise symbol_type has to be some simple integral type.
+    assert(symbol_type:isintegral())
+    symbol_setup = quote
+      var [symbol] = c.legion_domain_point_get_point_1d([point]).x[0]
+    end
+  end
+
+  local argument_map = terralib.newsymbol(c.legion_argument_map_t, "argument_map")
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
+  local launcher_setup = quote
+    [must_epoch_setup]
+    var [argument_map] = c.legion_argument_map_create()
+    do
+      var it = c.legion_domain_point_iterator_create([domain])
+      while c.legion_domain_point_iterator_has_next(it) do
+        var [point] = c.legion_domain_point_iterator_next(it)
+        [symbol_setup]
+
+        var [task_args]
+        [task_args_setup]
+        c.legion_argument_map_set_point(
+          [argument_map], [point], [task_args], true)
+      end
+      c.legion_domain_point_iterator_destroy(it)
+    end
+
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
+    var [tag] = 0
+    [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [launcher] = c.legion_index_launcher_create(
       [fn.value:gettaskid()],
-      c.legion_domain_from_rect_1d(
-        c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [domain1]) },
-          hi = c.legion_point_1d_t { x = arrayof(c.coord_t, [domain2] - 1) },
-        }),
-      g_args, [argument_map],
-      c.legion_predicate_true(), false, 0, 0)
+      [domain], g_args, [argument_map],
+      c.legion_predicate_true(), false, 0, [tag])
     [args_setup]
   end
 
@@ -6593,7 +6632,7 @@ function codegen.stat_index_launch(cx, node)
     local rhs = ast.typed.expr.Internal {
       value = values.value(node, expr.just(quote end, rh), future_type),
       expr_type = future_type,
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
 
@@ -6601,7 +6640,7 @@ function codegen.stat_index_launch(cx, node)
       rhs = ast.typed.expr.FutureGetResult {
         value = rhs,
         expr_type = rhs_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end
@@ -6610,7 +6649,7 @@ function codegen.stat_index_launch(cx, node)
       op = node.reduce_op,
       lhs = terralib.newlist({node.reduce_lhs}),
       rhs = terralib.newlist({rhs}),
-      options = node.options,
+      annotations = node.annotations,
       span = node.span,
     }
 
@@ -6646,6 +6685,47 @@ function codegen.stat_index_launch(cx, node)
     [launcher_cleanup]
   end
   return actions
+end
+
+function codegen.stat_index_launch_num(cx, node)
+  local values = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
+
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local actions = quote
+    [values:map(function(value) return value.actions end)]
+    var [domain] = c.legion_domain_from_rect_1d(
+      c.legion_rect_1d_t {
+        lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[1].value]) },
+        hi = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[2].value] - 1) },
+      })
+  end
+
+  return stat_index_launch_setup(cx, node, domain, actions)
+end
+
+function codegen.stat_index_launch_list(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local actions
+  if std.is_ispace(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = c.legion_index_space_get_domain(
+        [cx.runtime], [value.value].impl)
+    end
+  elseif std.is_region(value_type) then
+    actions = quote
+      [value.actions]
+      var [domain] = c.legion_index_space_get_domain(
+        [cx.runtime], [value.value].impl.index_space)
+    end
+  else
+    assert(false)
+  end
+
+  return stat_index_launch_setup(cx, node, domain, actions)
 end
 
 function codegen.stat_var(cx, node)
@@ -6951,8 +7031,11 @@ function codegen.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return codegen.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return codegen.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return codegen.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return codegen.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return codegen.stat_var(cx, node)
@@ -7020,7 +7103,7 @@ end
 function codegen.top_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
-  if node.options.cuda:is(ast.options.Demand) then
+  if node.annotations.cuda:is(ast.annotation.Demand) then
     node = node { region_divergence = false }
   end
 
@@ -7151,11 +7234,11 @@ function codegen.top_task(cx, node)
               expr.just(quote end, `([future_type]{ __result = [future] })),
               future_type),
             expr_type = future_type,
-            options = node.options,
+            annotations = node.annotations,
             span = node.span,
           },
           expr_type = param_type,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span,
       }):read(cx)
 
@@ -7479,10 +7562,10 @@ end
 
 function codegen.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    if not (node.options.cuda:is(ast.options.Demand) and
+    if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())
     then
-      if node.options.cuda:is(ast.options.Demand) then
+      if node.annotations.cuda:is(ast.annotation.Demand) then
         log.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
@@ -7498,8 +7581,8 @@ function codegen.top(cx, node)
       return cpu_task
     else
       local cpu_node = node {
-        options = node.options {
-          cuda = ast.options.Forbid { value = false }
+        annotations = node.annotations {
+          cuda = ast.annotation.Forbid { value = false }
         }
       }
       local cpu_task = node.prototype

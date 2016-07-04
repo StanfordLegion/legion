@@ -22,7 +22,7 @@ local c = bishoplib.c
 
 mapper
 
-task#foo[index=$p] {
+task task#foo[index=$p] {
   target : processors[isa=x86][($p[0] + 2) % processors[isa=x86].size];
 }
 
@@ -40,7 +40,7 @@ task bar()
   var proc =
     c.legion_runtime_get_executing_processor(__runtime(), __context())
   var procs = c.bishop_all_processors()
-  regentlib.assert(procs.list[1].id == proc.id, "assertion failed")
+  regentlib.assert(procs.list[1].id == proc.id, "test failed in bar")
 end
 
 task foo(x : int)
@@ -48,7 +48,7 @@ task foo(x : int)
     c.legion_runtime_get_executing_processor(__runtime(), __context())
   var procs = c.bishop_all_processors()
   regentlib.assert(procs.list[(x + 2) % procs.size].id == proc.id,
-    "assertion failed")
+    "test failed in foo")
 end
 
 task toplevel()
@@ -60,7 +60,7 @@ task toplevel()
   for i = 0, 4 do
     foo(i)
   end
-  regentlib.assert(procs.list[2].id == proc.id, "assertion failed")
+  regentlib.assert(procs.list[2].id == proc.id, "test failed in toplevel")
 end
 
 bishoplib.register_bishop_mappers()

@@ -47,18 +47,18 @@ local function expr_id(sym, node)
   return ast.typed.expr.ID {
     value = sym,
     expr_type = std.rawref(&sym:gettype()),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
 
-local function make_block(stats, options, span)
+local function make_block(stats, annotations, span)
   return ast.typed.stat.Block {
     block = ast.typed.Block {
       stats = stats,
       span = span,
     },
-    options = options,
+    annotations = annotations,
     span = span,
   }
 end
@@ -75,7 +75,7 @@ local function stat_var(lhs, rhs, node)
     symbols = symbols,
     types = types,
     values = values,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -89,7 +89,7 @@ local function stat_asgn(lh, rh, node)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -202,11 +202,11 @@ function inline_tasks.expr(cx, node)
 
     local task = node.fn.value
     local task_ast = task:hasast()
-    if node.options.inline:is(ast.options.Demand) then
+    if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(task_ast)
     elseif not task_ast or
-      not task_ast.options.inline:is(ast.options.Demand) or
-      node.options.inline:is(ast.options.Forbid)
+      not task_ast.annotations.inline:is(ast.annotation.Demand) or
+      node.annotations.inline:is(ast.annotation.Forbid)
     then
       return stats, node
     end
@@ -264,7 +264,7 @@ function inline_tasks.expr(cx, node)
           symbols = new_local_params,
           types = new_local_param_types,
           values = new_args,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span
         })
       end
@@ -347,7 +347,7 @@ function inline_tasks.expr(cx, node)
         stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
       end
       stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
-      new_block = make_block(stats, node.options, node.span)
+      new_block = make_block(stats, node.annotations, node.span)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
@@ -365,6 +365,16 @@ function inline_tasks.expr(cx, node)
           stats:insertall(new_stats)
           fields[k] = new_node
 
+        elseif terralib.islist(field) then
+          fields[k] = field:map(function(field)
+            if ast.is_node(field) and field:is(ast.typed.expr) then
+              local new_stats, new_node = inline_tasks.expr(cx, field)
+              stats:insertall(new_stats)
+              return new_node
+            else
+              return field
+            end
+          end)
         else
           fields[k] = field
         end
@@ -447,7 +457,7 @@ end
 
 function inline_tasks.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    if node.options.inline:is(ast.options.Demand) then
+    if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node)
     end
     local new_node = inline_tasks.top_task(cx, node)

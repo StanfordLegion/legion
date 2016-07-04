@@ -75,6 +75,11 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
+      virtual void create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -90,6 +95,11 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
+      virtual void create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -102,6 +112,11 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
+      virtual void create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
@@ -117,6 +132,11 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
+      virtual void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output);
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -140,6 +160,11 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
+      virtual void create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output);
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
