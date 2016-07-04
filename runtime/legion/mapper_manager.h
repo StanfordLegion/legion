@@ -109,6 +109,11 @@ namespace Legion {
                                       Mapper::SelectTaskSrcOutput *output,
                                       bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
+      void invoke_task_create_temporary(TaskOp *task,
+                                      Mapper::CreateTaskTemporaryInput *input,
+                                      Mapper::CreateTaskTemporaryOutput *output,
+                                      bool first_invocation = true,
+                                      MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
                                  bool first_invocation = true,
@@ -127,6 +132,11 @@ namespace Legion {
                                         Mapper::SelectInlineSrcOutput *output,
                                         bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
+      void invoke_inline_create_temporary(MapOp *op,
+                                    Mapper::CreateInlineTemporaryInput *input,
+                                    Mapper::CreateInlineTemporaryOutput *output,
+                                    bool first_invocation = true,
+                                    MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
                                           bool first_invocation = true,
@@ -142,6 +152,11 @@ namespace Legion {
                                       Mapper::SelectCopySrcOutput *output,
                                       bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
+      void invoke_copy_create_temporary(CopyOp *op,
+                                  Mapper::CreateCopyTemporaryInput *input,
+                                  Mapper::CreateCopyTemporaryOutput *output,
+                                  bool first_invocation = true,
+                                  MappingCallInfo *info = NULL);
       void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
                                  bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
@@ -160,6 +175,11 @@ namespace Legion {
                                        Mapper::SelectCloseSrcOutput *output,
                                        bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
+      void invoke_close_create_temporary(CloseOp *op,
+                                     Mapper::CreateCloseTemporaryInput *input,
+                                     Mapper::CreateCloseTemporaryOutput *output,
+                                     bool first_invocation = true,
+                                     MappingCallInfo *info = NULL);
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
                                          bool first_invocation = true,
@@ -189,6 +209,11 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcOutput *output,
                                          bool first_invocation = true,
                                          MappingCallInfo *info = NULL);
+      void invoke_release_create_temporary(ReleaseOp *op,
+                                  Mapper::CreateReleaseTemporaryInput *input,
+                                  Mapper::CreateReleaseTemporaryOutput *output,
+                                  bool first_invocation = true,
+                                  MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
                                     bool first_invocation = true,

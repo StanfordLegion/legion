@@ -1294,8 +1294,6 @@ namespace Legion {
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user,
                                     VersionInfo &version_info);
-      void close_logical_subtree(LogicalCloser &closer,
-                                 const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open,
@@ -1370,21 +1368,6 @@ namespace Legion {
                                     const FieldMask &deleted_mask);
     public:
       // Physical traversal operations
-      // Entry
-      void close_physical_node(PhysicalCloser &closer,
-                               const FieldMask &closing_mask);
-      void siphon_physical_children(PhysicalCloser &closer,
-                                    PhysicalState *state,
-                                    const FieldMask &closing_mask,
-                                    const std::set<ColorPoint> &next_children);
-      void close_physical_child(PhysicalCloser &closer,
-                                PhysicalState *state,
-                                const FieldMask &closing_mask,
-                                const ColorPoint &target_child,
-                                FieldMask &child_mask,
-                                const std::set<ColorPoint> &next_children,
-                                bool &changed);
-      // Analogous methods to those above except for closing to a composite view
       CompositeView* create_composite_instance(ContextID ctx_id,
                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      const std::set<ColorPoint> &next_children,
@@ -1570,13 +1553,6 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info) = 0;
-      virtual ApEvent perform_close_operation(const TraversalInfo &info,
-                                              const FieldMask &closing_mask,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                              const InstanceSet &targets, 
-                                              VersionInfo &version_info,
-                                              ApEvent term_event,
-                                 const std::set<ColorPoint> &next_children) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual InstanceView* find_context_view(PhysicalManager *manager, 
                                               SingleTask *context) = 0;
@@ -1712,13 +1688,6 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual ApEvent perform_close_operation(const TraversalInfo &info,
-                                              const FieldMask &closing_mask,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                              const InstanceSet &targets,
-                                              VersionInfo &version_info,
-                                              ApEvent term_event,
-                                     const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -1900,13 +1869,6 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual ApEvent perform_close_operation(const TraversalInfo &info,
-                                            const FieldMask &closing_mask,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                            const InstanceSet &targets,
-                                            VersionInfo &version_info,
-                                            ApEvent term_event,
-                                     const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,

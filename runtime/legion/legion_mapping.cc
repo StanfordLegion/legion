@@ -118,6 +118,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintID PhysicalInstance::get_layout_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->layout->constraints->layout_id;
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {

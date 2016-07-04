@@ -500,14 +500,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* TaskOp::get_logging_name(void)
+    const char* TaskOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return get_task_name();
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TaskOp::get_operation_kind(void)
+    Operation::OpKind TaskOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return TASK_OP_KIND;
@@ -617,6 +617,43 @@ namespace Legion {
       }
       else
         atomic_locks[lock] = exclusive;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* TaskOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      Mapper::CreateTaskTemporaryInput input;
+      Mapper::CreateTaskTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      input.region_requirement_index = index;
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        const std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+          acquired_instances = get_acquired_instances_ref(); 
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances->begin(); it !=
+              acquired_instances->end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_task_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, *acquired_instances, needed_fields,
+            regions[index].region, mapper, "create_task_temporary_instance");
+      }
+      else
+        mapper->invoke_task_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
     }
 
     //--------------------------------------------------------------------------

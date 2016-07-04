@@ -2204,48 +2204,52 @@ namespace Legion {
                                      true/*closing*/, false/*logical*/,
                    FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), closing_mask);
 #endif
-      ApEvent closed;
-      if (composite_idx >= 0)
+      // Always build the composite instance, and then optionally issue
+      // update copies to the target instances from the composite instance
+      CompositeView *result = close_node->create_composite_instance(info.ctx, 
+                                        to_close, next_children, closing_mask,
+                                        version_info, op->get_parent());
+      PhysicalState *physical_state = NULL;
+      LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
+      bool need_valid = true;
+      std::set<ApEvent> closed_events;
+      RegionUsage usage(req);
+      for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-#ifdef DEBUG_LEGION
-        assert(size_t(composite_idx) < targets.size());    
-#endif
-        const InstanceRef &comp_ref = targets[composite_idx];
-        const FieldMask &comp_mask = comp_ref.get_valid_fields();
-        // perform the composite close first
-        close_node->create_composite_instance(info.ctx, to_close,
-                                              next_children, comp_mask,
-                                              version_info, op->get_parent());
-        // Now we can remove those fields from the closing mask
-        closing_mask -= comp_mask;
-      }
-      // Now see if we still have fields to close
-      if (!!closing_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(!targets.empty());
-#endif
-        if (composite_idx >= 0)
+        if (int(idx) == composite_idx)
+          continue;
+        // Issue the update copies to this instance
+        if (need_valid)
         {
-#ifdef DEBUG_LEGION
-          assert(targets.size() > 1);
-#endif
-          // copy over the targets
-          InstanceSet copy_targets(targets.size() - 1);
-          unsigned copy_idx = 0;
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            if (idx == unsigned(composite_idx))
-              continue;
-            copy_targets[copy_idx++] = targets[idx];
-          }
-          closed = close_node->perform_close_operation(info, closing_mask,
-            to_close, copy_targets, version_info, term_event, next_children);
+          valid_instances[result] = closing_mask;
+          physical_state = close_node->get_physical_state(version_info);
+          need_valid = false;
         }
-        else
-          closed = close_node->perform_close_operation(info, closing_mask, 
-                to_close, targets, version_info, term_event, next_children);
+        const InstanceRef &target_ref = targets[idx];
+#ifdef DEBUG_LEGION
+        assert(target_ref.has_ref());
+#endif
+        const FieldMask &target_mask = target_ref.get_valid_fields();
+        InstanceView *target_view = close_node->convert_reference(target_ref, 
+                                                           op->get_parent()); 
+#ifdef DEBUG_LEGION
+        assert(target_view->is_materialized_view());
+#endif
+        close_node->issue_update_copies(info, 
+            target_view->as_materialized_view(), target_mask, valid_instances);
+        // Update the valid views for the node
+#ifdef DEBUG_LEGION
+        assert(physical_state != NULL);
+#endif
+        close_node->update_valid_views(physical_state, target_mask,
+                                       false/*dirty*/, target_view);
+        // Find the user precondition
+        closed_events.insert(target_view->find_user_precondition(usage,
+            term_event, target_mask, op, index, version_info, map_applied));
       }
+      ApEvent closed;
+      if (!closed_events.empty())
+        closed = Runtime::merge_events(closed_events);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -10163,15 +10167,13 @@ namespace Legion {
       // doing them later. We can also skip the close operations for 
       // any operations which have arrived and have read-write privileges
       // because they will be doing their own close operations.
-      if (!arrived || !(projecting || IS_WRITE(user.usage)))
+      if (!arrived || !projecting)
       {
         // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
-        const bool captures_closes = !arrived || 
-                              IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
-        LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*capture*/);
         siphon_logical_children(closer, state, user.field_mask,
-                                captures_closes, next_child, open_below);
+                                true/*capture*/, next_child, open_below);
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
@@ -10252,8 +10254,6 @@ namespace Legion {
             // of epoch users and remove any previous epoch users
             // that were totally dominated
             filter_prev_epoch_users(state, dominator_mask); 
-            // Mask off all dominated fields from current epoch users and move
-            // them to prev epoch users.  If all fields masked off, then remove
             // them from the list of current epoch users.
             filter_curr_epoch_users(state, dominator_mask);
             // We only advance version numbers for fields which are being
@@ -10278,30 +10278,10 @@ namespace Legion {
           // be issuing a close when we actually map.
           if (is_write)
           {
-            LogicalCloser closer(ctx,user,true/*validates*/,false/*captures*/);
-            // There's no point in siphoning, we know we need to close
-            // everything up that interferes with this task
-            close_logical_subtree(closer, user.field_mask);
-            if (closer.has_closed_fields())
-            {
-              const FieldMask &closed_fields = closer.get_closed_fields();
-              closer.record_top_version_numbers(this, state);
-              // We've registered dependences on any users in the sub-tree
-              // and we definitely interfered with them all so all we need
-              // to do now is capture the version information.
-              closer.merge_version_info(version_info, closed_fields);
-              FieldMask non_closed = user.field_mask - closed_fields;
-              if (!!non_closed)
-                state.record_version_numbers(non_closed, user, version_info,
-                                    true/*previous*/, false/*path only*/,
-                                    true/*final*/, false/*close top*/,
-                                    report_uninitialized);
-            }
-            else
-              state.record_version_numbers(user.field_mask, user, version_info,
-                                    true/*previous*/, false/*path only*/,
-                                    true/*final*/, false/*close top*/,
-                                    report_uninitialized);
+            state.record_version_numbers(user.field_mask, user, version_info,
+                                  true/*previous*/, false/*path only*/,
+                                  true/*final*/, false/*close top*/,
+                                  report_uninitialized);
           }
           else
           {
@@ -10550,9 +10530,7 @@ namespace Legion {
       FieldMask any_open_below;
       // Perform the close operations for all the children
       {
-        const bool captures_closes = !arrived ||
-                          IS_READ_ONLY(user.usage) || IS_REDUCE(user.usage);
-        LogicalCloser closer(ctx, user, arrived/*validates*/, captures_closes);
+        LogicalCloser closer(ctx, user, arrived/*validates*/, true/*capture*/);
         if (!arrived)
         {
           // Close up any interfering children, we know our children
@@ -10568,15 +10546,15 @@ namespace Legion {
             any_open_below |= open_below;
           }
         }
-        else if (!IS_WRITE(user.usage))
+        else
         {
           // Anything other than a write will do the normal close
           // Writes get their own special close routine
           // Otherwise just do the normal single close operation
           siphon_logical_children(closer, state, user.field_mask,
-                                 captures_closes, ColorPoint(), any_open_below);
+                                 true/*capture*/, ColorPoint(), any_open_below);
         }
-        if (closer.has_closed_fields())
+        if (closer.has_close_operations())
         {
           // Generate the close operations         
           // We need to record the version numbers for this node as well
@@ -10666,27 +10644,7 @@ namespace Legion {
         // be issuing a close when we actually map.
         if (is_write)
         {
-          LogicalCloser closer(ctx, user, true/*validates*/, false/*captures*/);
-          // There's no point in siphoning, we know we need to close
-          // everything up that interferes with this task
-          close_logical_subtree(closer, user.field_mask);
-          if (closer.has_closed_fields())
-          {
-            const FieldMask &closed_fields = closer.get_closed_fields();
-            closer.record_top_version_numbers(this, state);
-            // We've registered dependences on any users in the sub-tree
-            // and we definitely interfered with them all so all we need
-            // to do now is capture the version information.
-            closer.merge_version_info(version_info, closed_fields);
-            FieldMask non_closed = user.field_mask - closed_fields;
-            if (!!non_closed)
-              state.record_version_numbers(non_closed, user, version_info,
-                                  true/*previous*/, false/*path only*/,
-                                  true/*final*/, false/*close top*/,
-                                  report_uninitialized);
-          }
-          else
-            state.record_version_numbers(user.field_mask, user, version_info,
+          state.record_version_numbers(user.field_mask, user, version_info,
                                   true/*previous*/, false/*path only*/,
                                   true/*final*/, false/*close top*/,
                                   report_uninitialized);
@@ -10907,59 +10865,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::close_logical_subtree(LogicalCloser &closer,
-                                               const FieldMask &closing_mask)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(closer.ctx);
-
-      // No need to perform any local checks since they have all been done
-      // Recursively traverse any open children and close them
-      LegionDeque<FieldState>::aligned dummy_states;
-      ColorPoint next_child; // invalid next point
-      for (std::list<FieldState>::iterator it = state.field_states.begin();
-            it != state.field_states.end(); /*nothing*/)
-      {
-        FieldMask overlap = it->valid_fields & closing_mask;
-        if (!overlap)
-        {
-          it++;
-          continue;
-        }
-        FieldMask already_open;
-        perform_close_operations(closer, overlap, *it,
-                                 next_child, false/*allow next*/,
-                                 false/*upgrade*/, false/*leave open*/,
-                                 false/*read only close*/,
-                                 //(it->open_state == OPEN_READ_ONLY),
-                                 true/*record close operations*/,
-                                 false/*record closed fields*/,
-                                 dummy_states, already_open);
-        // Remove the state if it is now empty
-        if (!it->valid_fields)
-          it = state.field_states.erase(it);
-        else
-          it++;
-      }
-#ifdef DEBUG_LEGION
-      assert(dummy_states.empty());
-#endif
-      // No need to record or advance version numbers since that will 
-      // be done by the caller
-      // We can mark that there is no longer any dirty data below
-      state.dirty_below -= closing_mask;
-      // These fields are now fully closed
-      if (!!state.partially_closed)
-        state.partially_closed -= closing_mask;
-      // We can also clear any outstanding reduction fields
-      if (!(state.outstanding_reduction_fields * closing_mask))
-        clear_logical_reduction_fields(state, closing_mask);
-#ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
                                             bool permit_leave_open,
@@ -11108,7 +11013,6 @@ namespace Legion {
           }
         }
       }
-
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
@@ -12581,187 +12485,6 @@ namespace Legion {
             Runtime::merge_events(mutator_events));
       else
         Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::close_physical_node(PhysicalCloser &closer,
-                                             const FieldMask &closing_mask)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_PHYSICAL_NODE_CALL);
-      // Acquire the physical state of the node to close
-      ContextID ctx = closer.info.ctx;
-      // Figure out if we have dirty data.  If we do, issue copies back to
-      // each of the target instances specified by the closer.  Note we
-      // don't need to issue copies if the target view is already in
-      // the list of currently valid views.  Then
-      // perform the close operation on each of our open partitions that
-      // interfere with the closing mask.
-      // If there are any dirty fields we have to copy them back
-
-      // Not we only need to do this operation for nodes which are
-      // actually regions since they are the only ones that store
-      // actual instances.
-      
-      LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
-      LegionMap<ReductionView*,FieldMask>::aligned valid_reductions;
-      PhysicalState *state = get_physical_state(closer.info.version_info);
-      FieldMask dirty_fields = state->dirty_mask & closing_mask;
-      FieldMask reduc_fields = state->reduction_mask & closing_mask;
-      if (is_region())
-      {
-        if (!!dirty_fields)
-        {
-          // Pull down instance views so we don't issue unnecessary copies
-          pull_valid_instance_views(ctx, state, closing_mask, 
-              false/*needs space*/, closer.info.version_info);
-#ifdef DEBUG_LEGION
-          assert(!state->valid_views.empty());
-#endif
-          find_valid_instance_views(ctx, state, closing_mask, closing_mask, 
-              closer.info.version_info, false/*needs space*/, valid_instances);
-        }
-        if (!!reduc_fields)
-        {
-          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator
-                it = state->reduction_views.begin(); it != 
-                state->reduction_views.end(); it++)
-          {
-            FieldMask overlap = it->second & closing_mask;
-            if (!!overlap)
-              valid_reductions[it->first] = overlap;
-          }
-        }
-      }
-      if (is_region() && !!dirty_fields)
-        closer.issue_dirty_updates(this, dirty_fields, valid_instances);
-      // Now we need to issue close operations for all our children
-      PhysicalCloser next_closer(closer);
-      std::set<ColorPoint> empty_next_children;
-      siphon_physical_children(next_closer, state, 
-                               closing_mask, empty_next_children);
-      // Update the closer's dirty mask
-      const FieldMask &dirty_below = next_closer.get_dirty_mask();
-      closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
-      // Apply any reductions that we might have for the closing
-      // fields back to the target instances
-      // Again this only needs to be done for region nodes but
-      // we should always invalidate reduction views
-      if (is_region() && !!reduc_fields)
-        closer.issue_reduction_updates(this, reduc_fields, valid_reductions);
-      // If we are leaving this state open, we have to do some clean-up
-      // so that it can remain valid, otherwise, if we're not leaving it
-      // open then it doesn't matter anyway.
-      const FieldMask &leave_open_mask = closer.get_leave_open_mask();
-      if (!!leave_open_mask)
-      {
-        if (!!dirty_below)
-        {
-          FieldMask leave_open_dirty = dirty_below & leave_open_mask;
-          if (!!leave_open_dirty)
-            invalidate_instance_views(state, leave_open_dirty);
-        }
-        state->dirty_mask -= (closing_mask & leave_open_mask);
-        if (!!reduc_fields)
-        {
-          FieldMask leave_open_reduc = reduc_fields & leave_open_mask;
-          if (!!leave_open_reduc)
-            invalidate_reduction_views(state, leave_open_reduc); 
-        }
-      }
-    } 
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::siphon_physical_children(PhysicalCloser &closer,
-                                                  PhysicalState *state,
-                                                  const FieldMask &closing_mask,
-                                      const std::set<ColorPoint> &next_children)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime,   
-                        REGION_NODE_SIPHON_PHYSICAL_CHILDREN_CALL);
-#ifdef DEBUG_LEGION
-      assert(state->node == this);
-#endif
-      // First check, if all the fields are disjoint, then we're done
-      if (state->children.valid_fields * closing_mask)
-        return;
-      // Otherwise go through all of the children and 
-      // see which ones we need to clean up
-      bool changed = false;
-      std::vector<ColorPoint> to_delete;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
-            it = state->children.open_children.begin(); 
-            it != state->children.open_children.end(); it++)
-      {
-        close_physical_child(closer, state, closing_mask, it->first,
-                             it->second, next_children, changed);
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      // Delete any empty children
-      if (!to_delete.empty())
-      {
-        for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-        {
-          state->children.open_children.erase(*it);
-        }
-      }
-      // Rebuild the valid mask if anything changed
-      if (changed)
-      {
-        FieldMask next_valid;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              state->children.open_children.begin(); it !=
-              state->children.open_children.end(); it++)
-        {
-          next_valid |= it->second;
-        }
-        state->children.valid_fields = next_valid;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::close_physical_child(PhysicalCloser &closer,
-                                              PhysicalState *state,
-                                              const FieldMask &closing_mask,
-                                              const ColorPoint &target_child,
-                                              FieldMask &child_mask,
-                                      const std::set<ColorPoint> &next_children,
-                                              bool &changed)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(state->node == this);
-#endif
-      FieldMask close_mask = child_mask & closing_mask;
-      // Check field disjointness
-      if (!close_mask)
-        return;
-      // Check for child disjointness
-      if (!next_children.empty())
-      {
-        bool all_disjoint = true;
-        for (std::set<ColorPoint>::const_iterator it = 
-              next_children.begin(); it != next_children.end(); it++)
-        {
-          if (!are_children_disjoint(target_child, *it))
-          {
-            all_disjoint = false;
-            break;
-          }
-        }
-        if (all_disjoint)
-          return;
-      }
-      // Need to get this value before the iterator is invalidated
-      RegionTreeNode *child_node = get_tree_child(target_child);
-      // Now we're ready to perform the close operation
-      closer.close_tree_node(child_node, close_mask);
-      // Update the child field mask and mark that we changed something
-      child_mask -= close_mask;
-      changed = true;
     }
 
     //--------------------------------------------------------------------------
@@ -15287,91 +15010,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::perform_close_operation(const TraversalInfo &info,
-                                                const FieldMask &closing_mask,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                                const InstanceSet &targets,
-                                                VersionInfo &version_info,
-                                                ApEvent term_event, 
-                                      const std::set<ColorPoint> &next_children)
-    //--------------------------------------------------------------------------
-    {
-      // Firgure out which, if any, of our fields are going to
-      // be completely closed
-      PhysicalCloser closer(info, handle);
-      PhysicalState *state = get_physical_state(version_info);
-      // Iterate over all the targets and assign set the right views
-      // In the process, issue any copies necessary to bring these 
-      std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.op->get_parent(), target_views);
-      closer.initialize_targets(this, state, target_views,
-                                closing_mask, targets);
-      bool changed = false;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            target_children.begin(); it != target_children.end(); it++)
-      {
-        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-          state->children.open_children.find(it->first);
-        if (finder == state->children.open_children.end())
-          continue;
-        // If we're going to do the close, set the leave open fields
-        closer.set_leave_open_mask(it->second);
-        close_physical_child(closer, state, closing_mask,
-                             it->first, finder->second,
-                             next_children, changed);
-        if (!finder->second)
-          state->children.open_children.erase(finder);
-      }
-      // If anything changed, rebuild the field mask
-      if (changed)
-      {
-        FieldMask next_valid;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              state->children.open_children.begin(); it !=
-              state->children.open_children.end(); it++)
-        {
-          next_valid |= it->second;
-        }
-        state->children.valid_fields = next_valid;
-      }
-      // This will put the views in the valid set
-      closer.update_node_views(this, state);
-      // Now flush any reductions which need to be closed
-      if (!!state->reduction_mask)
-      {
-        FieldMask flush_reduction_mask = state->reduction_mask & closing_mask;
-        if (!!flush_reduction_mask)
-          flush_reductions(flush_reduction_mask, 0/*redop*/, info);
-      }
-      // Register this as a user of the instance
-      RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
-      const AddressSpaceID local_space = context->runtime->address_space;
-      if (targets.size() == 1)
-      {
-        const InstanceRef &ref = targets[0];  
-#ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
-#endif
-        const FieldMask &close_mask = ref.get_valid_fields();
-        return target_views[0]->add_user_fused(usage, term_event, close_mask,
-         info.op, info.index, version_info,local_space,info.map_applied_events);
-      }
-      std::set<ApEvent> closed_events;
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        const InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
-#endif
-        const FieldMask &close_mask = ref.get_valid_fields();
-        closed_events.insert(target_views[idx]->add_user_fused(usage, 
-                             term_event, close_mask, info.op, info.index, 
-                             version_info,local_space,info.map_applied_events));
-      }
-      return Runtime::merge_events(closed_events);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionNode::send_node(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -15582,9 +15220,9 @@ namespace Legion {
         // Normal instances
         std::vector<InstanceView*> new_views(targets.size());
         convert_target_views(targets, info.op->get_parent(), new_views);
-        if (IS_READ_ONLY(info.req))
+        if (!IS_WRITE_ONLY(info.req))
         {
-          // Read-only case
+          // Any case but write-only
           // All close operations have already been done, so all
           // we need to do is bring our instances up to date for
           // any of their missing fields, and then register our views
@@ -15637,10 +15275,11 @@ namespace Legion {
               issue_update_copies(info, view, valid_fields, valid_views);
             }
             // Finally add this to the set of valid views for the state
-            update_valid_views(state, valid_fields, false/*dirty*/, view); 
+            update_valid_views(state, valid_fields, 
+                               !IS_READ_ONLY(info.req)/*dirty*/, view); 
           }
         }
-        else if (IS_WRITE_ONLY(info.req))
+        else
         {
           // Write-only case
           // Remove any open children for these fields, we don't
@@ -15658,41 +15297,6 @@ namespace Legion {
           // dirty mask
           update_valid_views(state, info.traversal_mask, 
                              new_views, targets);
-        }
-        else
-        {
-          // Read-write case
-          // We first need to perform any close operations to bring
-          // these instances up to date, then issue any close operation
-          // to close up any dirty data to these instances, then 
-          // we can register the instances as being valid.
-          // Figure out our closing mask and the set of closing fields
-          std::vector<MaterializedView*> closing_views(new_views.size());
-          for (unsigned idx = 0; idx < new_views.size(); idx++)
-          {
-#ifdef DEBUG_LEGION
-            assert(new_views[idx]->is_instance_view());
-            assert(
-                new_views[idx]->as_instance_view()->is_materialized_view());
-#endif
-            closing_views[idx] = 
-              new_views[idx]->as_instance_view()->as_materialized_view();
-          }
-          PhysicalCloser closer(info, handle);
-          closer.initialize_targets(this, state, closing_views,
-                                    info.traversal_mask, targets);
-          // Mark the dirty mask with our bits since we're closing to it
-          closer.update_dirty_mask(info.traversal_mask);
-          std::set<ColorPoint> empty_next_children;
-          siphon_physical_children(closer, state, info.traversal_mask,
-                                   empty_next_children);
-          // This will put the instance in the set of valid views
-          closer.update_node_views(this, state);
-          // flush any reductions that we need to do
-          FieldMask reduction_overlap = info.traversal_mask &
-                                        state->reduction_mask;
-          if (!!reduction_overlap)
-            flush_reductions(reduction_overlap, 0/*redop*/, info);
         }
         // Finally we have to update our instance references
         // to get the ready events
@@ -17021,166 +16625,6 @@ namespace Legion {
       op->initialize(creator->get_parent(), req, targets, trace_info.trace,
                      trace_info.req_idx, closing_mask, creator);
       return op;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PartitionNode::perform_close_operation(const TraversalInfo &info,
-                                                  const FieldMask &closing_mask,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                                 const InstanceSet &targets,
-                                                 VersionInfo &version_info,
-                                                 ApEvent term_event,
-                                      const std::set<ColorPoint> &next_children)
-    //--------------------------------------------------------------------------
-    {
-      // Find the target views
-      std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.op->get_parent(), target_views);
-      // Handle a special case here: if the node we're closing is a partition
-      // and we're permitted to leave the partition open, then don't actually
-      // close the partition. Instead close to the individual target child
-      // that we are trying to close to. This handles the case of leaving 
-      // many children in a read-only partition open. Only safe to do
-      // this if all the children are disjoint.
-      FieldMask leave_open_all = closing_mask;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            target_children.begin(); it != target_children.end(); it++)
-      {
-        leave_open_all &= it->second;
-        if (!leave_open_all)
-          break;
-      }
-      if (!!leave_open_all && !targets.empty() && row_source->is_disjoint())
-      {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              target_children.begin(); it != target_children.end(); it++)
-        {
-          RegionNode *child_node = get_child(it->first); 
-          PhysicalCloser child_closer(info, child_node->handle);
-          child_closer.set_leave_open_mask(leave_open_all);
-          std::vector<MaterializedView*> child_views(target_views.size());
-          for (unsigned idx = 0; idx < target_views.size(); idx++)
-            child_views[idx] = 
-                target_views[idx]->get_materialized_subview(it->first);
-          PhysicalState *child_state = 
-            child_node->get_physical_state(version_info);
-          // Complete fields is empty because we don't know which
-          // children we will be closing during the siphon call
-          child_closer.initialize_targets(child_node, child_state, child_views,
-                                          leave_open_all, targets);
-          std::set<ColorPoint> empty_next_children;
-          child_node->siphon_physical_children(child_closer,
-                                               child_state, leave_open_all,
-                                               empty_next_children);
-          child_closer.update_node_views(child_node, child_state);
-        }
-        // See if we have any fields we haven't closed yet
-        FieldMask unclosed = closing_mask - leave_open_all; 
-        if (!!unclosed)
-        {
-          // Closed up this whole partition for the remaining fields
-          PhysicalCloser closer(info, parent->handle);
-          PhysicalState *state = get_physical_state(version_info); 
-          closer.initialize_targets(this, state, target_views,
-                                    unclosed, targets);
-          bool changed = false;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                target_children.begin(); it != target_children.end(); it++)
-          {
-            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-              state->children.open_children.find(it->first);
-            if (finder == state->children.open_children.end())
-              continue;
-            // If we're actually doing the close, record the leave open fields
-            closer.set_leave_open_mask(it->second & unclosed);
-            close_physical_child(closer, state, unclosed,
-                                 it->first, finder->second, 
-                                 next_children, changed);
-            if (!finder->second)
-              state->children.open_children.erase(finder);
-          }
-          // If anything changed, rebuild the field mask
-          if (changed)
-          {
-            FieldMask next_valid;
-            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                  state->children.open_children.begin(); it !=
-                  state->children.open_children.end(); it++)
-            {
-              next_valid |= it->second;
-            }
-            state->children.valid_fields = next_valid;
-          }   
-          closer.update_node_views(this, state);
-        }
-      }
-      else
-      {
-        // Otherwise we are trying to close up this whole partition
-        // Close it up to our parent region
-        PhysicalCloser closer(info, parent->handle);
-        PhysicalState *state = get_physical_state(version_info); 
-        closer.initialize_targets(this, state, target_views,
-                                  closing_mask, targets);
-        bool changed = false;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              target_children.begin(); it != target_children.end(); it++)
-        {
-          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-            state->children.open_children.find(it->first);
-          if (finder == state->children.open_children.end())
-            continue;
-          // If we're actually doing the close, record the leave open fields
-          closer.set_leave_open_mask(it->second);
-          close_physical_child(closer, state, closing_mask, it->first, 
-                               finder->second, next_children, changed);
-          if (!finder->second)
-            state->children.open_children.erase(finder);
-        }
-        // If anything changed, rebuild the field mask
-        if (changed)
-        {
-          FieldMask next_valid;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                state->children.open_children.begin(); it !=
-                state->children.open_children.end(); it++)
-          {
-            next_valid |= it->second;
-          }
-          state->children.valid_fields = next_valid;
-        }
-        // Update the physical instance views
-        closer.update_node_views(this, state);
-        // No need to check for flushed reductions, nobody can be
-        // reducing directly to a partition object anyway
-      }
-      // Register this as a user of the instance
-      RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
-      const AddressSpaceID local_space = context->runtime->address_space;
-      if (targets.size() == 1)
-      {
-        const InstanceRef &ref = targets[0];  
-#ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
-#endif
-        const FieldMask &close_mask = ref.get_valid_fields();
-        return target_views[0]->add_user_fused(usage, term_event, close_mask,
-                                         info.op, info.index, version_info,
-                                         local_space, info.map_applied_events);
-      }
-      std::set<ApEvent> closed_events;
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        const InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
-#endif
-        const FieldMask &close_mask = ref.get_valid_fields();
-        closed_events.insert(target_views[idx]->add_user_fused(usage, 
-                           term_event, close_mask, info.op, info.index, 
-                           version_info, local_space, info.map_applied_events));
-      }
-      return Runtime::merge_events(closed_events);
     }
 
     //--------------------------------------------------------------------------

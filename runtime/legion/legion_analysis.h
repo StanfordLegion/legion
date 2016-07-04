@@ -1302,53 +1302,6 @@ namespace Legion {
     };
 
     /**
-     * \struct PhysicalCloser
-     * Class for helping with the closing of physical region trees
-     */
-    class PhysicalCloser {
-    public:
-      PhysicalCloser(const TraversalInfo &info,
-                     LogicalRegion closing_handle);
-      PhysicalCloser(const PhysicalCloser &rhs);
-      ~PhysicalCloser(void);
-    public:
-      PhysicalCloser& operator=(const PhysicalCloser &rhs);
-    public:
-      void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
-                              const std::vector<MaterializedView*> &targets,
-                              const FieldMask &closing_mask,
-                              const InstanceSet &close_targets);
-    public:
-      void close_tree_node(RegionTreeNode *node, 
-                           const FieldMask &closing_mask);
-      void issue_dirty_updates(RegionTreeNode *node, 
-                               const FieldMask &dirty_fields,
-              const LegionMap<LogicalView*,FieldMask>::aligned &valid_intances);
-      void issue_reduction_updates(RegionTreeNode *node,
-                                   const FieldMask &reduc_fields,
-          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions);
-    public:
-      void update_dirty_mask(const FieldMask &mask);
-      const FieldMask& get_dirty_mask(void) const;
-      void update_node_views(RegionTreeNode *node, PhysicalState *state);
-    public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-      inline const FieldMask& get_leave_open_mask(void) const 
-        { return leave_open_mask; }
-    public:
-      const TraversalInfo &info;
-      const LogicalRegion handle;
-    protected:
-      FieldMask                    leave_open_mask;
-    protected:
-      FieldMask                         dirty_mask;
-      std::vector<MaterializedView*> upper_targets;
-      std::vector<MaterializedView*> lower_targets;
-      InstanceSet                    close_targets;
-    }; 
-
-    /**
      * \struct CompositeCloser
      * Class for helping with closing of physical trees to composite instances
      */
