@@ -467,25 +467,25 @@ namespace Legion {
       LogicalPartition get_parent_logical_partition(MappingCallInfo *info,
                                                     LogicalRegion handle);
     public:
-      void retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
+      bool retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
           SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
           SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx, 
+      bool retrieve_semantic_information(MappingCallInfo *ctx, 
           IndexPartition handle, SemanticTag tag, const void *&result,
           size_t &size, bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
           SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
           FieldID fid, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx, 
+      bool retrieve_semantic_information(MappingCallInfo *ctx, 
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result,
           size_t &size, bool can_fail, bool wait_until_ready);
     public:
