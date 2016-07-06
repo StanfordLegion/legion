@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- undefined_field_access_region1.rg:21: no field 'impl' in type region(int32)
+-- undefined_field_access_region1.rg:26: no field 'impl' in type region(int32)
 --   r.impl.tree_id = 5
 --    ^
 
