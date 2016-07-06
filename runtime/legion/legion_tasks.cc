@@ -496,6 +496,17 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
+      if (!map_locally)
+      {
+        log_run.error("Invalid mapper output. Remote mapping of tasks is not "
+                      "currently supported. Mapper %s attempted to remote map "
+                      "task %s (ID %lld).", mapper->get_mapper_name(),
+                      get_task_name(), unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
       return options.inline_task;
     }
 
