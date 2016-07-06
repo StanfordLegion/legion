@@ -4045,6 +4045,14 @@ legion_index_iterator_next_span(legion_index_iterator_t handle_,
 //------------------------------------------------------------------------
 
 legion_unique_id_t
+legion_context_get_unique_id(legion_context_t ctx_)
+{
+  Task* task =
+    reinterpret_cast<Task*>(CObjectWrapper::unwrap(ctx_)->context());
+  return task->get_unique_id();
+}
+
+legion_unique_id_t
 legion_task_get_unique_id(legion_task_t task_)
 {
   return CObjectWrapper::unwrap(task_)->get_unique_id();

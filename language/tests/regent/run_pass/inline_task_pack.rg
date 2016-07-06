@@ -22,33 +22,30 @@ struct ret
   id : uint64,
 }
 
-task inc1(x : int) : int
-  return x + 1
-end
+struct st
+{
+  v1 : ret,
+  v2 : ret,
+}
 
 __demand(__inline)
 task dec1(x : int) : ret
   return ret { v = x - 1, id = c.legion_context_get_unique_id(__context()) }
 end
 
-__demand(__inline)
-task f(x : int) : ret
-  return dec1(inc1(x + 5))
-end
-
-task g(x : int) : ret
-  return ret { v = x + 5, id = c.legion_context_get_unique_id(__context()) }
+__forbid(__inline)
+task inc1(x : int) : ret
+  return ret { v = x + 1, id = c.legion_context_get_unique_id(__context()) }
 end
 
 task main()
   var id_main = c.legion_context_get_unique_id(__context())
-  for i = 0, 10 do
-    var ret_f = f(i)
-    var ret_g = g(i)
-    regentlib.assert(ret_f.v == ret_g.v, "test failed")
-    regentlib.assert(id_main == ret_f.id, "test failed")
-    regentlib.assert(id_main ~= ret_g.id, "test failed")
-  end
+  var s = st { v1 = inc1(10), v2 = dec1(10) }
+  var { v1 = v1, v2 = v2 } = s
+  regentlib.assert(v1.v == 11, "test failed")
+  regentlib.assert(v2.v == 9, "test failed")
+  regentlib.assert(v1.id ~= id_main, "task inc1 is inlined though forbidden")
+  regentlib.assert(v2.id == id_main, "task dec1 is not inlined though demanded")
 end
 
 regentlib.start(main)

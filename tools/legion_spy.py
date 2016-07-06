@@ -3026,7 +3026,7 @@ class LogicalState(object):
                                  register_user, previous_deps, perform_checks):
         arrived = next_child is None
         # Figure out if we need to check close operations or not
-        if not arrived or not (projecting or req.is_write()):
+        if not arrived or not projecting:
             if not self.siphon_logical_children(op, req, next_child, 
                                                 previous_deps, perform_checks):
                 return False
@@ -3036,31 +3036,6 @@ class LogicalState(object):
                                                arrived, previous_deps):
                 return False
         if arrived and not projecting:
-            # If we are doing a write, register dependences on all
-            # open subtrees
-            if req.is_write() and self.open_children:
-                closed_users = list()
-                for child in self.open_children.iterkeys():
-                    child.close_logical_tree(self.field, closed_users, False)
-                if perform_checks:
-                    for prev_op,prev_req in closed_users:
-                        if prev_req.is_read_only():
-                            if not op.has_mapping_dependence(req, prev_op, prev_req,
-                                                             ANTI_DEPENDENCE, self.field):
-                                return False
-                        else:
-                            if not op.has_mapping_dependence(req, prev_op, prev_req,
-                                                            TRUE_DEPENDENCE, self.field):
-                                return False
-                else:
-                    # Not performing checks so record the mapping dependences 
-                    for prev_op,prev_req in closed_users:
-                        dep = MappingDependence(prev_op, prev_req.index, op, req.index, 
-                            ANTI_DEPENDENCE if prev_req.is_read_only() else TRUE_DEPENDENCE)
-                        prev_op.add_outgoing(dep)
-                        op.add_incoming(dep)
-                # We closed all the children
-                self.open_children = dict()
             # Add ourselves as the current user
             if register_user:
                 self.current_epoch_users.append((op,req))
@@ -3646,41 +3621,28 @@ class PhysicalState(object):
             # invalidate anything at this node
             return self.node.close_physical_tree(self.depth, self.field, None, 
                                                  op, req, perform_checks, True)
-        elif inst.is_virtual():
-            target = CompositeInstance(op.state, self.node, self.depth, self.field)
-            # Capture down the tree first
-            if not self.node.close_physical_tree(self.depth, self.field, target, 
-                                                 op, req, perform_checks, True):
-                return False
-            # Now capture locally
-            already_captured = set()
-            target.capture(self, already_captured)
-        else:
-            # Issue any local updates needed first
-            if self.dirty:
-                # If we are not already valid, we need to be made valid
-                if inst not in self.valid_instances:
-                    error_str = "region requirement "+str(req.index)+" of "+str(op)
-                    if not self.issue_update_copies(inst, self.valid_instances, op,
-                                              req.index, perform_checks, error_str):
-                        return False
-            # close sub-tree
-            if not self.node.close_physical_tree(self.depth, self.field, inst, 
-                                                 op, req, perform_checks, True):
-                return False
-            # Finally flush any outstanding reductions
-            if self.reduction_instances:
-                assert self.redop <> 0
-                error_str = "region requirement "+str(req.index)+" of "+str(op)
-                if not self.issue_update_reductions(inst, self.reduction_instances, 
-                                          op, req.index, perform_checks, error_str):
-                    return False
-            target = inst
+        # Otherwise we match the runtime by always making a composite
+        # instance and only issuing copies from it if we have actual
+        # physical instances to target
+        target = CompositeInstance(op.state, self.node, self.depth, self.field)
+        if not self.node.close_physical_tree(self.depth, self.field, target,
+                                             op, req, perform_checks, True):
+            return False
+        already_captured = set()
+        target.capture(self, already_captured)
         self.dirty = True 
         self.redop = 0
         self.valid_instances = set()
         self.reduction_instances = set()
         self.valid_instances.add(target)
+        # Now issue any copies if we have a real instance
+        if not inst.is_virtual():
+            error_str = "region requirement "+str(req.index)+" of "+str(op)
+            if not target.issue_update_copies(inst, self.depth, self.node, op, 
+                                              req.index, perform_checks, error_str): 
+                return False
+            # This is now also a valid instance
+            self.valid_instances.add(inst)
         return True
 
     def capture_composite_instance(self, op, req):
@@ -4053,13 +4015,13 @@ class MappingDependence(object):
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
-                 'incoming', 'outgoing', 'logical_incoming', 'logical_outgoing',
-                 'physical_incoming', 'physical_outgoing', 'start_event', 
-                 'finish_event', 'inter_close_ops', 'task', 'task_id', 'points', 
-                 'creator', 'realm_copies', 'realm_fills', 'close_idx', 
-                 'partition_kind', 'partition_node', 'node_name', 'cluster_name', 
-                 'generation', 'need_logical_replay', 'reachable_cache', 
-                 'transitive_warning_issued']
+                 'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
+                 'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
+                 'start_event', 'finish_event', 'inter_close_ops', 'task', 
+                 'task_id', 'points', 'creator', 'realm_copies', 'realm_fills', 
+                 'close_idx', 'partition_kind', 'partition_node', 'node_name', 
+                 'cluster_name', 'generation', 'need_logical_replay', 
+                 'reachable_cache', 'transitive_warning_issued']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -4068,6 +4030,7 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
+        self.temporaries = None
         self.incoming = None # Mapping dependences
         self.outgoing = None # Mapping dependences
         self.logical_incoming = None # Operation dependences
@@ -4227,6 +4190,13 @@ class Operation(object):
             self.mappings[index] = dict()
         self.mappings[index][fid] = inst
 
+    def add_temporary_instance(self, index, fid, inst):
+        if self.temporaries is None:
+            self.temporaries = dict()
+        if index not in self.temporaries:
+            self.temporaries[index] = dict()
+        self.temporaries[index][fid] = inst
+
     def add_incoming(self, dep):
         assert dep.op2 == self
         if self.incoming is None:
@@ -4254,6 +4224,15 @@ class Operation(object):
         if self.realm_fills is None:
             self.realm_fills = list()
         self.realm_fills.append(fill)
+
+    def find_temporary_instance(self, index, fid):
+        if not self.temporaries:
+            return None
+        if index not in self.temporaries:
+            return None
+        if fid not in self.temporaries[index]:
+            return None
+        return self.temporaries[index][fid]
 
     def get_logical_reachable(self, reachable, forward):
         if self in reachable:
@@ -4929,7 +4908,8 @@ class Operation(object):
         # Handle special cases first
         # Do any of our close operations before ourself
         if self.inter_close_ops:
-            assert not self.is_close()
+            assert not self.kind == INTER_CLOSE_OP_KIND and \
+                   not self.kind == READ_ONLY_CLOSE_OP_KIND
             prefix = ''
             for idx in range(depth):
                 prefix += '  '
@@ -4941,7 +4921,7 @@ class Operation(object):
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
-            for point in self.points.itervalues():
+            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
                 if not point.op.perform_op_physical_analysis(depth, perform_checks):
                     return False
             return True
@@ -5950,6 +5930,51 @@ class CompositeNode(object):
             for inst in self.valid_instances:
                 valid.add(inst)
 
+    def need_temporary_instance(self, dst, region, need_check = True):
+        if need_check:
+            # See if we can keep going down
+            dominating_children = list()
+            for child in self.children:
+                if child.are_domination_tests_sound() and child.node.dominates(region):
+                    dominating_children.append(child)
+            if len(dominating_children) == 1:
+                return dominating_children[0].need_temporary_instance(dst, region)
+        if self.dirty:
+            # Check to see if the target instance is already valid
+            if dst not in self.valid_instances:
+                # Check all the children to see if they have any dirty copies
+                # of the destination instance
+                for child in self.children:
+                    if child.has_dirty_destination(dst):
+                        return True
+                # Also need to check any composite instances to see if they
+                # need a temporary instance
+                for inst in self.valid_instances:
+                    if isinstance(inst, CompositeInstance) and \
+                        inst.need_temporary_instance(dst, region):
+                        return True
+        # Now check all the children
+        for child in self.children:
+            if child.need_temporary_instance(dst, region, False):
+                return True
+        return False
+
+    def has_dirty_destination(self, dst):
+        if self.dirty and dst in self.valid_instances:
+            return True
+        for child in self.children:
+            if child.has_dirty_destination(dst):
+                return True
+        return False
+
+    def are_domination_tests_sound(self):
+        if isinstance(self.node, LogicalRegion):
+            return True
+        # Partition nodes are only sound if they have all the fields
+        if len(self.children) <> self.node.get_num_children():
+            return False
+        return True
+
     def issue_update_copies(self, dst, dst_depth, dst_field, region, op, index, 
                             perform_checks, error_str, actually_across, need_check = True):
         children_dominate = False
@@ -5958,7 +5983,7 @@ class CompositeNode(object):
             # Keep going down if we there is exaclty one
             dominating_children = list()
             for child in self.children:
-                if child.node.dominates(region):
+                if child.are_domination_tests_sound() and child.node.dominates(region):
                     dominating_children.append(child)
             if len(dominating_children) == 1:
                 return dominating_children[0].issue_update_copies(dst, dst_depth, dst_field,
@@ -5967,6 +5992,8 @@ class CompositeNode(object):
             # if they do then we can skip doing any copies from this level
             target_points = region.get_point_set().copy()
             for child in self.children:
+                if not child.are_domination_tests_sound():
+                    continue
                 target_points -= child.node.get_point_set()
                 if target_points.empty():
                     break
@@ -6209,9 +6236,85 @@ class CompositeInstance(object):
 
     def issue_update_copies(self, dst, dst_depth, region, 
                             op, index, perform_checks, error_str):
-        # This is actually just a special case of issuing copies across 
-        return self.issue_copies_across(dst, dst_depth, self.field, region, op, index, 
-                                        perform_checks, error_str, False)
+        # Check to see if we need a temporary instance
+        # Since our analysis is more precise than the runtime, we'll also
+        # go down this path if we can find a temporary instance, definitely
+        # go down this path if we know we need to though
+        temp_inst = op.find_temporary_instance(index, self.field.fid)
+        if self.nodes[self.root].need_temporary_instance(dst, region) or \
+            temp_inst is not None:
+            if temp_inst is None:
+                print "ERROR: Missing temporary instance creation for "+\
+                      str(self.field)+" of target instance "+str(dst)+\
+                      " by "+error_str
+                if self.state.assert_on_fail:
+                    assert False
+                return False
+            # Issue the copies to the temporary instance and then
+            # issue the copies back to the original instance
+            if not self.issue_copies_across(temp_inst, dst_depth, self.field,
+                        region, op, index, perform_checks, error_str, False):
+                return False
+            # Now see if we can find the copy back
+            if perform_checks:
+                copy = op.find_generated_copy(self.field, region, dst, 0)
+                if copy is None:
+                    print "ERROR: Missing copy from temporary instance "+\
+                          str(temp_inst)+" to "+str(dst)+" for "+str(self.field)+\
+                          " by "+error_str
+                    if self.state.assert_on_fail:
+                        assert False
+                    return False
+                # Fill in the reachable cache
+                if copy.reachable_cache is None:
+                    copy.reachable_cache = set()
+                    copy.get_physical_reachable(copy.reachable_cache, False)
+                # Check the preconditions
+                src_preconditions = temp_inst.find_copy_dependences(depth=self.depth,
+                    field=self.field, op=op, index=index, region=region, 
+                    reading=True, redop=0, precise=True)
+                bad = check_preconditions(src_preconditions, copy)
+                if bad is not None:
+                    print "ERROR: Missing source copy precondition for temporary "+\
+                          "instance copy "+str(copy)+" of field "+str(self.field)+\
+                          " issued by "+error_str+" on "+str(bad)
+                    if self.state.assert_on_fail:
+                        assert False
+                    return False
+                dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
+                    field=self.field, op=op, index=index, region=region,
+                    reading=False, redop=0, precise=True)
+                bad = check_preconditions(dst_preconditions, copy)
+                if bad is not None:
+                    print "ERROR: Missing destination precondition for temporary "+\
+                          "instance copy "+str(copy)+" of field "+str(self.field)+\
+                          " issued by "+error_str+" on "+str(bad)
+                    if self.state.assert_on_fail:
+                        assert False
+                    return False
+            else:
+                src_preconditions = temp_inst.find_copy_dependences(depth=self.depth,
+                    field=self.field, op=op, index=index, region=region, 
+                    reading=True, redop=0, precise=True)
+                dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
+                    field=self.field, op=op, index=index, region=region,
+                    reading=False, redop=0, precise=True)
+                # Make a realm copy
+                copy = self.state.create_copy(op)
+                copy.set_region(region)
+                copy.add_field(self.field.fid, temp_inst, self.field.fid, dst, 0)
+                # Add the preconditions
+                for src_op in src_preconditions:
+                    src_op.physical_outgoing.add(copy)
+                    copy.physical_incoming.add(src_op)
+                for dst_op in dst_preconditions:
+                    dst_op.physical_outgoing.add(copy)
+                    copy.physical_incoming.add(dst_op)
+            return True
+        else:
+            # This is actually just a special case of issuing copies across 
+            return self.issue_copies_across(dst, dst_depth, self.field, region, 
+                                    op, index, perform_checks, error_str, False)
 
     def issue_copies_across(self, dst, dst_depth, dst_field, region, op, index, 
                             perform_checks, error_str, actually_across=True):
@@ -6225,6 +6328,9 @@ class CompositeInstance(object):
             if perform_checks:
                 for reduction_inst,reduction_region in self.reductions.iteritems():
                     assert reduction_inst.redop <> 0
+                    # No need to reduce back to the original instance
+                    if reduction_inst is dst:
+                        continue
                     # Check to see if it intersects with the region 
                     if region.intersects(reduction_region):
                         if reduction_region is not region:
@@ -6367,6 +6473,9 @@ class CompositeInstance(object):
                                 region=region, op=reduction, index=index, 
                                 reading=False, redop=reduction_inst.redop)
         return True
+
+    def need_temporary_instance(self, dst, region):
+        return self.nodes[self.root].need_temporary_instance(dst, region)
 
 class EventHandle(object):
     __slots__ = ['uid']
@@ -7215,6 +7324,9 @@ instance_field_pat      = re.compile(
 mapping_decision_pat    = re.compile(
     prefix+"Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
            "(?P<iid>[0-9a-f]+)")
+temporary_decision_pat  = re.compile(
+    prefix+"Temporary Instance (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
+           "(?P<iid>[0-9a-f]+)")
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
@@ -7433,6 +7545,13 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         inst = state.get_instance(int(m.group('iid'),16))
         op.add_mapping_decision(int(m.group('idx')),
+            int(m.group('fid')), inst)
+        return True
+    m = temporary_decision_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        inst = state.get_instance(int(m.group('iid'),16))
+        op.add_temporary_instance(int(m.group('idx')),
             int(m.group('fid')), inst)
         return True
     # Operations near the top since they happen frequently

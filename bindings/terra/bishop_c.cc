@@ -31,7 +31,6 @@ using namespace Legion::Mapping::Utilities;
 
 static vector<bishop_mapper_impl_t> mapper_impls;
 static vector<bishop_transition_fn_t> transitions;
-static map<bishop_matching_state_t, unsigned> state_to_mapper_impl_id;
 static bishop_mapper_state_init_fn_t mapper_init;
 
 namespace Legion {
@@ -49,8 +48,8 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
        it != local_procs.end(); it++)
   {
     BishopMapper* mapper =
-      new BishopMapper(mapper_impls, transitions, state_to_mapper_impl_id,
-                       mapper_init, rt, machine, *it);
+      new BishopMapper(mapper_impls, transitions, mapper_init, rt, machine,
+                       *it);
     runtime->replace_default_mapper(mapper, *it);
   }
 }
@@ -60,16 +59,12 @@ register_bishop_mappers(bishop_mapper_impl_t* _mapper_impls,
                         unsigned _num_mapper_impls,
                         bishop_transition_fn_t* _transitions,
                         unsigned _num_transitions,
-                        unsigned* _state_to_mapper_impl_id,
-                        unsigned _num_state_to_mapper_impl_id,
                         bishop_mapper_state_init_fn_t _mapper_init)
 {
   for (unsigned i = 0; i < _num_mapper_impls; ++i)
     mapper_impls.push_back(_mapper_impls[i]);
   for (unsigned i = 0; i < _num_transitions; ++i)
     transitions.push_back(_transitions[i]);
-  for (unsigned i = 0; i < _num_state_to_mapper_impl_id; ++i)
-    state_to_mapper_impl_id[i] = _state_to_mapper_impl_id[i];
   mapper_init = _mapper_init;
 
   HighLevelRuntime::set_registration_callback(

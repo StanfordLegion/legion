@@ -365,6 +365,16 @@ function inline_tasks.expr(cx, node)
           stats:insertall(new_stats)
           fields[k] = new_node
 
+        elseif terralib.islist(field) then
+          fields[k] = field:map(function(field)
+            if ast.is_node(field) and field:is(ast.typed.expr) then
+              local new_stats, new_node = inline_tasks.expr(cx, field)
+              stats:insertall(new_stats)
+              return new_node
+            else
+              return field
+            end
+          end)
         else
           fields[k] = field
         end

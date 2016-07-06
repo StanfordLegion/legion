@@ -141,6 +141,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::speculate(const MapperContext      ctx,
                                  const Task&              task,
                                        SpeculativeOutput& output)
@@ -175,6 +185,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const InlineMapping&        inline_op,
                                         const InlineProfilingInfo&  input)
@@ -196,6 +216,16 @@ namespace Legion {
                                            const Copy&                  copy,
                                            const SelectCopySrcInput&    input,
                                                  SelectCopySrcOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
     }
@@ -230,6 +260,16 @@ namespace Legion {
                                             const Close&               close,
                                             const SelectCloseSrcInput&  input,
                                                   SelectCloseSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
     }
@@ -289,6 +329,16 @@ namespace Legion {
     void ReplayMapper::speculate(const MapperContext         ctx,
                                  const Release&              release,
                                        SpeculativeOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
     }
