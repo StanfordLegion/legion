@@ -495,6 +495,9 @@ function type_check.expr_field_access(cx, node)
   local field_type
   if std.is_region(std.as_read(unpack_type)) and node.field_name == "ispace" then
     field_type = std.as_read(unpack_type):ispace()
+  elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
+    log.error(node, "no field '" .. node.field_name .. "' in type " ..
+                tostring(std.as_read(value_type)))
   else
     field_type = std.get_field(unpack_type, node.field_name)
 

@@ -599,6 +599,11 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t) or std.is_list_of_partitions(t)
 end
 
+function std.type_is_opaque_to_field_accesses(t)
+  return std.is_region(t) or std.is_partition(t) or
+    std.is_cross_product(t) or std.is_list(t)
+end
+
 function std.is_ctor(t)
   return terralib.types.istype(t) and rawget(t, "is_ctor")
 end
