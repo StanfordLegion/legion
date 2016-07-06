@@ -403,6 +403,13 @@ namespace Legion {
 		      index, fid, inst_id);
       }
 
+      static inline void log_temporary_instance(UniqueID unique_id,
+                                  unsigned index, FieldID fid, IDType inst_id)
+      {
+        log_spy.print("Temporary Instance %llu %d %d " IDFMT "", unique_id,
+                      index, fid, inst_id);
+      }
+
       // The calls above this ifdef record the basic information about
       // the execution of an application. It is sufficient to show how
       // an application executed, but is insufficient to actually 

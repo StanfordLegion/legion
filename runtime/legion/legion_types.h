@@ -360,23 +360,28 @@ namespace Legion {
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
+      TASK_CREATE_TEMPORARY_CALL,
       TASK_SPECULATE_CALL,
       TASK_REPORT_PROFILING_CALL,
       MAP_INLINE_CALL,
       INLINE_SELECT_SOURCES_CALL,
+      INLINE_CREATE_TEMPORARY_CALL,
       INLINE_REPORT_PROFILING_CALL,
       MAP_COPY_CALL,
       COPY_SELECT_SOURCES_CALL,
+      COPY_CREATE_TEMPORARY_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
       MAP_CLOSE_CALL,
       CLOSE_SELECT_SOURCES_CALL,
+      CLOSE_CREATE_TEMPORARY_CALL,
       CLOSE_REPORT_PROFILING_CALL,
       MAP_ACQUIRE_CALL,
       ACQUIRE_SPECULATE_CALL,
       ACQUIRE_REPORT_PROFILING_CALL,
       MAP_RELEASE_CALL,
       RELEASE_SELECT_SOURCES_CALL,
+      RELEASE_CREATE_TEMPORARY_CALL,
       RELEASE_SPECULATE_CALL,
       RELEASE_REPORT_PROFILING_CALL,
       CONFIGURE_CONTEXT_CALL,
@@ -402,23 +407,28 @@ namespace Legion {
       "select_task_variant",                        \
       "postmap_task",                               \
       "select_task_sources",                        \
+      "create task temporary",                      \
       "speculate (for task)",                       \
       "report profiling (for task)",                \
       "map_inline",                                 \
       "select_inline_sources",                      \
+      "inline create temporary",                    \
       "report profiling (for inline)",              \
       "map_copy",                                   \
       "select_copy_sources",                        \
+      "copy create temporary",                      \
       "speculate (for copy)",                       \
       "report_profiling (for copy)",                \
       "map_close",                                  \
       "select_close_sources",                       \
+      "close create temporary",                     \
       "report_profiling (for close)",               \
       "map_acquire",                                \
       "speculate (for acquire)",                    \
       "report_profiling (for acquire)",             \
       "map_release",                                \
       "select_release_sources",                     \
+      "release create temporary",                   \
       "speculate (for release)",                    \
       "report_profiling (for release)",             \
       "configure_context",                          \
@@ -1179,7 +1189,6 @@ namespace Legion {
     struct PhysicalUser;
     struct TraceInfo;
     class LogicalCloser;
-    class PhysicalCloser;
     class CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;

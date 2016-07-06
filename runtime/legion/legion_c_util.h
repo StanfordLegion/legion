@@ -123,6 +123,7 @@ namespace Legion {
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
+      NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);
@@ -138,6 +139,8 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
       NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
@@ -159,6 +162,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_map_task_input_t, Mapping::Mapper::MapTaskInput *);
       NEW_OPAQUE_WRAPPER(legion_map_task_output_t, Mapping::Mapper::MapTaskOutput *);
+      NEW_OPAQUE_WRAPPER(legion_slice_task_output_t, Mapping::Mapper::SliceTaskOutput *);
       NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
       NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
       NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
@@ -575,6 +579,27 @@ namespace Legion {
         options.stealable = options_.stealable;
         options.map_locally = options_.map_locally;
         return options;
+      }
+
+      static legion_slice_task_input_t
+      wrap(Mapping::Mapper::SliceTaskInput& input) {
+        legion_slice_task_input_t input_;
+        input_.domain = CObjectWrapper::wrap(input.domain);
+        return input_;
+      }
+
+      static legion_slice_task_input_t
+      wrap_const(const Mapping::Mapper::SliceTaskInput& input) {
+        legion_slice_task_input_t input_;
+        input_.domain = CObjectWrapper::wrap(input.domain);
+        return input_;
+      }
+
+      static Mapping::Mapper::SliceTaskInput
+      unwrap(legion_slice_task_input_t& input_) {
+        Mapping::Mapper::SliceTaskInput input;
+        input.domain = CObjectWrapper::unwrap(input_.domain);
+        return input;
       }
     };
 

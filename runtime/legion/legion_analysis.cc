@@ -1800,13 +1800,17 @@ namespace Legion {
       // update the open children
       if (has_child)
       {
-        state->children.valid_fields |= info->traversal_mask;
-        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-                            state->children.open_children.find(next_child);
-        if (finder == state->children.open_children.end())
-          state->children.open_children[next_child] = info->traversal_mask;
-        else
-          finder->second |= info->traversal_mask;
+        // We only update the children if we are going to be writing
+        if (!IS_READ_ONLY(info->req))
+        {
+          state->children.valid_fields |= info->traversal_mask;
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+                              state->children.open_children.find(next_child);
+          if (finder == state->children.open_children.end())
+            state->children.open_children[next_child] = info->traversal_mask;
+          else
+            finder->second |= info->traversal_mask;
+        }
       }
       else if (!IS_REDUCE(info->req))
       {
@@ -3896,177 +3900,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalCloser::PhysicalCloser(const TraversalInfo &in, LogicalRegion h)
-      : info(in), handle(h)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalCloser::PhysicalCloser(const PhysicalCloser &rhs)
-      : info(rhs.info), handle(rhs.handle), 
-        leave_open_mask(rhs.leave_open_mask),
-        upper_targets(rhs.lower_targets),
-        close_targets(rhs.close_targets)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalCloser::~PhysicalCloser(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalCloser& PhysicalCloser::operator=(const PhysicalCloser &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::initialize_targets(RegionTreeNode *origin,
-                                  PhysicalState *state,
-                                  const std::vector<MaterializedView*> &targets,
-                                  const FieldMask &closing_mask,
-                                  const InstanceSet &target_set)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(upper_targets.empty());
-#endif
-      // Figure out which instances need updates before we can close to them
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-      origin->find_valid_instance_views(info.ctx, state, closing_mask,
-                                        closing_mask, info.version_info,
-                                        false/*needs space*/, valid_views);
-      // Now figure out which fields need updating for each instance
-      for (std::vector<MaterializedView*>::const_iterator it = 
-            targets.begin(); it != targets.end(); it++)
-      {
-        // The set of fields we must update
-        FieldMask space_mask = (*it)->get_space_mask() & closing_mask;
-        // If we don't have any incomplete fields, keep going
-        if (!space_mask)
-          continue;
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          valid_views.find(*it);
-        if (finder != valid_views.end())
-        {
-          // We can skip fields for which we are already valid
-          FieldMask invalid_mask = space_mask - finder->second;
-          if (!!invalid_mask)
-            origin->issue_update_copies(info, *it, invalid_mask, valid_views);
-        }
-        else // update all the incomplete fields we have
-          origin->issue_update_copies(info, *it, space_mask, valid_views);
-      }
-      // Then we can record the targets
-      upper_targets = targets;
-      close_targets = target_set;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::close_tree_node(RegionTreeNode *node,
-                                         const FieldMask &closing_mask)
-    //--------------------------------------------------------------------------
-    {
-      // Lower the targets
-      lower_targets.resize(upper_targets.size());
-      for (unsigned idx = 0; idx < upper_targets.size(); idx++)
-        lower_targets[idx] = 
-          upper_targets[idx]->get_materialized_subview(node->get_color());
-
-      // Close the node
-      node->close_physical_node(*this, closing_mask);
-
-      // Clear out the lowered targets
-      lower_targets.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::issue_dirty_updates(RegionTreeNode *node,
-                                             const FieldMask &dirty_fields,
-              const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(lower_targets.size() == close_targets.size());
-#endif
-      // Iterate through all our instances and issue updates where necessary
-      for (unsigned idx = 0; idx < lower_targets.size(); idx++)
-      {
-        // Figure out which of the dirty fields we have to issue udpates for
-        FieldMask needed_fields = 
-          close_targets[idx].get_valid_fields() & dirty_fields;
-        // If we don't have any dirty fields, keep going
-        if (!needed_fields)
-          continue;
-        MaterializedView *target = lower_targets[idx];
-        // See if any of these fields are already valid
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          valid_instances.find(target);
-        if (finder != valid_instances.end())
-        {
-          needed_fields -= finder->second;
-          // If we're already valid, we're good to go
-          if (!needed_fields)
-            continue;
-        }
-        // Now we need to issue update copies for the valid fields
-        node->issue_update_copies(info, target, needed_fields, valid_instances);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::issue_reduction_updates(RegionTreeNode *node,
-                                                 const FieldMask &reduc_fields,
-           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(lower_targets.size() == close_targets.size());
-#endif
-      for (unsigned idx = 0; idx < lower_targets.size(); idx++)
-      {
-        FieldMask needed_fields = 
-          close_targets[idx].get_valid_fields() & reduc_fields;
-        if (!needed_fields)
-          continue;
-        node->issue_update_reductions(lower_targets[idx], needed_fields,
-                           info.version_info, valid_reductions, info.op, 
-                           info.index, info.map_applied_events);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::update_dirty_mask(const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      dirty_mask |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    const FieldMask& PhysicalCloser::get_dirty_mask(void) const
-    //--------------------------------------------------------------------------
-    {
-      return dirty_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::update_node_views(RegionTreeNode *node,
-                                           PhysicalState *state)
-    //--------------------------------------------------------------------------
-    {
-      // Note that permit leave open means that we don't update
-      // the dirty bits when we update the state
-      node->update_valid_views(state, dirty_mask, upper_targets, close_targets);
-    } 
-
-    //--------------------------------------------------------------------------
     CompositeCloser::CompositeCloser(ContextID c, 
                                      VersionInfo &info, SingleTask *target)
       : ctx(c), version_info(info), target_ctx(target)
@@ -4150,6 +3983,12 @@ namespace Legion {
       // open then we don't make the view dirty
       node->update_valid_views(state, valid_mask,
                                true /*dirty*/, composite_view);
+      if (!!state->reduction_mask)
+      {
+        FieldMask reduc_overlap = state->reduction_mask & valid_mask;
+        if (!!reduc_overlap)
+          node->invalidate_reduction_views(state, reduc_overlap);
+      }
       return composite_view;
     }
 

@@ -496,18 +496,29 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
+      if (!map_locally)
+      {
+        log_run.error("Invalid mapper output. Remote mapping of tasks is not "
+                      "currently supported. Mapper %s attempted to remote map "
+                      "task %s (ID %lld).", mapper->get_mapper_name(),
+                      get_task_name(), unique_op_id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
       return options.inline_task;
     }
 
     //--------------------------------------------------------------------------
-    const char* TaskOp::get_logging_name(void)
+    const char* TaskOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return get_task_name();
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TaskOp::get_operation_kind(void)
+    Operation::OpKind TaskOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return TASK_OP_KIND;
@@ -617,6 +628,43 @@ namespace Legion {
       }
       else
         atomic_locks[lock] = exclusive;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* TaskOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      Mapper::CreateTaskTemporaryInput input;
+      Mapper::CreateTaskTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      input.region_requirement_index = index;
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        const std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+          acquired_instances = get_acquired_instances_ref(); 
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances->begin(); it !=
+              acquired_instances->end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_task_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, *acquired_instances, needed_fields,
+            regions[index].region, mapper, "create_task_temporary_instance");
+      }
+      else
+        mapper->invoke_task_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
     }
 
     //--------------------------------------------------------------------------
@@ -3930,6 +3978,20 @@ namespace Legion {
       // Already hold the lock from the caller
       std::set<LogicalRegion> top_regions;
       runtime->forest->get_all_regions(handle, top_regions);
+      // See if we can aggregate this with any of the previous created
+      // region requirements
+      for (std::deque<RegionRequirement>::iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        std::set<LogicalRegion>::const_iterator finder = 
+          top_regions.find(it->region);
+        if (finder == top_regions.end())
+          continue;
+        it->privilege_fields.insert(fid);
+        top_regions.erase(finder);
+        if (top_regions.empty())
+          return;
+      }
       RemoteTask *outermost = find_outermost_context();
       for (std::set<LogicalRegion>::const_iterator it = top_regions.begin();
             it != top_regions.end(); it++)
@@ -5017,12 +5079,15 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
       if (req.flags & VERIFIED_FLAG)
         return NO_ERROR;
+      // Copy privilege fields for check
+      std::set<FieldID> privilege_fields(req.privilege_fields);
       // Try our original region requirements first
       for (std::vector<RegionRequirement>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, bad_field, skip_privilege);
+          check_privilege_internal(req, *it, privilege_fields, bad_field,
+                                   skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -5038,7 +5103,8 @@ namespace Legion {
             created_requirements.end(); it++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, bad_field, skip_privilege);
+          check_privilege_internal(req, *it, privilege_fields, bad_field,
+                                   skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -5054,6 +5120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionErrorType SingleTask::check_privilege_internal(
         const RegionRequirement &req, const RegionRequirement &our_req,
+        std::set<FieldID>& privilege_fields,
         FieldID &bad_field, bool skip_privilege) const
     //--------------------------------------------------------------------------
     {
@@ -5082,34 +5149,38 @@ namespace Legion {
         // Note we can use the parent since all the regions/partitions
         // in the same region tree have the same field space
         for (std::set<FieldID>::const_iterator fit = 
-              req.privilege_fields.begin(); fit != 
-              req.privilege_fields.end(); fit++)
+              privilege_fields.begin(); fit != 
+              privilege_fields.end(); )
         {
-          if (our_req.privilege_fields.find(*fit) == 
+          if (our_req.privilege_fields.find(*fit) != 
               our_req.privilege_fields.end())
-            // Indicate we should keep going
-            return ERROR_BAD_PARENT_REGION;
-        }
-        // Only need to do this check if there were overlapping fields
-        if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
-        {
-          // Handle the special case where the parent has WRITE_DISCARD
-          // privilege and the sub-task wants any other kind of privilege.  
-          // This case is ok because the parent could write something
-          // and then hand it off to the child.
-          if (our_req.privilege != WRITE_DISCARD)
           {
-            if ((req.handle_type == SINGULAR) || 
-                (req.handle_type == REG_PROJECTION))
-              return ERROR_BAD_REGION_PRIVILEGES;
-            else
-              return ERROR_BAD_PARTITION_PRIVILEGES;
+            // Only need to do this check if there were overlapping fields
+            if (!skip_privilege && (req.privilege & (~(our_req.privilege))))
+            {
+              // Handle the special case where the parent has WRITE_DISCARD
+              // privilege and the sub-task wants any other kind of privilege.  
+              // This case is ok because the parent could write something
+              // and then hand it off to the child.
+              if (our_req.privilege != WRITE_DISCARD)
+              {
+                if ((req.handle_type == SINGULAR) || 
+                    (req.handle_type == REG_PROJECTION))
+                  return ERROR_BAD_REGION_PRIVILEGES;
+                else
+                  return ERROR_BAD_PARTITION_PRIVILEGES;
+              }
+            }
+            privilege_fields.erase(fit++);
           }
+          else
+            ++fit;
         }
-        // If we make it here then we are good
-        return NO_ERROR;
       }
-      return ERROR_BAD_PARENT_REGION;
+
+      if (!privilege_fields.empty()) return ERROR_BAD_PARENT_REGION;
+        // If we make it here then we are good
+      return NO_ERROR;
     }
 
     //--------------------------------------------------------------------------
@@ -5513,9 +5584,10 @@ namespace Legion {
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
             const void *name; size_t name_size;
-            runtime->retrieve_semantic_information(
+            if(!runtime->retrieve_semantic_information(
                 regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                name, name_size, false, false);
+                name, name_size, true/*can fail*/, false))
+	      name = "(no name)";
             log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }

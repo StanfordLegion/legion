@@ -497,6 +497,24 @@ function pretty.expr_fill(cx, node)
       ")"})
 end
 
+function pretty.expr_acquire(cx, node)
+  return join({
+      "acquire(",
+      commas({pretty.expr_region_root(cx, node.region),
+              unpack(node.conditions:map(
+                function(condition) return pretty.expr_condition(cx, condition) end))}),
+      ")"})
+end
+
+function pretty.expr_release(cx, node)
+  return join({
+      "release(",
+      commas({pretty.expr_region_root(cx, node.region),
+              unpack(node.conditions:map(
+                function(condition) return pretty.expr_condition(cx, condition) end))}),
+      ")"})
+end
+
 function pretty.expr_allocate_scratch_fields(cx, node)
   return join({
       "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
@@ -669,6 +687,12 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.Fill) then
     return pretty.expr_fill(cx, node)
 
+  elseif node:is(ast.typed.expr.Acquire) then
+    return pretty.expr_acquire(cx, node)
+
+  elseif node:is(ast.typed.expr.Release) then
+    return pretty.expr_release(cx, node)
+
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return pretty.expr_allocate_scratch_fields(cx, node)
 
@@ -784,9 +808,21 @@ function pretty.stat_block(cx, node)
   return text.Lines { lines = result }
 end
 
-function pretty.stat_index_launch(cx, node)
+function pretty.stat_index_launch_num(cx, node)
   local result = terralib.newlist()
-  result:insert(join({"for", tostring(node.symbol), "=", pretty.expr_list(cx, node.domain), "do -- index launch"}, true))
+  result:insert(join({"for", tostring(node.symbol), "=", pretty.expr_list(cx, node.values), "do -- index launch"}, true))
+  local call = pretty.expr(cx, node.call)
+  if node.reduce_op then
+    call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
+  end
+  result:insert(text.Indent { value = call })
+  result:insert(text.Line { value = "end" })
+  return text.Lines { lines = result }
+end
+
+function pretty.stat_index_launch_list(cx, node)
+  local result = terralib.newlist()
+  result:insert(join({"for", tostring(node.symbol), "in", pretty.expr(cx, node.value), "do -- index launch"}, true))
   local call = pretty.expr(cx, node.call)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
@@ -883,8 +919,11 @@ function pretty.stat(cx, node)
   elseif node:is(ast.typed.stat.Block) then
     return pretty.stat_block(cx, node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
-    return pretty.stat_index_launch(cx, node)
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return pretty.stat_index_launch_num(cx, node)
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
+    return pretty.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     return pretty.stat_var(cx, node)

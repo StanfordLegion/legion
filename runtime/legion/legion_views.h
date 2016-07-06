@@ -835,6 +835,9 @@ namespace Legion {
                           std::vector<FieldDataDescriptor> &field_data,
                                   std::set<ApEvent> &preconditions);
     public:
+      virtual bool need_temporary_instance(MaterializedView *dst,
+                                           const FieldMask &copy_mask,
+                                           bool &already_valid) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -916,6 +919,9 @@ namespace Legion {
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);
     public:
+      virtual bool need_temporary_instance(MaterializedView *dst,
+                                           const FieldMask &copy_mask,
+                                           bool &already_valid);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -969,6 +975,11 @@ namespace Legion {
       bool simplify(CompositeCloser &closer, FieldMask &capture_mask,
                     CompositeNode *new_parent);
     public:
+      bool need_temporary_instance(MaterializedView *dst,
+                                   const FieldMask &copy_mask,
+                                   bool &fully_valid,
+                                   bool &partially_valid,
+                                   bool check_root = true) const;
       void issue_deferred_copies(const TraversalInfo &info, 
                                  MaterializedView *dst,
                                  const FieldMask &copy_mask,
@@ -977,7 +988,9 @@ namespace Legion {
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
                     CopyAcrossHelper *helper, bool check_root = true) const;
-      CompositeNode* find_next_root(RegionTreeNode *target) const;
+      CompositeNode* find_next_root(RegionTreeNode *target,
+                                    const FieldMask &mask) const;
+      bool are_domination_tests_sound(const FieldMask &mask) const;
       void find_valid_views(const FieldMask &search_mask,
                       LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
       void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
@@ -1063,6 +1076,9 @@ namespace Legion {
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);
     public:
+      virtual bool need_temporary_instance(MaterializedView *dst,
+                                           const FieldMask &copy_mask,
+                                           bool &already_valid);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,

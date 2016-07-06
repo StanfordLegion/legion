@@ -124,6 +124,8 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
@@ -195,8 +197,18 @@ local function validate_vars_node(cx)
       continuation(node.block)
       cx:pop_local_scope()
 
-    elseif node:is(ast.typed.stat.IndexLaunch) then
-      continuation(node.domain)
+    elseif node:is(ast.typed.stat.IndexLaunchNum) then
+      continuation(node.values)
+
+      cx:push_local_scope()
+      cx:intern_variable(node, node.symbol)
+      continuation(node.preamble)
+      continuation(node.reduce_lhs)
+      continuation(node.call)
+      cx:pop_local_scope()
+
+    elseif node:is(ast.typed.stat.IndexLaunchList) then
+      continuation(node.value)
 
       cx:push_local_scope()
       cx:intern_variable(node, node.symbol)
@@ -229,7 +241,7 @@ local function validate_vars_node(cx)
       node:is(ast.typed.stat.UnmapRegions) or
       node:is(ast.typed.Block) or
       node:is(ast.location) or
-      node:is(ast.options)
+      node:is(ast.annotation)
     then
       continuation(node, true)
 

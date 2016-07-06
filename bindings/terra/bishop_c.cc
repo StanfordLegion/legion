@@ -21,6 +21,7 @@
 
 #include <vector>
 #include <set>
+#include <map>
 #include <cstdlib>
 
 using namespace std;
@@ -28,8 +29,8 @@ using namespace Legion;
 using namespace Legion::Mapping;
 using namespace Legion::Mapping::Utilities;
 
-static vector<bishop_task_rule_t> task_rules;
-static vector<bishop_region_rule_t> region_rules;
+static vector<bishop_mapper_impl_t> mapper_impls;
+static vector<bishop_transition_fn_t> transitions;
 static bishop_mapper_state_init_fn_t mapper_init;
 
 namespace Legion {
@@ -42,27 +43,28 @@ static void
 bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
                               			const set<Processor> &local_procs)
 {
+  MapperRuntime* rt = runtime->get_mapper_runtime();
   for (set<Processor>::const_iterator it = local_procs.begin();
        it != local_procs.end(); it++)
   {
     BishopMapper* mapper =
-      new BishopMapper(task_rules, region_rules, mapper_init,
-                       runtime->get_mapper_runtime(), machine, *it);
+      new BishopMapper(mapper_impls, transitions, mapper_init, rt, machine,
+                       *it);
     runtime->replace_default_mapper(mapper, *it);
   }
 }
 
 void
-register_bishop_mappers(bishop_task_rule_t* _task_rules,
-                        unsigned _num_task_rules,
-                        bishop_region_rule_t* _region_rules,
-                        unsigned _num_region_rules,
+register_bishop_mappers(bishop_mapper_impl_t* _mapper_impls,
+                        unsigned _num_mapper_impls,
+                        bishop_transition_fn_t* _transitions,
+                        unsigned _num_transitions,
                         bishop_mapper_state_init_fn_t _mapper_init)
 {
-  for (unsigned i = 0; i < _num_task_rules; ++i)
-    task_rules.push_back(_task_rules[i]);
-  for (unsigned i = 0; i < _num_region_rules; ++i)
-    region_rules.push_back(_region_rules[i]);
+  for (unsigned i = 0; i < _num_mapper_impls; ++i)
+    mapper_impls.push_back(_mapper_impls[i]);
+  for (unsigned i = 0; i < _num_transitions; ++i)
+    transitions.push_back(_transitions[i]);
   mapper_init = _mapper_init;
 
   HighLevelRuntime::set_registration_callback(
@@ -124,10 +126,12 @@ bishop_all_memories()
   return mems_;
 }
 
+legion_processor_t NO_PROC = CObjectWrapper::wrap(Processor::NO_PROC);
+
 legion_processor_t
 bishop_get_no_processor()
 {
-  return CObjectWrapper::wrap(Processor::NO_PROC);
+  return NO_PROC;
 }
 
 legion_memory_t

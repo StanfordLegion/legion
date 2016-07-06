@@ -223,7 +223,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       local fn_node = ast.typed.expr.Function {
         expr_type = fn_type,
         value = fn,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
       return ast.typed.expr.Call {
@@ -231,7 +231,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
         args = args,
         conditions = terralib.newlist(),
         expr_type = rval_type,
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end
@@ -261,7 +261,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       new_node.fn = ast.typed.expr.Function {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
-        options = node.options,
+        annotations = node.annotations,
         span = node.span,
       }
     end
@@ -478,7 +478,7 @@ function vectorize.stat_for_list(cx, node)
     block = body,
     orig_block = node.block,
     vector_width = simd_width,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -946,10 +946,10 @@ function vectorize_loops.stat_for_num(node)
 end
 
 function vectorize_loops.stat_for_list(node)
-  if node.options.vectorize:is(ast.options.Forbid) then return node end
+  if node.annotations.vectorize:is(ast.annotation.Forbid) then return node end
   local cx = context:new_global_scope()
   cx:assign(node.symbol, V)
-  cx.demanded = node.options.vectorize:is(ast.options.Demand)
+  cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
   if vectorizable and not bounds_checks then
@@ -997,7 +997,10 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Block) then
     return vectorize_loops.stat_block(node)
 
-  elseif node:is(ast.typed.stat.IndexLaunch) then
+  elseif node:is(ast.typed.stat.IndexLaunchNum) then
+    return node
+
+  elseif node:is(ast.typed.stat.IndexLaunchList) then
     return node
 
   elseif node:is(ast.typed.stat.Var) then

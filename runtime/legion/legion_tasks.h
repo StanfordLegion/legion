@@ -82,8 +82,8 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -97,6 +97,8 @@ namespace Legion {
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -499,6 +501,7 @@ namespace Legion {
     protected:
       LegionErrorType check_privilege_internal(const RegionRequirement &req,
                                       const RegionRequirement &parent_req,
+                                      std::set<FieldID>& privilege_fields,
                                       FieldID &bad_field, 
                                       bool skip_privileges) const;
     public:

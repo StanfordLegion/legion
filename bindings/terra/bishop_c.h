@@ -38,27 +38,21 @@ LIST_TYPE(field, bishop_field_list_t, legion_field_id_t)
 typedef void* bishop_mapper_state_t;
 
 typedef
-  bool (*bishop_task_predicate_t)(
-      bishop_mapper_state_t,
-      legion_mapper_runtime_t,
-      legion_mapper_context_t,
-      legion_task_t);
-
-typedef
-  bool (*bishop_region_predicate_t)(
-      bishop_mapper_state_t,
-      legion_mapper_runtime_t,
-      legion_mapper_context_t,
-      legion_task_t,
-      legion_region_requirement_t);
-
-typedef
   void (*bishop_select_task_options_fn_t)(
       bishop_mapper_state_t,
       legion_mapper_runtime_t,
       legion_mapper_context_t,
       legion_task_t,
-      legion_task_options_t);
+      legion_task_options_t*);
+
+typedef
+  void (*bishop_slice_task_fn_t)(
+      bishop_mapper_state_t,
+      legion_mapper_runtime_t,
+      legion_mapper_context_t,
+      legion_task_t,
+      legion_slice_task_input_t,
+      legion_slice_task_output_t);
 
 typedef
   void (*bishop_map_task_fn_t)(
@@ -70,47 +64,34 @@ typedef
       legion_map_task_output_t);
 
 typedef
-  void (*bishop_task_callback_fn_t)(
-      bishop_mapper_state_t,
-      legion_mapper_runtime_t,
-      legion_mapper_context_t,
-      legion_task_t);
-
-typedef
-  void (*bishop_region_callback_fn_t)(
-      bishop_mapper_state_t,
-      legion_mapper_runtime_t,
-      legion_mapper_context_t,
-      legion_task_t,
-      legion_region_requirement_t,
-      unsigned);
-
-typedef
   void (*bishop_mapper_state_init_fn_t)(
       bishop_mapper_state_t*);
 
-typedef struct bishop_task_rule_t {
-  bishop_task_predicate_t matches;
-  bishop_select_task_options_fn_t select_task_options;
-  bishop_map_task_fn_t map_task;
-} bishop_task_rule_t;
+typedef unsigned int bishop_matching_state_t;
 
-typedef struct bishop_region_rule_t {
-  bishop_region_callback_fn_t pre_map_task;
+typedef
+  bishop_matching_state_t (*bishop_transition_fn_t)(
+      legion_task_t);
+
+typedef struct bishop_mapper_impl_t {
+  bishop_select_task_options_fn_t select_task_options;
+  bishop_slice_task_fn_t slice_task;
   bishop_map_task_fn_t map_task;
-} bishop_region_rule_t;
+} bishop_mapper_impl_t;
 
 typedef legion_isa_kind_t bishop_isa_t;
 
 void
-register_bishop_mappers(bishop_task_rule_t*,
+register_bishop_mappers(bishop_mapper_impl_t*,
                         unsigned,
-                        bishop_region_rule_t*,
+                        bishop_transition_fn_t*,
                         unsigned,
                         bishop_mapper_state_init_fn_t);
 
 bishop_processor_list_t
 bishop_all_processors();
+
+extern legion_processor_t NO_PROC;
 
 legion_processor_t
 bishop_get_no_processor();
