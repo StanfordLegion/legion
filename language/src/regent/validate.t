@@ -266,6 +266,15 @@ end
 function validate.top(cx, node)
   if node:is(ast.typed.top.Task) then
     validate.top_task(cx, node)
+
+  elseif node:is(ast.typed.top.Fspace) or
+    node:is(ast.specialized.top.QuoteExpr) or
+    node:is(ast.specialized.top.QuoteStat)
+  then
+    return
+
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 

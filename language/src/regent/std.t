@@ -1566,7 +1566,7 @@ function symbol:getname()
 end
 
 function symbol:hastype()
-  return self.symbol_type
+  return self.symbol_type or nil
 end
 
 function symbol:gettype()
@@ -1789,7 +1789,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     end
   end
 
-  if std.config["debug"] then
+  if false then -- std.config["debug"] then
     function st.metamethods:__typename()
       local bounds = self.bounds_symbols
 

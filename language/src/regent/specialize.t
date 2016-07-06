@@ -12,8 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Specialization Pass
+-- Regent Specialization Pass
 
+local alpha_convert = require("regent/alpha_convert")
 local ast = require("regent/ast")
 local data = require("regent/data")
 local log = require("regent/log")
@@ -25,9 +26,16 @@ local specialize = {}
 local context = {}
 context.__index = context
 
-function context:new_local_scope()
+function context:new_local_scope(is_quote)
+  local copy_mapping = {}
+  for k, v in pairs(self.mapping) do
+    copy_mapping[k] = v
+  end
+
   local cx = {
     env = self.env:new_local_scope(),
+    mapping = copy_mapping,
+    is_quote = self.is_quote or is_quote,
   }
   setmetatable(cx, context)
   return cx
@@ -36,6 +44,7 @@ end
 function context:new_global_scope(env)
   local cx = {
     env = symbol_table.new_global_scope(env),
+    mapping = {},
   }
   setmetatable(cx, context)
   return cx
@@ -112,10 +121,11 @@ local function convert_lua_value(cx, node, value)
     }
   elseif std.is_rquote(value) then
     value = value:getast()
-    if value:is(ast.typed.top.QuoteExpr) then
+    if value:is(ast.specialized.top.QuoteExpr) then
       assert(value.expr:is(ast.specialized.expr))
+      local value = alpha_convert.entry(value, cx.env, cx.mapping)
       return value.expr
-    elseif value:is(ast.typed.top.QuoteStat) then
+    elseif value:is(ast.specialized.top.QuoteStat) then
       log.error(node, "unable to specialize quoted statement as an expression")
     else
       log.error(node, "unexpected node type " .. tostring(value:type()))
@@ -1434,6 +1444,7 @@ function specialize.stat_for_num(cx, node)
   local var_type = node.type_expr(cx.env:env())
   local symbol = std.newsymbol(var_type, node.name)
   cx.env:insert(node, node.name, symbol)
+  cx.env:insert(node, symbol, symbol)
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
@@ -1459,6 +1470,7 @@ function specialize.stat_for_list(cx, node)
   end
   local symbol = std.newsymbol(var_type, node.name)
   cx.env:insert(node, node.name, symbol)
+  cx.env:insert(node, symbol, symbol)
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
@@ -1503,12 +1515,16 @@ end
 
 local function make_symbol(cx, node, var_name, var_type)
   if type(var_name) == "string" then
-    return std.newsymbol(var_type or nil, var_name)
+    return var_name, std.newsymbol(var_type or nil, var_name)
   end
 
   var_name = var_name(cx.env:env())
   if std.is_symbol(var_name) then
-    return var_name
+    if cx.is_quote then
+      return var_name, var_name
+    else
+      return var_name, std.newsymbol(var_name:hastype(), var_name:hasname())
+    end
   end
 
   log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
@@ -1520,7 +1536,12 @@ function specialize.stat_var(cx, node)
   local symbols = terralib.newlist()
   for i, var_name in ipairs(node.var_names) do
     if node.values[i] and node.values[i]:is(ast.unspecialized.expr.Region) then
-      local symbol = make_symbol(cx, node, var_name)
+      local var_name, symbol = make_symbol(cx, node, var_name)
+      if std.is_symbol(var_name) then
+        cx.mapping[var_name] = symbol
+      else
+        cx.env:insert(node, symbol, symbol)
+      end
       cx.env:insert(node, var_name, symbol)
       symbols[i] = symbol
     end
@@ -1537,7 +1558,12 @@ function specialize.stat_var(cx, node)
     local var_type = types[i]
     local symbol = symbols[i]
     if not symbol then
-      symbol = make_symbol(cx, node, var_name, var_type)
+      var_name, symbol = make_symbol(cx, node, var_name, var_type)
+      if std.is_symbol(var_name) then
+        cx.mapping[var_name] = symbol
+      else
+        cx.env:insert(node, symbol, symbol)
+      end
       cx.env:insert(node, var_name, symbol)
       symbols[i] = symbol
     end
@@ -1556,6 +1582,7 @@ function specialize.stat_var_unpack(cx, node)
   for _, var_name in ipairs(node.var_names) do
     local symbol = std.newsymbol(var_name)
     cx.env:insert(node, var_name, symbol)
+    cx.env:insert(node, symbol, symbol)
     symbols:insert(symbol)
   end
 
@@ -1634,12 +1661,13 @@ function specialize.stat_expr(cx, node)
   }
 end
 
-local function get_quote_contents(expr)
+local function get_quote_contents(cx, expr)
   assert(std.is_rquote(expr))
 
   local value = expr:getast()
-  if value:is(ast.typed.top.QuoteExpr) then
+  if value:is(ast.specialized.top.QuoteExpr) then
     assert(value.expr:is(ast.specialized.expr))
+    local value = alpha_convert.entry(value, cx.env, cx.mapping)
     return terralib.newlist({
       ast.specialized.stat.Expr {
         expr = value.expr,
@@ -1647,8 +1675,9 @@ local function get_quote_contents(expr)
         span = node.span,
       },
     })
-  elseif value:is(ast.typed.top.QuoteStat) then
+  elseif value:is(ast.specialized.top.QuoteStat) then
     assert(value.block:is(ast.specialized.Block))
+    local value = alpha_convert.entry(value, cx.env, cx.mapping)
     return value.block.stats
   else
     assert(false)
@@ -1658,12 +1687,12 @@ end
 function specialize.stat_escape(cx, node)
   local expr = node.expr(cx.env:env())
   if std.is_rquote(expr) then
-    return get_quote_contents(expr)
+    return get_quote_contents(cx, expr)
   elseif terralib.islist(expr) then
     if not data.all(expr:map(function(v) return std.is_rquote(v) end)) then
       log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
     end
-    return data.flatmap(get_quote_contents, expr)
+    return data.flatmap(function(x) return get_quote_contents(cx, x) end, expr)
   else
     log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
   end
@@ -1737,6 +1766,7 @@ function specialize.top_task_param(cx, node)
   -- for this recursion.
   local symbol = std.newsymbol(node.param_name)
   cx.env:insert(node, node.param_name, symbol)
+  cx.env:insert(node, symbol, symbol)
   local param_type = node.type_expr(cx.env:env())
   if not param_type then
     log.error(node, "param type is undefined or nil")
@@ -1859,7 +1889,7 @@ function specialize.top_fspace(cx, node)
 end
 
 function specialize.top_quote_expr(cx, node)
-  local cx = cx:new_local_scope()
+  local cx = cx:new_local_scope(true)
   return ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
     annotations = node.annotations,
@@ -1868,7 +1898,7 @@ function specialize.top_quote_expr(cx, node)
 end
 
 function specialize.top_quote_stat(cx, node)
-  local cx = cx:new_local_scope()
+  local cx = cx:new_local_scope(true)
   return ast.specialized.top.QuoteStat {
     block = specialize.block(cx, node.block),
     annotations = node.annotations,

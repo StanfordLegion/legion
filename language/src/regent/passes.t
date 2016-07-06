@@ -14,6 +14,7 @@
 
 -- Regent Compiler Passes
 
+local alpha_convert = require("regent/alpha_convert")
 local ast = require("regent/ast")
 local check_annotations = require("regent/check_annotations")
 local codegen = require("regent/codegen")
@@ -62,6 +63,7 @@ function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = specialize.entry(env, node)
+    alpha_convert.entry(node) -- Run this here to avoid bitrot (discard result).
     node = type_check.entry(node)
     check_annotations.entry(node)
     node = passes.optimize(node)

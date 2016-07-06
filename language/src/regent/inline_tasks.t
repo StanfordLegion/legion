@@ -457,10 +457,10 @@ function inline_tasks.top(cx, node)
   elseif node:is(ast.typed.top.Fspace) then
     return node
 
-  elseif node:is(ast.typed.top.QuoteExpr) then
+  elseif node:is(ast.specialized.top.QuoteExpr) then
     return node
 
-  elseif node:is(ast.typed.top.QuoteStat) then
+  elseif node:is(ast.specialized.top.QuoteStat) then
     return node
 
   else

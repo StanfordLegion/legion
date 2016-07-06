@@ -3264,12 +3264,12 @@ end
 
 function type_check.top_quote_expr(cx, node)
   -- Type check lazily, when the expression is interpolated.
-  return ast.typed.top.QuoteExpr(node)
+  return node
 end
 
 function type_check.top_quote_stat(cx, node)
   -- Type check lazily, when the statement is interpolated.
-  return ast.typed.top.QuoteStat(node)
+  return node
 end
 
 function type_check.top(cx, node)
