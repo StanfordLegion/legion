@@ -461,14 +461,17 @@ function type_check.expr_field_access(cx, node)
   end
 
   -- Resolve index and bounded types and automatic unpacks of fspaces.
-  if std.is_index_type(std.as_read(unpack_type)) then
-    unpack_type = std.as_read(unpack_type).base_type
-  elseif std.is_bounded_type(std.as_read(unpack_type)) and
-    std.get_field(std.as_read(unpack_type).index_type.base_type, node.field_name)
-  then
-    unpack_type = std.as_read(unpack_type).index_type.base_type
-  elseif std.is_fspace_instance(std.as_read(unpack_type)) then
-    local result_type, result_constraints = std.unpack_fields(std.as_read(unpack_type))
+  do
+    local result_type, result_constraints
+    if std.is_index_type(std.as_read(unpack_type)) then
+      result_type, result_constraints = std.as_read(unpack_type).base_type
+    elseif std.is_bounded_type(std.as_read(unpack_type)) and
+      std.get_field(std.as_read(unpack_type).index_type.base_type, node.field_name)
+    then
+      result_type, result_constraints = std.as_read(unpack_type).index_type.base_type
+    elseif std.is_fspace_instance(std.as_read(unpack_type)) then
+      result_type, result_constraints = std.unpack_fields(std.as_read(unpack_type))
+    end
 
     -- Since we may have stripped off a reference from the incoming
     -- type, restore it before continuing.
@@ -479,6 +482,8 @@ function type_check.expr_field_access(cx, node)
                               unpack(unpack_type.field_path))
       elseif std.is_rawref(unpack_type) then
         unpack_type = std.rawref(&result_type)
+      else
+        unpack_type = result_type
       end
     end
   end
