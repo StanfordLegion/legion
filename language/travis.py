@@ -48,7 +48,7 @@ def install_dependencies():
 
 def test(root_dir, debug, spy, env):
     subprocess.check_call(
-        ['time', './install.py', '-j', '2'] + (['--debug'] if debug else []),
+        ['time', './install.py', '-j', '2', '--rdir=auto'] + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
     subprocess.check_call(
