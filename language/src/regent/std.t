@@ -2730,9 +2730,7 @@ do
     st.entries = fields
     st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
-      if std.is_index_type(to) then
-        return `([to]{ __ptr = [to.impl_type](expr)})
-      elseif to:isstruct() then
+      if to:isstruct() then
         local from_fields = {}
         for _, from_field in ipairs(from:getentries()) do
           from_fields[field_name(from_field)] = field_type(from_field)
@@ -2773,9 +2771,7 @@ do
     end
     st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
-      if std.is_index_type(to) then
-        return `([to]{ __ptr = [to.impl_type](expr)})
-      elseif to:isstruct() then
+      if to:isstruct() then
         local from_fields = {}
         for i, from_field in ipairs(from:getentries()) do
           from_fields[i] = field_type(from_field)
