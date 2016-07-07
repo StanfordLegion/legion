@@ -962,12 +962,12 @@ function type_check.expr_ctor(cx, node)
 
   local expr_type
   if node.named then
-    expr_type = std.ctor(
+    expr_type = std.ctor_named(
       fields:map(
         function(field) return { field.name, field.expr_type } end))
   else
-    expr_type = terralib.types.tuple(unpack(fields:map(
-      function(field) return field.expr_type end)))
+    expr_type = std.ctor_tuple(fields:map(
+      function(field) return field.expr_type end))
   end
 
   return ast.typed.expr.Ctor {

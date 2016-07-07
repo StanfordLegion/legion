@@ -14,13 +14,30 @@
 
 import "regent"
 
-task main()
+task named()
   var is = ispace(int2d, { x = 1, y = 3 })
   var t = int2d { x = 10, y = 20 }
   for i in is do
     t += i + { x = 100, y = 200 }
   end
+  regentlib.c.printf("named: x = %lld, y = %lld\n", t.x, t.y)
   regentlib.assert(t.x == 310, "test failed")
   regentlib.assert(t.y == 623, "test failed")
+end
+
+task positional()
+  var is = ispace(int2d, { 1, 3 })
+  var t = int2d { 10, 20 }
+  for i in is do
+    t += i + { 100, 200 }
+  end
+  regentlib.c.printf("positional: x = %lld, y = %lld\n", t.x, t.y)
+  regentlib.assert(t.x == 310, "test failed")
+  regentlib.assert(t.y == 623, "test failed")
+end
+
+task main()
+  named()
+  positional()
 end
 regentlib.start(main)

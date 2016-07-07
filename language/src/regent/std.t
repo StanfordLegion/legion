@@ -2725,7 +2725,7 @@ do
     return field["type"] or field[2]
   end
 
-  function std.ctor(fields)
+  function std.ctor_named(fields)
     local st = terralib.types.newstruct()
     st.entries = fields
     st.is_ctor = true
@@ -2760,6 +2760,22 @@ do
         return quote var [v] = [expr] in [to]({ [fields] }) end
       else
         error("ctor must cast to a struct")
+      end
+    end
+    return st
+  end
+
+  function std.ctor_tuple(fields)
+    local st = terralib.types.newstruct()
+    st.entries = terralib.newlist({
+      { "impl", terralib.types.tuple(unpack(fields)) },
+    })
+    st.is_ctor = true
+    st.metamethods.__cast = function(from, to, expr)
+      if std.is_index_type(to) then
+        return `([to]{ __ptr = [to.impl_type](expr)})
+      elseif to:isstruct() then
+        return `([to](expr.impl))
       end
     end
     return st
