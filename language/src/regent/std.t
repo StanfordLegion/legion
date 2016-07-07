@@ -1187,7 +1187,7 @@ function std.unpack_fields(fs, symbols)
     })
   end
 
-  local result_type = std.ctor(new_fields)
+  local result_type = std.ctor_named(new_fields)
   result_type.is_unpack_result = true
 
   return result_type, new_constraints
@@ -1342,7 +1342,7 @@ function std.implicit_cast(from, to, expr)
   if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
-    return `([to](expr))
+    return `([to]([expr]))
   end
 end
 
@@ -1351,7 +1351,7 @@ function std.explicit_cast(from, to, expr)
   if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
-    return `([to](expr))
+    return `([to]([expr]))
   end
 end
 
@@ -2734,7 +2734,7 @@ do
         return `([to]{ __ptr = [to.impl_type](expr)})
       elseif to:isstruct() then
         local from_fields = {}
-        for _, from_field in ipairs(to:getentries()) do
+        for _, from_field in ipairs(from:getentries()) do
           from_fields[field_name(from_field)] = field_type(from_field)
         end
         local mapping = terralib.newlist()
@@ -2742,8 +2742,8 @@ do
           local to_field_name = field_name(to_field)
           local to_field_type = field_type(to_field)
           local from_field_type = from_fields[to_field_name]
-          if not (from_field_type and to_field_type == from_field_type) then
-            error()
+          if not from_field_type then
+            error("type mismatch: ctor cast missing field " .. tostring(to_field_name))
           end
           mapping:insert({from_field_type, to_field_type, to_field_name})
         end
@@ -2767,15 +2767,41 @@ do
 
   function std.ctor_tuple(fields)
     local st = terralib.types.newstruct()
-    st.entries = terralib.newlist({
-      { "impl", terralib.types.tuple(unpack(fields)) },
-    })
+    st.entries = terralib.newlist()
+    for i, field in ipairs(fields) do
+      st.entries:insert({"_" .. tostring(i), field})
+    end
     st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
       if std.is_index_type(to) then
         return `([to]{ __ptr = [to.impl_type](expr)})
       elseif to:isstruct() then
-        return `([to](expr.impl))
+        local from_fields = {}
+        for i, from_field in ipairs(from:getentries()) do
+          from_fields[i] = field_type(from_field)
+        end
+        local mapping = terralib.newlist()
+        for i, to_field in ipairs(to:getentries()) do
+          local to_field_type = field_type(to_field)
+          local from_field_type = from_fields[i]
+          if not from_field_type then
+            error("type mismatch: ctor cast has insufficient fields")
+          end
+          mapping:insert({from_field_type, to_field_type, i})
+        end
+
+        local v = terralib.newsymbol(from)
+        local fields = mapping:map(
+          function(field_mapping)
+            local from_field_type, to_field_type, i = unpack(
+              field_mapping)
+            return std.implicit_cast(
+              from_field_type, to_field_type, `([v].["_" .. tostring(i)]))
+          end)
+
+        return quote var [v] = [expr] in [to]({ [fields] }) end
+      else
+        error("ctor must cast to a struct")
       end
     end
     return st

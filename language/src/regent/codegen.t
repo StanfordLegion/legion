@@ -2674,17 +2674,10 @@ function codegen.expr_ctor(cx, node)
   end
   local expr_type = std.as_read(node.expr_type)
 
-  if node.named then
-    return values.value(
-      node,
-      expr.once_only(actions, `([expr_type]{ [field_values] }), expr_type),
-      expr_type)
-  else
-    return values.value(
-      node,
-      expr.once_only(actions, `([expr_type]{ impl = [field_values] }), expr_type),
-      expr_type)
-  end
+  return values.value(
+    node,
+    expr.once_only(actions, `([expr_type]{ [field_values] }), expr_type),
+    expr_type)
 end
 
 function codegen.expr_raw_context(cx, node)
