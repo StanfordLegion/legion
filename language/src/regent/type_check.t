@@ -2358,7 +2358,7 @@ function type_check.expr_with_scratch_fields(cx, node)
 end
 
 local function unary_op_type(op)
-  return function(cx, rhs_type)
+  return function(cx, node, rhs_type)
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
     local function test()
       local terra query(rhs : rhs_type)
@@ -2385,7 +2385,7 @@ function type_check.expr_unary(cx, node)
   local rhs = type_check.expr(cx, node.rhs)
   local rhs_type = std.check_read(cx, rhs)
 
-  local expr_type = unary_ops[node.op](cx, rhs_type)
+  local expr_type = unary_ops[node.op](cx, node, rhs_type)
 
   return ast.typed.expr.Unary {
     op = node.op,
