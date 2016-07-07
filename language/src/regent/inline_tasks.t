@@ -484,4 +484,6 @@ function inline_tasks.entry(node)
   return inline_tasks.top(cx, node)
 end
 
+inline_tasks.pass_name = "inline_tasks"
+
 return inline_tasks

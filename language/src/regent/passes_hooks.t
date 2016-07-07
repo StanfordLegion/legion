@@ -16,7 +16,7 @@
 
 local passes_hooks = {}
 
-passes_hooks.hooks = terralib.newlist()
+passes_hooks.optimization_hooks = terralib.newlist()
 
 local function compare_priority(a, b)
   return a[1] < b[1]
@@ -24,15 +24,24 @@ end
 
 function passes_hooks.add_optimization(priority, pass)
   assert(priority > 0 and priority < 100, "priority must be between 0 and 100")
-  assert(type(pass.entry) == "function")
+  assert(type(pass.entry) == "function", "pass requires entry function")
+  assert(type(pass.pass_name) == "string", "pass requires name")
 
-  passes_hooks.hooks:insert({priority, pass})
-  passes_hooks.hooks:sort(compare_priority)
+  passes_hooks.optimization_hooks:insert({priority, pass})
+  passes_hooks.optimization_hooks:sort(compare_priority)
 end
 
 function passes_hooks.run_optimizations(node)
-  for _, hook in ipairs(passes_hooks.hooks) do
+  for _, hook in ipairs(passes_hooks.optimization_hooks) do
     node = hook[2].entry(node)
+  end
+  return node
+end
+
+function passes_hooks.debug_optimizations(node)
+  print("Registered optimizations passes:")
+  for _, hook in ipairs(passes_hooks.optimization_hooks) do
+    print("  " .. tostring(hook[1]) .. ". " .. tostring(hook[2].pass_name))
   end
   return node
 end

@@ -26,19 +26,13 @@ local optimize_inlines = require("regent/optimize_inlines")
 local optimize_traces = require("regent/optimize_traces")
 local vectorize_loops = require("regent/vectorize_loops")
 
-local flow_from_ast, flow_spmd, flow_to_ast
 if std.config["flow"] then
-  flow_from_ast = require("regent/flow_from_ast")
-  flow_spmd = require("regent/flow_spmd")
-  flow_to_ast = require("regent/flow_to_ast")
+  require("regent/flow_from_ast")
+  require("regent/flow_spmd")
+  require("regent/flow_to_ast")
 end
 
 if std.config["inline"] then passes_hooks.add_optimization(1, inline_tasks) end
-if std.config["flow"] then
-  passes_hooks.add_optimization(10, flow_from_ast)
-  if std.config["flow-spmd"] then passes_hooks.add_optimization(11, flow_spmd) end
-  passes_hooks.add_optimization(12, flow_to_ast)
-end
 if std.config["index-launch"] then passes_hooks.add_optimization(20, optimize_index_launches) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end
 if std.config["leaf"] then passes_hooks.add_optimization(40, optimize_config_options) end
@@ -46,3 +40,5 @@ if std.config["mapping"] then passes_hooks.add_optimization(50, optimize_inlines
 if std.config["trace"] then passes_hooks.add_optimization(60, optimize_traces) end
 if std.config["no-dynamic-branches"] then passes_hooks.add_optimization(70, optimize_divergence) end
 if std.config["vectorize"] then passes_hooks.add_optimization(80, vectorize_loops) end
+
+if std.config["debug"] then passes_hooks.debug_optimizations() end

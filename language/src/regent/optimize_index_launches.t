@@ -626,4 +626,6 @@ function optimize_index_launches.entry(node)
   return optimize_index_launches.top(cx, node)
 end
 
+optimize_index_launches.pass_name = "optimize_index_launches"
+
 return optimize_index_launches

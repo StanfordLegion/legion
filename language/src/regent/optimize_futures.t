@@ -1481,4 +1481,6 @@ function optimize_futures.entry(node)
   return optimize_futures.top(cx, node)
 end
 
+optimize_futures.pass_name = "optimize_futures"
+
 return optimize_futures
