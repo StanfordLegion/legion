@@ -32,13 +32,11 @@ LegionRuntime::Logger::Category log_bishop("bishop");
 //------------------------------------------------------------------------------
 BishopMapper::BishopMapper(const std::vector<bishop_mapper_impl_t>& impls,
                            const std::vector<bishop_transition_fn_t>& trans,
-                   const map<bishop_matching_state_t, unsigned>& state_impl_map,
                            bishop_mapper_state_init_fn_t init_fn,
                            MapperRuntime* rt, Machine machine,
                            Processor local_proc)
   : DefaultMapper(rt, machine, local_proc, "bishop"),
     mapper_impls(impls), transitions(trans),
-    state_to_mapper_impl_id(state_impl_map),
     mapper_init(init_fn), runtime_(CObjectWrapper::wrap(rt))
 //------------------------------------------------------------------------------
 {
@@ -129,9 +127,10 @@ bishop_mapper_impl_t& BishopMapper::get_mapper_impl(bishop_matching_state_t st)
 //------------------------------------------------------------------------------
 {
 #ifdef DEBUG_LEGION
-  assert(state_to_mapper_impl_id.find(st) != state_to_mapper_impl_id.end());
+  assert(st != 0);
+  assert(st > 0 && st < mapper_impls.size());
 #endif
-  return mapper_impls[state_to_mapper_impl_id[st]];
+  return mapper_impls[st];
 }
 
 //------------------------------------------------------------------------------

@@ -102,4 +102,6 @@ function optimize_divergence.entry(node)
   return optimize_divergence.top(cx, node)
 end
 
+optimize_divergence.pass_name = "optimize_divergence"
+
 return optimize_divergence

@@ -547,4 +547,6 @@ function optimize_inlines.entry(node)
   return optimize_inlines.top(cx, node)
 end
 
+optimize_inlines.pass_name = "optimize_inlines"
+
 return optimize_inlines

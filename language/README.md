@@ -2,6 +2,14 @@
 
 This directory contains the compiler for the Regent language.
 
+## Quickstart for Ubuntu
+
+```
+sudo apt-get install llvm-3.5-dev libclang-3.5-dev clang-3.5
+./install.py --debug
+./regent.py examples/circuit.rg
+```
+
 ## Prerequisites
 
 Regent requires:

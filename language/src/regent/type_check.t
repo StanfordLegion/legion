@@ -461,14 +461,17 @@ function type_check.expr_field_access(cx, node)
   end
 
   -- Resolve index and bounded types and automatic unpacks of fspaces.
-  if std.is_index_type(std.as_read(unpack_type)) then
-    unpack_type = std.as_read(unpack_type).base_type
-  elseif std.is_bounded_type(std.as_read(unpack_type)) and
-    std.get_field(std.as_read(unpack_type).index_type.base_type, node.field_name)
-  then
-    unpack_type = std.as_read(unpack_type).index_type.base_type
-  elseif std.is_fspace_instance(std.as_read(unpack_type)) then
-    local result_type, result_constraints = std.unpack_fields(std.as_read(unpack_type))
+  do
+    local result_type, result_constraints
+    if std.is_index_type(std.as_read(unpack_type)) then
+      result_type, result_constraints = std.as_read(unpack_type).base_type
+    elseif std.is_bounded_type(std.as_read(unpack_type)) and
+      std.get_field(std.as_read(unpack_type).index_type.base_type, node.field_name)
+    then
+      result_type, result_constraints = std.as_read(unpack_type).index_type.base_type
+    elseif std.is_fspace_instance(std.as_read(unpack_type)) then
+      result_type, result_constraints = std.unpack_fields(std.as_read(unpack_type))
+    end
 
     -- Since we may have stripped off a reference from the incoming
     -- type, restore it before continuing.
@@ -479,6 +482,8 @@ function type_check.expr_field_access(cx, node)
                               unpack(unpack_type.field_path))
       elseif std.is_rawref(unpack_type) then
         unpack_type = std.rawref(&result_type)
+      else
+        unpack_type = result_type
       end
     end
   end
@@ -490,6 +495,9 @@ function type_check.expr_field_access(cx, node)
   local field_type
   if std.is_region(std.as_read(unpack_type)) and node.field_name == "ispace" then
     field_type = std.as_read(unpack_type):ispace()
+  elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
+    log.error(node, "no field '" .. node.field_name .. "' in type " ..
+                tostring(std.as_read(value_type)))
   else
     field_type = std.get_field(unpack_type, node.field_name)
 
@@ -954,12 +962,12 @@ function type_check.expr_ctor(cx, node)
 
   local expr_type
   if node.named then
-    expr_type = std.ctor(
+    expr_type = std.ctor_named(
       fields:map(
         function(field) return { field.name, field.expr_type } end))
   else
-    expr_type = terralib.types.tuple(unpack(fields:map(
-      function(field) return field.expr_type end)))
+    expr_type = std.ctor_tuple(fields:map(
+      function(field) return field.expr_type end))
   end
 
   return ast.typed.expr.Ctor {
@@ -3264,12 +3272,12 @@ end
 
 function type_check.top_quote_expr(cx, node)
   -- Type check lazily, when the expression is interpolated.
-  return ast.typed.top.QuoteExpr(node)
+  return node
 end
 
 function type_check.top_quote_stat(cx, node)
   -- Type check lazily, when the statement is interpolated.
-  return ast.typed.top.QuoteStat(node)
+  return node
 end
 
 function type_check.top(cx, node)

@@ -14,30 +14,26 @@
 
 import "regent"
 
-task named()
-  var is = ispace(int2d, { x = 1, y = 3 })
-  var t = int2d { x = 10, y = 20 }
-  for i in is do
-    t += i + { x = 100, y = 200 }
-  end
-  regentlib.c.printf("named: x = %lld, y = %lld\n", t.x, t.y)
-  regentlib.assert(t.x == 310, "test failed")
-  regentlib.assert(t.y == 623, "test failed")
-end
+-- This test exhibits a second fill when run with inline mapping
+-- enabled (with or without composite instances).
 
-task positional()
-  var is = ispace(int2d, { 1, 3 })
-  var t = int2d { 10, 20 }
-  for i in is do
-    t += i + { 100, 200 }
+task increment(values : region(ispace(int1d), double))
+where reads writes(values)
+do
+  for i in values do
+    regentlib.c.printf("values[%d] before  %f\n", i, values[i])
+    values[i] += 4000
+    regentlib.c.printf("values[%d] after   %f\n", i, values[i])
   end
-  regentlib.c.printf("positional: x = %lld, y = %lld\n", t.x, t.y)
-  regentlib.assert(t.x == 310, "test failed")
-  regentlib.assert(t.y == 623, "test failed")
 end
 
 task main()
-  named()
-  positional()
+  var values = region(ispace(int1d, 1), double)
+  fill(values, 123)
+  increment(partition(equal, values, ispace(int1d, 1))[0])
+  for i in values do
+    regentlib.c.printf("values[%d] finally %f\n", i, values[i])
+  end
+  regentlib.assert(values[0] == 4123, "test failed")
 end
 regentlib.start(main)

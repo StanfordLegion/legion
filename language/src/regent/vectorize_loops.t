@@ -1062,4 +1062,6 @@ function vectorize_loops.entry(node)
   return vectorize_loops.top(node)
 end
 
+vectorize_loops.pass_name = "vectorize_loops"
+
 return vectorize_loops

@@ -86,8 +86,6 @@ register_bishop_mappers(bishop_mapper_impl_t*,
                         unsigned,
                         bishop_transition_fn_t*,
                         unsigned,
-                        unsigned*,
-                        unsigned,
                         bishop_mapper_state_init_fn_t);
 
 bishop_processor_list_t

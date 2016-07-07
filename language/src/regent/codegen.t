@@ -2639,11 +2639,11 @@ function codegen.expr_cast(cx, node)
     [arg.actions];
     [emit_debuginfo(node)]
   end
-  local value_type = std.as_read(node.expr_type)
+  local expr_type = std.as_read(node.expr_type)
   return values.value(
     node,
-    expr.once_only(actions, `([fn.value]([arg.value])), value_type),
-    value_type)
+    expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
+    expr_type)
 end
 
 function codegen.expr_ctor_list_field(cx, node)
@@ -2674,24 +2674,10 @@ function codegen.expr_ctor(cx, node)
   end
   local expr_type = std.as_read(node.expr_type)
 
-  if node.named then
-    local st = std.ctor(
-      node.fields:map(
-        function(field)
-          local field_type = std.as_read(field.value.expr_type)
-          return { field.name, field_type }
-        end))
-
-    return values.value(
-      node,
-      expr.once_only(actions, `([st]({ [field_values] })), expr_type),
-      expr_type)
-  else
-    return values.value(
-      node,
-      expr.once_only(actions, `({ [field_values] }), expr_type),
-      expr_type)
-  end
+  return values.value(
+    node,
+    expr.once_only(actions, `([expr_type]{ [field_values] }), expr_type),
+    expr_type)
 end
 
 function codegen.expr_raw_context(cx, node)
@@ -7609,10 +7595,10 @@ function codegen.top(cx, node)
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)
 
-  elseif node:is(ast.typed.top.QuoteExpr) then
+  elseif node:is(ast.specialized.top.QuoteExpr) then
     return codegen.top_quote_expr(cx, node)
 
-  elseif node:is(ast.typed.top.QuoteStat) then
+  elseif node:is(ast.specialized.top.QuoteStat) then
     return codegen.top_quote_stat(cx, node)
 
   else

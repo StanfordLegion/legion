@@ -14,30 +14,21 @@
 
 import "regent"
 
-task named()
-  var is = ispace(int2d, { x = 1, y = 3 })
-  var t = int2d { x = 10, y = 20 }
-  for i in is do
-    t += i + { x = 100, y = 200 }
-  end
-  regentlib.c.printf("named: x = %lld, y = %lld\n", t.x, t.y)
-  regentlib.assert(t.x == 310, "test failed")
-  regentlib.assert(t.y == 623, "test failed")
-end
-
-task positional()
-  var is = ispace(int2d, { 1, 3 })
-  var t = int2d { 10, 20 }
-  for i in is do
-    t += i + { 100, 200 }
-  end
-  regentlib.c.printf("positional: x = %lld, y = %lld\n", t.x, t.y)
-  regentlib.assert(t.x == 310, "test failed")
-  regentlib.assert(t.y == 623, "test failed")
-end
+-- This test is for a regression in the Regent compiler where field
+-- access on an index type stripped l-val-ness.
 
 task main()
-  named()
-  positional()
+  var point = int2d { x = 1, y = 2 }
+  point.x = 1 -- This should be mutable.
+  point.y = 20
+
+  var is = ispace(int2d, { x = 2, y = 2})
+  for i in is do
+    var point2 = i
+    point2.x = 300 -- This should be mutable.
+    point2.y = 4000
+  end
+
+  regentlib.assert(point.x + point.y == 21, "test failed")
 end
 regentlib.start(main)

@@ -137,4 +137,6 @@ function optimize_config_options.entry(node)
   return optimize_config_options.top(cx, node)
 end
 
+optimize_config_options.pass_name = "optimize_config_options"
+
 return optimize_config_options
