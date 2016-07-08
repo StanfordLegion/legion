@@ -446,19 +446,26 @@ function type_check.expr_field_access(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = value.expr_type -- Keep references, do NOT std.check_read
 
-  local unpack_type, constraints
-
-  -- Resolve automatic dereferences.
+  -- Resolve automatic dereferences by desugaring into a separate
+  -- deref and field access.
   if std.is_bounded_type(std.as_read(value_type)) and
     std.as_read(value_type):is_ptr() and
     -- Note: Bounded types with fields take precedence over dereferences.
     not std.get_field(std.as_read(value_type).index_type.base_type, node.field_name)
   then
-    -- Check privileges on the pointer itself.
-    unpack_type = std.ref(std.check_read(cx, value))
-  else
-    unpack_type = value_type
+    return type_check.expr(
+      cx,
+      node {
+        value = ast.specialized.expr.Deref {
+          value = node.value,
+          span = node.value.span,
+          annotations = node.value.annotations,
+        }
+      })
   end
+
+  local unpack_type = value_type
+  local constraints
 
   -- Resolve index and bounded types and automatic unpacks of fspaces.
   do
