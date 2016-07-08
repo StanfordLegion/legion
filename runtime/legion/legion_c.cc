@@ -3242,6 +3242,10 @@ legion_runtime_unmap_all_regions(legion_runtime_t runtime_,
   runtime->unmap_all_regions(ctx);
 }
 
+// -----------------------------------------------------------------------
+// Fill Field Operations
+// -----------------------------------------------------------------------
+
 void
 legion_runtime_fill_field(
   legion_runtime_t runtime_,
@@ -3280,6 +3284,73 @@ legion_runtime_fill_field_future(
   Predicate *pred = CObjectWrapper::unwrap(pred_);
 
   runtime->fill_field(ctx, handle, parent, fid, *f, *pred);
+}
+
+// -----------------------------------------------------------------------
+// File Operations
+// -----------------------------------------------------------------------
+
+legion_field_map_t
+legion_field_map_create()
+{
+  std::map<FieldID, const char *> *result =
+    new std::map<FieldID, const char *>();
+
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_field_map_destroy(legion_field_map_t handle_)
+{
+  std::map<FieldID, const char *> *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_field_map_insert(legion_field_map_t handle_,
+                        legion_field_id_t key,
+                        const char *value)
+{
+  std::map<FieldID, const char *> *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->insert(std::pair<FieldID, const char *>(key, value));
+}
+
+legion_physical_region_t
+legion_runtime_attach_hdf5(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  const char *filename,
+  legion_logical_region_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_map_t field_map_,
+  legion_file_mode_t mode)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  std::map<FieldID, const char *> *field_map =
+    CObjectWrapper::unwrap(field_map_);
+
+  PhysicalRegion result =
+    runtime->attach_hdf5(ctx, filename, handle, parent, *field_map, mode);
+
+  return CObjectWrapper::wrap(new PhysicalRegion(result));
+}
+
+void
+legion_runtime_detach_hdf5(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_physical_region_t region_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  PhysicalRegion *region = CObjectWrapper::unwrap(region_);
+
+  runtime->detach_hdf5(ctx, *region);
 }
 
 // -----------------------------------------------------------------------
