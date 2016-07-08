@@ -115,7 +115,7 @@ function ast_node:type()
   return self.node_type
 end
 
-function ast_node:fields()
+function ast_node:get_fields()
   local result = {}
   for k, v in pairs(self) do
     if k ~= "node_type" then
