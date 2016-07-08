@@ -27,7 +27,7 @@ local default_options = {
   ["future"] = true,
   ["leaf"] = true,
   ["mapping"] = true,
-  ["vectorize"] = false,
+  ["vectorize"] = true,
 
   -- Dataflow optimization flags:
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,

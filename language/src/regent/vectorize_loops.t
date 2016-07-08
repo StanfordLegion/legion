@@ -272,6 +272,9 @@ function flip_types.expr(cx, simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.expr.Deref) then
+    if cx:lookup_expr_type(node) == V then
+      new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    end
 
   elseif node:is(ast.typed.expr.ID) then
     if cx:lookup_expr_type(node) == V and not (node.value == symbol) then
@@ -483,15 +486,22 @@ function vectorize.stat_for_list(cx, node)
   }
 end
 
-function collect_bounds(node)
+local function get_bounds(ty)
+  if std.is_ref(ty) then
+    return ty:bounds():map(function(bound)
+      return data.newtuple(bound, ty.field_path)
+    end)
+  else
+    return terralib.newlist()
+  end
+end
+
+local function collect_bounds(node)
   local bounds = terralib.newlist()
-  if node:is(ast.typed.expr.FieldAccess) then
-    local value_type = std.as_read(node.value.expr_type)
-    if std.is_bounded_type(value_type) then
-      value_type:bounds():map(function(bound)
-        bounds:insert(data.newtuple(bound, node.field_name))
-      end)
-    end
+  if node:is(ast.typed.expr.FieldAccess) or
+     node:is(ast.typed.expr.Deref) then
+    local ty = node.expr_type
+    if std.is_ref(ty) then bounds:insertall(get_bounds(ty)) end
     bounds:insertall(collect_bounds(node.value))
 
   elseif node:is(ast.typed.expr.IndexAccess) then
@@ -602,25 +612,31 @@ function check_vectorizability.stat(cx, node)
       end
 
       -- bookkeeping for alias analysis
-      collect_bounds(lh):map(function(pair)
+      -- we only track references that are being written in LHS
+      -- since read accesses can be aliased
+      get_bounds(lh.expr_type):map(function(pair)
         local ty, field = unpack(pair)
         if not bounds_lhs[ty] then bounds_lhs[ty] = {} end
-        bounds_lhs[ty][field] = true
+        bounds_lhs[ty][field:hash()] = field
       end)
       collect_bounds(rh):map(function(pair)
         local ty, field = unpack(pair)
         if not bounds_rhs[ty] then bounds_rhs[ty] = {} end
-        bounds_rhs[ty][field] = true
+        bounds_rhs[ty][field:hash()] = field
       end)
     end
 
     -- reject an aliasing between the read set and write set
     for ty, fields in pairs(bounds_lhs) do
       if bounds_rhs[ty] then
-        for field, _ in pairs(fields) do
-          if bounds_rhs[ty][field] then
+        for field_hash, field in pairs(fields) do
+          if bounds_rhs[ty][field_hash] then
+            local path = ""
+            if #field > 0 then
+              path = "." .. field:mkstring(nil, ".", nil)
+            end
             cx:report_error_when_demanded(node, error_prefix ..
-              "aliasing references of path " ..  tostring(ty) .. "." .. field)
+              "aliasing references of path " ..  tostring(ty) .. path)
             return false
           end
         end

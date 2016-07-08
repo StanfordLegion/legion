@@ -650,8 +650,6 @@ function value:__get_field(cx, node, value_type, field_name)
       assert(value_type:is_ptr())
       return values.ref(node, self:read(cx, value_type), value_type, data.newtuple(field_name))
     end
-  elseif std.is_vptr(value_type) then
-    return values.vref(node, self:read(cx, value_type), value_type, data.newtuple(field_name))
   else
     return self:new(
       node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
@@ -1248,14 +1246,16 @@ function vref:write(cx, value, expr_type)
     data.zip(base_pointers, field_paths):map(
       function(pair)
         local base_pointer, field_path = unpack(pair)
-        local result = value_expr.value
         for i = 1, vector_width do
+          local result = value_expr.value
           local field_value = `base_pointer[ [vref_value].__ptr.value[ [i - 1] ] ]
           for _, field_name in ipairs(field_path) do
             result = `([result].[field_name])
           end
           local assignment
-          if value.value_type:isprimitive() then
+          if value.value_type:isprimitive() or
+             (std.is_sov(expr_type) and
+              std.type_eq(expr_type.type, value.value_type)) then
             assignment = quote
               [field_value] = [result]
             end
@@ -5516,7 +5516,7 @@ function codegen.expr_binary(cx, node)
 end
 
 function codegen.expr_deref(cx, node)
-  local value = codegen.expr(cx, node.value):read(cx)
+  local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
   local value_type = std.as_read(node.value.expr_type)
 
   if value_type:ispointer() then
@@ -5524,6 +5524,8 @@ function codegen.expr_deref(cx, node)
   elseif std.is_bounded_type(value_type) then
     assert(value_type:is_ptr())
     return values.ref(node, value, value_type)
+  elseif std.is_vptr(value_type) then
+    return values.vref(node, value, value_type)
   else
     assert(false)
   end
@@ -6848,7 +6850,7 @@ function codegen.stat_assignment(cx, node)
       rh_expr = expr.once_only(rh_expr.actions, rh_expr.value, rh_node.expr_type)
       actions:insert(rh_expr.actions)
       return values.value(
-        node,
+        rh_node,
         expr.just(quote end, rh_expr.value),
         std.as_read(rh_node.expr_type))
     end)

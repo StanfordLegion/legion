@@ -13,30 +13,35 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops3.rg:40: vectorization failed: loop body has aliasing references of path region(fs2()).v
---     e.p1.v = e.p2.v
---     ^
+-- vectorize_loops14.rg:45: vectorization failed: loop body has aliasing references of path region(fs3()).v
+--    e.p1.p.v += e.p2.p.v
+--    ^
 
 import "regent"
 
-fspace fs2
+fspace fs3
 {
   v : float,
 }
 
-fspace fs1(r : region(fs2))
+fspace fs2(r : region(fs3))
 {
-  p1 : ptr(fs2, r),
-  p2 : ptr(fs2, r),
+  p : ptr(fs3, r),
 }
 
-task f(r2 : region(fs2), r : region(fs1(r2)))
+fspace fs1(s : region(fs3), r : region(fs2(s)))
+{
+  p1 : ptr(fs2(s), r),
+  p2 : ptr(fs2(s), r),
+}
+
+task f(s : region(fs3), r : region(fs2(s)), t : region(fs1(s, r)))
 where
-  reads(r2.v, r.p1, r.p2),
-  writes(r2.v)
+  reads(s.v, r.p, t.p1, t.p2),
+  writes(s.v)
 do
   __demand(__vectorize)
-  for e in r do
-    e.p1.v = e.p2.v
+  for e in t do
+    e.p1.p.v += e.p2.p.v
   end
 end
