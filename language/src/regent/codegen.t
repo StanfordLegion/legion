@@ -1643,12 +1643,11 @@ function codegen.expr_index_access(cx, node)
     end
 
     local color_type = value_type:colors().index_type
-    local dim = color_type.dim
     local color = std.implicit_cast(index_type, color_type, index.value)
 
     actions = quote
       [actions]
-      var dp = color:to_domain_point()
+      var dp = [color]:to_domain_point()
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
         [cx.runtime], [value.value].impl, dp)
       var [is] = [lr].index_space
@@ -1685,6 +1684,9 @@ function codegen.expr_index_access(cx, node)
       [emit_debuginfo(node)]
     end
 
+    local color_type = value_type:partition():colors().index_type
+    local color = std.implicit_cast(index_type, color_type, index.value)
+
     local region_type = expr_type:parent_region()
     local lr
     if not cx:has_region(region_type) then
@@ -1694,7 +1696,7 @@ function codegen.expr_index_access(cx, node)
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
-      if not cx.leaf then
+      if not cx.leaf and parent_region_type:is_opaque() then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       end
       local it = false
@@ -1703,13 +1705,14 @@ function codegen.expr_index_access(cx, node)
       end
       actions = quote
         [actions]
-        var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
-          [cx.runtime], [value.value].impl, [index.value])
+        var dp = [color]:to_domain_point()
+        var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+          [cx.runtime], [value.value].impl, dp)
         var [is] = [lr].index_space
         var [r] = [region_type] { impl = [lr] }
       end
 
-      if not cx.leaf then
+      if not cx.leaf and parent_region_type:is_opaque() then
         actions = quote
           [actions]
           var [isa] = c.legion_index_allocator_create(
@@ -1736,9 +1739,10 @@ function codegen.expr_index_access(cx, node)
     local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
     actions = quote
       [actions]
-      var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color(
+      var dp = [color]:to_domain_point()
+      var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
         [cx.runtime], [cx.context],
-        [value.value].product, [index.value])
+        [value.value].product, dp)
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [lr], [ip])
     end

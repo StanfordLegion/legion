@@ -814,6 +814,28 @@ namespace Realm {
         return 0;
       }
 
+      // Intersects this Domain with another Domain and returns the result.
+      // WARNING: currently only works with structured Domains.
+      Domain intersection(const Domain &other) const
+      {
+        assert(dim == other.dim);
+
+        switch (dim)
+        {
+          case 0:
+            assert(false);
+          case 1:
+            return Domain::from_rect<1>(get_rect<1>().intersection(other.get_rect<1>()));
+          case 2:
+            return Domain::from_rect<2>(get_rect<2>().intersection(other.get_rect<2>()));
+          case 3:
+            return Domain::from_rect<3>(get_rect<3>().intersection(other.get_rect<3>()));
+          default:
+            assert(false);
+        }
+        return Domain::NO_DOMAIN;
+      }
+
       template <int DIM>
       LegionRuntime::Arrays::Rect<DIM> get_rect(void) const { assert(dim == DIM); return LegionRuntime::Arrays::Rect<DIM>(rect_data); }
 
