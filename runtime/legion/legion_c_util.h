@@ -166,6 +166,8 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
       NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
       NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
+      typedef std::map<FieldID, const char *> FieldMap;
+      NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
