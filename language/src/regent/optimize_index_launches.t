@@ -134,9 +134,8 @@ end
 local function analyze_is_side_effect_free_node(cx)
   return function(node)
     -- Expressions:
-    if node:is(ast.typed.expr.FieldAccess) then
-      local ptr_type = std.as_read(node.value.expr_type)
-      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    if node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.Call) then
       return not std.is_task(node.fn.value)
     elseif node:is(ast.typed.expr.RawContext) or
@@ -173,7 +172,7 @@ local function analyze_is_side_effect_free_node(cx)
     elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Cast) or
       node:is(ast.typed.expr.Ctor) or
@@ -226,9 +225,8 @@ local function analyze_is_loop_invariant_node(cx)
     -- Expressions:
     if node:is(ast.typed.expr.ID) then
       return not cx:is_loop_variable(node.value)
-    elseif node:is(ast.typed.expr.FieldAccess) then
-      local ptr_type = std.as_read(node.value.expr_type)
-      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.Call) or
       node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
@@ -261,7 +259,7 @@ local function analyze_is_loop_invariant_node(cx)
 
     elseif node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Cast) or
       node:is(ast.typed.expr.Ctor) or

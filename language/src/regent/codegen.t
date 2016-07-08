@@ -642,12 +642,8 @@ function value:__get_field(cx, node, value_type, field_name)
   elseif std.is_index_type(value_type) then
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
-    if std.get_field(value_type.index_type.base_type, field_name) then
-      return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
-    else
-      assert(value_type:is_ptr())
-      return values.ref(node, self:read(cx, value_type), value_type, data.newtuple(field_name))
-    end
+    assert(std.get_field(value_type.index_type.base_type, field_name))
+    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   else
     return self:new(
       node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
@@ -693,17 +689,12 @@ function value:get_index(cx, node, index, result_type)
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
-  local base_value_type = value_type
-  if std.is_bounded_type(base_value_type) and
-    not std.get_field(base_value_type.index_type.base_type, field_name)
-  then
-    assert(base_value_type:is_ptr())
-    base_value_type = base_value_type.points_to_type
-  end
+  assert(not std.is_bounded_type(value_type) or
+           std.get_field(value_type.index_type.base_type, field_name))
   local unpack_type = std.as_read(field_type)
 
   if std.is_region(unpack_type) and not cx:has_region(unpack_type) then
-    local static_region_type = std.get_field(base_value_type, field_name)
+    local static_region_type = std.get_field(value_type, field_name)
     local region_expr = self:__get_field(cx, self.node, value_type, field_name):read(cx)
     region_expr = unpack_region(cx, region_expr, unpack_type, static_region_type)
     region_expr = expr.just(region_expr.actions, self.expr.value)
@@ -729,13 +720,13 @@ function value:unpack(cx, value_type, field_name, field_type)
     assert(#region_types == 1)
     local region_type = region_types[1]
 
-    local static_ptr_type = std.get_field(base_value_type, field_name)
+    local static_ptr_type = std.get_field(value_type, field_name)
     local static_region_types = static_ptr_type:bounds()
     assert(#static_region_types == 1)
     local static_region_type = static_region_types[1]
 
     local region_field_name
-    for _, entry in pairs(base_value_type:getentries()) do
+    for _, entry in pairs(value_type:getentries()) do
       local entry_type = entry[2] or entry.type
       if entry_type == static_region_type then
         region_field_name = entry[1] or entry.field
