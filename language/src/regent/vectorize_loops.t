@@ -70,6 +70,8 @@ function context:new_local_scope()
     subst = self.subst:new_local_scope(),
     expr_type = self.expr_type,
     demanded = self.demanded,
+    read_set = self.read_set,
+    write_set = self.write_set,
   }
   return setmetatable(cx, context)
 end
@@ -80,6 +82,8 @@ function context:new_global_scope()
     subst = symbol_table:new_global_scope(),
     expr_type = {},
     demanded = false,
+    read_set = {},
+    write_set = {},
   }
   return setmetatable(cx, context)
 end
@@ -569,13 +573,21 @@ function check_vectorizability.stat(cx, node)
         return type_vectorizable
       end
       cx:assign(symbol, V)
+      node.values:map(function(value)
+        collect_bounds(value):map(function(pair)
+          local ty, field = unpack(pair)
+          local field_hash = field:hash()
+          if not cx.read_set[ty] then cx.read_set[ty] = {} end
+          if not cx.read_set[ty][field_hash] then
+            cx.read_set[ty][field_hash] = data.newtuple(field, node)
+          end
+        end)
+      end)
     end
     return true
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
-    local bounds_lhs = {}
-    local bounds_rhs = {}
     for i, rh in pairs(node.rhs) do
       local lh = node.lhs[i]
 
@@ -616,32 +628,22 @@ function check_vectorizability.stat(cx, node)
       -- since read accesses can be aliased
       get_bounds(lh.expr_type):map(function(pair)
         local ty, field = unpack(pair)
-        if not bounds_lhs[ty] then bounds_lhs[ty] = {} end
-        bounds_lhs[ty][field:hash()] = field
+        local field_hash = field:hash()
+        if not cx.write_set[ty] then cx.write_set[ty] = {} end
+        if not cx.write_set[ty][field_hash] then
+          cx.write_set[ty][field_hash] = data.newtuple(field, node)
+        end
       end)
       collect_bounds(rh):map(function(pair)
         local ty, field = unpack(pair)
-        if not bounds_rhs[ty] then bounds_rhs[ty] = {} end
-        bounds_rhs[ty][field:hash()] = field
+        local field_hash = field:hash()
+        if not cx.read_set[ty] then cx.read_set[ty] = {} end
+        if not cx.read_set[ty][field_hash] then
+          cx.read_set[ty][field_hash] = data.newtuple(field, node)
+        end
       end)
     end
 
-    -- reject an aliasing between the read set and write set
-    for ty, fields in pairs(bounds_lhs) do
-      if bounds_rhs[ty] then
-        for field_hash, field in pairs(fields) do
-          if bounds_rhs[ty][field_hash] then
-            local path = ""
-            if #field > 0 then
-              path = "." .. field:mkstring(nil, ".", nil)
-            end
-            cx:report_error_when_demanded(node, error_prefix ..
-              "aliasing references of path " ..  tostring(ty) .. path)
-            return false
-          end
-        end
-      end
-    end
     return true
 
   elseif node:is(ast.typed.stat.ForNum) then
@@ -930,6 +932,26 @@ function check_vectorizability.type(ty)
   end
 end
 
+-- reject an aliasing between the read set and write set
+function check_vectorizability.alias_analysis(cx)
+  for ty, fields in pairs(cx.write_set) do
+    if cx.read_set[ty] then
+      for field_hash, pair in pairs(fields) do
+        if cx.read_set[ty][field_hash] then
+          local field, node = unpack(pair)
+          local path = ""
+          if #field > 0 then
+            path = "." .. field:mkstring(nil, ".", nil)
+          end
+          cx:report_error_when_demanded(node, error_prefix ..
+            "aliasing update of path " ..  tostring(ty) .. path)
+          return false
+        end
+      end
+    end
+  end
+end
+
 -- visitor for each statement type
 local vectorize_loops = {}
 
@@ -968,6 +990,8 @@ function vectorize_loops.stat_for_list(node)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
+  vectorizable = vectorizable and
+                 check_vectorizability.alias_analysis(cx)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else

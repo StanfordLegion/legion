@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops3.rg:40: vectorization failed: loop body has aliasing references of path region(fs2()).v
+-- vectorize_loops3.rg:40: vectorization failed: loop body has aliasing update of path region(fs2()).v
 --     e.p1.v = e.p2.v
 --     ^
 
