@@ -16,11 +16,9 @@ local config = require("regent/config")
 local log = require("regent/log")
 
 local cudahelper = {}
+cudahelper.check_cuda_available = function() return false end
 
-if not config.args()["cuda"] then return cudahelper end
-
-if not terralib.cudacompile then
-  cudahelper.check_cuda_available = function() return false end
+if not config.args()["cuda"] or not terralib.cudacompile then
   return cudahelper
 end
 

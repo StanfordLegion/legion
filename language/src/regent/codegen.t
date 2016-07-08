@@ -21,7 +21,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local traverse_symbols = require("regent/traverse_symbols")
 local codegen_hooks = require("regent/codegen_hooks")
-local cudahelper = {}
+local cudahelper = require("regent/cudahelper")
 
 -- Configuration Variables
 
@@ -46,8 +46,6 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- checks flag as the compiler does not use standard runtime
 -- accessors.
 local bounds_checks = std.config["bounds-checks"]
-
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 local codegen = {}
 
