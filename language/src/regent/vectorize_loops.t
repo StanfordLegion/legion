@@ -71,12 +71,12 @@ function context:new_local_scope()
     expr_type = self.expr_type,
     demanded = self.demanded,
     read_set = self.read_set,
-    write_set = self.write_set,
+    loop_symbol = self.loop_symbol,
   }
   return setmetatable(cx, context)
 end
 
-function context:new_global_scope()
+function context:new_global_scope(loop_symbol)
   local cx = {
     var_type = symbol_table:new_global_scope(),
     subst = symbol_table:new_global_scope(),
@@ -84,6 +84,7 @@ function context:new_global_scope()
     demanded = false,
     read_set = {},
     write_set = {},
+    loop_symbol = loop_symbol,
   }
   return setmetatable(cx, context)
 end
@@ -552,6 +553,33 @@ function check_vectorizability.block(cx, node)
   return true
 end
 
+-- reject an aliasing between the read set and write set
+function check_vectorizability.check_aliasing(cx, write_set)
+  -- ignore write accesses directly to the region being iterated over
+  cx.loop_symbol:gettype():bounds():map(function(r)
+    write_set[r] = nil
+  end)
+  for ty, fields in pairs(write_set) do
+    if cx.read_set[ty] then
+      for field_hash, pair in pairs(fields) do
+        if cx.read_set[ty][field_hash] then
+          local field, node = unpack(pair)
+          local path = ""
+          if #field > 0 then
+            path = "." .. field[1]
+            for idx = 2, #field do
+              path = path .. "." .. field[idx]
+            end
+          end
+          cx:report_error_when_demanded(node, error_prefix ..
+            "aliasing update of path " ..  tostring(ty) .. path)
+          return false
+        end
+      end
+    end
+  end
+end
+
 function check_vectorizability.stat(cx, node)
   if node:is(ast.typed.stat.Block) then
     return check_vectorizability.block(cx, node.block)
@@ -624,16 +652,6 @@ function check_vectorizability.stat(cx, node)
       end
 
       -- bookkeeping for alias analysis
-      -- we only track references that are being written in LHS
-      -- since read accesses can be aliased
-      get_bounds(lh.expr_type):map(function(pair)
-        local ty, field = unpack(pair)
-        local field_hash = field:hash()
-        if not cx.write_set[ty] then cx.write_set[ty] = {} end
-        if not cx.write_set[ty][field_hash] then
-          cx.write_set[ty][field_hash] = data.newtuple(field, node)
-        end
-      end)
       collect_bounds(rh):map(function(pair)
         local ty, field = unpack(pair)
         local field_hash = field:hash()
@@ -642,6 +660,16 @@ function check_vectorizability.stat(cx, node)
           cx.read_set[ty][field_hash] = data.newtuple(field, node)
         end
       end)
+      local write_set = {}
+      get_bounds(lh.expr_type):map(function(pair)
+        local ty, field = unpack(pair)
+        local field_hash = field:hash()
+        if not write_set[ty] then write_set[ty] = {} end
+        if not write_set[ty][field_hash] then
+          write_set[ty][field_hash] = data.newtuple(field, node)
+        end
+      end)
+      check_vectorizability.check_aliasing(cx, write_set)
     end
 
     return true
@@ -657,7 +685,13 @@ function check_vectorizability.stat(cx, node)
     end
     cx = cx:new_local_scope()
     cx:assign(node.symbol, S)
-    return check_vectorizability.block(cx, node.block)
+    -- check loop body twice to check loop carried aliasing
+    for idx = 0, 2 do
+      if not check_vectorizability.block(cx, node.block) then
+        return false
+      end
+    end
+    return true
 
   elseif node:is(ast.typed.stat.If) then
     if not check_vectorizability.expr(cx, node.cond) then return false end
@@ -932,26 +966,6 @@ function check_vectorizability.type(ty)
   end
 end
 
--- reject an aliasing between the read set and write set
-function check_vectorizability.alias_analysis(cx)
-  for ty, fields in pairs(cx.write_set) do
-    if cx.read_set[ty] then
-      for field_hash, pair in pairs(fields) do
-        if cx.read_set[ty][field_hash] then
-          local field, node = unpack(pair)
-          local path = ""
-          if #field > 0 then
-            path = "." .. field:mkstring(nil, ".", nil)
-          end
-          cx:report_error_when_demanded(node, error_prefix ..
-            "aliasing update of path " ..  tostring(ty) .. path)
-          return false
-        end
-      end
-    end
-  end
-end
-
 -- visitor for each statement type
 local vectorize_loops = {}
 
@@ -985,13 +999,11 @@ end
 
 function vectorize_loops.stat_for_list(node)
   if node.annotations.vectorize:is(ast.annotation.Forbid) then return node end
-  local cx = context:new_global_scope()
+  local cx = context:new_global_scope(node.symbol)
   cx:assign(node.symbol, V)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
-  vectorizable = vectorizable and
-                 check_vectorizability.alias_analysis(cx)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
