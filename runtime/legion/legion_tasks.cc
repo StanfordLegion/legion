@@ -6408,8 +6408,15 @@ namespace Legion {
           rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
           rez.serialize(wait_on); 
         }
+        // If we don't have a context yet, then we haven't been registered
+        // with the runtime, so do a temporary registration and then when
+        // we are done, we can unregister our temporary self
+        if (!context.exists())
+          runtime->register_temporary_context(this);
         runtime->send_create_top_view_request(manager->owner_space, rez);
         wait_on.wait();
+        if (!context.exists())
+          runtime->unregister_temporary_context(this);
 #ifdef DEBUG_LEGION
         assert(result != NULL); // when we wake up we should have the result
 #endif

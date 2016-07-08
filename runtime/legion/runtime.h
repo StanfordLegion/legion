@@ -2339,6 +2339,8 @@ namespace Legion {
     public:
       void allocate_local_context(SingleTask *task);
       void free_local_context(SingleTask *task);
+      void register_temporary_context(SingleTask *task);
+      void unregister_temporary_context(SingleTask *task);
       void register_remote_context(UniqueID context_uid, RemoteTask *context,
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
