@@ -199,7 +199,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
 end
 
 function flip_types.expr(cx, simd_width, symbol, node)
-  local new_node = node:fields()
+  local new_node = node:get_fields()
   if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
