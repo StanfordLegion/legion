@@ -17788,6 +17788,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::register_temporary_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(local_contexts.find(context_uid) == local_contexts.end());
+#endif
+      local_contexts[context_uid] = task;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_temporary_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
+      std::map<UniqueID,SingleTask*>::iterator finder = 
+        local_contexts.find(context_uid);
+#ifdef DEBUG_LEGION
+      assert(finder != local_contexts.end());
+#endif
+      local_contexts.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_remote_context(UniqueID context_uid, 
                           RemoteTask *context, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
