@@ -432,8 +432,12 @@ local function cast_fn(to_type)
   return terralib.types.functype(terralib.newlist({untyped}), to_type, false)
 end
 
-function type_check.insert_explicit_cast(node, from_type, to_type)
+local function insert_implicit_cast(node, from_type, to_type)
+  assert(std.validate_implicit_cast(from_type, to_type))
   if not std.type_eq(from_type, to_type) then
+    -- It is safe to make this an explicit cast, because every valid
+    -- implicit cast should also be a valid explicit cast.
+    -- (The inverse is not true.)
     return ast.typed.expr.Cast {
       fn = ast.typed.expr.Function {
         value = to_type,
@@ -548,26 +552,34 @@ function type_check.expr_index_access(cx, node)
   local index = type_check.expr(cx, node.index)
   local index_type = std.check_read(cx, index)
 
+  -- Some kinds of operations require information about the index used
+  -- (e.g. partition access at a constant). Save that index now to
+  -- avoid getting entangled in any implicit casts.
+  local static_index
+  if index:is(ast.typed.expr.Constant) or
+    (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
+  then
+    static_index = index.value
+  end
+
   if std.is_partition(value_type) then
     local color_type = value_type:colors().index_type
     if not std.validate_implicit_cast(index_type, color_type) then
       log.error(node, "type mismatch: expected " .. tostring(color_type) .. " but got " .. tostring(index_type))
     end
-    -- TODO: put this back once index space optimizer is extended for casts
-    -- index = type_check.insert_explicit_cast(index, index_type, color_type)
+    index = insert_implicit_cast(index, index_type, color_type)
 
     local partition = value_type:partition()
     local parent = value_type:parent_region()
+
     local subregion
-    if index:is(ast.typed.expr.Constant) or
-      (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
-    then
-      subregion = value_type:subregion_constant(index.value)
+    if static_index then
+      subregion = value_type:subregion_constant(static_index)
 
       if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
         for other_index, other_subregion in pairs(other_subregions) do
-          if index.value ~= other_index then
+          if static_index ~= other_index then
             std.add_constraint(cx, subregion, other_subregion, "*", true)
           end
         end
@@ -591,15 +603,13 @@ function type_check.expr_index_access(cx, node)
     if not std.validate_implicit_cast(index_type, color_type) then
       log.error(node, "type mismatch: expected " .. tostring(color_type) .. " but got " .. tostring(index_type))
     end
-    index = type_check.insert_explicit_cast(index, index_type, int)
+    index = insert_implicit_cast(index, index_type, int)
 
     local partition = value_type:partition()
     local parent = value_type:parent_region()
     local subregion, subpartition
-    if index:is(ast.typed.expr.Constant) or
-      (index:is(ast.typed.expr.ID) and not std.is_rawref(index.expr_type))
-    then
-      subpartition = value_type:subpartition_constant(index.value)
+    if static_index then
+      subpartition = value_type:subpartition_constant(static_index)
       subregion = subpartition:parent_region()
 
       if value_type:is_disjoint() then
@@ -629,6 +639,12 @@ function type_check.expr_index_access(cx, node)
   elseif std.is_region(value_type) then
     -- FIXME: Need to check if this is a bounded type (with the right
     -- bound) and, if not, insert a dynamic cast.
+
+    -- Elliott: Careful! A bounded type generally indicates that the
+    -- value in question is within bounds. This is not necessarily
+    -- true for array accesses. If we want to be able to do analyses
+    -- with this information later, we should be careful not to cast
+    -- to a bounded type here.
     local region_index_type = value_type:ispace().index_type
     if not std.validate_implicit_cast(index_type, region_index_type) then
       log.error(node, "type mismatch: expected " .. tostring(region_index_type) .. " but got " .. tostring(index_type))
@@ -657,7 +673,7 @@ function type_check.expr_index_access(cx, node)
                   tostring(index_type))
     end
     if not slice then
-      index = type_check.insert_explicit_cast(index, index_type, int)
+      index = insert_implicit_cast(index, index_type, int)
     end
 
     if not value_type:is_list_of_regions() then
@@ -1143,7 +1159,7 @@ function type_check.expr_new(cx, node)
     log.error(node, "type mismatch in argument 2: expected " .. tostring(index_type) .. ", got " .. tostring(extent_type))
   end
   if extent then
-    extent = type_check.insert_explicit_cast(extent, extent_type, index_type)
+    extent = insert_implicit_cast(extent, extent_type, index_type)
   end
 
   return ast.typed.expr.New {
@@ -1274,9 +1290,9 @@ function type_check.expr_ispace(cx, node)
     log.error(node, "type mismatch in argument 3: expected " ..
                 tostring(index_type) .. " but got " .. tostring(start_type))
   end
-  extent = type_check.insert_explicit_cast(extent, extent_type, index_type)
+  extent = insert_implicit_cast(extent, extent_type, index_type)
   if node.start then
-    start = type_check.insert_explicit_cast(start, start_type, index_type)
+    start = insert_implicit_cast(start, start_type, index_type)
   end
 
   local expr_type = std.ispace(index_type)
@@ -1798,7 +1814,7 @@ function type_check.expr_list_slice_partition(cx, node)
   if not std.validate_implicit_cast(indices_type, std.list(int)) then
     log.error(node, "type mismatch: expected " .. tostring(std.list(int)) .. " but got " .. tostring(indices_type))
   end
-  indices = type_check.insert_explicit_cast(indices, indices_type, std.list(int))
+  indices = insert_implicit_cast(indices, indices_type, std.list(int))
   local expr_type = std.list(
     std.region(
       terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
@@ -1831,7 +1847,7 @@ function type_check.expr_list_duplicate_partition(cx, node)
   if not std.validate_implicit_cast(indices_type, std.list(int)) then
     log.error(node, "type mismatch: expected " .. tostring(std.list(int)) .. " but got " .. tostring(indices_type))
   end
-  indices = type_check.insert_explicit_cast(indices, indices_type, std.list(int))
+  indices = insert_implicit_cast(indices, indices_type, std.list(int))
   local expr_type = std.list(
     std.region(
       std.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
@@ -1982,8 +1998,8 @@ function type_check.expr_list_range(cx, node)
   if not std.validate_implicit_cast(stop_type, int) then
     log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(stop_type))
   end
-  start = type_check.insert_explicit_cast(start, start_type, int)
-  stop = type_check.insert_explicit_cast(stop, stop_type, int)
+  start = insert_implicit_cast(start, start_type, int)
+  stop = insert_implicit_cast(stop, stop_type, int)
   local expr_type = std.list(int)
 
   return ast.typed.expr.ListRange {
@@ -2001,7 +2017,7 @@ function type_check.expr_phase_barrier(cx, node)
   if not std.validate_implicit_cast(value_type, int) then
     log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(value_type))
   end
-  value = type_check.insert_explicit_cast(value, value_type, int)
+  value = insert_implicit_cast(value, value_type, int)
 
   return ast.typed.expr.PhaseBarrier {
     value = value,
@@ -2017,7 +2033,7 @@ function type_check.expr_dynamic_collective(cx, node)
   if not std.validate_implicit_cast(arrivals_type, int) then
     log.error(node, "type mismatch in argument 3: expected " .. tostring(int) .. " but got " .. tostring(arrivals_type))
   end
-  arrivals = type_check.insert_explicit_cast(arrivals, arrivals_type, int)
+  arrivals = insert_implicit_cast(arrivals, arrivals_type, int)
 
   local expr_type = std.dynamic_collective(node.value_type)
 
@@ -2742,7 +2758,7 @@ function type_check.stat_if(cx, node)
   if not std.validate_implicit_cast(cond_type, bool) then
     log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
   end
-  cond = type_check.insert_explicit_cast(cond, cond_type, bool)
+  cond = insert_implicit_cast(cond, cond_type, bool)
 
   local then_cx = cx:new_local_scope()
   local else_cx = cx:new_local_scope()
@@ -2763,7 +2779,7 @@ function type_check.stat_elseif(cx, node)
   if not std.validate_implicit_cast(cond_type, bool) then
     log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
   end
-  cond = type_check.insert_explicit_cast(cond, cond_type, bool)
+  cond = insert_implicit_cast(cond, cond_type, bool)
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.Elseif {
@@ -2780,7 +2796,7 @@ function type_check.stat_while(cx, node)
   if not std.validate_implicit_cast(cond_type, bool) then
     log.error(node.cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(cond_type))
   end
-  cond = type_check.insert_explicit_cast(cond, cond_type, bool)
+  cond = insert_implicit_cast(cond, cond_type, bool)
 
   local body_cx = cx:new_local_scope()
   return ast.typed.stat.While {
@@ -2899,7 +2915,7 @@ function type_check.stat_repeat(cx, node)
   if not std.validate_implicit_cast(until_cond_type, bool) then
     log.error(node.until_cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(until_cond_type))
   end
-  until_cond = type_check.insert_explicit_cast(until_cond, until_cond_type, bool)
+  until_cond = insert_implicit_cast(until_cond, until_cond_type, bool)
 
   local cx = cx:new_local_scope()
   return ast.typed.stat.Repeat {
@@ -2964,7 +2980,7 @@ function type_check.stat_var(cx, node)
 
   values = data.zip(node.symbols, values, value_types):map(function(tuple)
     local sym, value, value_type = unpack(tuple)
-    return type_check.insert_explicit_cast(value, value_type, sym:gettype())
+    return insert_implicit_cast(value, value_type, sym:gettype())
   end)
 
   return ast.typed.stat.Var {
@@ -3094,7 +3110,7 @@ function type_check.stat_assignment(cx, node)
 
   rhs = data.zip(lhs_types, rhs, rhs_types):map(function(tuple)
     local lh_type, rh, rh_type = unpack(tuple)
-    return type_check.insert_explicit_cast(rh, rh_type, lh_type)
+    return insert_implicit_cast(rh, rh_type, lh_type)
   end)
 
   return ast.typed.stat.Assignment {
