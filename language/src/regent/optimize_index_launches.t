@@ -446,12 +446,16 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
         (std.is_partition(std.as_read(arg.value.expr_type)) or
-           std.is_cross_product(std.as_read(arg.value.expr_type))) and
-        arg.index:is(ast.typed.expr.ID) and
-        arg.index.value == node.symbol
+           std.is_cross_product(std.as_read(arg.value.expr_type)))
       then
-        partition_type = std.as_read(arg.value.expr_type)
-        arg_variant = true
+        if (arg.index:is(ast.typed.expr.ID) and arg.index.value == node.symbol) or
+          (arg.index:is(ast.typed.expr.Cast) and
+             arg.index.arg:is(ast.typed.expr.ID) and
+             arg.index.arg.value == node.symbol)
+        then
+          partition_type = std.as_read(arg.value.expr_type)
+          arg_variant = true
+        end
       end
 
       if not (arg_variant or arg_invariant) then
