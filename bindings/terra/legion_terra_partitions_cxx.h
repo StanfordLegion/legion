@@ -23,6 +23,24 @@
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
 
+/**
+ * Creates the cross product between two IndexPartition's.
+ * @param lhs the left-hand side partition, whose subspaces are to be
+ *        sub-partitioned to represent the cross product
+ * @param rhs the right-hand side partition, within the same index tree as lhs
+ * @param rhs_color the Color to assign to partitions in the cross product; if
+ *        equals -1, suitable Color(s) will be chosen (see \p consistent_ids)
+ * @param consistent_ids if set, all new partitions in the cross product will
+ *        be assigned the same Color, even when `rhs_color` is -1
+ * @param[out] chosen_colors if non-NULL, will be populated so that each
+ *        subspace in \p lhs is associated with the Color assigned to its
+ *        corresponding partition in the cross product
+ * @param lhs_filter,rhs_filter if non-NULL, only subspaces with Colors
+ *        included in the filters will be included in the cross product
+ * @return the Color assigned to the newly created partitions of the cross
+ *         product, if all partitions are assigned the same Color (i.e. if
+ *         \p rhs_color is -1 or \p consistent_ids is set); -1 otherwise
+ */
 Color
 create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
@@ -31,7 +49,7 @@ create_cross_product(HighLevelRuntime *runtime,
                      Color rhs_color = -1,
                      bool consistent_ids = true,
                      std::map<IndexSpace, Color> *chosen_colors = NULL,
-                     const std::set<Color> *lhs_filter = NULL,
-                     const std::set<Color> *rhs_filter = NULL);
+                     const std::set<DomainPoint> *lhs_filter = NULL,
+                     const std::set<DomainPoint> *rhs_filter = NULL);
 
 #endif // __LEGION_TERRA_PARTITIONS_CXX_H__

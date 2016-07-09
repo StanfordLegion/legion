@@ -2296,7 +2296,8 @@ function std.cross_product(...)
     region_type = region_type or self:subregion_dynamic()
     assert(std.is_region(region_type))
     local region_symbol = std.newsymbol(region_type)
-    local partition = std.partition(self:partition(2).disjointness, region_symbol)
+    local partition = std.partition(self:partition(2).disjointness, region_symbol,
+                                    self:partition(2).colors_symbol)
     if #partition_symbols > 2 then
       local partition_symbol = std.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})

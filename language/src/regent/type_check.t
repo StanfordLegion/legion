@@ -599,10 +599,11 @@ function type_check.expr_index_access(cx, node)
       span = node.span,
     }
   elseif std.is_cross_product(value_type) then
-    if not std.validate_implicit_cast(index_type, int) then
-      log.error(node, "type mismatch: expected " .. tostring(int) .. " but got " .. tostring(index_type))
+    local color_type = value_type:partition():colors().index_type
+    if not std.validate_implicit_cast(index_type, color_type) then
+      log.error(node, "type mismatch: expected " .. tostring(color_type) .. " but got " .. tostring(index_type))
     end
-    index = insert_implicit_cast(index, index_type, int)
+    index = insert_implicit_cast(index, index_type, color_type)
 
     local partition = value_type:partition()
     local parent = value_type:parent_region()
@@ -614,7 +615,7 @@ function type_check.expr_index_access(cx, node)
       if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
         for other_index, other_subregion in pairs(other_subregions) do
-          if index.value ~= other_index then
+          if static_index ~= other_index then
             std.add_constraint(cx, subregion, other_subregion, "*", true)
           end
         end
