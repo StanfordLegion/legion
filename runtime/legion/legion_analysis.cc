@@ -5221,7 +5221,7 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_SPLIT_PREVIOUS_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5269,7 +5269,7 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_SPLIT_ADVANCE_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5298,7 +5298,7 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_PATH_ONLY_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5327,7 +5327,7 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_PATH_ONLY_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -5396,7 +5396,7 @@ namespace Legion {
                                           std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_MERGE_PATH_ONLY_CALL);
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
@@ -5457,7 +5457,7 @@ namespace Legion {
                                             bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_MERGE_PHYSICAL_STATE_CALL);
       WrapperReferenceMutator mutator(applied_conditions);
       if (need_lock)
@@ -5576,7 +5576,7 @@ namespace Legion {
                         std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_FILTER_AND_MERGE_PHYSICAL_STATE_CALL);
       WrapperReferenceMutator mutator(applied_conditions);
       // We're writing so we need the lock in exclusive mode
@@ -5787,7 +5787,7 @@ namespace Legion {
                 const FieldMask &request_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_REQUEST_INITIAL_CALL);
       RtUserEvent ready_event;
       FieldMask remaining_mask = request_mask;
@@ -5884,7 +5884,7 @@ namespace Legion {
                                                std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_REQUEST_FINAL_CALL);
       RtUserEvent ready_event;
       FieldMask remaining_mask = req_mask;
@@ -6107,7 +6107,7 @@ namespace Legion {
                                           RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_SEND_STATE_CALL);
       Serializer rez;
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
@@ -6322,7 +6322,7 @@ namespace Legion {
                                                     FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_REQUEST_CALL);
       if (!is_owner())
       {
@@ -6540,7 +6540,7 @@ namespace Legion {
                                                      Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(node->context->runtime,
+      DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_RESPONSE_CALL);
       // Special case for path only response
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
