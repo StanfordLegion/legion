@@ -43,14 +43,14 @@ namespace Legion {
       // First validate that the machine is the same
       {
         unsigned num_processors;
-        fread(&num_processors, sizeof(num_processors), 1, f);
+        (void)fread(&num_processors, sizeof(num_processors), 1, f);
         std::map<Processor,Processor::Kind> orig_processors;
         for (unsigned idx = 0; idx < num_processors; idx++)
         {
           Processor p;
-          fread(&p.id, sizeof(p.id), 1, f);
+          (void)fread(&p.id, sizeof(p.id), 1, f);
           Processor::Kind k;
-          fread(&k, sizeof(k), 1, f);
+          (void)fread(&k, sizeof(k), 1, f);
           orig_processors[p] = k;
         }
         Machine::ProcessorQuery all_procs(machine);
@@ -80,14 +80,14 @@ namespace Legion {
       }
       {
         unsigned num_memories;
-        fread(&num_memories, sizeof(num_memories), 1, f);
+        (void)fread(&num_memories, sizeof(num_memories), 1, f);
         std::map<Memory,Memory::Kind> orig_memories;
         for (unsigned idx = 0; idx < num_memories; idx++)
         {
           Memory m;
-          fread(&m.id, sizeof(m.id), 1, f);
+          (void)fread(&m.id, sizeof(m.id), 1, f);
           Memory::Kind k;
-          fread(&k, sizeof(k), 1, f);
+          (void)fread(&k, sizeof(k), 1, f);
           orig_memories[m] = k;
         }
         Machine::MemoryQuery all_mems(machine);
@@ -117,53 +117,54 @@ namespace Legion {
       }
       // Now build the mapping data structures
       unsigned num_instances;
-      fread(&num_instances, sizeof(num_instances), 1, f);
+      (void)fread(&num_instances, sizeof(num_instances), 1, f);
       for (unsigned idx = 0; idx < num_instances; idx++)
       {
         InstanceInfo *instance = unpack_instance(f);
         instance_infos[instance->original_id] = instance;
       }
       unsigned num_tasks;
-      fread(&num_tasks, sizeof(num_tasks), 1, f);
+      (void)fread(&num_tasks, sizeof(num_tasks), 1, f);
       for (unsigned idx = 0; idx < num_tasks; idx++)
       {
         std::pair<UniqueID,DomainPoint> key;
-        fread(&key.first, sizeof(key.first), 1, f);
-        fread(&key.second.dim, sizeof(key.second.dim), 1, f);
+        (void)fread(&key.first, sizeof(key.first), 1, f);
+        (void)fread(&key.second.dim, sizeof(key.second.dim), 1, f);
         for (int i = 0; i < key.second.dim; i++)
-          fread(key.second.point_data+i, sizeof(key.second.point_data[i]), 1,f);
+          (void)fread(key.second.point_data+i, 
+                      sizeof(key.second.point_data[i]), 1, f);
         task_mappings[key] = unpack_task_mapping(f);     
       }
       unsigned num_inlines;
-      fread(&num_inlines, sizeof(num_inlines), 1, f);
+      (void)fread(&num_inlines, sizeof(num_inlines), 1, f);
       for (unsigned idx = 0; idx < num_inlines; idx++)
       {
         UniqueID uid;
-        fread(&uid, sizeof(uid), 1, f);
+        (void)fread(&uid, sizeof(uid), 1, f);
         inline_mappings[uid] = unpack_inline_mapping(f);
       }
       unsigned num_copies;
-      fread(&num_copies, sizeof(num_copies), 1, f);
+      (void)fread(&num_copies, sizeof(num_copies), 1, f);
       for (unsigned idx = 0; idx < num_copies; idx++)
       {
         UniqueID uid;
-        fread(&uid, sizeof(uid), 1, f);
+        (void)fread(&uid, sizeof(uid), 1, f);
         copy_mappings[uid] = unpack_copy_mapping(f);
       }
       unsigned num_closes;
-      fread(&num_closes, sizeof(num_closes), 1, f);
+      (void)fread(&num_closes, sizeof(num_closes), 1, f);
       for (unsigned idx = 0; idx < num_closes; idx++)
       {
         UniqueID uid;
-        fread(&uid, sizeof(uid), 1, f);
+        (void)fread(&uid, sizeof(uid), 1, f);
         close_mappings[uid] = unpack_close_mapping(f);
       }
       unsigned num_releases;
-      fread(&num_releases, sizeof(num_releases), 1, f);
+      (void)fread(&num_releases, sizeof(num_releases), 1, f);
       for (unsigned idx = 0; idx < num_releases; idx++)
       {
         UniqueID uid;
-        fread(&uid, sizeof(uid), 1, f);
+        (void)fread(&uid, sizeof(uid), 1, f);
         release_mappings[uid] = unpack_release_mapping(f);
       }
       fclose(f);
@@ -859,113 +860,115 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceInfo *info = new InstanceInfo();
-      fread(&info->original_id, sizeof(info->original_id), 1, f);
-      fread(&info->num_uses, sizeof(info->num_uses), 1, f);
-      fread(&info->creator.id, sizeof(info->creator.id), 1, f);
+      (void)fread(&info->original_id, sizeof(info->original_id), 1, f);
+      (void)fread(&info->num_uses, sizeof(info->num_uses), 1, f);
+      (void)fread(&info->creator.id, sizeof(info->creator.id), 1, f);
       info->is_owner = (info->creator == local_proc);
-      fread(&info->target_memory.id, sizeof(info->target_memory.id), 1, f); 
+      (void)fread(&info->target_memory.id, 
+                  sizeof(info->target_memory.id), 1, f); 
       // Unpack the layout constraints 
       LayoutConstraintSet &layout = info->layout_constraints;  
       {
         SpecializedConstraint &spec = layout.specialized_constraint;
-        fread(&spec.kind, sizeof(spec.kind), 1, f);
-        fread(&spec.redop, sizeof(spec.redop), 1, f);
+        (void)fread(&spec.kind, sizeof(spec.kind), 1, f);
+        (void)fread(&spec.redop, sizeof(spec.redop), 1, f);
       }
       {
         MemoryConstraint &mem = layout.memory_constraint;
-        fread(&mem.kind, sizeof(mem.kind), 1, f);
+        (void)fread(&mem.kind, sizeof(mem.kind), 1, f);
         mem.has_kind = true;
       }
       {
         FieldConstraint &fields = layout.field_constraint;
         unsigned num_fields;
-        fread(&num_fields, sizeof(num_fields), 1, f);
+        (void)fread(&num_fields, sizeof(num_fields), 1, f);
         fields.field_set.resize(num_fields);
         for (unsigned idx = 0; idx < num_fields; idx++)
-          fread(&fields.field_set[idx], sizeof(fields.field_set[idx]), 1, f);
+          (void)fread(&fields.field_set[idx], 
+                      sizeof(fields.field_set[idx]), 1, f);
         unsigned contiguous;
-        fread(&contiguous, sizeof(contiguous), 1, f);
+        (void)fread(&contiguous, sizeof(contiguous), 1, f);
         fields.contiguous = (contiguous != 0);
         unsigned inorder;
-        fread(&inorder, sizeof(inorder), 1, f);
+        (void)fread(&inorder, sizeof(inorder), 1, f);
         fields.inorder = (inorder != 0);
       }
       {
         OrderingConstraint &order = layout.ordering_constraint;
         unsigned num_dims;
-        fread(&num_dims, sizeof(num_dims), 1, f);
+        (void)fread(&num_dims, sizeof(num_dims), 1, f);
         order.ordering.resize(num_dims);
         for (unsigned idx = 0; idx < num_dims; idx++)
-          fread(&order.ordering[idx], sizeof(order.ordering[idx]), 1, f);
+          (void)fread(&order.ordering[idx], sizeof(order.ordering[idx]), 1, f);
         unsigned contiguous;
-        fread(&contiguous, sizeof(contiguous), 1, f);
+        (void)fread(&contiguous, sizeof(contiguous), 1, f);
         order.contiguous = (contiguous != 0);
       }
       {
         unsigned num_constraints;
-        fread(&num_constraints, sizeof(num_constraints), 1, f);
+        (void)fread(&num_constraints, sizeof(num_constraints), 1, f);
         layout.splitting_constraints.resize(num_constraints);
         for (unsigned idx = 0; idx < num_constraints; idx++)
         {
           SplittingConstraint &split = layout.splitting_constraints[idx];
-          fread(&split.kind, sizeof(split.kind), 1, f);
-          fread(&split.value, sizeof(split.value), 1, f);
+          (void)fread(&split.kind, sizeof(split.kind), 1, f);
+          (void)fread(&split.value, sizeof(split.value), 1, f);
           unsigned chunks;
-          fread(&chunks, sizeof(chunks), 1, f);
+          (void)fread(&chunks, sizeof(chunks), 1, f);
           split.chunks = (chunks != 0);
         }
       }
       {
         unsigned num_constraints;
-        fread(&num_constraints, sizeof(num_constraints), 1, f);
+        (void)fread(&num_constraints, sizeof(num_constraints), 1, f);
         layout.dimension_constraints.resize(num_constraints);
         for (unsigned idx = 0; idx < num_constraints; idx++)
         {
           DimensionConstraint &dim = layout.dimension_constraints[idx];
-          fread(&dim.kind, sizeof(dim.kind), 1, f);
-          fread(&dim.eqk, sizeof(dim.eqk), 1, f);
-          fread(&dim.value, sizeof(dim.value), 1, f);
+          (void)fread(&dim.kind, sizeof(dim.kind), 1, f);
+          (void)fread(&dim.eqk, sizeof(dim.eqk), 1, f);
+          (void)fread(&dim.value, sizeof(dim.value), 1, f);
         }
       }
       {
         unsigned num_constraints;
-        fread(&num_constraints, sizeof(num_constraints), 1, f);
+        (void)fread(&num_constraints, sizeof(num_constraints), 1, f);
         layout.alignment_constraints.resize(num_constraints);
         for (unsigned idx = 0; idx < num_constraints; idx++)
         {
           AlignmentConstraint &align = layout.alignment_constraints[idx];
-          fread(&align.fid, sizeof(align.fid), 1, f);
-          fread(&align.eqk, sizeof(align.eqk), 1, f);
-          fread(&align.alignment, sizeof(align.alignment), 1, f);
+          (void)fread(&align.fid, sizeof(align.fid), 1, f);
+          (void)fread(&align.eqk, sizeof(align.eqk), 1, f);
+          (void)fread(&align.alignment, sizeof(align.alignment), 1, f);
         }
       }
       {
         unsigned num_constraints;
-        fread(&num_constraints, sizeof(num_constraints), 1, f);
+        (void)fread(&num_constraints, sizeof(num_constraints), 1, f);
         layout.offset_constraints.resize(num_constraints);
         for (unsigned idx = 0; idx < num_constraints; idx++)
         {
           OffsetConstraint &offset = layout.offset_constraints[idx]; 
-          fread(&offset.fid, sizeof(offset.fid), 1, f);
-          fread(&offset.offset, sizeof(offset.offset), 1, f);
+          (void)fread(&offset.fid, sizeof(offset.fid), 1, f);
+          (void)fread(&offset.offset, sizeof(offset.offset), 1, f);
         }
       }
       // Unpack the paths
       unsigned num_paths;
-      fread(&num_paths, sizeof(num_paths), 1, f);
+      (void)fread(&num_paths, sizeof(num_paths), 1, f);
       info->region_paths.resize(num_paths);
       for (unsigned nidx = 0; nidx < num_paths; nidx++)
       {
         std::vector<DomainPoint> &path = info->region_paths[nidx];
         unsigned num_points;
-        fread(&num_points, sizeof(num_points), 1, f);
+        (void)fread(&num_points, sizeof(num_points), 1, f);
         path.resize(num_points);
         for (unsigned pidx = 0; pidx < num_points; pidx++)
         {
           DomainPoint &point = path[pidx]; 
-          fread(&point.dim, sizeof(point.dim), 1, f);
+          (void)fread(&point.dim, sizeof(point.dim), 1, f);
           for (int i = 0; i < point.dim; i++)
-            fread(point.point_data+i, sizeof(point.point_data[i]), 1, f);
+            (void)fread(point.point_data+i, sizeof(point.point_data[i]), 1, f);
         }
       }
       return info;
@@ -977,58 +980,59 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskMappingInfo *info = new TaskMappingInfo();
-      fread(&info->original_unique_id, sizeof(info->original_unique_id), 1,f);
-      fread(&info->target_proc, sizeof(info->target_proc), 1, f);
-      fread(&info->priority, sizeof(info->priority), 1, f);
+      (void)fread(&info->original_unique_id, 
+                  sizeof(info->original_unique_id), 1,f);
+      (void)fread(&info->target_proc, sizeof(info->target_proc), 1, f);
+      (void)fread(&info->priority, sizeof(info->priority), 1, f);
       unsigned num_premappings;
-      fread(&num_premappings, sizeof(num_premappings), 1, f);
+      (void)fread(&num_premappings, sizeof(num_premappings), 1, f);
       for (unsigned idx = 0; idx < num_premappings; idx++)
       {
         unsigned index;
-        fread(&index, sizeof(index), 1, f);
+        (void)fread(&index, sizeof(index), 1, f);
         info->premappings[index] = unpack_requirement(f);
       }
       unsigned num_mappings;
-      fread(&num_mappings, sizeof(num_mappings), 1, f);
+      (void)fread(&num_mappings, sizeof(num_mappings), 1, f);
       info->mappings.resize(num_mappings);
       for (unsigned idx = 0; idx < num_mappings; idx++)
         info->mappings[idx] = unpack_requirement(f);
       unsigned num_postmappings;
-      fread(&num_postmappings, sizeof(num_postmappings), 1, f);
+      (void)fread(&num_postmappings, sizeof(num_postmappings), 1, f);
       for (unsigned idx = 0; idx < num_postmappings; idx++)
       {
         unsigned index;
-        fread(&index, sizeof(index), 1, f);
+        (void)fread(&index, sizeof(index), 1, f);
         info->postmappings[index] = unpack_requirement(f);
       }
       unsigned num_temporaries;
-      fread(&num_temporaries, sizeof(num_temporaries), 1, f);
+      (void)fread(&num_temporaries, sizeof(num_temporaries), 1, f);
       for (unsigned idx = 0; idx < num_temporaries; idx++)
       {
         unsigned index;
-        fread(&index, sizeof(index), 1, f);
+        (void)fread(&index, sizeof(index), 1, f);
         info->temporaries[idx] = unpack_temporary(f);
       }
       unsigned num_tunables;
-      fread(&num_tunables, sizeof(num_tunables), 1, f);
+      (void)fread(&num_tunables, sizeof(num_tunables), 1, f);
       for (unsigned idx = 0; idx < num_tunables; idx++)
       {
         std::pair<TunableID,MappingTagID> key;
-        fread(&key.first, sizeof(key.first), 1, f);
-        fread(&key.second, sizeof(key.second), 1, f);
+        (void)fread(&key.first, sizeof(key.first), 1, f);
+        (void)fread(&key.second, sizeof(key.second), 1, f);
         info->tunables[key] = unpack_tunable(f);
       }
       unsigned num_operations;
-      fread(&num_operations, sizeof(num_operations), 1, f);
+      (void)fread(&num_operations, sizeof(num_operations), 1, f);
       info->operation_ids.resize(num_operations);
       for (unsigned idx = 0; idx < num_operations; idx++)
-        fread(&info->operation_ids[idx], 
+        (void)fread(&info->operation_ids[idx], 
               sizeof(info->operation_ids[idx]), 1, f);
       unsigned num_closes;
-      fread(&num_closes, sizeof(num_closes), 1, f);
+      (void)fread(&num_closes, sizeof(num_closes), 1, f);
       info->close_ids.resize(num_closes);
       for (unsigned idx = 0; idx < num_closes; idx++)
-        fread(&info->close_ids[idx], sizeof(info->close_ids[idx]), 1, f);
+        (void)fread(&info->close_ids[idx], sizeof(info->close_ids[idx]), 1, f);
       return info;
     }
 
@@ -1039,14 +1043,14 @@ namespace Legion {
     {
       InlineMappingInfo *info = new InlineMappingInfo();
       unsigned num_mappings;
-      fread(&num_mappings, sizeof(num_mappings), 1, f);
+      (void)fread(&num_mappings, sizeof(num_mappings), 1, f);
       assert((num_mappings == 0) || (num_mappings == 1));
       if (num_mappings == 1)
         info->mapping = unpack_requirement(f);
       else
         info->mapping = NULL;
       unsigned num_temporaries;
-      fread(&num_temporaries, sizeof(num_temporaries), 1, f);
+      (void)fread(&num_temporaries, sizeof(num_temporaries), 1, f);
       assert((num_temporaries == 0) || (num_temporaries == 1));
       if (num_temporaries == 1)
         info->temporary = unpack_temporary(f);
@@ -1062,28 +1066,28 @@ namespace Legion {
     {
       CopyMappingInfo *info = new CopyMappingInfo();
       unsigned num_src_mappings;
-      fread(&num_src_mappings, sizeof(num_src_mappings), 1, f);
+      (void)fread(&num_src_mappings, sizeof(num_src_mappings), 1, f);
       info->src_mappings.resize(num_src_mappings);
       for (unsigned idx = 0; idx < num_src_mappings; idx++)
         info->src_mappings[idx] = unpack_requirement(f);
       unsigned num_dst_mappings;
-      fread(&num_dst_mappings, sizeof(num_dst_mappings), 1, f);
+      (void)fread(&num_dst_mappings, sizeof(num_dst_mappings), 1, f);
       for (unsigned idx = 0; idx < num_dst_mappings; idx++)
         info->dst_mappings[idx] = unpack_requirement(f);
       unsigned num_src_temporaries;
-      fread(&num_src_temporaries, sizeof(num_src_temporaries), 1, f);
+      (void)fread(&num_src_temporaries, sizeof(num_src_temporaries), 1, f);
       for (unsigned idx = 0; idx < num_src_temporaries; idx++)
       {
         unsigned index;
-        fread(&index, sizeof(index), 1, f);
+        (void)fread(&index, sizeof(index), 1, f);
         info->src_temporaries[index] = unpack_temporary(f);
       }
       unsigned num_dst_temporaries;
-      fread(&num_dst_temporaries, sizeof(num_dst_temporaries), 1, f);
+      (void)fread(&num_dst_temporaries, sizeof(num_dst_temporaries), 1, f);
       for (unsigned idx = 0; idx < num_dst_temporaries; idx++)
       {
         unsigned index;
-        fread(&index, sizeof(index), 1, f);
+        (void)fread(&index, sizeof(index), 1, f);
         info->dst_temporaries[index] = unpack_temporary(f);
       }
       return info;
@@ -1096,14 +1100,14 @@ namespace Legion {
     {
       CloseMappingInfo *info = new CloseMappingInfo();
       unsigned num_mappings;
-      fread(&num_mappings, sizeof(num_mappings), 1, f);
+      (void)fread(&num_mappings, sizeof(num_mappings), 1, f);
       assert((num_mappings == 0) || (num_mappings == 1));
       if (num_mappings == 1)
         info->mapping = unpack_requirement(f);
       else
         info->mapping = NULL;
       unsigned num_temporaries;
-      fread(&num_temporaries, sizeof(num_temporaries), 1, f);
+      (void)fread(&num_temporaries, sizeof(num_temporaries), 1, f);
       assert((num_temporaries == 0) || (num_temporaries == 1));
       if (num_temporaries == 1)
         info->temporary = unpack_temporary(f);
@@ -1119,7 +1123,7 @@ namespace Legion {
     {
       ReleaseMappingInfo *info = new ReleaseMappingInfo();
       unsigned num_temporaries;
-      fread(&num_temporaries, sizeof(num_temporaries), 1, f);
+      (void)fread(&num_temporaries, sizeof(num_temporaries), 1, f);
       assert((num_temporaries == 0) || (num_temporaries == 1));
       if (num_temporaries == 1)
         info->temporary = unpack_temporary(f);
@@ -1135,12 +1139,12 @@ namespace Legion {
     {
       RequirementMapping *req = new RequirementMapping(); 
       unsigned num_instances;
-      fread(&num_instances, sizeof(num_instances), 1, f);
+      (void)fread(&num_instances, sizeof(num_instances), 1, f);
       req->instances.resize(num_instances);
       for (unsigned idx = 0; idx < num_instances; idx++)
       {
         unsigned long original_id;
-        fread(&original_id, sizeof(original_id), 1, f);
+        (void)fread(&original_id, sizeof(original_id), 1, f);
         std::map<unsigned long,InstanceInfo*>::const_iterator finder = 
           instance_infos.find(original_id);
         assert(finder != instance_infos.end());
@@ -1156,13 +1160,13 @@ namespace Legion {
     {
       TemporaryMapping *temp = new TemporaryMapping();
       unsigned num_instances;
-      fread(&num_instances, sizeof(num_instances), 1, f);
+      (void)fread(&num_instances, sizeof(num_instances), 1, f);
       for (unsigned idx = 0; idx < num_instances; idx++)
       {
         unsigned long original_dst;
-        fread(&original_dst, sizeof(original_dst), 1, f);
+        (void)fread(&original_dst, sizeof(original_dst), 1, f);
         unsigned long original_id;
-        fread(&original_id, sizeof(original_id), 1, f);
+        (void)fread(&original_id, sizeof(original_id), 1, f);
         std::map<unsigned long,InstanceInfo*>::const_iterator finder = 
           instance_infos.find(original_id);
         assert(finder != instance_infos.end());
@@ -1176,9 +1180,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TunableMapping *tunable = new TunableMapping();
-      fread(&tunable->tunable_size, sizeof(tunable->tunable_size), 1, f);
+      (void)fread(&tunable->tunable_size, sizeof(tunable->tunable_size), 1, f);
       tunable->tunable_value = malloc(tunable->tunable_size);
-      fread(&tunable->tunable_value, tunable->tunable_size, 1, f);
+      (void)fread(&tunable->tunable_value, tunable->tunable_size, 1, f);
       return tunable;
     }
 
