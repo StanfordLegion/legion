@@ -964,7 +964,7 @@ namespace Legion {
         {
           DomainPoint &point = path[pidx]; 
           fread(&point.dim, sizeof(point.dim), 1, f);
-          for (unsigned i = 0; i < point.dim; i++)
+          for (int i = 0; i < point.dim; i++)
             fread(point.point_data+i, sizeof(point.point_data[i]), 1, f);
         }
       }
