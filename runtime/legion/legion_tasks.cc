@@ -12854,7 +12854,8 @@ namespace Legion {
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_DEFERRED_SLICE_ID, 
-                                                    HLR_LATENCY_PRIORITY, args.slice);
+                                                    HLR_LATENCY_PRIORITY, 
+                                                    args.slice);
           if (wait.exists())
             wait_events.insert(wait);
           if (done)
