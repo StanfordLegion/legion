@@ -1753,7 +1753,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Mappable(void);
     public:
+      // Return a globally unique ID for this operation
       virtual UniqueID get_unique_id(void) const = 0;
+      // Return the number of operations that came before
+      // this operation in the same context (close operations
+      // return number of previous close operations)
+      virtual unsigned get_context_index(void) const = 0;
+      // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
       MapperID                                  map_id;

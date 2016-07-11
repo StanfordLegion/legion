@@ -98,7 +98,6 @@ namespace Legion {
     protected:   
       PhysicalInstanceImpl impl;
       std::set<FieldID>  fields;
-
       friend std::ostream& operator<<(std::ostream& os,
 				      const PhysicalInstance& p);
     };
@@ -1167,7 +1166,7 @@ namespace Legion {
        * mapped to the same physical instance. The mapper is also given 
        * the mapping tag passed at the callsite in 'mapping_tag'.
        */
-      struct MappingConstraint{
+      struct MappingConstraint {
         std::vector<Task*>                          constrained_tasks;
         std::vector<unsigned>                       requirement_indexes;
         // tasks.size() == requirement_indexes.size()
@@ -1306,6 +1305,7 @@ namespace Legion {
        */
       struct MapperMessage {
         Processor                               sender;
+        unsigned                                kind;
         const void*                             message;
         size_t                                  size;
         bool                                    broadcast;
@@ -1371,10 +1371,18 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for communicating with other mappers of the same kind
       //------------------------------------------------------------------------
-      void send_message(MapperContext ctx, Processor target, 
-                                const void *message, size_t message_size) const;
+      void send_message(MapperContext ctx, Processor target,const void *message,
+                        size_t message_size, unsigned message_kind = 0) const;
       void broadcast(MapperContext ctx, const void *message, 
-                               size_t message_size, int radix = 4) const;
+           size_t message_size, unsigned message_kind = 0, int radix = 4) const;
+    public:
+      //------------------------------------------------------------------------
+      // Methods for packing and unpacking physical instances
+      //------------------------------------------------------------------------
+      void pack_physical_instance(MapperContext ctx, Serializer &rez,
+                                  PhysicalInstance instance) const;
+      void unpack_physical_instance(MapperContext ctx, Deserializer &derez,
+                                    PhysicalInstance &instance) const;
     public:
       //------------------------------------------------------------------------
       // Methods for managing the execution of mapper tasks 
@@ -1592,8 +1600,10 @@ namespace Legion {
       LogicalPartition get_logical_partition(MapperContext ctx, 
                              LogicalRegion parent, IndexPartition handle) const;
 
-      LogicalPartition get_logical_partition_by_color(
-                    MapperContext ctx, LogicalRegion parent, Color color) const;
+      LogicalPartition get_logical_partition_by_color(MapperContext ctx, 
+                                       LogicalRegion parent, Color color) const;
+      LogicalPartition get_logical_partition_by_color(MapperContext ctx, 
+                          LogicalRegion parent, const DomainPoint &color) const;
 
       LogicalPartition get_logical_partition_by_tree(
                     MapperContext ctx, IndexPartition handle, 
@@ -1604,6 +1614,8 @@ namespace Legion {
 
       LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
                                     LogicalPartition parent, Color color) const;
+      LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
+                       LogicalPartition parent, const DomainPoint &color) const;
       
       LogicalRegion get_logical_subregion_by_tree(MapperContext ctx,
                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const;

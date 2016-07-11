@@ -38,7 +38,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Operation::Operation(Runtime *rt)
       : runtime(rt), op_lock(Reservation::create_reservation()), 
-        gen(0), unique_op_id(0), 
+        gen(0), unique_op_id(0), context_index(0), 
         outstanding_mapping_references(0),
         hardened(false), parent_ctx(NULL)
     //--------------------------------------------------------------------------
@@ -69,6 +69,7 @@ namespace Legion {
     {
       // Get a new unique ID for this operation
       unique_op_id = runtime->get_unique_operation_id();
+      context_index = 0;
       outstanding_mapping_references = 0;
 #ifdef DEBUG_LEGION
       mapped = false;
@@ -263,7 +264,7 @@ namespace Legion {
       parent_ctx = ctx;
       track_parent = track;
       if (track_parent)
-        parent_ctx->register_new_child_operation(this);
+        context_index = parent_ctx->register_new_child_operation(this);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
     }
@@ -2242,6 +2243,13 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    unsigned MapOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int MapOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -3608,6 +3616,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned CopyOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int CopyOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -4681,6 +4696,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned CloseOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int CloseOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -4703,6 +4725,8 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
+      if (!track)
+        context_index = ctx->register_new_close_operation(this);
       parent_task = ctx;
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
@@ -4716,6 +4740,8 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
+      if (!track)
+        context_index = ctx->register_new_close_operation(this);
       parent_task = ctx;
       ctx->clone_requirement(idx, requirement);
       initialize_privilege_path(privilege_path, requirement);
@@ -6225,6 +6251,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned AcquireOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int AcquireOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -6850,6 +6883,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ReleaseOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
     }
 
     //--------------------------------------------------------------------------

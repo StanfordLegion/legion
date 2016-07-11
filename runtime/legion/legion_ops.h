@@ -414,6 +414,7 @@ namespace Legion {
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
+      unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -639,6 +640,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -712,6 +714,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
@@ -895,6 +898,7 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       void activate_close(void);
@@ -1177,6 +1181,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1243,6 +1248,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;

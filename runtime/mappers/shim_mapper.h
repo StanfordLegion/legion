@@ -99,6 +99,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
+        virtual unsigned get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const char* get_task_name(void) const;
       public:
@@ -121,6 +122,7 @@ namespace Legion {
         std::vector<RegionRequirement>  regions;
       private:
         UniqueID                        unique_id;
+        unsigned                        context_index;
         int                             depth;
         const char * const              task_name;
       };
@@ -135,6 +137,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
+        virtual unsigned get_context_index(void) const;
         virtual int get_depth(void) const;
       public:
         inline UniqueID get_unique_inline_id(void) const { return unique_id; }
@@ -142,6 +145,7 @@ namespace Legion {
         RegionRequirement               requirement;
       private:
         UniqueID                        unique_id;
+        unsigned                        context_index;
         int                             depth;
       };
       // Our version of copy operations
@@ -155,6 +159,7 @@ namespace Legion {
         virtual Inline* as_mappable_inline(void) const;
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
+        virtual unsigned get_context_index(void) const;
         virtual int get_depth(void) const;
       public:
         inline UniqueID get_unique_copy_id(void) const { return unique_id; }
@@ -163,6 +168,7 @@ namespace Legion {
         std::vector<RegionRequirement>  dst_requirements;
       private:
         UniqueID                        unique_id;
+        unsigned                        context_index;
         int                             depth;
       };
       // Task Variant Collection

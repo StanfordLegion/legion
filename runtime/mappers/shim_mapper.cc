@@ -79,7 +79,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::Task::Task(const Legion::Task &t, TaskVariantCollection *var)
       : Legion::Task(t), variants(var), unique_id(t.get_unique_id()), 
-        depth(t.get_depth()), task_name(t.get_task_name())
+        context_index(t.get_context_index()), depth(t.get_depth()), 
+        task_name(t.get_task_name())
     //--------------------------------------------------------------------------
     {
       inline_task = false;
@@ -139,6 +140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned ShimMapper::Task::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int ShimMapper::Task::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -155,7 +163,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::Inline::Inline(const Legion::InlineMapping &m)
       : Legion::InlineMapping(m), unique_id(m.get_unique_id()), 
-        depth(m.get_depth())
+        context_index(m.get_context_index()), depth(m.get_depth())
     //--------------------------------------------------------------------------
     {
       requirement = m.requirement;
@@ -205,6 +213,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned ShimMapper::Inline::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int ShimMapper::Inline::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -213,7 +228,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ShimMapper::Copy::Copy(const Legion::Copy &c)
-      : Legion::Copy(c)
+      : Legion::Copy(c), unique_id(c.get_unique_id()), 
+        context_index(c.get_context_index()), depth(c.get_depth())
     //--------------------------------------------------------------------------
     {
       // fill in our region requirements by copying, sucks but whatever
@@ -267,6 +283,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return unique_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShimMapper::Copy::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
     }
 
     //--------------------------------------------------------------------------
