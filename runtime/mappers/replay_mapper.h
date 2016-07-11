@@ -322,6 +322,9 @@ namespace Legion {
       ReleaseMappingInfo* find_release_mapping(MapperContext ctx,
                                                const Release &release);
     protected:
+      template<typename T>
+      static inline void ignore_result(T arg) { }
+    protected:
       const Machine machine;
       const Processor local_proc;
       const char *const mapper_name;
