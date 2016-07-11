@@ -17,7 +17,7 @@
 
 import subprocess
 import sys, os, re, gc, shutil, copy
-import string
+import string, struct
 import tempfile
 import random
 from getopt import getopt,GetoptError
@@ -1914,10 +1914,12 @@ class PointSet(object):
         return self
 
 class Processor(object):
-    __slots__ = ['state', 'uid', 'kind', 'mem_latency', 'mem_bandwidth', 'node_name']
+    __slots__ = ['state', 'uid', 'kind_num', 'kind', 'mem_latency', 
+                 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
+        self.kind_num = None
         self.kind = "Unknown"
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
@@ -1926,7 +1928,8 @@ class Processor(object):
     def __str__(self):
         return self.kind + " Processor " + hex(self.uid)
 
-    def set_kind(self, kind):
+    def set_kind(self, kind_num, kind):
+        self.kind_num = kind_num
         self.kind = kind
 
     def add_memory(self, mem, bandwidth, latency):
@@ -1947,11 +1950,12 @@ class Processor(object):
         
 
 class Memory(object):
-    __slots__ = ['state', 'uid', 'kind', 'capacity', 'proc_latency',
+    __slots__ = ['state', 'uid', 'kind_num', 'kind', 'capacity', 'proc_latency',
                  'proc_bandwidth', 'mem_latency', 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
+        self.kind_num = None
         self.kind = "Unknown"
         self.capacity = -1
         self.proc_latency = dict()
@@ -1965,7 +1969,8 @@ class Memory(object):
 
     __repr__ = __str__
 
-    def set_kind(self, kind):
+    def set_kind(self, kind_num, kind):
+        self.kind_num = kind_num
         self.kind = kind
 
     def set_capacity(self, capacity):
@@ -7844,12 +7849,14 @@ def parse_legion_spy_line(line, state):
     m = processor_pat.match(line)
     if m is not None:
         proc = state.get_processor(int(m.group('pid'),16))
-        proc.set_kind(state.get_processor_kind(int(m.group('kind'))))
+        kind_num = int(m.group('kind'))
+        proc.set_kind(kind_num, state.get_processor_kind(kind_num))
         return True
     m = memory_pat.match(line)
     if m is not None:
         mem = state.get_memory(int(m.group('mid'),16))
-        mem.set_kind(state.get_memory_kind(int(m.group('kind'))))
+        kind_num = int(m.group('kind'))
+        mem.set_kind(kind_num, state.get_memory_kind(kind_num))
         mem.set_capacity(int(m.group('capacity')))
         return True
     m = proc_mem_pat.match(line)
@@ -8206,6 +8213,40 @@ class State(object):
         for node in all_nodes:
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
+
+    def make_replay_file(self):
+        file_name = 'legion.rp'
+        print 'Emitting replay file '+file_name
+        replay_file = open(file_name,'wb')  
+        # Write out processors
+        replay_file.write(struct.pack('I',len(self.processors)))
+        for proc in self.processors.itervalues():
+            replay_file.write(struct.pack('Q', proc.uid))    
+            replay_file.write(struct.pack('I', proc.kind_num))
+        # Write out memories
+        replay_file.write(struct.pack('I',len(self.memories)))
+        for mem in self.memories.itervalues():
+            replay_file.write(struct.pack('Q', mem.uid))
+            replay_file.write(struct.pack('I', mem.kind_num))
+        # Write out the instances
+        replay_file.write(struct.pack('I',0))
+
+        # Write out the tasks
+        replay_file.write(struct.pack('I',0))
+
+        # Write out the inlines
+        replay_file.write(struct.pack('I',0))
+
+        # Write out the copies
+        replay_file.write(struct.pack('I',0))
+
+        # Write out the closes
+        replay_file.write(struct.pack('I',0))
+
+        # Write out the releases
+        replay_file.write(struct.pack('I',0))
+
+        replay_file.close()
 
     def print_instance_descriptions(self):
         for inst in self.instances.itervalues():
@@ -8659,7 +8700,7 @@ def main(temp_dir):
         state.make_event_graph(temp_dir)
     if replay_file:
         print "Generating mapper replay file..."
-        assert False
+        state.make_replay_file()
     if instance_descriptions:
         state.print_instance_descriptions()
     if mapping_decisions:
