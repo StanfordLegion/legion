@@ -670,19 +670,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      Serializer rez;
-      {
-        rez.serialize(did);
-        RezCheck z(rez);
-        rez.serialize(result_size);
-        rez.serialize(result,result_size);
-      }
       // Need to hold the lock when reading the set of remote spaces
       AutoLock gc(gc_lock,1,false/*exclusive*/);
-      for (std::set<AddressSpaceID>::const_iterator it = 
-            registered_waiters.begin(); it != registered_waiters.end(); it++)
+      if (!registered_waiters.empty())
       {
-        runtime->send_future_result(*it, rez); 
+        Serializer rez;
+        {
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          rez.serialize(result,result_size);
+        }
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              registered_waiters.begin(); it != registered_waiters.end(); it++)
+        {
+          runtime->send_future_result(*it, rez); 
+        }
       }
     }
 
