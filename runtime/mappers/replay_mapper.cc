@@ -844,7 +844,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       original_instances[current_id] = original_id;
-      std::map<unsigned long,MapperEvent>::const_iterator finder = 
+      std::map<unsigned long,MapperEvent>::iterator finder = 
         pending_instance_ids.find(current_id);
       if (finder != pending_instance_ids.end())
       {
