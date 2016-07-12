@@ -777,6 +777,7 @@ function type_check.expr_method_call(cx, node)
   local defs = get_function_definitions(value_type.methods[node.method_name])
   if #defs == 1 then
     local args_with_casts = terralib.newlist()
+    assert(not defs[1].type.isvararg)
     local param_types = defs[1].type.parameters
     for idx, arg_type in pairs(arg_types) do
       args_with_casts:insert(
@@ -919,8 +920,16 @@ function type_check.expr_call(cx, node)
     end
   end
 
+  local param_types = terralib.newlist()
+  param_types:insertall(fn_type.parameters)
+  if fn_type.isvararg then
+    for idx = #fn_type.parameters + 1, #arg_types + 1 do
+      param_types:insert(arg_types[idx])
+      need_cast:insert(false)
+    end
+  end
   args =
-    data.zip(args, arg_types, fn_type.parameters, need_cast):map(function(tuple)
+    data.zip(args, arg_types, param_types, need_cast):map(function(tuple)
       local arg, arg_type, param_type, need_cast = unpack(tuple)
       if not need_cast then
         return arg
