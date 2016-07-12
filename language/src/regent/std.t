@@ -949,6 +949,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
     mapping = {}
   end
 
+  local need_cast = terralib.newlist()
   for i, param in ipairs(params) do
     local arg = args[i]
     local param_type = param:gettype()
@@ -963,6 +964,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] == arg_type
     then
       -- Ok
+      need_cast[i] = false
     elseif type_compatible(param_type, arg_type) then
       -- Regions (and other unique types) require a special pass here 
 
@@ -993,14 +995,17 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
+      need_cast[i] = false
     elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
       log.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
                   " but got " .. tostring(arg_type))
+    else
+      need_cast[i] = not std.type_eq(arg_type, param_type, mapping)
     end
   end
-  return reconstruct_return_as_arg_type(return_type, mapping)
+  return reconstruct_return_as_arg_type(return_type, mapping), need_cast
 end
 
 local function unpack_type(old_type, mapping)

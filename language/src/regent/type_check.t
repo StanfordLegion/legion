@@ -740,6 +740,16 @@ function type_check.expr_index_access(cx, node)
   end
 end
 
+local function get_function_definitions(fn)
+  if terralib.isfunction(fn) or
+     terralib.isoverloadedfunction(fn) then
+    return terralib.newlist({rawget(fn, "definition")}) or
+           rawget(fn, "definitions")
+  else
+    return terralib.newlist()
+  end
+end
+
 function type_check.expr_method_call(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -762,6 +772,17 @@ function type_check.expr_method_call(cx, node)
   if not valid then
     log.error(node, "invalid method call for " .. tostring(value_type) .. ":" ..
                 node.method_name .. "(" .. data.newtuple(unpack(arg_types)):mkstring(", ") .. ")")
+  end
+
+  local defs = get_function_definitions(value_type.methods[node.method_name])
+  if #defs == 1 then
+    local args_with_casts = terralib.newlist()
+    local param_types = defs[1].type.parameters
+    for idx, arg_type in pairs(arg_types) do
+      args_with_casts:insert(
+        insert_implicit_cast(args[idx], arg_type, param_types[idx + 1]))
+    end
+    args = args_with_casts
   end
 
   return ast.typed.expr.MethodCall {
@@ -808,7 +829,12 @@ function type_check.expr_call(cx, node)
         local valid, result_type = pcall(test)
 
       if valid then
-        fn_type = result_type
+        local defs = get_function_definitions(fn.value)
+        if #defs == 1 then
+          fn_type = defs[1].type
+        else
+          fn_type = result_type
+        end
       else
         local fn_name = fn.value.name or tostring(fn.value)
         fn_name = string.gsub(fn_name, "^std[.]", "regentlib.")
@@ -845,7 +871,7 @@ function type_check.expr_call(cx, node)
       arg_symbols:insert(std.newsymbol(arg_type))
     end
   end
-  local expr_type = std.validate_args(
+  local expr_type, need_cast = std.validate_args(
     node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, false)
 
   if std.is_task(fn.value) then
@@ -892,6 +918,16 @@ function type_check.expr_call(cx, node)
                   " " .. tostring(constraint.op) .. " " .. tostring(constraint.rhs))
     end
   end
+
+  args =
+    data.zip(args, arg_types, fn_type.parameters, need_cast):map(function(tuple)
+      local arg, arg_type, param_type, need_cast = unpack(tuple)
+      if not need_cast then
+        return arg
+      else
+        return insert_implicit_cast(arg, arg_type, param_type)
+      end
+    end)
 
   local result = ast.typed.expr.Call {
     fn = fn,
