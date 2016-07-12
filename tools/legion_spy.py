@@ -2900,7 +2900,7 @@ class LogicalPartition(object):
                                                           prev, checks)
         elif not checks:
             # Do all the invalidations and record and dependences
-            self.perform_deletion_invalidations(op, req, field)
+            self.perform_deletion_invalidation(op, req, field)
         return True
 
     def perform_deletion_invalidation(self, op, req, field):
