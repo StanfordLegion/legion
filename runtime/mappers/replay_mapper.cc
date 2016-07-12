@@ -1494,9 +1494,11 @@ namespace Legion {
                    LogicalRegion handle, std::vector<PhysicalInstance> &targets)
     //--------------------------------------------------------------------------
     {
-      targets.resize(instances.size());
+      // We'll always put the virtual instance at the end
+      targets.resize(instances.size()+1);
       for (unsigned idx = 0; idx < instances.size(); idx++)
         targets[idx] = instances[idx]->get_instance(runtime, ctx, handle);
+      targets[instances.size()] = PhysicalInstance::get_virtual_instance();
     }
 
     //--------------------------------------------------------------------------
