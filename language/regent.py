@@ -16,7 +16,14 @@
 #
 
 from __future__ import print_function
-import os, platform, subprocess, sys
+import json, os, platform, subprocess, sys
+
+def load_json_config(filename):
+    try:
+        with open(filename, 'r') as f:
+            return json.load(f)
+    except IOError:
+        return None
 
 os_name = platform.system()
 
@@ -42,6 +49,11 @@ elif 'CUDATOOLKIT_HOME' in os.environ:
 else:
     cuda_dir = None
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
+
+# Find RDIR.
+rdir_config_filename = os.path.join(regent_dir, '.rdir.json')
+rdir = load_json_config(rdir_config_filename)
+use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
 
 include_path = [
     bindings_dir,
@@ -94,6 +106,7 @@ def regent(args, env = {}, **kwargs):
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
         'LG_RT_DIR': runtime_dir,
+        'USE_RDIR': use_rdir,
     }
 
     cmd = []

@@ -56,6 +56,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned TaskOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int TaskOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -281,6 +288,7 @@ namespace Legion {
       rez.serialize(steal_count);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
+      rez.serialize(context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -358,6 +366,7 @@ namespace Legion {
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
+      derez.deserialize(context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -1832,6 +1841,7 @@ namespace Legion {
 #endif
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
+      this->context_index = rhs->context_index;
       // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
         this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
@@ -2633,6 +2643,8 @@ namespace Legion {
       profiling_done = RtEvent::NO_RT_EVENT;
       current_trace = NULL;
       task_executed = false;
+      total_children_count = 0;
+      total_close_count = 0;
       outstanding_children_count = 0;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
@@ -3165,12 +3177,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::register_new_child_operation(Operation *op)
+    unsigned SingleTask::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed());
+      unsigned result = __sync_fetch_and_add(&total_children_count,1);
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
@@ -3197,6 +3210,15 @@ namespace Legion {
         else // we can do the wait inline
           perform_window_wait();
       }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned SingleTask::register_new_close_operation(CloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // For now we just bump our counter
+      return __sync_fetch_and_add(&total_close_count, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -6408,8 +6430,15 @@ namespace Legion {
           rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
           rez.serialize(wait_on); 
         }
+        // If we don't have a context yet, then we haven't been registered
+        // with the runtime, so do a temporary registration and then when
+        // we are done, we can unregister our temporary self
+        if (!context.exists())
+          runtime->register_temporary_context(this);
         runtime->send_create_top_view_request(manager->owner_space, rez);
         wait_on.wait();
+        if (!context.exists())
+          runtime->unregister_temporary_context(this);
 #ifdef DEBUG_LEGION
         assert(result != NULL); // when we wake up we should have the result
 #endif
@@ -10219,10 +10248,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::register_new_child_operation(Operation *op)
+    unsigned InlineTask::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      enclosing->register_new_child_operation(op);
+      return enclosing->register_new_child_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InlineTask::register_new_close_operation(CloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_new_close_operation(op);
     }
 
     //--------------------------------------------------------------------------
@@ -12818,7 +12854,8 @@ namespace Legion {
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_DEFERRED_SLICE_ID, 
-                                                    HLR_LATENCY_PRIORITY, args.slice);
+                                                    HLR_LATENCY_PRIORITY, 
+                                                    args.slice);
           if (wait.exists())
             wait_events.insert(wait);
           if (done)

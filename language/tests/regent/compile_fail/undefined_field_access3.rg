@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- undefined_field_access3.rg:25: no field 'f' in type ptr(p, $r)
+-- undefined_field_access3.rg:25: no field 'f' in type p
 --   var y = x.f
 --           ^
 

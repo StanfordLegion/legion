@@ -599,6 +599,11 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t) or std.is_list_of_partitions(t)
 end
 
+function std.type_is_opaque_to_field_accesses(t)
+  return std.is_region(t) or std.is_partition(t) or
+    std.is_cross_product(t) or std.is_list(t)
+end
+
 function std.is_ctor(t)
   return terralib.types.istype(t) and rawget(t, "is_ctor")
 end
@@ -1182,7 +1187,7 @@ function std.unpack_fields(fs, symbols)
     })
   end
 
-  local result_type = std.ctor(new_fields)
+  local result_type = std.ctor_named(new_fields)
   result_type.is_unpack_result = true
 
   return result_type, new_constraints
@@ -1337,7 +1342,7 @@ function std.implicit_cast(from, to, expr)
   if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
-    return `([to](expr))
+    return `([to]([expr]))
   end
 end
 
@@ -1346,7 +1351,7 @@ function std.explicit_cast(from, to, expr)
   if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
-    return `([to](expr))
+    return `([to]([expr]))
   end
 end
 
@@ -1566,7 +1571,7 @@ function symbol:getname()
 end
 
 function symbol:hastype()
-  return self.symbol_type
+  return self.symbol_type or nil
 end
 
 function symbol:gettype()
@@ -1789,7 +1794,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     end
   end
 
-  if std.config["debug"] then
+  if false then -- std.config["debug"] then
     function st.metamethods:__typename()
       local bounds = self.bounds_symbols
 
@@ -2291,7 +2296,8 @@ function std.cross_product(...)
     region_type = region_type or self:subregion_dynamic()
     assert(std.is_region(region_type))
     local region_symbol = std.newsymbol(region_type)
-    local partition = std.partition(self:partition(2).disjointness, region_symbol)
+    local partition = std.partition(self:partition(2).disjointness, region_symbol,
+                                    self:partition(2).colors_symbol)
     if #partition_symbols > 2 then
       local partition_symbol = std.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})
@@ -2720,16 +2726,14 @@ do
     return field["type"] or field[2]
   end
 
-  function std.ctor(fields)
+  function std.ctor_named(fields)
     local st = terralib.types.newstruct()
     st.entries = fields
     st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
-      if std.is_index_type(to) then
-        return `([to]{ __ptr = [to.impl_type](expr)})
-      elseif to:isstruct() then
+      if to:isstruct() then
         local from_fields = {}
-        for _, from_field in ipairs(to:getentries()) do
+        for _, from_field in ipairs(from:getentries()) do
           from_fields[field_name(from_field)] = field_type(from_field)
         end
         local mapping = terralib.newlist()
@@ -2737,8 +2741,8 @@ do
           local to_field_name = field_name(to_field)
           local to_field_type = field_type(to_field)
           local from_field_type = from_fields[to_field_name]
-          if not (from_field_type and to_field_type == from_field_type) then
-            error()
+          if not from_field_type then
+            error("type mismatch: ctor cast missing field " .. tostring(to_field_name))
           end
           mapping:insert({from_field_type, to_field_type, to_field_name})
         end
@@ -2750,6 +2754,46 @@ do
               field_mapping)
             return std.implicit_cast(
               from_field_type, to_field_type, `([v].[to_field_name]))
+          end)
+
+        return quote var [v] = [expr] in [to]({ [fields] }) end
+      else
+        error("ctor must cast to a struct")
+      end
+    end
+    return st
+  end
+
+  function std.ctor_tuple(fields)
+    local st = terralib.types.newstruct()
+    st.entries = terralib.newlist()
+    for i, field in ipairs(fields) do
+      st.entries:insert({"_" .. tostring(i), field})
+    end
+    st.is_ctor = true
+    st.metamethods.__cast = function(from, to, expr)
+      if to:isstruct() then
+        local from_fields = {}
+        for i, from_field in ipairs(from:getentries()) do
+          from_fields[i] = field_type(from_field)
+        end
+        local mapping = terralib.newlist()
+        for i, to_field in ipairs(to:getentries()) do
+          local to_field_type = field_type(to_field)
+          local from_field_type = from_fields[i]
+          if not from_field_type then
+            error("type mismatch: ctor cast has insufficient fields")
+          end
+          mapping:insert({from_field_type, to_field_type, i})
+        end
+
+        local v = terralib.newsymbol(from)
+        local fields = mapping:map(
+          function(field_mapping)
+            local from_field_type, to_field_type, i = unpack(
+              field_mapping)
+            return std.implicit_cast(
+              from_field_type, to_field_type, `([v].["_" .. tostring(i)]))
           end)
 
         return quote var [v] = [expr] in [to]({ [fields] }) end

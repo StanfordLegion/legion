@@ -86,12 +86,10 @@ end
 
 local function analyze_inner_node(cx)
   return function(node)
-    if node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.Deref)
+    if node:is(ast.typed.expr.Deref) or
+      node:is(ast.typed.expr.IndexAccess)
     then
-      return not std.is_bounded_type(std.as_read(node.value.expr_type))
-    elseif node:is(ast.typed.expr.IndexAccess) then
-      return not std.is_region(std.as_read(node.value.expr_type))
+      return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.RawPhysical) or
       node:is(ast.typed.stat.MapRegions)
     then
@@ -136,5 +134,7 @@ function optimize_config_options.entry(node)
   local cx = context.new_global_scope()
   return optimize_config_options.top(cx, node)
 end
+
+optimize_config_options.pass_name = "optimize_config_options"
 
 return optimize_config_options

@@ -1836,9 +1836,11 @@ namespace Legion {
       AddressSpaceID find_address_space(Processor target) const;
     public:
       void process_mapper_message(Processor target, MapperID map_id,
-                Processor source, const void *message, size_t message_size);
+                                  Processor source, const void *message, 
+                                  size_t message_size, unsigned message_kind);
       void process_mapper_broadcast(MapperID map_id, Processor source,
-                const void *message, size_t message_size, int radix, int index);
+                                    const void *message, size_t message_size, 
+                                    unsigned message_kind, int radix,int index);
     public:
       void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
@@ -2339,6 +2341,8 @@ namespace Legion {
     public:
       void allocate_local_context(SingleTask *task);
       void free_local_context(SingleTask *task);
+      void register_temporary_context(SingleTask *task);
+      void unregister_temporary_context(SingleTask *task);
       void register_remote_context(UniqueID context_uid, RemoteTask *context,
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);

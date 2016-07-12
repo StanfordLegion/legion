@@ -115,7 +115,7 @@ function ast_node:type()
   return self.node_type
 end
 
-function ast_node:fields()
+function ast_node:get_fields()
   local result = {}
   for k, v in pairs(self) do
     if k ~= "node_type" then
@@ -270,14 +270,15 @@ end
 function ast.traverse_node_continuation(fn, node)
   local function continuation(node, continuing)
     if ast.is_node(node) then
+      -- First entry: invoke the callback.
       if continuing == nil then
-        continuing = fn(node, continuation)
-      end
-      if continuing then
+        fn(node, continuation)
+
+      -- Second entry: (if true) continue to children.
+      elseif continuing then
         for _, child in pairs(node) do
           continuation(child)
         end
-      else
       end
     elseif terralib.islist(node) then
       for _, child in ipairs(node) do
@@ -286,6 +287,35 @@ function ast.traverse_node_continuation(fn, node)
     end
   end
   continuation(node)
+end
+
+function ast.map_node_continuation(fn, node)
+  local function continuation(node, continuing)
+    if ast.is_node(node) then
+      -- First entry: invoke the callback.
+      if continuing == nil then
+        return fn(node, continuation)
+
+      -- Second entry: (if true) continue to children.
+      elseif continuing then
+        local tmp = {}
+        for k, child in pairs(node) do
+          if k ~= "node_type" then
+            tmp[k] = continuation(child)
+          end
+        end
+        return node(tmp)
+      end
+    elseif terralib.islist(node) then
+      local tmp = terralib.newlist()
+      for _, child in ipairs(node) do
+        tmp:insert(continuation(child))
+      end
+      return tmp
+    end
+    return node
+  end
+  return continuation(node)
 end
 
 function ast.traverse_node_postorder(fn, node)
@@ -818,7 +848,5 @@ ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "constraints", "body", "config_options",
                              "region_divergence", "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type"})
-ast.typed.top:leaf("QuoteExpr", {"expr"})
-ast.typed.top:leaf("QuoteStat", {"block"})
 
 return ast

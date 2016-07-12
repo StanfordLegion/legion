@@ -290,18 +290,35 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperRuntime::send_message(MapperContext ctx, Processor target,
-                                 const void *message, size_t message_size) const
+          const void *message, size_t message_size, unsigned message_kind) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->send_message(ctx, target, message, message_size);
+      ctx->manager->send_message(ctx, target, 
+                                 message, message_size, message_kind);
     }
 
     //--------------------------------------------------------------------------
     void MapperRuntime::broadcast(MapperContext ctx, const void *message,
-                                           size_t message_size, int radix) const
+                    size_t message_size, unsigned message_kind, int radix) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->broadcast(ctx, message, message_size, radix);
+      ctx->manager->broadcast(ctx, message, message_size, message_kind, radix);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::pack_physical_instance(MapperContext ctx, 
+                               Serializer &rez, PhysicalInstance instance) const 
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->pack_physical_instance(ctx, rez, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::unpack_physical_instance(MapperContext ctx,
+                          Deserializer &derez, PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->unpack_physical_instance(ctx, derez, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -781,6 +798,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition MapperRuntime::get_logical_partition_by_color(
+           MapperContext ctx, LogicalRegion par, const DomainPoint &color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_logical_partition_by_color(ctx, par, color);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition MapperRuntime::get_logical_partition_by_tree(
                                       MapperContext ctx, IndexPartition part,
                                       FieldSpace fspace, RegionTreeID tid) const
@@ -800,6 +825,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion MapperRuntime::get_logical_subregion_by_color(
                      MapperContext ctx, LogicalPartition par, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_logical_subregion_by_color(ctx, par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperRuntime::get_logical_subregion_by_color(
+        MapperContext ctx, LogicalPartition par, const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_subregion_by_color(ctx, par, color);

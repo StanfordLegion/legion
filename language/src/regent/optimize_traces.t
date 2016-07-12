@@ -106,4 +106,6 @@ function optimize_traces.entry(node)
   return optimize_traces.top(cx, node)
 end
 
+optimize_traces.pass_name = "optimize_traces"
+
 return optimize_traces

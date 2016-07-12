@@ -134,9 +134,8 @@ end
 local function analyze_is_side_effect_free_node(cx)
   return function(node)
     -- Expressions:
-    if node:is(ast.typed.expr.FieldAccess) then
-      local ptr_type = std.as_read(node.value.expr_type)
-      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    if node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.Call) then
       return not std.is_task(node.fn.value)
     elseif node:is(ast.typed.expr.RawContext) or
@@ -173,7 +172,7 @@ local function analyze_is_side_effect_free_node(cx)
     elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Cast) or
       node:is(ast.typed.expr.Ctor) or
@@ -226,9 +225,8 @@ local function analyze_is_loop_invariant_node(cx)
     -- Expressions:
     if node:is(ast.typed.expr.ID) then
       return not cx:is_loop_variable(node.value)
-    elseif node:is(ast.typed.expr.FieldAccess) then
-      local ptr_type = std.as_read(node.value.expr_type)
-      return not (std.is_bounded_type(ptr_type) or std.is_ref(ptr_type))
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.Call) or
       node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
@@ -261,7 +259,7 @@ local function analyze_is_loop_invariant_node(cx)
 
     elseif node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.IndexAccess) or
+      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Cast) or
       node:is(ast.typed.expr.Ctor) or
@@ -448,12 +446,16 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
         (std.is_partition(std.as_read(arg.value.expr_type)) or
-           std.is_cross_product(std.as_read(arg.value.expr_type))) and
-        arg.index:is(ast.typed.expr.ID) and
-        arg.index.value == node.symbol
+           std.is_cross_product(std.as_read(arg.value.expr_type)))
       then
-        partition_type = std.as_read(arg.value.expr_type)
-        arg_variant = true
+        if (arg.index:is(ast.typed.expr.ID) and arg.index.value == node.symbol) or
+          (arg.index:is(ast.typed.expr.Cast) and
+             arg.index.arg:is(ast.typed.expr.ID) and
+             arg.index.arg.value == node.symbol)
+        then
+          partition_type = std.as_read(arg.value.expr_type)
+          arg_variant = true
+        end
       end
 
       if not (arg_variant or arg_invariant) then
@@ -625,5 +627,7 @@ function optimize_index_launches.entry(node)
   local cx = context.new_global_scope({})
   return optimize_index_launches.top(cx, node)
 end
+
+optimize_index_launches.pass_name = "optimize_index_launches"
 
 return optimize_index_launches

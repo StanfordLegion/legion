@@ -16,6 +16,7 @@
 
 local builtins = require("regent/builtins")
 local passes = require("regent/passes")
+local passes_default = require("regent/passes_default")
 local std = require("regent/std")
 
 -- Add Language Builtins to Global Environment

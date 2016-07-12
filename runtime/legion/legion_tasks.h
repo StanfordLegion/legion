@@ -47,6 +47,7 @@ namespace Legion {
       virtual ~TaskOp(void);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
     public:
@@ -389,7 +390,8 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual void register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, 
                                            bool has_lock);
       virtual void register_child_executed(Operation *op);
@@ -650,6 +652,8 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
     protected:
       // Track whether this task has finished executing
+      unsigned total_children_count; // total number of sub-operations
+      unsigned total_close_count;
       unsigned outstanding_children_count;
       bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
@@ -1154,7 +1158,8 @@ namespace Legion {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     public:
-      virtual void register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op,
                                            bool has_lock);
       virtual void register_child_executed(Operation *op);

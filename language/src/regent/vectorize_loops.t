@@ -70,16 +70,21 @@ function context:new_local_scope()
     subst = self.subst:new_local_scope(),
     expr_type = self.expr_type,
     demanded = self.demanded,
+    read_set = self.read_set,
+    loop_symbol = self.loop_symbol,
   }
   return setmetatable(cx, context)
 end
 
-function context:new_global_scope()
+function context:new_global_scope(loop_symbol)
   local cx = {
     var_type = symbol_table:new_global_scope(),
     subst = symbol_table:new_global_scope(),
     expr_type = {},
     demanded = false,
+    read_set = {},
+    write_set = {},
+    loop_symbol = loop_symbol,
   }
   return setmetatable(cx, context)
 end
@@ -194,7 +199,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
 end
 
 function flip_types.expr(cx, simd_width, symbol, node)
-  local new_node = node:fields()
+  local new_node = node:get_fields()
   if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
@@ -272,6 +277,9 @@ function flip_types.expr(cx, simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.expr.Deref) then
+    if cx:lookup_expr_type(node) == V then
+      new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    end
 
   elseif node:is(ast.typed.expr.ID) then
     if cx:lookup_expr_type(node) == V and not (node.value == symbol) then
@@ -483,15 +491,22 @@ function vectorize.stat_for_list(cx, node)
   }
 end
 
-function collect_bounds(node)
+local function get_bounds(ty)
+  if std.is_ref(ty) then
+    return ty:bounds():map(function(bound)
+      return data.newtuple(bound, ty.field_path)
+    end)
+  else
+    return terralib.newlist()
+  end
+end
+
+local function collect_bounds(node)
   local bounds = terralib.newlist()
-  if node:is(ast.typed.expr.FieldAccess) then
-    local value_type = std.as_read(node.value.expr_type)
-    if std.is_bounded_type(value_type) then
-      value_type:bounds():map(function(bound)
-        bounds:insert(data.newtuple(bound, node.field_name))
-      end)
-    end
+  if node:is(ast.typed.expr.FieldAccess) or
+     node:is(ast.typed.expr.Deref) then
+    local ty = node.expr_type
+    if std.is_ref(ty) then bounds:insertall(get_bounds(ty)) end
     bounds:insertall(collect_bounds(node.value))
 
   elseif node:is(ast.typed.expr.IndexAccess) then
@@ -538,6 +553,33 @@ function check_vectorizability.block(cx, node)
   return true
 end
 
+-- reject an aliasing between the read set and write set
+function check_vectorizability.check_aliasing(cx, write_set)
+  -- ignore write accesses directly to the region being iterated over
+  cx.loop_symbol:gettype():bounds():map(function(r)
+    write_set[r] = nil
+  end)
+  for ty, fields in pairs(write_set) do
+    if cx.read_set[ty] then
+      for field_hash, pair in pairs(fields) do
+        if cx.read_set[ty][field_hash] then
+          local field, node = unpack(pair)
+          local path = ""
+          if #field > 0 then
+            path = "." .. field[1]
+            for idx = 2, #field do
+              path = path .. "." .. field[idx]
+            end
+          end
+          cx:report_error_when_demanded(node, error_prefix ..
+            "aliasing update of path " ..  tostring(ty) .. path)
+          return false
+        end
+      end
+    end
+  end
+end
+
 function check_vectorizability.stat(cx, node)
   if node:is(ast.typed.stat.Block) then
     return check_vectorizability.block(cx, node.block)
@@ -559,13 +601,21 @@ function check_vectorizability.stat(cx, node)
         return type_vectorizable
       end
       cx:assign(symbol, V)
+      node.values:map(function(value)
+        collect_bounds(value):map(function(pair)
+          local ty, field = unpack(pair)
+          local field_hash = field:hash()
+          if not cx.read_set[ty] then cx.read_set[ty] = {} end
+          if not cx.read_set[ty][field_hash] then
+            cx.read_set[ty][field_hash] = data.newtuple(field, node)
+          end
+        end)
+      end)
     end
     return true
 
   elseif node:is(ast.typed.stat.Assignment) or
          node:is(ast.typed.stat.Reduce) then
-    local bounds_lhs = {}
-    local bounds_rhs = {}
     for i, rh in pairs(node.rhs) do
       local lh = node.lhs[i]
 
@@ -602,30 +652,26 @@ function check_vectorizability.stat(cx, node)
       end
 
       -- bookkeeping for alias analysis
-      collect_bounds(lh):map(function(pair)
-        local ty, field = unpack(pair)
-        if not bounds_lhs[ty] then bounds_lhs[ty] = {} end
-        bounds_lhs[ty][field] = true
-      end)
       collect_bounds(rh):map(function(pair)
         local ty, field = unpack(pair)
-        if not bounds_rhs[ty] then bounds_rhs[ty] = {} end
-        bounds_rhs[ty][field] = true
+        local field_hash = field:hash()
+        if not cx.read_set[ty] then cx.read_set[ty] = {} end
+        if not cx.read_set[ty][field_hash] then
+          cx.read_set[ty][field_hash] = data.newtuple(field, node)
+        end
       end)
+      local write_set = {}
+      get_bounds(lh.expr_type):map(function(pair)
+        local ty, field = unpack(pair)
+        local field_hash = field:hash()
+        if not write_set[ty] then write_set[ty] = {} end
+        if not write_set[ty][field_hash] then
+          write_set[ty][field_hash] = data.newtuple(field, node)
+        end
+      end)
+      check_vectorizability.check_aliasing(cx, write_set)
     end
 
-    -- reject an aliasing between the read set and write set
-    for ty, fields in pairs(bounds_lhs) do
-      if bounds_rhs[ty] then
-        for field, _ in pairs(fields) do
-          if bounds_rhs[ty][field] then
-            cx:report_error_when_demanded(node, error_prefix ..
-              "aliasing references of path " ..  tostring(ty) .. "." .. field)
-            return false
-          end
-        end
-      end
-    end
     return true
 
   elseif node:is(ast.typed.stat.ForNum) then
@@ -639,7 +685,13 @@ function check_vectorizability.stat(cx, node)
     end
     cx = cx:new_local_scope()
     cx:assign(node.symbol, S)
-    return check_vectorizability.block(cx, node.block)
+    -- check loop body twice to check loop carried aliasing
+    for idx = 0, 2 do
+      if not check_vectorizability.block(cx, node.block) then
+        return false
+      end
+    end
+    return true
 
   elseif node:is(ast.typed.stat.If) then
     if not check_vectorizability.expr(cx, node.cond) then return false end
@@ -947,7 +999,7 @@ end
 
 function vectorize_loops.stat_for_list(node)
   if node.annotations.vectorize:is(ast.annotation.Forbid) then return node end
-  local cx = context:new_global_scope()
+  local cx = context:new_global_scope(node.symbol)
   cx:assign(node.symbol, V)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
@@ -1061,5 +1113,7 @@ end
 function vectorize_loops.entry(node)
   return vectorize_loops.top(node)
 end
+
+vectorize_loops.pass_name = "vectorize_loops"
 
 return vectorize_loops

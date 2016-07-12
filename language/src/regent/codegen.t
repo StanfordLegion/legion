@@ -21,7 +21,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local traverse_symbols = require("regent/traverse_symbols")
 local codegen_hooks = require("regent/codegen_hooks")
-local cudahelper = {}
+local cudahelper = require("regent/cudahelper")
 
 -- Configuration Variables
 
@@ -46,8 +46,6 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- checks flag as the compiler does not use standard runtime
 -- accessors.
 local bounds_checks = std.config["bounds-checks"]
-
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 local codegen = {}
 
@@ -644,14 +642,8 @@ function value:__get_field(cx, node, value_type, field_name)
   elseif std.is_index_type(value_type) then
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
-    if std.get_field(value_type.index_type.base_type, field_name) then
-      return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
-    else
-      assert(value_type:is_ptr())
-      return values.ref(node, self:read(cx, value_type), value_type, data.newtuple(field_name))
-    end
-  elseif std.is_vptr(value_type) then
-    return values.vref(node, self:read(cx, value_type), value_type, data.newtuple(field_name))
+    assert(std.get_field(value_type.index_type.base_type, field_name))
+    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   else
     return self:new(
       node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
@@ -697,17 +689,12 @@ function value:get_index(cx, node, index, result_type)
 end
 
 function value:unpack(cx, value_type, field_name, field_type)
-  local base_value_type = value_type
-  if std.is_bounded_type(base_value_type) and
-    not std.get_field(base_value_type.index_type.base_type, field_name)
-  then
-    assert(base_value_type:is_ptr())
-    base_value_type = base_value_type.points_to_type
-  end
+  assert(not std.is_bounded_type(value_type) or
+           std.get_field(value_type.index_type.base_type, field_name))
   local unpack_type = std.as_read(field_type)
 
   if std.is_region(unpack_type) and not cx:has_region(unpack_type) then
-    local static_region_type = std.get_field(base_value_type, field_name)
+    local static_region_type = std.get_field(value_type, field_name)
     local region_expr = self:__get_field(cx, self.node, value_type, field_name):read(cx)
     region_expr = unpack_region(cx, region_expr, unpack_type, static_region_type)
     region_expr = expr.just(region_expr.actions, self.expr.value)
@@ -733,13 +720,13 @@ function value:unpack(cx, value_type, field_name, field_type)
     assert(#region_types == 1)
     local region_type = region_types[1]
 
-    local static_ptr_type = std.get_field(base_value_type, field_name)
+    local static_ptr_type = std.get_field(value_type, field_name)
     local static_region_types = static_ptr_type:bounds()
     assert(#static_region_types == 1)
     local static_region_type = static_region_types[1]
 
     local region_field_name
-    for _, entry in pairs(base_value_type:getentries()) do
+    for _, entry in pairs(value_type:getentries()) do
       local entry_type = entry[2] or entry.type
       if entry_type == static_region_type then
         region_field_name = entry[1] or entry.field
@@ -1248,14 +1235,16 @@ function vref:write(cx, value, expr_type)
     data.zip(base_pointers, field_paths):map(
       function(pair)
         local base_pointer, field_path = unpack(pair)
-        local result = value_expr.value
         for i = 1, vector_width do
+          local result = value_expr.value
           local field_value = `base_pointer[ [vref_value].__ptr.value[ [i - 1] ] ]
           for _, field_name in ipairs(field_path) do
             result = `([result].[field_name])
           end
           local assignment
-          if value.value_type:isprimitive() then
+          if value.value_type:isprimitive() or
+             (std.is_sov(expr_type) and
+              std.type_eq(expr_type.type, value.value_type)) then
             assignment = quote
               [field_value] = [result]
             end
@@ -1654,12 +1643,11 @@ function codegen.expr_index_access(cx, node)
     end
 
     local color_type = value_type:colors().index_type
-    local dim = color_type.dim
     local color = std.implicit_cast(index_type, color_type, index.value)
 
     actions = quote
       [actions]
-      var dp = color:to_domain_point()
+      var dp = [color]:to_domain_point()
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
         [cx.runtime], [value.value].impl, dp)
       var [is] = [lr].index_space
@@ -1696,6 +1684,9 @@ function codegen.expr_index_access(cx, node)
       [emit_debuginfo(node)]
     end
 
+    local color_type = value_type:partition():colors().index_type
+    local color = std.implicit_cast(index_type, color_type, index.value)
+
     local region_type = expr_type:parent_region()
     local lr
     if not cx:has_region(region_type) then
@@ -1705,7 +1696,7 @@ function codegen.expr_index_access(cx, node)
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
-      if not cx.leaf then
+      if not cx.leaf and parent_region_type:is_opaque() then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       end
       local it = false
@@ -1714,13 +1705,14 @@ function codegen.expr_index_access(cx, node)
       end
       actions = quote
         [actions]
-        var [lr] = c.legion_logical_partition_get_logical_subregion_by_color(
-          [cx.runtime], [value.value].impl, [index.value])
+        var dp = [color]:to_domain_point()
+        var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+          [cx.runtime], [value.value].impl, dp)
         var [is] = [lr].index_space
         var [r] = [region_type] { impl = [lr] }
       end
 
-      if not cx.leaf then
+      if not cx.leaf and parent_region_type:is_opaque() then
         actions = quote
           [actions]
           var [isa] = c.legion_index_allocator_create(
@@ -1747,9 +1739,10 @@ function codegen.expr_index_access(cx, node)
     local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
     actions = quote
       [actions]
-      var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color(
+      var dp = [color]:to_domain_point()
+      var [ip] = c.legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
         [cx.runtime], [cx.context],
-        [value.value].product, [index.value])
+        [value.value].product, dp)
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [lr], [ip])
     end
@@ -2639,11 +2632,11 @@ function codegen.expr_cast(cx, node)
     [arg.actions];
     [emit_debuginfo(node)]
   end
-  local value_type = std.as_read(node.expr_type)
+  local expr_type = std.as_read(node.expr_type)
   return values.value(
     node,
-    expr.once_only(actions, `([fn.value]([arg.value])), value_type),
-    value_type)
+    expr.once_only(actions, `([fn.value]([arg.value])), expr_type),
+    expr_type)
 end
 
 function codegen.expr_ctor_list_field(cx, node)
@@ -2674,24 +2667,10 @@ function codegen.expr_ctor(cx, node)
   end
   local expr_type = std.as_read(node.expr_type)
 
-  if node.named then
-    local st = std.ctor(
-      node.fields:map(
-        function(field)
-          local field_type = std.as_read(field.value.expr_type)
-          return { field.name, field_type }
-        end))
-
-    return values.value(
-      node,
-      expr.once_only(actions, `([st]({ [field_values] })), expr_type),
-      expr_type)
-  else
-    return values.value(
-      node,
-      expr.once_only(actions, `({ [field_values] }), expr_type),
-      expr_type)
-  end
+  return values.value(
+    node,
+    expr.once_only(actions, `([expr_type]{ [field_values] }), expr_type),
+    expr_type)
 end
 
 function codegen.expr_raw_context(cx, node)
@@ -5530,7 +5509,7 @@ function codegen.expr_binary(cx, node)
 end
 
 function codegen.expr_deref(cx, node)
-  local value = codegen.expr(cx, node.value):read(cx)
+  local value = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
   local value_type = std.as_read(node.value.expr_type)
 
   if value_type:ispointer() then
@@ -5538,6 +5517,8 @@ function codegen.expr_deref(cx, node)
   elseif std.is_bounded_type(value_type) then
     assert(value_type:is_ptr())
     return values.ref(node, value, value_type)
+  elseif std.is_vptr(value_type) then
+    return values.vref(node, value, value_type)
   else
     assert(false)
   end
@@ -6862,7 +6843,7 @@ function codegen.stat_assignment(cx, node)
       rh_expr = expr.once_only(rh_expr.actions, rh_expr.value, rh_node.expr_type)
       actions:insert(rh_expr.actions)
       return values.value(
-        node,
+        rh_node,
         expr.just(quote end, rh_expr.value),
         std.as_read(rh_node.expr_type))
     end)
@@ -7609,10 +7590,10 @@ function codegen.top(cx, node)
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)
 
-  elseif node:is(ast.typed.top.QuoteExpr) then
+  elseif node:is(ast.specialized.top.QuoteExpr) then
     return codegen.top_quote_expr(cx, node)
 
-  elseif node:is(ast.typed.top.QuoteStat) then
+  elseif node:is(ast.specialized.top.QuoteStat) then
     return codegen.top_quote_stat(cx, node)
 
   else

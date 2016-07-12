@@ -1131,23 +1131,47 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::send_message(MappingCallInfo *ctx, Processor target,
-                                     const void *message, size_t message_size)
+                const void *message, size_t message_size, unsigned message_kind)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_message(target, mapper_id, processor,
-                                      message, message_size);
+                                      message, message_size, message_kind);
       resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::broadcast(MappingCallInfo *ctx, const void *message,
-                                  size_t message_size, int radix)
+                          size_t message_size, unsigned message_kind, int radix)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
-                                        message_size, radix, 0/*index*/);
+                        message_size, message_kind, radix, 0/*index*/);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::pack_physical_instance(MappingCallInfo *ctx,
+                                      Serializer &rez, MappingInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      // No need to even pause the mapper call here
+      rez.serialize(instance.impl->did);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::unpack_physical_instance(MappingCallInfo *ctx,
+                                 Deserializer &derez, MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      instance.impl = runtime->find_or_request_physical_manager(did, ready);
+      if (ready.exists())
+        ready.wait();
       resume_mapper_call(ctx);
     }
 
@@ -2472,6 +2496,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_logical_partition_by_color(
+              MappingCallInfo *ctx, LogicalRegion par, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LogicalPartition result = 
+        runtime->get_logical_partition_by_color(par, color);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition_by_tree(
                                                         MappingCallInfo *ctx,
                                                         IndexPartition part,
@@ -2501,6 +2537,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_color(
                         MappingCallInfo *ctx, LogicalPartition par, Color color)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_logical_subregion_by_color(
+           MappingCallInfo *ctx, LogicalPartition par, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);

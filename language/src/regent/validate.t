@@ -78,9 +78,20 @@ local function validate_vars_node(cx)
     if node:is(ast.typed.expr.ID) then
       cx:check_variable(node, node.value, node.expr_type)
 
+    elseif node:is(ast.typed.expr.FieldAccess) then
+      -- Field accesses used to autoref pointers. The type checker now
+      -- desugars into a deref and a separate field access.
+      local value_type = std.as_read(node.value.expr_type)
+      if std.is_bounded_type(value_type) and
+        value_type:is_ptr() and
+        not std.get_field(value_type.index_type.base_type, node.field_name)
+      then
+        log.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
+      end
+      continuation(node, true)
+
     elseif node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.IndexAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Call) or
@@ -266,6 +277,15 @@ end
 function validate.top(cx, node)
   if node:is(ast.typed.top.Task) then
     validate.top_task(cx, node)
+
+  elseif node:is(ast.typed.top.Fspace) or
+    node:is(ast.specialized.top.QuoteExpr) or
+    node:is(ast.specialized.top.QuoteStat)
+  then
+    return
+
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 

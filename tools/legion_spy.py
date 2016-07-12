@@ -17,7 +17,7 @@
 
 import subprocess
 import sys, os, re, gc, shutil, copy
-import string
+import string, struct
 import tempfile
 import random
 from getopt import getopt,GetoptError
@@ -1914,10 +1914,12 @@ class PointSet(object):
         return self
 
 class Processor(object):
-    __slots__ = ['state', 'uid', 'kind', 'mem_latency', 'mem_bandwidth', 'node_name']
+    __slots__ = ['state', 'uid', 'kind_num', 'kind', 'mem_latency', 
+                 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
+        self.kind_num = None
         self.kind = "Unknown"
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
@@ -1926,7 +1928,8 @@ class Processor(object):
     def __str__(self):
         return self.kind + " Processor " + hex(self.uid)
 
-    def set_kind(self, kind):
+    def set_kind(self, kind_num, kind):
+        self.kind_num = kind_num
         self.kind = kind
 
     def add_memory(self, mem, bandwidth, latency):
@@ -1947,11 +1950,12 @@ class Processor(object):
         
 
 class Memory(object):
-    __slots__ = ['state', 'uid', 'kind', 'capacity', 'proc_latency',
+    __slots__ = ['state', 'uid', 'kind_num', 'kind', 'capacity', 'proc_latency',
                  'proc_bandwidth', 'mem_latency', 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
+        self.kind_num = None
         self.kind = "Unknown"
         self.capacity = -1
         self.proc_latency = dict()
@@ -1965,7 +1969,8 @@ class Memory(object):
 
     __repr__ = __str__
 
-    def set_kind(self, kind):
+    def set_kind(self, kind_num, kind):
+        self.kind_num = kind_num
         self.kind = kind
 
     def set_capacity(self, capacity):
@@ -2377,12 +2382,8 @@ class IndexPartition(object):
         return len(self.children)
 
     def print_link_to_parent(self, printer, parent):
-        if self.disjoint:
-            edge_label = '*'
-        else:
-            edge_label = ''
         printer.println(parent+' -> '+ self.node_name+
-                ' [label="'+edge_label+'",style=dotted,color=black,penwidth=2];')
+                ' [style=dotted,color=black,penwidth=2];')
 
     def print_graph(self, printer):
         if self.name is not None:
@@ -2396,6 +2397,8 @@ class IndexPartition(object):
                 break
         assert color is not None
         label += ' (color: ' + str(color) + ')'
+        label += '\nDisjoint=' + ('True' if self.disjoint else 'False')
+        label += ', Complete=' + ('True' if self.is_complete() else 'False')
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="times italic"];')
@@ -2897,7 +2900,7 @@ class LogicalPartition(object):
                                                           prev, checks)
         elif not checks:
             # Do all the invalidations and record and dependences
-            self.perform_deletion_invalidations(op, req, field)
+            self.perform_deletion_invalidation(op, req, field)
         return True
 
     def perform_deletion_invalidation(self, op, req, field):
@@ -2962,12 +2965,8 @@ class LogicalPartition(object):
         return self.has_named_children
 
     def print_link_to_parent(self, printer, parent):
-        if self.index_partition.disjoint:
-            edge_label = '*'
-        else:
-            edge_label = ''
         printer.println(parent+' -> '+ self.node_name+
-                ' [label="'+edge_label+'",style=dotted,color=black,penwidth=2];')
+                ' [style=dotted,color=black,penwidth=2];')
 
     def gen_id(self):
         return 'part: '+hex(self.index_partition.uid)+','+\
@@ -2979,6 +2978,8 @@ class LogicalPartition(object):
             label = self.name+' ('+self.gen_id() +')'
         else:
             label = 'partition ('+self.gen_id() +')'
+        label += '\nDisjoint=' + ('True' if self.index_partition.disjoint else 'False')
+        label += ', Complete=' + ('True' if self.index_partition.is_complete() else 'False')
         printer.println(self.node_name+' [label="'+label+
                 '",shape=plaintext,fontsize=14,'+
                 'fontcolor=black,fontname="times italic"];')
@@ -5201,6 +5202,96 @@ class Operation(object):
                 else:
                     printer.println(src.node_name+' -> '+self.node_name+
                             ' [style=solid,color=black,penwidth=2];')
+
+    def pack_requirement_replay_info(self, replay_file, req, mapping):
+        if mapping:
+            replay_file.write(struct.pack('I',len(mapping)))
+            for inst in mapping.itervalues():
+                replay_file.write(struct.pack('Q',inst.handle))
+        else:
+            replay_file.write(struct.pack('I',0))
+
+    def pack_temporary_replay_info(self, replay_file, req, mapping, temporary):
+        assert len(temporary) > 0
+        replay_file.write(struct.pack('I',len(temporary)))
+        for fid,inst in temporary.iteritems():
+            assert fid in mapping
+            replay_file.write(struct.pack('Q',mapping[fid].handle))
+            replay_file.write(struct.pack('Q',inst.handle))
+
+    def pack_inline_replay_info(self, replay_file):
+        assert self.kind == MAP_OP_KIND
+        assert 0 in self.reqs
+        assert 0 in self.mappings
+        assert len(self.mappings) == 1
+        replay_file.write(struct.pack('I',1))
+        self.pack_requirement_replay_info(replay_file, self.reqs[0], 
+                                          self.mappings[0])
+        if self.temporaries:
+            assert 0 in self.temporaries  
+            replay_file.write(struct.pack('I',1))
+            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
+                                self.mappings[0], self.temporaries[0])
+        else:
+            replay_file.write(struct.pack('I',0))
+
+    def pack_copy_replay_info(self, replay_file):
+        assert self.kind == COPY_OP_KIND
+        assert len(self.reqs) % 2 == 0
+        half = len(self.reqs) / 2
+        replay_file.write(struct.pack('I',half))
+        src_temporaries = set()
+        for idx in range(half):
+            self.pack_requirement_replay_info(replay_file, self.reqs[idx],
+              None if idx not in self.mappings[idx] else self.mappings[idx])
+            if self.temporaries and idx in self.temporaries:
+                src_temporaries.add(idx)
+        replay_file.write(struct.pack('I',half))
+        dst_temporaries = set()
+        for idx in range(half,2*half):
+            self.pack_requirement_replay_info(replay_file,self.reqs[idx],
+              None if idx not in self.mappings[idx] else self.mappings[idx])
+            if self.temporaries and idx in self.temporaries:
+                dst_temporaries.add(idx)
+        replay_file.write(struct.pack('I',len(src_temporaries)))
+        for idx in src_temporaries:
+            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
+                              self.mappings[idx], self.temporaries[idx])
+        replay_file.write(struct.pack('I',len(dst_temporaries)))
+        for idx in dst_temporaries:
+            self.pack_temporary_replay_info(replay_file, self.reqs[idx],
+                              self.mappings[idx], self.temporaries[idx])
+        
+    def pack_close_replay_info(self, replay_file):
+        assert self.kind == INTER_CLOSE_OP_KIND
+        assert 0 in self.reqs
+        if 0 in self.mappings:
+            assert len(self.mappings) == 1
+            replay_file.write(struct.pack('I',1))
+            self.pack_requirement_replay_info(replay_file, self.reqs[0], 
+                                              self.mappings[0])
+        else:
+            replay_file.write(struct.pack('I',0))
+        if self.temporaries:
+            assert 0 in self.mappings
+            assert 0 in self.temporaries  
+            replay_file.write(struct.pack('I',1))
+            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
+                                self.mappings[0], self.temporaries[0])
+        else:
+            replay_file.write(struct.pack('I',0))
+
+    def pack_release_replay_info(self, replay_file):
+        assert self.kind == RELEASE_OP_KIND
+        if self.temporaries:
+            assert 0 in self.reqs
+            assert 0 in self.mappings
+            assert 0 in self.temporaries  
+            replay_file.write(struct.pack('I',1))
+            self.pack_temporary_replay_info(replay_file, self.reqs[0], 
+                                self.mappings[0], self.temporaries[0])
+        else:
+            replay_file.write(struct.pack('I',0))
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
@@ -7844,12 +7935,14 @@ def parse_legion_spy_line(line, state):
     m = processor_pat.match(line)
     if m is not None:
         proc = state.get_processor(int(m.group('pid'),16))
-        proc.set_kind(state.get_processor_kind(int(m.group('kind'))))
+        kind_num = int(m.group('kind'))
+        proc.set_kind(kind_num, state.get_processor_kind(kind_num))
         return True
     m = memory_pat.match(line)
     if m is not None:
         mem = state.get_memory(int(m.group('mid'),16))
-        mem.set_kind(state.get_memory_kind(int(m.group('kind'))))
+        kind_num = int(m.group('kind'))
+        mem.set_kind(kind_num, state.get_memory_kind(kind_num))
         mem.set_capacity(int(m.group('capacity')))
         return True
     m = proc_mem_pat.match(line)
@@ -8206,6 +8299,60 @@ class State(object):
         for node in all_nodes:
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
+
+    def make_replay_file(self):
+        file_name = 'legion.rp'
+        print 'Emitting replay file '+file_name
+        replay_file = open(file_name,'wb')  
+        # Write out processors
+        replay_file.write(struct.pack('I',len(self.processors)))
+        for proc in self.processors.itervalues():
+            replay_file.write(struct.pack('Q', proc.uid))    
+            replay_file.write(struct.pack('I', proc.kind_num))
+        # Write out memories
+        replay_file.write(struct.pack('I',len(self.memories)))
+        for mem in self.memories.itervalues():
+            replay_file.write(struct.pack('Q', mem.uid))
+            replay_file.write(struct.pack('I', mem.kind_num))
+        # Write out the instances
+        replay_file.write(struct.pack('I',len(self.instances)))
+        for inst in self.instances.itervalues():
+            inst.pack_inst_replay_info(replay_file)
+        # Write out the tasks
+        replay_file.write(struct.pack('I',len(self.tasks)))
+        for task in self.tasks.itervalues():
+            task.pack_task_replay_info(replay_file)  
+        # Find all the sets of operations
+        inlines = set()
+        copies = set()
+        closes = set()
+        releases = set()
+        for op in self.ops.itervalues():
+            if op.kind == MAP_OP_KIND:
+                inlines.add(op)
+            elif op.kind == COPY_OP_KIND:
+                copies.add(op)
+            elif op.kind == INTER_CLOSE_OP_KIND:
+                closes.add(op)
+            elif op.kind == RELEASE_OP_KIND:
+                releases.add(op)
+        # Write out the inlines
+        replay_file.write(struct.pack('I',len(inlines)))
+        for op in inlines:
+            op.pack_inline_replay_info(replay_file)
+        # Write out the copies
+        replay_file.write(struct.pack('I',len(copies)))
+        for op in copies:
+            op.pack_copy_replay_info(replay_file)
+        # Write out the closes
+        replay_file.write(struct.pack('I',len(closes)))
+        for op in closes:
+            op.pack_close_replay_info(replay_file)
+        # Write out the releases
+        replay_file.write(struct.pack('I',len(releases)))
+        for op in releases:
+            op.pack_release_replay_info(replay_file)
+        replay_file.close()
 
     def print_instance_descriptions(self):
         for inst in self.instances.itervalues():
@@ -8659,7 +8806,7 @@ def main(temp_dir):
         state.make_event_graph(temp_dir)
     if replay_file:
         print "Generating mapper replay file..."
-        assert False
+        state.make_replay_file()
     if instance_descriptions:
         state.print_instance_descriptions()
     if mapping_decisions:

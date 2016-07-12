@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Inline Optimizer
+-- Mapping Optimizer
 --
--- Attempts to place map/unmap calls to avoid thrashing inlines.
+-- Attempts to place map/unmap calls to avoid thrashing inline mappings.
 
 local ast = require("regent/ast")
 local data = require("regent/data")
@@ -217,7 +217,7 @@ local function analyze_usage(cx, node)
     node, nil)
 end
 
-local optimize_inlines = {}
+local optimize_mapping = {}
 
 local function annotate(node, in_usage, out_usage)
   return { node, in_usage, out_usage }
@@ -280,9 +280,9 @@ local function fixup_elseif(annotated_node, in_usage, out_usage)
   return node { block = block }
 end
 
-function optimize_inlines.block(cx, node)
+function optimize_mapping.block(cx, node)
   local stats = node.stats:map(
-    function(stat) return optimize_inlines.stat(cx, stat) end)
+    function(stat) return optimize_mapping.stat(cx, stat) end)
 
   local result_stats = terralib.newlist()
   local out_usage
@@ -306,15 +306,15 @@ function optimize_inlines.block(cx, node)
     in_usage, out_usage)
 end
 
-function optimize_inlines.stat_if(cx, node)
+function optimize_mapping.stat_if(cx, node)
   local then_cond_usage = analyze_usage(cx, node.cond)
   local elseif_cond_usage = node.elseif_blocks:map(
     function(block) return analyze_usage(cx, block.cond) end)
 
-  local then_annotated = optimize_inlines.block(cx, node.then_block)
+  local then_annotated = optimize_mapping.block(cx, node.then_block)
   local elseif_annotated = node.elseif_blocks:map(
-    function(block) return optimize_inlines.stat_elseif(cx, block) end)
-  local else_annotated = optimize_inlines.block(cx, node.else_block)
+    function(block) return optimize_mapping.stat_elseif(cx, block) end)
+  local else_annotated = optimize_mapping.block(cx, node.else_block)
 
   local initial_usage = data.reduce(usage_meet, elseif_cond_usage, then_cond_usage)
   local final_usage = data.reduce(
@@ -337,16 +337,16 @@ function optimize_inlines.stat_if(cx, node)
     initial_usage, final_usage)
 end
 
-function optimize_inlines.stat_elseif(cx, node)
-  local block, in_usage, out_usage = unpack(optimize_inlines.block(cx, node.block))
+function optimize_mapping.stat_elseif(cx, node)
+  local block, in_usage, out_usage = unpack(optimize_mapping.block(cx, node.block))
   return annotate(
     node { block = block },
     in_usage, out_usage)
 end
 
-function optimize_inlines.stat_while(cx, node)
+function optimize_mapping.stat_while(cx, node)
   local cond_usage = analyze_usage(cx, node.cond)
-  local annotated_block = optimize_inlines.block(cx, node.block)
+  local annotated_block = optimize_mapping.block(cx, node.block)
   local loop_usage = usage_meet(cond_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
@@ -354,9 +354,9 @@ function optimize_inlines.stat_while(cx, node)
     loop_usage, loop_usage)
 end
 
-function optimize_inlines.stat_for_num(cx, node)
+function optimize_mapping.stat_for_num(cx, node)
   local values_usage = analyze_usage(cx, node.values)
-  local annotated_block = optimize_inlines.block(cx, node.block)
+  local annotated_block = optimize_mapping.block(cx, node.block)
   local loop_usage = usage_meet(values_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
@@ -364,9 +364,9 @@ function optimize_inlines.stat_for_num(cx, node)
     loop_usage, loop_usage)
 end
 
-function optimize_inlines.stat_for_list(cx, node)
+function optimize_mapping.stat_for_list(cx, node)
   local value_usage = analyze_usage(cx, node.value)
-  local annotated_block = optimize_inlines.block(cx, node.block)
+  local annotated_block = optimize_mapping.block(cx, node.block)
   local loop_usage = usage_meet(value_usage, annotated_in_usage(annotated_block))
   local block = fixup_block(annotated_block, loop_usage, loop_usage)
   return annotate(
@@ -374,8 +374,8 @@ function optimize_inlines.stat_for_list(cx, node)
     loop_usage, loop_usage)
 end
 
-function optimize_inlines.stat_repeat(cx, node)
-  local annotated_block = optimize_inlines.block(cx, node.block)
+function optimize_mapping.stat_repeat(cx, node)
+  local annotated_block = optimize_mapping.block(cx, node.block)
   local until_cond_usage = analyze_usage(cx, node.until_cond)
   local loop_usage = usage_meet(until_cond_usage,
                                 annotated_in_usage(annotated_block))
@@ -385,123 +385,123 @@ function optimize_inlines.stat_repeat(cx, node)
     loop_usage, loop_usage)
 end
 
-function optimize_inlines.stat_must_epoch(cx, node)
+function optimize_mapping.stat_must_epoch(cx, node)
   local block, block_in_usage, block_out_usage = unpack(
-    optimize_inlines.block(cx, node.block))
+    optimize_mapping.block(cx, node.block))
   return annotate(
     node { block = block },
     block_in_usage, block_out_usage)
 end
 
-function optimize_inlines.stat_block(cx, node)
+function optimize_mapping.stat_block(cx, node)
   local block, block_in_usage, block_out_usage = unpack(
-    optimize_inlines.block(cx, node.block))
+    optimize_mapping.block(cx, node.block))
   return annotate(
     node { block = block },
     block_in_usage, block_out_usage)
 end
 
-function optimize_inlines.stat_index_launch_num(cx, node)
+function optimize_mapping.stat_index_launch_num(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_index_launch_list(cx, node)
+function optimize_mapping.stat_index_launch_list(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_var(cx, node)
+function optimize_mapping.stat_var(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_var_unpack(cx, node)
+function optimize_mapping.stat_var_unpack(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_return(cx, node)
+function optimize_mapping.stat_return(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_break(cx, node)
+function optimize_mapping.stat_break(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_assignment(cx, node)
+function optimize_mapping.stat_assignment(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_reduce(cx, node)
+function optimize_mapping.stat_reduce(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_expr(cx, node)
+function optimize_mapping.stat_expr(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat_raw_delete(cx, node)
+function optimize_mapping.stat_raw_delete(cx, node)
   local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_inlines.stat(cx, node)
+function optimize_mapping.stat(cx, node)
   if node:is(ast.typed.stat.If) then
-    return optimize_inlines.stat_if(cx, node)
+    return optimize_mapping.stat_if(cx, node)
 
   elseif node:is(ast.typed.stat.While) then
-    return optimize_inlines.stat_while(cx, node)
+    return optimize_mapping.stat_while(cx, node)
 
   elseif node:is(ast.typed.stat.ForNum) then
-    return optimize_inlines.stat_for_num(cx, node)
+    return optimize_mapping.stat_for_num(cx, node)
 
   elseif node:is(ast.typed.stat.ForList) then
-    return optimize_inlines.stat_for_list(cx, node)
+    return optimize_mapping.stat_for_list(cx, node)
 
   elseif node:is(ast.typed.stat.Repeat) then
-    return optimize_inlines.stat_repeat(cx, node)
+    return optimize_mapping.stat_repeat(cx, node)
 
   elseif node:is(ast.typed.stat.MustEpoch) then
-    return optimize_inlines.stat_must_epoch(cx, node)
+    return optimize_mapping.stat_must_epoch(cx, node)
 
   elseif node:is(ast.typed.stat.Block) then
-    return optimize_inlines.stat_block(cx, node)
+    return optimize_mapping.stat_block(cx, node)
 
   elseif node:is(ast.typed.stat.IndexLaunchNum) then
-    return optimize_inlines.stat_index_launch_num(cx, node)
+    return optimize_mapping.stat_index_launch_num(cx, node)
 
   elseif node:is(ast.typed.stat.IndexLaunchList) then
-    return optimize_inlines.stat_index_launch_list(cx, node)
+    return optimize_mapping.stat_index_launch_list(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
-    return optimize_inlines.stat_var(cx, node)
+    return optimize_mapping.stat_var(cx, node)
 
   elseif node:is(ast.typed.stat.VarUnpack) then
-    return optimize_inlines.stat_var_unpack(cx, node)
+    return optimize_mapping.stat_var_unpack(cx, node)
 
   elseif node:is(ast.typed.stat.Return) then
-    return optimize_inlines.stat_return(cx, node)
+    return optimize_mapping.stat_return(cx, node)
 
   elseif node:is(ast.typed.stat.Break) then
-    return optimize_inlines.stat_break(cx, node)
+    return optimize_mapping.stat_break(cx, node)
 
   elseif node:is(ast.typed.stat.Assignment) then
-    return optimize_inlines.stat_assignment(cx, node)
+    return optimize_mapping.stat_assignment(cx, node)
 
   elseif node:is(ast.typed.stat.Reduce) then
-    return optimize_inlines.stat_reduce(cx, node)
+    return optimize_mapping.stat_reduce(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
-    return optimize_inlines.stat_expr(cx, node)
+    return optimize_mapping.stat_expr(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
-    return optimize_inlines.stat_raw_delete(cx, node)
+    return optimize_mapping.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -520,31 +520,33 @@ function task_initial_usage(cx, privileges)
   return usage
 end
 
-function optimize_inlines.top_task(cx, node)
+function optimize_mapping.top_task(cx, node)
   local cx = cx:new_task_scope(
     node.prototype:get_constraints(),
     node.prototype:get_region_universe())
   local initial_usage = task_initial_usage(cx, node.privileges)
-  local annotated_body = optimize_inlines.block(cx, node.body)
+  local annotated_body = optimize_mapping.block(cx, node.body)
   local body = fixup_block(annotated_body, initial_usage, nil)
 
   return node { body = body }
 end
 
-function optimize_inlines.top(cx, node)
+function optimize_mapping.top(cx, node)
   if node:is(ast.typed.top.Task) and
      not node.config_options.inner
   then
-    return optimize_inlines.top_task(cx, node)
+    return optimize_mapping.top_task(cx, node)
 
   else
     return node
   end
 end
 
-function optimize_inlines.entry(node)
+function optimize_mapping.entry(node)
   local cx = context.new_global_scope({})
-  return optimize_inlines.top(cx, node)
+  return optimize_mapping.top(cx, node)
 end
 
-return optimize_inlines
+optimize_mapping.pass_name = "optimize_mapping"
+
+return optimize_mapping

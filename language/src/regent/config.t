@@ -30,7 +30,7 @@ local default_options = {
   ["vectorize"] = true,
 
   -- Dataflow optimization flags:
-  ["flow"] = false,
+  ["flow"] = os.getenv('USE_RDIR') == '1' or false,
   ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
 
