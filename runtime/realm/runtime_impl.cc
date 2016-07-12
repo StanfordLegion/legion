@@ -55,6 +55,8 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
+  typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
+  typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
 }
 
 #include <unistd.h>
@@ -800,6 +802,8 @@ namespace Realm {
       hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
       hcount += RegisterTaskMessage::Message::add_handler_entries(&handlers[hcount], "Register Task AM");
       hcount += RegisterTaskCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Register Task Complete AM");
+      hcount += RemoteIBAllocRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Request AM");
+      hcount += RemoteIBAllocResponseAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Response AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 

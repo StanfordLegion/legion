@@ -26,7 +26,46 @@ namespace Realm {
 namespace LegionRuntime {
   namespace LowLevel {
 
+    struct RemoteIBAllocRequestAsync {
+      struct RequestArgs {
+        int node;
+        Memory memory;
+        void* req;
+        int idx;
+        ID::IDType src_inst_id, dst_inst_id;
+        size_t size;
+      };
 
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_REQUEST_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory tgt_mem, void* req,
+                               int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
+    };
+
+    struct RemoteIBAllocResponseAsync {
+      struct RequestArgs {
+        void* req;
+        int idx;
+        ID::IDType src_inst_id, dst_inst_id;
+        size_t size;
+        off_t offset;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_RESPONSE_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_id,
+                               ID::IDType dst_id, size_t ib_size, off_t ib_offset);
+    };
+
+    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path);
 
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
@@ -117,6 +156,8 @@ namespace LegionRuntime {
       enum State {
 	STATE_INIT,
 	STATE_METADATA_FETCH,
+	STATE_GEN_PATH,
+	STATE_ALLOC_IB,
 	STATE_BEFORE_EVENT,
 	STATE_INST_LOCK,
 	STATE_READY,

@@ -72,6 +72,23 @@ namespace LegionRuntime {
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
     typedef std::map<InstPair, OASVec> OASByInst;
+    class IBFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      IBFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
+      virtual void request_cancellation(void) {
+        // ignored for now
+      }
+      virtual void print(std::ostream& os) const { os << "IBFence"; }
+    };
+
+    struct IBInfo {
+      Memory memory;
+      off_t offset;
+      size_t size;
+      IBFence* fence;
+    };
+    typedef std::vector<IBInfo> IBVec;
+    typedef std::map<InstPair, IBVec> IBByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
 
     class DmaRequest;
@@ -186,6 +203,27 @@ namespace LegionRuntime {
 
       Domain domain;
       OASByInst *oas_by_inst;
+
+      // <NEW_DMA>
+      void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
+
+      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
+
+      // operations on ib_by_inst are protected by ib_mutex
+      IBByInst ib_by_inst;
+      GASNetHSL ib_mutex;
+      class IBAllocOp : public Realm::Operation {
+      public:
+        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
+        ~IBAllocOp() {};
+        void print(std::ostream& os) const {os << "IBAllocOp"; };
+      };
+
+      IBAllocOp* ib_req;
+      Event ib_completion;
+      std::vector<Memory> mem_path;
+      // </NEW_DMA>
+
       Event before_copy;
       Waiter waiter; // if we need to wait on events
     };
@@ -394,6 +432,12 @@ namespace LegionRuntime {
 
       oas_by_inst = new OASByInst;
 
+      // <NEW_DMA>
+      ib_completion = GenEventImpl::create_genevent()->current_event();
+      ib_req = new IBAllocOp(ib_completion);
+      ib_by_inst.clear();
+      // </NEW_DMA>
+
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
@@ -463,6 +507,11 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
+      // <NEW_DMA>
+      ib_completion = GenEventImpl::create_genevent()->current_event();
+      ib_req = new IBAllocOp(ib_completion);
+      ib_by_inst.clear();
+      // </NEW_DMA>
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << domain << " before=" << before_copy << " after=" << get_finish_event();
       for(OASByInst::const_iterator it = oas_by_inst->begin();
@@ -485,6 +534,7 @@ namespace LegionRuntime {
       for (it = path.begin(); it != path.end(); it++) {
         destroy_xfer_des(*it);
       }
+      delete ib_req;
       //</NEWDMA>
       delete oas_by_inst;
     }
@@ -588,6 +638,110 @@ namespace LegionRuntime {
       return req->get_finish_event();
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBAllocRequestAsync
+    //
+
+    /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
+    {
+      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
+      assert(offset >= 0);
+      RemoteIBAllocResponseAsync::send_request(args.node, args.req, args.idx, args.src_inst_id, args.dst_inst_id, args.size, offset); 
+    }
+
+    /*static*/ void RemoteIBAllocRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
+    {
+      RequestArgs args;
+      args.node = gasnet_mynode();
+      args.memory = tgt_mem;
+      args.req = req;
+      args.idx = idx;
+      args.src_inst_id = src_inst_id;
+      args.dst_inst_id = dst_inst_id;
+      args.size = ib_size;
+      Message::request(target, args);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBAllocResponseAsync
+    //
+
+    /*static*/ void RemoteIBAllocResponseAsync::handle_request(RequestArgs args)
+    {
+      CopyRequest* req = (CopyRequest*) args.req;
+      RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
+      RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
+      InstPair inst_pair(src_impl->me, dst_impl->me);
+      req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
+    }
+
+    /*static*/ void RemoteIBAllocResponseAsync::send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
+    {
+      RequestArgs args;
+      args.req = req;
+      args.idx = idx;
+      args.src_inst_id = src_inst_id;
+      args.dst_inst_id = dst_inst_id;
+      args.size = ib_size;
+      args.offset = ib_offset;
+      Message::request(target, args);
+    }
+
+#define IB_MAX_SIZE (16 * 1024 * 1024)
+
+    void CopyRequest::alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx)
+    {
+      assert(oas_by_inst->find(inst_pair) != oas_by_inst->end());
+      OASVec& oasvec = (*oas_by_inst)[inst_pair];
+      size_t ib_elmnt_size = 0, domain_size = 0;
+      for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
+        ib_elmnt_size += it->size;
+      }
+      if (domain.get_dim() == 0) {
+        IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
+        assert(get_runtime()->get_instance_impl(inst_pair.second)->metadata.is_valid());
+        if (ispace->me == get_runtime()->get_instance_impl(inst_pair.second)->metadata.is) {
+          // perform a 1D copy from first_element to last_element
+          Realm::StaticAccess<IndexSpaceImpl> data(ispace);
+          assert(data->num_elmts > 0);
+          Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
+          Domain new_domain = Domain::from_rect<1>(new_rect);
+          domain_size = new_domain.get_volume();
+        } else {
+          domain_size = domain.get_volume();
+        }
+      } else {
+        domain_size = domain.get_volume();
+      }
+      size_t ib_size;
+      if (domain_size * ib_elmnt_size < IB_MAX_SIZE)
+        ib_size = domain_size * ib_elmnt_size;
+      else
+        ib_size = IB_MAX_SIZE;
+      if (ID(tgt_mem).memory.owner_node == gasnet_mynode()) {
+        // create local intermediate buffer
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+        assert(ib_offset >= 0);
+        handle_ib_response(idx, inst_pair, ib_size, ib_offset);
+      } else {
+        // create remote intermediate buffer
+        RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
+      }
+    }
+
+    void CopyRequest::handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset)
+    {
+      AutoHSLLock al(ib_mutex);
+      assert(ib_by_inst.find(inst_pair) != ib_by_inst.end());
+      IBVec& ibvec = ib_by_inst[inst_pair];
+      ibvec[idx].size = ib_size;
+      ibvec[idx].offset = ib_offset;
+      ibvec[idx].fence->mark_finished(true);
+    }
+
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
     {
       if(state == STATE_INIT)
@@ -663,7 +817,42 @@ namespace LegionRuntime {
 	}
 
 	// if we got all the way through, we've got all the metadata we need
-	state = STATE_BEFORE_EVENT;
+	state = STATE_GEN_PATH;
+      }
+
+      if(state == STATE_GEN_PATH) {
+        Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
+        Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+        find_shortest_path(src_mem, dst_mem, mem_path);
+        ib_req->mark_ready();
+        ib_req->mark_started();
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          AutoHSLLock al(ib_mutex);
+          IBByInst::iterator ib_it = ib_by_inst.find(it->first);
+          assert(ib_it != ib_by_inst.end());
+          IBVec& ib_vec = ib_it->second;
+          assert(ib_vec.size() == 0);
+          for (size_t i = 1; i < mem_path.size() - 1; i++) {
+            IBInfo ib_info;
+            ib_info.memory = mem_path[i];
+            ib_info.fence = new IBFence(ib_req);
+            ib_req->add_async_work_item(ib_info.fence); 
+            ib_vec.push_back(ib_info);
+            alloc_intermediate_buffer(it->first, mem_path[i], i);
+          }
+        }
+        ib_req->mark_finished(true);
+        state = STATE_ALLOC_IB;
+      }
+
+      if(state == STATE_ALLOC_IB) {
+        if (ib_completion.has_triggered()) {
+          state = STATE_BEFORE_EVENT;
+        } else {
+          if (just_check) return false;
+          waiter.sleep_on_event(ib_completion);
+          return false;
+        }
       }
 
       // make sure our functional precondition has occurred
@@ -2837,23 +3026,12 @@ namespace LegionRuntime {
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
-#define IB_MAX_SIZE (16 * 1024 * 1024)
-
-    Buffer simple_create_intermediate_buffer(gasnet_node_t tgt_node, Memory::Kind kind, const Domain& domain,
+    Buffer simple_create_intermediate_buffer(const IBInfo& ib_info, const Domain& domain,
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
                                              DomainLinearization linearization)
     {
       oasvec_src.clear();
       oasvec_dst.clear();
-      Machine machine = Machine::get_machine();
-      std::set<Memory> mem;
-      Memory tgt_mem = Memory::NO_MEMORY;
-      machine.get_all_memories(mem);
-      for(std::set<Memory>::iterator it = mem.begin(); it != mem.end(); it++)
-        if (it->kind() == kind && ID(*it).memory.owner_node == tgt_node) {
-          tgt_mem = *it;
-        }
-      assert(tgt_mem != Memory::NO_MEMORY);
       std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
       off_t ib_elmnt_size = 0;
       for (unsigned i = 0; i < oasvec.size(); i++) {
@@ -2873,9 +3051,11 @@ namespace LegionRuntime {
         ib_size = domain.get_volume() * ib_elmnt_size;
       else
         ib_size = IB_MAX_SIZE;
-      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
-      assert(ib_offset >= 0);
-      Buffer ib_buf(ib_offset, true, domain.get_volume(), ib_elmnt_size, ib_size, linearization, tgt_mem);
+      // Make sure the size we want here matches our previous allocation
+      assert(ib_size == ib_info.size);
+      //off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+      //assert(ib_offset >= 0);
+      Buffer ib_buf(ib_info.offset, true, domain.get_volume(), ib_elmnt_size, ib_info.size, linearization, ib_info.memory);
       return ib_buf;
     }
 
@@ -3002,8 +3182,8 @@ namespace LegionRuntime {
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
       mark_started();
-      std::vector<Memory> mem_path;
-      find_shortest_path(src_mem, dst_mem, mem_path);
+      //std::vector<Memory> mem_path;
+      //find_shortest_path(src_mem, dst_mem, mem_path);
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
@@ -3014,6 +3194,9 @@ namespace LegionRuntime {
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
         OASVec oasvec = it->second, oasvec_src, oasvec_dst;
+        IBByInst::iterator ib_it = ib_by_inst.find(it->first);
+        assert(ib_it != ib_by_inst.end());
+        IBVec& ibvec = ib_it->second;
         RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
         RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
 
@@ -3062,8 +3245,8 @@ namespace LegionRuntime {
                 Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
                 Domain new_domain = Domain::from_rect<1>(new_rect);
                 if (idx != mem_path.size() - 1) {
-                  cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
-                              mem_path[idx].kind(), new_domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                  cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                              new_domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
                 } else {
                   cur_buf = dst_buf;
                   oasvec_src = oasvec;
@@ -3074,8 +3257,8 @@ namespace LegionRuntime {
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
               } else {
                 if (idx != mem_path.size() - 1) {
-                  cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
-                              mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                  cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                              domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
                 } else {
                   cur_buf = dst_buf;
                   oasvec_src = oasvec;
@@ -3088,8 +3271,8 @@ namespace LegionRuntime {
             }
             else {
               if (idx != mem_path.size() - 1) {
-                cur_buf = simple_create_intermediate_buffer(ID(mem_path[idx]).memory.owner_node,
-                            mem_path[idx].kind(), domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                            domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
               } else {
                 cur_buf = dst_buf;
                 oasvec_src = oasvec;
