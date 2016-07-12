@@ -675,7 +675,9 @@ namespace LegionRuntime {
       RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
       RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
       InstPair inst_pair(src_impl->me, dst_impl->me);
+      log_dma.debug("CP#3");
       req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
+      log_dma.debug("CP#4");
     }
 
     /*static*/ void RemoteIBAllocResponseAsync::send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
@@ -728,6 +730,7 @@ namespace LegionRuntime {
         handle_ib_response(idx, inst_pair, ib_size, ib_offset);
       } else {
         // create remote intermediate buffer
+        log_dma.debug("RemoteIBAllocRequest");
         RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
       }
     }
@@ -735,8 +738,10 @@ namespace LegionRuntime {
     void CopyRequest::handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset)
     {
       AutoHSLLock al(ib_mutex);
-      assert(ib_by_inst.find(inst_pair) != ib_by_inst.end());
-      IBVec& ibvec = ib_by_inst[inst_pair];
+      IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
+      assert(ib_it != ib_by_inst.end());
+      IBVec& ibvec = ib_it->second;
+      assert(ibvec.size() > idx);
       ibvec[idx].size = ib_size;
       ibvec[idx].offset = ib_offset;
       ibvec[idx].fence->mark_finished(true);
@@ -821,16 +826,16 @@ namespace LegionRuntime {
       }
 
       if(state == STATE_GEN_PATH) {
+        log_dma.debug("generate paths");
         Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
         Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
         find_shortest_path(src_mem, dst_mem, mem_path);
         ib_req->mark_ready();
         ib_req->mark_started();
+        // Pass 1: create IBInfo blocks
         for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
           AutoHSLLock al(ib_mutex);
-          IBByInst::iterator ib_it = ib_by_inst.find(it->first);
-          assert(ib_it != ib_by_inst.end());
-          IBVec& ib_vec = ib_it->second;
+          IBVec& ib_vec = ib_by_inst[it->first];
           assert(ib_vec.size() == 0);
           for (size_t i = 1; i < mem_path.size() - 1; i++) {
             IBInfo ib_info;
@@ -838,7 +843,12 @@ namespace LegionRuntime {
             ib_info.fence = new IBFence(ib_req);
             ib_req->add_async_work_item(ib_info.fence); 
             ib_vec.push_back(ib_info);
-            alloc_intermediate_buffer(it->first, mem_path[i], i);
+          }
+        }
+        // Pass 2: send ib allocation requests
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          for (size_t i = 1; i < mem_path.size() - 1; i++) {
+            alloc_intermediate_buffer(it->first, mem_path[i], i - 1);
           }
         }
         ib_req->mark_finished(true);
@@ -846,6 +856,7 @@ namespace LegionRuntime {
       }
 
       if(state == STATE_ALLOC_IB) {
+        log_dma.debug("wait for the ib allocations to complete");
         if (ib_completion.has_triggered()) {
           state = STATE_BEFORE_EVENT;
         } else {
