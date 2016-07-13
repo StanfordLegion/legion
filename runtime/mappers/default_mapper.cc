@@ -825,7 +825,9 @@ namespace Legion {
       log_mapper.spew("Default slice_task in %s", get_mapper_name());
       // Whatever kind of processor we are is the one this task should
       // be scheduled on as determined by select initial task
-      switch (task.target_proc.kind())
+      Processor::Kind target_kind =
+        task.must_epoch_task ? local_proc.kind() : task.target_proc.kind();
+      switch (target_kind)
       {
         case Processor::LOC_PROC:
           {
