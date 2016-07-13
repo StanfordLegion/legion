@@ -809,6 +809,7 @@ function type_check.expr_call(cx, node)
 
   -- Determine the type of the function being called.
   local fn_type
+  local def_type
   if fn.expr_type == untyped then
     if terralib.isfunction(fn.value) or
       terralib.isoverloadedfunction(fn.value) or
@@ -832,10 +833,9 @@ function type_check.expr_call(cx, node)
       if valid then
         local defs = get_function_definitions(fn.value)
         if #defs == 1 then
-          fn_type = defs[1].type
-        else
-          fn_type = result_type
+          def_type = defs[1].type
         end
+        fn_type = result_type
       else
         local fn_name = fn.value.name or tostring(fn.value)
         fn_name = string.gsub(fn_name, "^std[.]", "regentlib.")
@@ -852,16 +852,17 @@ function type_check.expr_call(cx, node)
   else
     fn_type = fn.expr_type
   end
+  def_type = def_type or fn_type
   assert(terralib.types.istype(fn_type) and
            (fn_type:isfunction() or fn_type:ispointertofunction()))
   -- Store the determined type back into the AST node for the function.
-  fn.expr_type = fn_type
+  fn.expr_type = def_type
 
   local param_symbols
   if std.is_task(fn.value) then
     param_symbols = fn.value:get_param_symbols()
   else
-    param_symbols = std.fn_param_symbols(fn_type)
+    param_symbols = std.fn_param_symbols(def_type)
   end
   local arg_symbols = terralib.newlist()
   for i, arg in ipairs(args) do
@@ -873,7 +874,7 @@ function type_check.expr_call(cx, node)
     end
   end
   local expr_type, need_cast = std.validate_args(
-    node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, false)
+    node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false)
 
   if std.is_task(fn.value) then
     if cx.must_epoch then
@@ -921,12 +922,15 @@ function type_check.expr_call(cx, node)
   end
 
   local param_types = terralib.newlist()
-  param_types:insertall(fn_type.parameters)
-  if fn_type.isvararg then
-    for idx = #fn_type.parameters + 1, #arg_types + 1 do
+  param_types:insertall(def_type.parameters)
+  if def_type.isvararg then
+    for idx = #def_type.parameters + 1, #arg_types do
       param_types:insert(arg_types[idx])
       need_cast:insert(false)
     end
+    -- Hack: set this back to the concrete type inferred by query above.
+    --       since RDIR doesn't understand functions with varargs
+    fn.expr_type = fn_type
   end
   args =
     data.zip(args, arg_types, param_types, need_cast):map(function(tuple)
