@@ -475,11 +475,12 @@ namespace Legion {
                 assert(false); // unknown processor type
             }
             // See if we have any variants of this kind
+            std::vector<VariantID> variants;
             runtime->find_valid_variants(ctx, task.task_id, 
                                           variants, ranking[idx]);
             // If we have valid variants and we have processors we are
             // good to use this set of variants
-            if (!ranking.empty())
+            if (!variants.empty())
             {
               best_kind = ranking[idx];
               break;
@@ -824,7 +825,7 @@ namespace Legion {
       log_mapper.spew("Default slice_task in %s", get_mapper_name());
       // Whatever kind of processor we are is the one this task should
       // be scheduled on as determined by select initial task
-      switch (local_kind)
+      switch (task.target_proc.kind())
       {
         case Processor::LOC_PROC:
           {
