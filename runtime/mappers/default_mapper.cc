@@ -435,6 +435,7 @@ namespace Legion {
       runtime->find_valid_variants(ctx, task.task_id, variants);
       if (!variants.empty())
       {
+        variants.clear();
         Processor::Kind best_kind = Processor::NO_KIND;
         if (finder == preferred_variants.end() || 
             (specific != Processor::NO_KIND))
@@ -474,8 +475,8 @@ namespace Legion {
               default:
                 assert(false); // unknown processor type
             }
+
             // See if we have any variants of this kind
-            std::vector<VariantID> variants;
             runtime->find_valid_variants(ctx, task.task_id, 
                                           variants, ranking[idx]);
             // If we have valid variants and we have processors we are
