@@ -19,7 +19,6 @@ local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
-local traverse_symbols = require("regent/traverse_symbols")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
 
@@ -6041,11 +6040,61 @@ function codegen.stat_for_list(cx, node)
         var [symbol] = [symbol.type] { __ptr = [tid] }
       end
     end
-    local function expr_codegen(expr) return codegen.expr(cx, expr):read(cx) end
-    local undefined =
-      traverse_symbols.find_undefined_symbols(expr_codegen, symbol, node.block)
+    local undefined = {}
+    local defined = { [node.symbol] = true }
+    local accesses = {}
+    local function collect_symbol_pre(node)
+      if rawget(node, "node_type") then
+        if node:is(ast.typed.stat.Var) then
+          node.symbols:map(function(sym) defined[sym] = true end)
+        elseif node:is(ast.typed.stat.ForNum) or
+               node:is(ast.typed.stat.ForList) then
+          defined[node.symbol] = true
+        end
+      end
+    end
+    local function collect_symbol_post(node)
+      if rawget(node, "node_type") then
+        if node:is(ast.typed.expr.ID) and
+               not defined[node.value] and
+               not std.is_region(std.as_read(node.expr_type)) then
+          undefined[node.value] = true
+        elseif (node:is(ast.typed.expr.FieldAccess) or
+                node:is(ast.typed.expr.IndexAccess)) and
+               std.is_ref(node.expr_type) then
+          accesses[node] = true
+          if accesses[node.value] and
+             std.is_ref(node.expr_type) and
+             std.is_ref(node.value.expr_type) and
+             node.expr_type:bounds() == node.value.expr_type:bounds() then
+             accesses[node.value] = nil
+          end
+        elseif node:is(ast.typed.expr.Deref) and
+               std.is_ref(node.expr_type) and
+               node.expr_type:bounds() ~= node.value.expr_type:bounds() then
+          accesses[node] = true
+        end
+      end
+    end
+    ast.traverse_node_prepostorder(collect_symbol_pre,
+                                   collect_symbol_post,
+                                   node.block)
+    local base_pointers = {}
+    for node, _ in pairs(accesses) do
+      local value_type = std.as_read(node.expr_type)
+      node.expr_type:bounds():map(function(region)
+        local prefix = node.expr_type.field_path
+        local field_paths = std.flatten_struct_fields(value_type)
+        local absolute_field_paths = field_paths:map(
+          function(field_path) return prefix .. field_path end)
+        absolute_field_paths:map(function(field_path)
+          base_pointers[cx:region(region):base_pointer(field_path)] = true
+        end)
+      end)
+    end
     local args = terralib.newlist()
-    for symbol, _ in pairs(undefined) do args:insert(symbol) end
+    for base_pointer, _ in pairs(base_pointers) do args:insert(base_pointer) end
+    for symbol, _ in pairs(undefined) do args:insert(symbol:getsymbol()) end
     args:insert(base)
     args:insert(count)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
