@@ -667,12 +667,12 @@ function type_check.expr_index_access(cx, node)
     }
   elseif std.is_list(value_type) then
     local slice = std.type_eq(index_type, std.list(int))
-    if not (std.validate_implicit_cast(index_type, int) or slice) then
-      log.error(node, "type mismatch: expected " .. tostring(int) .. " or " ..
-                  tostring(std.list(int)) .. " but got " ..
-                  tostring(index_type))
-    end
     if not slice then
+      if not std.validate_implicit_cast(index_type, int) then
+        log.error(node, "type mismatch: expected " .. tostring(int) .. " or " ..
+                    tostring(std.list(int)) .. " but got " ..
+                    tostring(index_type))
+      end
       index = insert_implicit_cast(index, index_type, int)
     end
 
