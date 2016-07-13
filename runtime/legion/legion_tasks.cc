@@ -9299,7 +9299,7 @@ namespace Legion {
     void PointTask::return_virtual_instance(unsigned index, InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(index < regions.size());
 #endif
       slice_owner->return_virtual_instance(index, refs, regions[index]);

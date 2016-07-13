@@ -13155,7 +13155,7 @@ namespace Legion {
       if (pid == 0)
       {
         log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
@@ -13172,7 +13172,7 @@ namespace Legion {
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
@@ -13198,7 +13198,7 @@ namespace Legion {
       if (pid == 0)
       {
         log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
@@ -13211,7 +13211,7 @@ namespace Legion {
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
