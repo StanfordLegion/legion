@@ -740,6 +740,16 @@ function type_check.expr_index_access(cx, node)
   end
 end
 
+local function get_function_definitions(fn)
+  if terralib.isfunction(fn) or
+     terralib.isoverloadedfunction(fn) then
+    return terralib.newlist({rawget(fn, "definition")}) or
+           rawget(fn, "definitions")
+  else
+    return terralib.newlist()
+  end
+end
+
 function type_check.expr_method_call(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -762,6 +772,18 @@ function type_check.expr_method_call(cx, node)
   if not valid then
     log.error(node, "invalid method call for " .. tostring(value_type) .. ":" ..
                 node.method_name .. "(" .. data.newtuple(unpack(arg_types)):mkstring(", ") .. ")")
+  end
+
+  local defs = get_function_definitions(value_type.methods[node.method_name])
+  if #defs == 1 then
+    local args_with_casts = terralib.newlist()
+    assert(not defs[1].type.isvararg)
+    local param_types = defs[1].type.parameters
+    for idx, arg_type in pairs(arg_types) do
+      args_with_casts:insert(
+        insert_implicit_cast(args[idx], arg_type, param_types[idx + 1]))
+    end
+    args = args_with_casts
   end
 
   return ast.typed.expr.MethodCall {
@@ -787,6 +809,7 @@ function type_check.expr_call(cx, node)
 
   -- Determine the type of the function being called.
   local fn_type
+  local def_type
   if fn.expr_type == untyped then
     if terralib.isfunction(fn.value) or
       terralib.isoverloadedfunction(fn.value) or
@@ -808,6 +831,10 @@ function type_check.expr_call(cx, node)
         local valid, result_type = pcall(test)
 
       if valid then
+        local defs = get_function_definitions(fn.value)
+        if #defs == 1 then
+          def_type = defs[1].type
+        end
         fn_type = result_type
       else
         local fn_name = fn.value.name or tostring(fn.value)
@@ -825,16 +852,17 @@ function type_check.expr_call(cx, node)
   else
     fn_type = fn.expr_type
   end
+  def_type = def_type or fn_type
   assert(terralib.types.istype(fn_type) and
            (fn_type:isfunction() or fn_type:ispointertofunction()))
   -- Store the determined type back into the AST node for the function.
-  fn.expr_type = fn_type
+  fn.expr_type = def_type
 
   local param_symbols
   if std.is_task(fn.value) then
     param_symbols = fn.value:get_param_symbols()
   else
-    param_symbols = std.fn_param_symbols(fn_type)
+    param_symbols = std.fn_param_symbols(def_type)
   end
   local arg_symbols = terralib.newlist()
   for i, arg in ipairs(args) do
@@ -845,8 +873,8 @@ function type_check.expr_call(cx, node)
       arg_symbols:insert(std.newsymbol(arg_type))
     end
   end
-  local expr_type = std.validate_args(
-    node, param_symbols, arg_symbols, fn_type.isvararg, fn_type.returntype, {}, false)
+  local expr_type, need_cast = std.validate_args(
+    node, param_symbols, arg_symbols, def_type.isvararg, def_type.returntype, {}, false)
 
   if std.is_task(fn.value) then
     if cx.must_epoch then
@@ -892,6 +920,27 @@ function type_check.expr_call(cx, node)
                   " " .. tostring(constraint.op) .. " " .. tostring(constraint.rhs))
     end
   end
+
+  local param_types = terralib.newlist()
+  param_types:insertall(def_type.parameters)
+  if def_type.isvararg then
+    for idx = #def_type.parameters + 1, #arg_types do
+      param_types:insert(arg_types[idx])
+      need_cast:insert(false)
+    end
+    -- Hack: set this back to the concrete type inferred by query above.
+    --       since RDIR doesn't understand functions with varargs
+    fn.expr_type = fn_type
+  end
+  args =
+    data.zip(args, arg_types, param_types, need_cast):map(function(tuple)
+      local arg, arg_type, param_type, need_cast = unpack(tuple)
+      if not need_cast then
+        return arg
+      else
+        return insert_implicit_cast(arg, arg_type, param_type)
+      end
+    end)
 
   local result = ast.typed.expr.Call {
     fn = fn,

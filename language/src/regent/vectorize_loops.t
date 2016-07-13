@@ -428,6 +428,10 @@ function min_simd_width.expr(cx, reg_size, node)
       simd_width = min(simd_width, min_simd_width.expr(cx, reg_size,field))
     end
 
+  elseif node:is(ast.typed.expr.CtorRecField) or
+         node:is(ast.typed.expr.CtorListField) then
+    simd_width = min_simd_width.expr(cx, reg_size, node.value)
+
   elseif node:is(ast.typed.expr.CtorRecField) then
     simd_width = min_simd_width.expr(cx, reg_size, node.value)
 
@@ -825,7 +829,8 @@ function check_vectorizability.expr(cx, node)
     end
     return true
 
-  elseif node:is(ast.typed.expr.CtorRecField) then
+  elseif node:is(ast.typed.expr.CtorRecField) or
+         node:is(ast.typed.expr.CtorListField) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
@@ -861,9 +866,6 @@ function check_vectorizability.expr(cx, node)
   else
     if node:is(ast.typed.expr.MethodCall) then
       cx:report_error_when_demanded(node, error_prefix .. "a method call")
-
-    elseif node:is(ast.typed.expr.CtorListField) then
-      cx:report_error_when_demanded(node, error_prefix .. "a list constructor")
 
     elseif node:is(ast.typed.expr.RawContext) then
       cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
