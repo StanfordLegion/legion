@@ -675,9 +675,7 @@ namespace LegionRuntime {
       RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
       RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
       InstPair inst_pair(src_impl->me, dst_impl->me);
-      log_dma.debug("CP#3");
       req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
-      log_dma.debug("CP#4");
     }
 
     /*static*/ void RemoteIBAllocResponseAsync::send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
@@ -730,7 +728,6 @@ namespace LegionRuntime {
         handle_ib_response(idx, inst_pair, ib_size, ib_offset);
       } else {
         // create remote intermediate buffer
-        log_dma.debug("RemoteIBAllocRequest");
         RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
       }
     }
@@ -741,7 +738,7 @@ namespace LegionRuntime {
       IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
       assert(ib_it != ib_by_inst.end());
       IBVec& ibvec = ib_it->second;
-      assert(ibvec.size() > idx);
+      assert((int)ibvec.size() > idx);
       ibvec[idx].size = ib_size;
       ibvec[idx].offset = ib_offset;
       ibvec[idx].fence->mark_finished(true);

@@ -404,7 +404,7 @@ namespace Realm {
       bool is_null(void) const { return (dim == -1); }
 
       static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
-      friend std::ostream& operator<< (std::ostream& stream, const DomainPoint& dp);
+
     protected:
     public:
       int dim;
