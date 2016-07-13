@@ -3783,8 +3783,9 @@ function codegen.expr_list_slice_cross_product(cx, node)
       __data = data,
     }
     for i = 0, [indices.value].__size do
-      var color = [indices_type:data(indices.value)][i]
-      var ip = c.legion_terra_index_cross_product_get_subpartition_by_color(
+      var color = c.legion_domain_point_from_point_1d(
+        c.legion_point_1d_t { x = arrayof(c.coord_t, [indices_type:data(indices.value)][i]) })
+      var ip = c.legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
         [cx.runtime], [cx.context],
         [product.value].product, color)
       var lp = c.legion_logical_partition_create_by_tree(
