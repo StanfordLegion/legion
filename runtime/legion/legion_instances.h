@@ -123,6 +123,9 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
     public:
+      void log_instance_creation(UniqueID creator_id, Processor proc,
+                     const std::vector<LogicalRegion> &regions) const;
+    public:
       inline bool is_reduction_manager(void) const;
       inline bool is_instance_manager(void) const;
       inline bool is_fold_manager(void) const;

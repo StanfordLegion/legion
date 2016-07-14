@@ -1271,6 +1271,7 @@ namespace Legion {
         MapperID mapper_id;
         MappingTagID tag;
         TunableID tunable_id;
+        unsigned tunable_index; // only valid for LegionSpy
         SingleTask *task;
         FutureImpl *result;
       };

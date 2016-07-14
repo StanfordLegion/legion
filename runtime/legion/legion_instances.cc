@@ -539,6 +539,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::log_instance_creation(UniqueID creator_id,
+                Processor proc, const std::vector<LogicalRegion> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(Runtime::legion_spy_enabled);
+#endif
+      LegionSpy::log_physical_instance_creator(instance.id, creator_id,proc.id);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        LegionSpy::log_physical_instance_creation_region(instance.id, 
+                                                         regions[idx]);
+      const LayoutConstraints *constraints = layout->constraints;
+      LegionSpy::log_instance_specialized_constraint(instance.id,
+          constraints->specialized_constraint.kind, 
+          constraints->specialized_constraint.redop);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(constraints->memory_constraint.has_kind);
+#endif
+      LegionSpy::log_instance_memory_constraint(instance.id,
+          constraints->memory_constraint.kind);
+      LegionSpy::log_instance_field_constraint(instance.id,
+          constraints->field_constraint.contiguous, 
+          constraints->field_constraint.inorder,
+          constraints->field_constraint.field_set.size());
+      for (std::vector<FieldID>::const_iterator it = 
+            constraints->field_constraint.field_set.begin(); it !=
+            constraints->field_constraint.field_set.end(); it++)
+        LegionSpy::log_instance_field_constraint_field(instance.id, *it);
+      LegionSpy::log_instance_ordering_constraint(instance.id,
+          constraints->ordering_constraint.contiguous,
+          constraints->ordering_constraint.ordering.size());
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraints->ordering_constraint.ordering.begin(); it !=
+            constraints->ordering_constraint.ordering.end(); it++)
+        LegionSpy::log_instance_ordering_constraint_dimension(instance.id, *it);
+      for (std::vector<SplittingConstraint>::const_iterator it = 
+            constraints->splitting_constraints.begin(); it !=
+            constraints->splitting_constraints.end(); it++)
+        LegionSpy::log_instance_splitting_constraint(instance.id,
+                                it->kind, it->value, it->chunks);
+      for (std::vector<DimensionConstraint>::const_iterator it = 
+            constraints->dimension_constraints.begin(); it !=
+            constraints->dimension_constraints.end(); it++)
+        LegionSpy::log_instance_dimension_constraint(instance.id,
+                                    it->kind, it->eqk, it->value);
+      for (std::vector<AlignmentConstraint>::const_iterator it = 
+            constraints->alignment_constraints.begin(); it !=
+            constraints->alignment_constraints.end(); it++)
+        LegionSpy::log_instance_alignment_constraint(instance.id,
+                                it->fid, it->eqk, it->alignment);
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            constraints->offset_constraints.begin(); it != 
+            constraints->offset_constraints.end(); it++)
+        LegionSpy::log_instance_offset_constraint(instance.id,
+                                          it->fid, it->offset);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {

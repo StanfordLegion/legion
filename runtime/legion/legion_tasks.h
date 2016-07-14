@@ -364,6 +364,8 @@ namespace Legion {
         { return executing_processor; }
       inline void set_executing_processor(Processor p)
         { executing_processor = p; }
+      inline unsigned get_tunable_index(void)
+        { return total_tunable_count++; }
     public:
       // These two functions are only safe to call after
       // the task has had its variant selected
@@ -654,6 +656,7 @@ namespace Legion {
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count;
+      unsigned total_tunable_count;
       unsigned outstanding_children_count;
       bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;

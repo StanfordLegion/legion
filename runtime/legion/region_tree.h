@@ -422,7 +422,8 @@ namespace Legion {
                                      InstanceSet &result);
       void log_mapping_decision(UniqueID uid, unsigned index,
                                 const RegionRequirement &req,
-                                const InstanceSet &targets);
+                                const InstanceSet &targets,
+                                bool postmapping = false);
     protected: // helper method for the above two methods
       void perform_missing_acquires(Operation *op,
                  std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,

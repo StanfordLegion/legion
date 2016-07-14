@@ -339,6 +339,18 @@ namespace Legion {
         log_spy.print("Point Point %llu %llu", p1, p2);
       }
 
+      static inline void log_child_operation_index(UniqueID parent_id, 
+                                       unsigned index, UniqueID child_id)
+      {
+        log_spy.print("Operation Index %llu %d %llu", parent_id,index,child_id);
+      }
+
+      static inline void log_close_operation_index(UniqueID parent_id,
+                                        unsigned index, UniqueID child_id)
+      {
+        log_spy.print("Close Index %llu %d %llu", parent_id, index, child_id);
+      }
+
       // Logger calls for mapping dependence analysis 
       static inline void log_logical_requirement(UniqueID unique_id, 
           unsigned index, bool region, IDType index_component,
@@ -395,6 +407,90 @@ namespace Legion {
         log_spy.print("Physical Instance Field " IDFMT " %d", inst_id, field_id);
       }
 
+      static inline void log_physical_instance_creator(IDType inst_id, 
+                                           UniqueID creator_id, IDType proc_id)
+      {
+        log_spy.print("Physical Instance Creator " IDFMT " %lld " IDFMT "",
+                      inst_id, creator_id, proc_id);
+      }
+
+      static inline void log_physical_instance_creation_region(IDType inst_id,
+                                                         LogicalRegion handle)
+      {
+        log_spy.print("Physical Instance Creation Region " IDFMT " %d %d %d",
+                      inst_id, handle.get_index_space().get_id(), 
+                      handle.get_field_space().get_id(), handle.get_tree_id());
+      }
+
+      static inline void log_instance_specialized_constraint(IDType inst_id,
+                                  SpecializedKind kind, ReductionOpID redop)
+      {
+        log_spy.print("Instance Specialized Constraint " IDFMT " %d %d",
+                      inst_id, kind, redop);
+      }
+
+      static inline void log_instance_memory_constraint(IDType inst_id,
+                                                     Memory::Kind kind)
+      {
+        log_spy.print("Instance Memory Constraint " IDFMT " %d", inst_id, kind);
+      }
+
+      static inline void log_instance_field_constraint(IDType inst_id,
+                      bool contiguous, bool inorder, size_t num_fields)
+      {
+        log_spy.print("Instance Field Constraint " IDFMT " %d %d %ld",
+            inst_id, (contiguous ? 1 : 0), (inorder ? 1 : 0), num_fields);
+      }
+
+      static inline void log_instance_field_constraint_field(IDType inst_id,
+                                                             FieldID fid)
+      {
+        log_spy.print("Instance Field Constraint Field " IDFMT " %d",
+                      inst_id, fid);
+      }
+
+      static inline void log_instance_ordering_constraint(IDType inst_id,
+                                  bool contiguous, size_t num_dimensions)
+      {
+        log_spy.print("Instance Ordering Constraint " IDFMT " %d %ld",
+                      inst_id, (contiguous ? 1 : 0), num_dimensions);
+      }
+
+      static inline void log_instance_ordering_constraint_dimension(
+                                    IDType inst_id, DimensionKind dim)
+      {
+        log_spy.print("Instance Ordering Constraint Dimension " IDFMT " %d",
+                      inst_id, dim);
+      }
+
+      static inline void log_instance_splitting_constraint(IDType inst_id,
+                              DimensionKind dim, size_t value, bool chunks)
+      {
+        log_spy.print("Instance Splitting Constraint " IDFMT " %d %ld %d",
+                      inst_id, dim, value, (chunks ? 1 : 0));
+      }
+
+      static inline void log_instance_dimension_constraint(IDType inst_id,
+                        DimensionKind dim, EqualityKind eqk, size_t value)
+      {
+        log_spy.print("Instance Dimension Constraint " IDFMT " %d %d %ld",
+                      inst_id, dim, eqk, value);
+      }
+
+      static inline void log_instance_alignment_constraint(IDType inst_id,
+                          FieldID fid, EqualityKind eqk, size_t alignment)
+      {
+        log_spy.print("Instance Alignment Constraint " IDFMT " %d %d %ld",
+                      inst_id, fid, eqk, alignment);
+      }
+
+      static inline void log_instance_offset_constraint(IDType inst_id,
+                                              FieldID fid, off_t offset)
+      {
+        log_spy.print("Instance Offset Constraint " IDFMT " %d %lld",
+                      inst_id, fid, offset);
+      }
+
       // Logger calls for mapping decisions
       static inline void log_mapping_decision(UniqueID unique_id, 
                                   unsigned index, FieldID fid, IDType inst_id)
@@ -403,11 +499,64 @@ namespace Legion {
 		      index, fid, inst_id);
       }
 
+      static inline void log_post_mapping_decision(UniqueID unique_id, 
+                                  unsigned index, FieldID fid, IDType inst_id)
+      {
+        log_spy.print("Post Mapping Decision %llu %d %d " IDFMT "", unique_id,
+		      index, fid, inst_id);
+      }
+
       static inline void log_temporary_instance(UniqueID unique_id,
                                   unsigned index, FieldID fid, IDType inst_id)
       {
         log_spy.print("Temporary Instance %llu %d %d " IDFMT "", unique_id,
                       index, fid, inst_id);
+      }
+
+      static inline void log_task_priority(UniqueID unique_id, 
+                                           TaskPriority priority)
+      {
+        log_spy.print("Task Priority %llu %d", unique_id, priority);
+      }
+
+      static inline void log_task_processor(UniqueID unique_id, IDType proc_id)
+      {
+        log_spy.print("Task Processor %llu " IDFMT "", unique_id, proc_id);
+      }
+
+      static inline void log_task_premapping(UniqueID unique_id, unsigned index)
+      {
+        log_spy.print("Task Premapping %llu %d", unique_id, index);
+      }
+
+      static inline void log_tunable_value(UniqueID unique_id, unsigned index,
+                                    const void *value, size_t num_bytes)
+      {
+        // Build a hex string for the value 
+        // For now the result must be a multiple of 4 bytes
+        assert((num_bytes % 4) == 0);
+        size_t buffer_size = ((8 * num_bytes) / 4) + 1;
+        char *buffer = (char*)malloc(buffer_size);
+        unsigned *src = (unsigned*)value;
+        unsigned byte_index = 0;
+        for (unsigned word_idx = 0; word_idx < (num_bytes/4); word_idx++)
+        {
+          unsigned word = src[word_idx];
+          // Every 4 bits get's a hex character 
+          for (unsigned i = 0; i < (8*sizeof(word)/4); i++, byte_index++)
+          {
+            // Get the next four bits
+            unsigned offset = (word >> (i*4)) & 0xF; 
+            if (offset < 10)
+              buffer[byte_index] = '0' + offset;
+            else
+              buffer[byte_index] = 'A' + (offset-10);
+          }
+        }
+        buffer[byte_index] = '\0';
+        log_spy.print("Task Tunable %llu %d %ld %s\n", 
+                      unique_id, index, num_bytes, buffer);
+        free(buffer);
       }
 
       // The calls above this ifdef record the basic information about

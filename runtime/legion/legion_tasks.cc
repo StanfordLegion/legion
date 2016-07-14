@@ -2645,6 +2645,7 @@ namespace Legion {
       task_executed = false;
       total_children_count = 0;
       total_close_count = 0;
+      total_tunable_count = 0;
       outstanding_children_count = 0;
       outstanding_subtasks = 0;
       pending_subtasks = 0;
@@ -3183,7 +3184,7 @@ namespace Legion {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed());
-      unsigned result = __sync_fetch_and_add(&total_children_count,1);
+      unsigned result = total_children_count++;
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
@@ -3210,6 +3211,9 @@ namespace Legion {
         else // we can do the wait inline
           perform_window_wait();
       }
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_child_operation_index(unique_op_id, result, 
+                                             op->get_unique_op_id()); 
       return result;
     }
 
@@ -3218,7 +3222,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // For now we just bump our counter
-      return __sync_fetch_and_add(&total_close_count, 1);
+      unsigned result = total_close_count++;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_close_operation_index(unique_op_id, result, 
+                                             op->get_unique_op_id());
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -6076,7 +6084,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+        {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_task_premapping(unique_op_id, idx);
           continue;
+        }
         if (no_access_regions[idx])
           continue;
         // See if we have to do any virtual mapping before registering
@@ -6304,6 +6316,10 @@ namespace Legion {
             }
           }
         }
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx,
+                                                regions[idx], result,
+                                                true/*postmapping*/);
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
@@ -7010,8 +7026,14 @@ namespace Legion {
 #endif
 #ifdef LEGION_SPY
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_operation_events(get_unique_id(), start_condition, 
                                         completion_event);
+        LegionSpy::log_task_priority(unique_op_id, task_priority);
+      }
+#else
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_task_priority(unique_op_id, task_priority);
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
                             start_condition, task_priority, profiling_requests);
@@ -7037,6 +7059,8 @@ namespace Legion {
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_task_processor(unique_op_id, executing_processor.id);
 #ifdef DEBUG_LEGION
       log_task.debug("Task %s (ID %lld) starting on processor " IDFMT "",
                     get_task_name(), get_unique_id(), executing_processor.id);

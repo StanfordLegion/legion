@@ -2884,7 +2884,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
                                                 const RegionRequirement &req,
-                                                const InstanceSet &targets)
+                                                const InstanceSet &targets,
+                                                bool postmapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2904,6 +2905,9 @@ namespace Legion {
         node->get_field_ids(valid_mask, valid_fields);
         if (manager->is_virtual_manager())
         {
+#ifdef DEBUG_LEGION
+          assert(!postmapping);
+#endif
           for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
                 it != valid_fields.end(); it++)
             LegionSpy::log_mapping_decision(uid, index, *it, 0/*iid*/);
@@ -2912,7 +2916,14 @@ namespace Legion {
         {
           for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
                 it != valid_fields.end(); it++)
-            LegionSpy::log_mapping_decision(uid,index,*it,manager->instance.id);
+          {
+            if (postmapping)
+              LegionSpy::log_post_mapping_decision(uid, index, *it,
+                                                   manager->instance.id);
+            else
+              LegionSpy::log_mapping_decision(uid, index, *it,
+                                              manager->instance.id);
+          }
         }
       }
     }

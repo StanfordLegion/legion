@@ -2486,6 +2486,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2538,6 +2540,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2607,6 +2611,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // We're definitely going to succeed one way or another
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -2687,6 +2693,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // If we make it here we're definitely going to succeed
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -12825,6 +12833,8 @@ namespace Legion {
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
+      if (legion_spy_enabled)
+        args.tunable_index = ctx->get_tunable_index();
       args.task = ctx;
       args.result = result;
       issue_runtime_meta_task(&args, sizeof(args),
@@ -12839,7 +12849,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Future f = select_tunable_value(ctx, tid, mid, tag);
-      return f.get_result<int>();
+      int result = f.get_result<int>();
+      if (legion_spy_enabled)
+      {
+        unsigned index = ctx->get_tunable_index();
+        LegionSpy::log_tunable_value(ctx->get_unique_op_id(), index,
+                                     &result, sizeof(result));
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -12856,6 +12873,9 @@ namespace Legion {
       output.value = NULL;
       output.size = 0;
       mapper->invoke_select_tunable_value(args->task, &input, &output);
+      if (legion_spy_enabled)
+        LegionSpy::log_tunable_value(args->task->get_unique_op_id(), 
+            args->tunable_index, output.value, output.size);
       // Set and complete the future
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, true/*own*/);
