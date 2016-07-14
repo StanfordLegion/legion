@@ -1422,11 +1422,6 @@ function type_check.expr_partition(cx, node)
     log.error(node, "type mismatch in argument 4: expected ispace but got " ..
                 tostring(colors_type))
   end
-  if colors and data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
-    log.error(node, "type mismatch in argument 4: expected ispace with " ..
-                tostring(region_type:ispace().dim) .. " dimensions but got " ..
-                tostring(colors_type))
-  end
 
   if region_type:is_opaque() then
     if colors then
