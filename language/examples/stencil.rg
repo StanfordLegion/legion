@@ -117,7 +117,7 @@ local function make_stencil(radius)
   local task st(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
   where reads writes(private.output), reads(ghost.input) do
     for i in private do
-      private[i].output = ghost[i].input +
+      private[i].output = private[i].output +
         [make_stencil_pattern(ghost, i,  0, -1, radius)] +
         [make_stencil_pattern(ghost, i, -1,  0, radius)] +
         [make_stencil_pattern(ghost, i,  1,  0, radius)] +
@@ -140,7 +140,7 @@ end
 task check(points : region(ispace(int2d), point), tsteps : int64, init : int64)
 where reads(points.{input, output}) do
   var expect_in = init + tsteps
-  var expect_out = init + tsteps - 1
+  var expect_out = init
   for i in points do
     if points[i].input ~= expect_in then
       for i2 in points do
