@@ -1780,6 +1780,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
     return a + b
   end
+  terra st.metamethods.__sub(a : st.index_type, b : st.index_type) : st.index_type
+    return a - b
+  end
 
   terra st:to_point()
     return ([index_type](@self)):to_point()
@@ -1903,9 +1906,15 @@ function std.index_type(base_type, displayname)
     terra st.metamethods.__add(a : st, b : st) : st
       return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
     end
+    terra st.metamethods.__sub(a : st, b : st) : st
+      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value - b.__ptr.value } }
+    end
   else
     terra st.metamethods.__add(a : st, b : st) : st
       return st { __ptr = a.__ptr + b.__ptr }
+    end
+    terra st.metamethods.__sub(a : st, b : st) : st
+      return st { __ptr = a.__ptr - b.__ptr }
     end
   end
 
@@ -1975,9 +1984,15 @@ local struct __int2d { x : int, y : int }
 terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
   return __int2d { x = a.x + b.x, y = a.y + b.y }
 end
+terra __int2d.metamethods.__sub(a : __int2d, b : __int2d) : __int2d
+  return __int2d { x = a.x - b.x, y = a.y - b.y }
+end
 local struct __int3d { x : int, y : int, z : int }
 terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
   return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+end
+terra __int3d.metamethods.__sub(a : __int3d, b : __int3d) : __int3d
+  return __int3d { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z }
 end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
