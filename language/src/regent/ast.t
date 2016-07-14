@@ -331,6 +331,22 @@ function ast.traverse_node_postorder(fn, node)
   end
 end
 
+function ast.traverse_node_prepostorder(pre_fn, post_fn, node)
+  if ast.is_node(node) then
+    pre_fn(node)
+    for k, child in pairs(node) do
+      if k ~= "node_type" then
+        ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+      end
+    end
+    post_fn(node)
+  elseif terralib.islist(node) then
+    for _, child in ipairs(node) do
+      ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+    end
+  end
+end
+
 function ast.map_node_postorder(fn, node)
   if ast.is_node(node) then
     local tmp = {}

@@ -534,9 +534,14 @@ function pretty.expr_unary(cx, node)
 end
 
 function pretty.expr_binary(cx, node)
-  local loose = node.op == "or" or node.op == "and"
-  return join({
-      "(", join({pretty.expr(cx, node.lhs), node.op, pretty.expr(cx, node.rhs)}, loose), ")"})
+  if node.op == "min" or node.op == "max" then
+    return join({
+        node.op, "(", commas({pretty.expr(cx, node.lhs), pretty.expr(cx, node.rhs)}), ")"})
+  else
+    local loose = node.op == "or" or node.op == "and"
+    return join({
+        "(", join({pretty.expr(cx, node.lhs), node.op, pretty.expr(cx, node.rhs)}, loose), ")"})
+  end
 end
 
 function pretty.expr_deref(cx, node)

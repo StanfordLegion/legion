@@ -273,6 +273,10 @@ function base.task:gettaskid()
   return self.taskid
 end
 
+function base.task:settaskid(id)
+  self.taskid = id
+end
+
 function base.task:getname()
   return self.name
 end

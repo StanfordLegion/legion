@@ -1190,7 +1190,7 @@ namespace Legion {
                                                      AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
+#ifdef DEBUG_LEGION
       assert(!is_owner());
 #endif
       AutoLock gc(gc_lock);
