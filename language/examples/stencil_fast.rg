@@ -264,8 +264,8 @@ local function make_stencil_interior(private, interior, radius)
       var interior_rect = get_rect(interior.ispace)
       cstencil.stencil(base_input, base_output, weights,
                        stride_input / [terralib.sizeof(DTYPE)],
-                       0, interior_rect.hi.x[0] - interior_rect.lo.x[0] + 1,
-                       0, interior_rect.hi.x[1] - interior_rect.lo.x[1] + 1)
+                       interior_rect.lo.x[0] - rect.lo.x[0], interior_rect.hi.x[0] - rect.lo.x[0] + 1,
+                       interior_rect.lo.x[1] - rect.lo.x[1], interior_rect.hi.x[1] - rect.lo.x[1] + 1)
     end
   end
 end
@@ -334,8 +334,8 @@ local function make_increment_interior(private, exterior)
       var exterior_rect = get_rect(exterior.ispace)
       cstencil.increment(base_input,
                          stride_input / [terralib.sizeof(DTYPE)],
-                         0, exterior_rect.hi.x[0] - exterior_rect.lo.x[0] + 1,
-                         0, exterior_rect.hi.x[1] - exterior_rect.lo.x[1] + 1)
+                         exterior_rect.lo.x[0] - rect.lo.x[0], exterior_rect.hi.x[0] - rect.lo.x[0] + 1,
+                         exterior_rect.lo.x[1] - rect.lo.x[1], exterior_rect.hi.x[1] - rect.lo.x[1] + 1)
     end
   end
 end
