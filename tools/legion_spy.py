@@ -4023,6 +4023,7 @@ class Operation(object):
                  'close_idx', 'partition_kind', 'partition_node', 'node_name', 
                  'cluster_name', 'generation', 'need_logical_replay', 
                  'reachable_cache', 'transitive_warning_issued']
+                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -4198,6 +4199,23 @@ class Operation(object):
             self.temporaries[index] = dict()
         self.temporaries[index][fid] = inst
 
+    def update_instance_uses(self):
+        if self.mappings:
+            for mapping in self.mappings.itervalues():
+                unique_insts = set()
+                for inst in mapping.itervalues():
+                    unique_insts.add(inst) 
+                for inst in unique_insts:
+                    inst.increment_use_count() 
+        if self.temporaries:
+            for index,temporary in self.temporaries.iteritems():
+                unique_pairs = dict()
+                for fid,inst in temporary.iteritems(): 
+                    assert fid in self.mappings[index]
+                    unique_pairs[self.mappings[index][fid]] = inst
+                for inst in unique_pairs.itervalues():
+                    inst.increment_use_count() 
+
     def add_incoming(self, dep):
         assert dep.op2 == self
         if self.incoming is None:
@@ -4276,6 +4294,26 @@ class Operation(object):
             self.reqs = other.reqs
         else:
             assert not other.reqs
+        if not self.mappings:
+            self.mappings = other.mappings
+        else:
+            assert not other.mappings
+        if not self.temporaries:
+            self.temporaries = other.temporaries
+        else:
+            assert not other.temporaries
+        if not self.inter_close_ops:
+            self.inter_close_ops = other.inter_close_ops
+        else:
+            assert not other.inter_close_ops
+        if not self.realm_copies:
+            self.realm_copies = other.realm_copies
+        else:
+            assert not other.realm_copies
+        if not self.realm_fills:
+            self.realm_fills = other.realm_fills
+        else:
+            assert not other.realm_fills
         if self.task_id == -1:
             self.task_id = other.task_id
         elif other.task_id <> -1:
@@ -5205,19 +5243,27 @@ class Operation(object):
 
     def pack_requirement_replay_info(self, replay_file, req, mapping):
         if mapping:
-            replay_file.write(struct.pack('I',len(mapping)))
+            # Get the unique set of instances
+            unique_insts = set()
             for inst in mapping.itervalues():
+                unique_insts.add(inst)
+            replay_file.write(struct.pack('I',len(unique_insts)))
+            for inst in unique_insts:
                 replay_file.write(struct.pack('Q',inst.handle))
         else:
             replay_file.write(struct.pack('I',0))
 
     def pack_temporary_replay_info(self, replay_file, req, mapping, temporary):
         assert len(temporary) > 0
-        replay_file.write(struct.pack('I',len(temporary)))
+        # Compute the unique set of pairs
+        unique_pairs = dict()
         for fid,inst in temporary.iteritems():
             assert fid in mapping
-            replay_file.write(struct.pack('Q',mapping[fid].handle))
-            replay_file.write(struct.pack('Q',inst.handle))
+            unique_pairs[mapping[fid]] = inst
+        replay_file.write(struct.pack('I',len(unique_pairs)))
+        for dst,src in unique_pairs.iteritems():
+            replay_file.write(struct.pack('Q',dst))
+            replay_file.write(struct.pack('Q',src))
 
     def pack_inline_replay_info(self, replay_file):
         assert self.kind == MAP_OP_KIND
@@ -5295,7 +5341,10 @@ class Operation(object):
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
-                 'current_fence', 'used_instances', 'virtual_indexes']
+                 'current_fence', 'used_instances', 'virtual_indexes',
+                 'processor', 'priority', 'premappings', 'postmappings',
+                 'tunables', 'operation_indexes', 'close_indexes']
+                  # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
         self.op = op
@@ -5306,6 +5355,13 @@ class Task(object):
         self.current_fence = None
         self.used_instances = None
         self.virtual_indexes = None
+        self.processor = None
+        self.priority = None
+        self.premappings = None
+        self.postmappings = None
+        self.tunables = None
+        self.operation_indexes = None
+        self.close_indexes = None
 
     def __str__(self):
         return str(self.op)
@@ -5317,6 +5373,60 @@ class Task(object):
 
     def set_point(self, point):
         self.point = point
+
+    def set_priority(self, priority):
+        assert not self.priority
+        self.priority = priority
+     
+    def set_processor(self, processor):
+        assert not self.processor
+        self.processor = processor
+
+    def add_premapping(self, index):
+        if not self.premappings:
+            self.premappings = set()
+        self.premappings.add(index)
+
+    def add_postmapping(self, index, fid, inst):
+        if not self.postmappings:
+            self.postmappings = dict()
+        if index not in self.postmappings:
+            self.postmappings[index] = dict()
+        self.postmappings[index][fid] = inst
+
+    def update_instance_uses(self):
+        if self.premappings:
+            for index in self.premappings:
+                assert index in self.op.mappings
+                mapping = self.op.mappings[index]
+                unique_insts = set()
+                for inst in mapping.itervalues():
+                    unique_insts.add(inst)
+                for inst in unique_insts:
+                    inst.increment_use_count() 
+        if self.postmappings:
+            for mapping in self.postmappings.itervalues():
+                unique_insts = set()
+                for inst in mapping.itervalues():
+                    unique_insts.add(inst)
+                for inst in unique_insts:
+                    inst.increment_use_count()
+
+    def add_tunable(self, index, size, value):
+        if not self.tunables:
+            self.tunables = dict()
+        assert index not in self.tunables
+        self.tunables[index] = (value,size)
+
+    def add_operation_index(self, index, uid):
+        if not self.operation_indexes:
+            self.operation_indexes = dict()
+        self.operation_indexes[index] = uid
+
+    def add_close_index(self, index, uid):
+        if not self.close_indexes:
+            self.close_indexes = dict()
+        self.close_indexes[index] = uid
 
     def get_parent_context(self):
         assert self.op.context is not None
@@ -5340,6 +5450,34 @@ class Task(object):
             self.operations = other.operations
         else:
             assert not other.operations
+        if not self.processor:
+            self.processor = other.processor
+        else:
+            assert not other.processor
+        if not self.priority:
+            self.priority = other.priority
+        else:
+            assert not other.priority
+        if not self.premappings:
+            self.premappings = other.premappings
+        else:
+            assert not other.premappings
+        if not self.postmappings:
+            self.postmappings = other.postmappings
+        else:
+            assert not other.postmappings
+        if not self.tunables:
+            self.tunables = other.tunables
+        else:
+            assert not other.tunables
+        if not self.operation_indexes:
+            self.operation_indexes = other.operation_indexes
+        else:
+            assert not other.operation_indexes
+        if not self.close_indexes:
+            self.close_indexes = other.close_indexes
+        else:
+            assert not other.close_indexes
 
     def perform_logical_dependence_analysis(self, perform_checks):
         # If we don't have any operations we are done
@@ -5602,6 +5740,76 @@ class Task(object):
             # End the cluster
             printer.end_this_cluster()
 
+    def pack_task_replay_info(self, replay_file, op_id):
+        # Pack the point
+        replay_file.write(struct.pack('i', self.point.dim))
+        for idx in range(self.point.dim):
+            replay_file.write(struct.pack('i',self.point.vals[idx]))
+        # Pack the base data
+        replay_file.write(struct.pack('Q', op_id)) 
+        replay_file.write(struct.pack('Q', self.processor.uid))
+        replay_file.write(struct.pack('i', self.priority))
+        # Pack premappings
+        if self.premappings:
+            replay_file.write(struct.pack('I',len(self.premappings)))
+            for index in self.premappings:
+                assert index in self.op.mappings
+                replay_file.write(struct.pack('I',index))
+                self.op.pack_requirement_replay_info(replay_file, 
+                    self.op.reqs[index], self.op.mappings[index]) 
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Pack mappings
+        replay_file.write(struct.pack('I',len(self.op.reqs)))
+        for index in range(len(self.op.reqs)):
+            self.op.pack_requirement_replay_info(replay_file, self.op.reqs[index], 
+                None if index not in self.op.mappings else self.op.mappings[index])
+        # Pack postmappings
+        if self.postmappings:
+            replay_file.write(struct.pack('I',len(self.postmappings)))
+            for index,mapping in self.postmappings:
+                replay_file.write(struct.pack('I',index))
+                self.op.pack_requirement_replay_info(replay_file,
+                    self.op.reqs[index], mapping)
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Pack the temporaries
+        if self.op.temporaries:
+            for index,temp in self.op.temporaries.iteritems():
+                replay_file.write(struct.pack('I',index))
+                self.op.pack_temporary_replay_info(replay_file, 
+                    self.op.reqs[index], self.op.mappings[index], temp)
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Pack the tunables
+        if self.tunables:
+            replay_file.write(struct.pack('I',len(self.tunables)))
+            for index in range(len(self.tunables)):
+                assert index in self.tunables
+                value,size = self.tunables[index]
+                replay_file.write(struct.pack('I',size))
+                string_length = len(value)+1 # need null termination
+                replay_file.write(struct.pack('I',string_length))
+                replay_file.write(struct.pack(str(string_length)+'s',value))
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Pack the operation indexes
+        if self.operation_indexes:
+            replay_file.write(struct.pack('I',len(self.operation_indexes)))
+            for idx in range(len(self.operation_indexes)):
+                assert idx in self.operation_indexes
+                replay_file.write(struct.pack('Q',self.operation_indexes[idx]))
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Pack the close indexes
+        if self.close_indexes:
+            replay_file.write(struct.pack('I',len(self.close_indexes)))
+            for idx in range(len(self.close_indexes)):
+                assert idx in self.close_indexes
+                replay_file.write(struct.pack('Q',self.close_indexes[idx]))
+        else:
+            replay_file.write(struct.pack('I',0))
+
 class InstanceUser(object):
     __slots__ = ['op', 'index', 'logical_op', 'region', 'priv', 'coher', 
                  'redop', 'shape', 'intersect']
@@ -5660,17 +5868,132 @@ class InstanceUser(object):
 
     def is_relaxed(self):
         return self.coher == RELAXED
+
+class SpecializedConstraint(object):
+    __slots__ = ['kind', 'redop']
+    def __init__(self, kind, redop):
+        self.kind = kind
+        self.redop = redop
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.kind))
+        replay_file.write(struct.pack('I', self.redop))
+
+class MemoryConstraint(object):
+    __slots__ = ['kind']
+    def __init__(self, kind):
+        self.kind = kind
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.kind))
+
+class FieldConstraint(object):
+    __slots__ = ['contiguous', 'inorder', 'fields', 'count']
+    def __init__(self, contig, inorder, count):
+        self.contiguous = contig
+        self.inorder = inorder
+        self.fields = list()
+        self.count = count
+
+    def add_field(self, fid):
+        self.fields.append(fid)
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', len(self.fields)))
+        for fid in self.fields:
+            replay_file.write(struct.pack('I', fid))
+        replay_file.write(struct.pack('I', self.contiguous))
+        replay_file.write(struct.pack('I', self.inorder))
+
+class OrderingConstraint(object):
+    __slots__ = ['contiguous', 'dimensions', 'count']
+    def __init__(self, contig, count):
+        self.contiguous = contig
+        self.dimensions = list()
+        self.count = count
+
+    def add_dim(self, dim):
+        self.dimensions.append(dim)
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I',len(self.dimensions)))
+        for dim in self.dimensions:
+            replay_file.write(struct.pack('I',dim))
+        replay_file.write(struct.pack('I', self.contiguous))
+
+class SplittingConstraint(object):
+    __slots__ = ['dim', 'value', 'chunks']
+    def __init__(self, dim, value, chunks):
+        self.dim = dim
+        self.value = value
+        self.chunks = chunks
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.dim))
+        replay_file.write(struct.pack('Q', self.value))
+        replay_file.write(struct.pack('I', self.chunks))
+
+class DimensionConstraint(object):
+    __slots__ = ['dim', 'eqk', 'value']
+    def __init__(self, dim, eqk, value):
+        self.dim = dim
+        self.eqk = eqk
+        self.value = value
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.dim))
+        replay_file.write(struct.pack('I', self.eqk))
+        replay_file.write(struct.pack('Q', self.value))
           
+class AlignmentConstraint(object):
+    __slots__ = ['fid', 'eqk', 'alignment']
+    def __init__(self, fid, eqk, alignment):
+        self.fid = fid
+        self.eqk = eqk
+        self.alignment = alignment
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.fid))
+        replay_file.write(struct.pack('I', self.eqk))
+        replay_file.write(struct.pack('Q', self.alignment))
+
+class OffsetConstraint(object):
+    __slots__ = ['fid', 'offset']
+    def __init__(self, fid, offset):
+        self.fid = fid
+        self.offset = offset
+
+    def pack_constraint(self, replay_file):
+        replay_file.write(struct.pack('I', self.fid))
+        replay_file.write(struct.pack('q', self.offset))
+
 class Instance(object):
-    __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 'redop', 'depth_users']
+    __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 
+                 'redop', 'depth_users', 'processor', 'creator', 
+                 'uses', 'creator_regions', 'specialized_constraint',
+                 'memory_constraint', 'field_constraint', 'ordering_constraint',
+                 'splitting_constraints', 'dimension_constraints',
+                 'alignment_constraints', 'offset_constraints']
     def __init__(self, state, handle):
         self.state = state
         self.handle = handle
         self.memory = None
-        self.region = None
+        self.region = None # Upper bound region
+        self.creator_regions = None # Regions contributing to upper bound
         self.fields = None
         self.redop = 0
         self.depth_users = dict() # map to dict for each depth
+        self.creator = None # Initially a uid, later an op after post-parsing
+        self.processor = None
+        self.uses = 0
+        self.specialized_constraint = None
+        self.memory_constraint = None
+        self.field_constraint = None
+        self.ordering_constraint = None
+        self.splitting_constraints = None
+        self.dimension_constraints = None
+        self.alignment_constraints = None
+        self.offset_constraints = None
 
     def __str__(self):
         #return "Instance %s in %s" % (hex(self.handle), str(self.memory))
@@ -5697,6 +6020,67 @@ class Instance(object):
         if self.fields is None:
             self.fields = set()
         self.fields.add(field)
+
+    def set_creator(self, uid, proc):
+        self.creator = uid
+        self.processor = proc
+
+    def update_creator(self):
+        if self.creator is not None:
+            op = self.state.get_operation(self.creator)
+            self.creator = op
+
+    def add_creator_region(self, region):
+        if not self.creator_regions:
+            self.creator_regions = set()
+        self.creator_regions.add(region)
+
+    def set_specialized_constraint(self, kind, redop):
+        assert not self.specialized_constraint
+        self.specialized_constraint = SpecializedConstraint(kind, redop)
+
+    def set_memory_constraint(self, kind):
+        assert not self.memory_constraint
+        self.memory_constraint = MemoryConstraint(kind)
+
+    def set_field_constraint(self, contig, inorder, fields):
+        assert not self.field_constraint
+        self.field_constraint = FieldConstraint(contig, inorder, fields)
+
+    def add_field_constraint_field(self, fid):
+        assert self.field_constraint
+        self.field_constraint.add_field(fid)
+
+    def set_ordering_constraint(self, contig, dims):
+        assert not self.ordering_constraint
+        self.ordering_constraint = OrderingConstraint(contig, dims)
+
+    def add_ordering_constraint_dim(self, dim):
+        assert self.ordering_constraint
+        self.ordering_constraint.add_dim(dim)
+
+    def add_splitting_constraint(self, dim, value, chunks):
+        if not self.splitting_constraints:
+            self.splitting_constraints = list()
+        self.splitting_constraints.append(SplittingConstraint(dim, value, chunks))
+
+    def add_dimension_constraint(self, dim, eqk, value):
+        if not self.dimension_constraints:
+            self.dimension_constraints = list()
+        self.dimension_constraints.append(DimensionConstraint(dim, eqk, value))
+
+    def add_alignment_constraint(self, fid, eqk, alignment):
+        if not self.alignment_constraints:
+            self.alignment_constraints = list()
+        self.alignment_constraints.append(AlignmentConstraint(fid, eqk, alignment))
+
+    def add_offset_constraint(self, fid, offset):
+        if not self.offset_constraints:
+            self.offset_constraints = list()
+        self.offset_constraints.append(OffsetConstraint(fid, offset))
+
+    def increment_use_count(self):
+        self.uses += 1
 
     # Only one virtual instance always with ID 0
     def is_virtual(self):
@@ -5840,6 +6224,60 @@ class Instance(object):
         else:
             users[field].append(InstanceUser(op, index, region,
                                  READ_WRITE, EXCLUSIVE, 0, shape, intersect))
+
+    def pack_inst_replay_info(self, replay_file):
+        replay_file.write(struct.pack('Q', self.handle))
+        replay_file.write(struct.pack('I', self.uses))
+        replay_file.write(struct.pack('Q', self.processor.uid))
+        replay_file.write(struct.pack('Q', self.memory.uid))
+        # Now pack the constraints
+        assert self.specialized_constraint
+        self.specialized_constraint.pack_constraint(replay_file)
+        assert self.memory_constraint
+        self.memory_constraint.pack_constraint(replay_file)
+        assert self.field_constraint
+        self.field_constraint.pack_constraint(replay_file) 
+        assert self.ordering_constraint
+        self.ordering_constraint.pack_constraint(replay_file)
+        if self.splitting_constraints:
+            replay_file.write(struct.pack('I',len(self.splitting_constraints)))
+            for constraint in self.splitting_constraints:
+                constraint.pack_constraint(replay_file)
+        else:
+            replay_file.write(struct.pack('I',0))
+        if self.dimension_constraints:
+            replay_file.write(struct.pack('I',len(self.dimension_constraints)))
+            for constraint in self.dimension_constraints:
+                constraint.pack_constraint(replay_file)
+        else:
+            replay_file.write(struct.pack('I',0))
+        if self.alignment_constraints:
+            replay_file.write(struct.pack('I',len(self.alignment_constraints)))
+            for constraint in self.alignment_constraints:
+                constraint.pack_constraint(replay_file)
+        else:
+            replay_file.write(struct.pack('I',0))
+        if self.offset_constraints:
+            replay_file.write(struct.pack('I',len(self.offset_constraints)))
+            for constraint in self.offset_constraints:
+                constraint.pack_constraint(replay_file)
+        else:
+            replay_file.write(struct.pack('I',0))
+        # Now pack the paths for each of the different creator regions
+        assert self.creator_regions
+        replay_file.write(struct.pack('I',len(self.creator_regions)))
+        for region in self.creator_regions:
+            path = deque()         
+            temp = region
+            while temp.parent:
+                path.appendleft(temp.index_space.color)
+                path.appendleft(temp.parent.index_partition.color)
+                temp = temp.parent.parent
+            replay_file.write(struct.pack('I',len(path)))
+            for color in path:
+                replay_file.write(struct.pack('i', color.dim))
+                for idx in range(color.dim):
+                    replay_file.write(struct.pack('i', color.vals[idx]))
 
 class FillInstance(object):
     __slots__ = ['state', 'region', 'depth', 'field']
@@ -7394,6 +7832,10 @@ slice_point_pat          = re.compile(
            "(?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 point_point_pat          = re.compile(
     prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
+op_index_pat             = re.compile(
+    prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
+close_index_pat          = re.compile(
+    prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 # Patterns for logical analysis and region requirements
 requirement_pat         = re.compile(
     prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) "+
@@ -7412,12 +7854,57 @@ instance_region_pat     = re.compile(
            "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
 instance_field_pat      = re.compile(
     prefix+"Physical Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
+instance_creator_pat    = re.compile(
+    prefix+"Physical Instance Creator (?P<iid>[0-9a-f]+) (?P<uid>[0-9]+) "
+           "(?P<proc>[0-9a-f]+)")
+instance_creator_region_pat = re.compile(
+    prefix+"Physical Instance Creation Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9]+) "
+           "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
+specialized_constraint_pat = re.compile(
+    prefix+"Instance Specialized Constraint (?P<iid>[0-9a-f]+) (?P<kind>[0-9]+) "
+           "(?P<redop>[0-9]+)")
+memory_constraint_pat   = re.compile(
+    prefix+"Instance Memory Constraint (?P<iid>[0-9a-f]+) (?P<kind>[0-9]+)")
+field_constraint_pat    = re.compile(
+    prefix+"Instance Field Constraint (?P<iid>[0-9a-f]+) (?P<contig>[0-1]) "
+           "(?P<inorder>[0-1]) (?P<fields>[0-9]+)")
+field_constraint_field_pat = re.compile(
+    prefix+"Instance Field Constraint Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
+ordering_constraint_pat = re.compile(
+    prefix+"Instance Ordering Constraint (?P<iid>[0-9a-f]+) (?P<contig>[0-1]) "
+           "(?P<dims>[0-9]+)")
+ordering_constraint_dim_pat = re.compile(
+    prefix+"Instance Ordering Constraint Dimension (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+)")
+splitting_constraint_pat = re.compile(
+    prefix+"Instance Splitting Constraint (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) "
+           "(?P<value>[0-9]+) (?P<chunks>[0-1])")
+dimension_constraint_pat = re.compile(
+    prefix+"Instance Dimension Constraint (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) "
+           "(?P<eqk>[0-9]+) (?P<value>[0-9]+)")
+alignment_constraint_pat = re.compile(
+    prefix+"Instance Alignment Constraint (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) "
+           "(?P<eqk>[0-9]+) (?P<align>[0-9]+)")
+offset_constraint_pat = re.compile(
+    prefix+"Instance Offset Constraint (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) "
+           "(?P<offset>[0-9]+)")
 mapping_decision_pat    = re.compile(
     prefix+"Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
            "(?P<iid>[0-9a-f]+)")
+post_decision_pat       = re.compile(
+    prefix+"Post Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
+           "(?P<iid>[0-9a-f]+)")
+task_priority_pat       = re.compile(
+    prefix+"Task Priority (?P<uid>[0-9]+) (?P<priority>-?[0-9]+)") # Handle negatives
+task_processor_pat      = re.compile(
+    prefix+"Task Processor (?P<uid>[0-9]+) (?P<proc>[0-9a-f]+)")
+task_premapping_pat     = re.compile(
+    prefix+"Task Premapping (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 temporary_decision_pat  = re.compile(
     prefix+"Temporary Instance (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
            "(?P<iid>[0-9a-f]+)")
+tunable_pat             = re.compile(
+    prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
+           "(?P<value>[0-9a-f]+)")
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
@@ -7631,6 +8118,76 @@ def parse_legion_spy_line(line, state):
         inst = state.get_instance(int(m.group('iid'),16))
         inst.add_field(int(m.group('fid')))
         return True
+    m = instance_creator_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        proc = state.get_processor(int(m.group('proc'),16))
+        inst.set_creator(int(m.group('uid')), proc)
+        return True
+    m = instance_creator_region_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        region = state.get_region(int(m.group('ispace')), 
+            int(m.group('fspace')), int(m.group('tid')))
+        inst.add_creator_region(region)
+        return True
+    m = specialized_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.set_specialized_constraint(int(m.group('kind')),
+                                        int(m.group('redop')))
+        return True
+    m = memory_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.set_memory_constraint(int(m.group('kind')))
+        return True
+    m = field_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.set_field_constraint(int(m.group('contig')), 
+            int(m.group('inorder')), int(m.group('fields')))
+        return True
+    m = field_constraint_field_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_field_constraint_field(int(m.group('fid')))
+        return True
+    m = ordering_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.set_ordering_constraint(int(m.group('contig')), 
+                                     int(m.group('dims')))
+        return True
+    m = ordering_constraint_dim_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_ordering_constraint_dim(int(m.group('dim')))
+        return True
+    m = splitting_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_splitting_constraint(int(m.group('dim')),
+            int(m.group('value')), int(m.group('chunks')))
+        return True
+    m = dimension_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_dimesion_constraint(int(m.group('dim')),
+            int(m.group('eqk')), int(m.group('value')))
+        return True
+    m = alignment_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_alignment_constraint(int(m.group('fid')),
+            int(m.group('eqk')), int(m.group('align')))
+        return True
+    m = offset_constraint_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_offset_constraint(int(m.group('fid')),
+            int(m.group('offset')))
+        return True
     m = mapping_decision_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
@@ -7638,12 +8195,40 @@ def parse_legion_spy_line(line, state):
         op.add_mapping_decision(int(m.group('idx')),
             int(m.group('fid')), inst)
         return True
+    m = post_decision_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        inst = state.get_instance(int(m.group('iid'),16))
+        task.add_postmapping(int(m.group('idx')),
+            int(m.group('fid')), inst)
+        return True
+    m = task_priority_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        task.set_priority(int(m.group('priority')))
+        return True
+    m = task_processor_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        proc = state.get_processor(int(m.group('proc'),16))
+        task.set_processor(proc)
+        return True
+    m = task_premapping_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        task.add_premapping(int(m.group('index')))
+        return True
     m = temporary_decision_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         inst = state.get_instance(int(m.group('iid'),16))
         op.add_temporary_instance(int(m.group('idx')),
             int(m.group('fid')), inst)
+        return True
+    m = tunable_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        task.add_tunable(int(m.group('idx')), int(m.group('bytes')), m.group('value'))
         return True
     # Operations near the top since they happen frequently
     m = task_name_pat.match(line)
@@ -7810,6 +8395,18 @@ def parse_legion_spy_line(line, state):
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
         state.alias_points(p1, p2)
+        return True
+    m = op_index_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('parent')))
+        task.add_operation_index(int(m.group('index')),
+                                 int(m.group('child')))
+        return True
+    m = close_index_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('parent')))
+        task.add_close_index(int(m.group('index')),
+                             int(m.group('child')))
         return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
@@ -8100,6 +8697,14 @@ class State(object):
             for event in self.events.itervalues():
                 if event.handle.uid in self.phase_barriers:
                     event.phase_barrier = True
+        # Update the instance 
+        for inst in self.instances.itervalues():
+            inst.update_creator()
+        # Update the instance users
+        for op in self.ops.itervalues():
+            op.update_instance_uses() 
+        for task in self.tasks.itervalues():
+            task.update_instance_uses()
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
@@ -8315,20 +8920,33 @@ class State(object):
             replay_file.write(struct.pack('Q', mem.uid))
             replay_file.write(struct.pack('I', mem.kind_num))
         # Write out the instances
-        replay_file.write(struct.pack('I',len(self.instances)))
+        assert len(self.instances) > 0
+        # Skip the virtual instance
+        replay_file.write(struct.pack('I',len(self.instances)-1))
         for inst in self.instances.itervalues():
+            if inst.is_virtual():
+                continue
             inst.pack_inst_replay_info(replay_file)
-        # Write out the tasks
-        replay_file.write(struct.pack('I',len(self.tasks)))
-        for task in self.tasks.itervalues():
-            task.pack_task_replay_info(replay_file)  
         # Find all the sets of operations
+        total_tasks = 0
+        single_tasks = set()
+        index_tasks = set()
         inlines = set()
         copies = set()
         closes = set()
         releases = set()
         for op in self.ops.itervalues():
-            if op.kind == MAP_OP_KIND:
+            if op.kind == SINGLE_TASK_KIND:
+                # If it doesn't have a task and a processor, then it's not real
+                if not op.task or op.task.processor is None:
+                    continue
+                single_tasks.add(op)
+                total_tasks += 1
+            if op.kind == INDEX_TASK_KIND:
+                index_tasks.add(op) 
+                assert op.points is not None
+                total_tasks += len(op.points)
+            elif op.kind == MAP_OP_KIND:
                 inlines.add(op)
             elif op.kind == COPY_OP_KIND:
                 copies.add(op)
@@ -8336,6 +8954,17 @@ class State(object):
                 closes.add(op)
             elif op.kind == RELEASE_OP_KIND:
                 releases.add(op)
+        # Write out the tasks first 
+        replay_file.write(struct.pack('I',total_tasks))
+        actual_packed_tasks = 0
+        for op in single_tasks:
+            op.task.pack_task_replay_info(replay_file, op.uid)
+            actual_packed_tasks += 1
+        for task in index_tasks:
+            for point in task.points.itervalues():
+                point.pack_task_replay_info(replay_file, task.uid)
+                actual_packed_tasks += 1
+        assert actual_packed_tasks == total_tasks
         # Write out the inlines
         replay_file.write(struct.pack('I',len(inlines)))
         for op in inlines:
