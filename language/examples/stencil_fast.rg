@@ -382,12 +382,15 @@ where reads(private.{input, output}) do
 end
 
 task main()
-  var n : int64 = 8 -- Note: Does not include 2*radius
+  var nbloated : int64 = 12 -- Grid size along each dimension, including border.
   var nt : int64 = 4
   var tsteps : int64 = 10
   var init : int64 = 1000
 
   var radius : int64 = RADIUS
+  var n : int64 = nbloated - 2*radius -- Grid size, minus the border.
+  regentlib.assert(n >= nt, "grid too small")
+
   var grid = ispace(int2d, { x = n + 2*nt*radius, y = n + 2*nt*radius })
   var nt2 = nt*nt
   var tiles = ispace(int1d, nt2)
