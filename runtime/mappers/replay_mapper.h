@@ -87,16 +87,19 @@ namespace Legion {
       };
       struct TaskMappingInfo {
       public:
+        TaskMappingInfo(void) : next_tunable(0) { }
+      public:
         UniqueID original_unique_id;
         Processor target_proc;
         VariantID variant;
         TaskPriority priority;
+        unsigned next_tunable;
       public:
         std::map<unsigned,RequirementMapping*> premappings;
         std::vector<RequirementMapping*> mappings;
         std::map<unsigned,RequirementMapping*> postmappings;
         std::map<unsigned,TemporaryMapping*> temporaries;
-        std::map<std::pair<TunableID,MappingTagID>,TunableMapping*> tunables;
+        std::vector<TunableMapping*> tunables;
         std::vector<UniqueID/*original*/> operation_ids;
         std::vector<UniqueID/*original*/> close_ids; 
       };
