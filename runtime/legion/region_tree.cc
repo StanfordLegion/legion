@@ -5392,15 +5392,17 @@ namespace LegionRuntime {
                     it != left_set.end(); it++)
               {
                 Rect<2> left_rect = it->get_rect<2>();
-                rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
-                                         left_rect.hi[0], left_rect.hi[1]);
+                if (left_rect.volume() > 0)
+                  rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
+                                           left_rect.hi[0], left_rect.hi[1]);
               }
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
                 Rect<2> right_rect = it->get_rect<2>();
-                if (!rectangles.covers(right_rect.lo[0], right_rect.lo[1],
+                if (right_rect.volume() > 0 &&
+                    !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
                                        right_rect.hi[0], right_rect.hi[1]))
                 {
                   dominates = false;
