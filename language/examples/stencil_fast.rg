@@ -18,7 +18,7 @@ import "regent"
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = false
+local USE_FOREIGN = true
 
 local c = regentlib.c
 
@@ -208,7 +208,7 @@ task get_rect(is : ispace(int2d))
     c.legion_index_space_get_domain(__runtime(), __raw(is)))
 end
 
-terra get_base_and_offset(rect : c.legion_rect_2d_t,
+terra get_base_and_stride(rect : c.legion_rect_2d_t,
                           physical : c.legion_physical_region_t,
                           field : c.legion_field_id_t)
   var subrect : c.legion_rect_2d_t
@@ -221,7 +221,7 @@ terra get_base_and_offset(rect : c.legion_rect_2d_t,
   regentlib.assert(subrect.hi.x[0] == rect.hi.x[0] and subrect.hi.x[1] == rect.hi.x[1], "subrect not equal to rect")
   regentlib.assert(offsets[0].offset == terralib.sizeof(DTYPE), "stride does not match expected value")
 
-  return { base_pointer = base_pointer, offset = offsets[1].offset }
+  return { base = base_pointer, stride = offsets[1].offset }
 end
 
 local function make_stencil_interior(private, interior, radius)
@@ -244,11 +244,9 @@ local function make_stencil_interior(private, interior, radius)
 
     return rquote
       var rect = get_rect(private.ispace)
-      var subrect : c.legion_rect_2d_t
-
-      var { base_pointer_input = base_pointer, offset_input = offset } = get_base_and_offset(rect, __physical(private)[0], __fields(private)[0])
-      var { base_pointer_output = base_pointer, offset_output = offset } = get_base_and_offset(rect, __physical(private)[1], __fields(private)[1])
-      regentlib.assert(offset_output == offset_input, "strides do not match")
+      var { base_input = base, stride_input = stride } = get_base_and_stride(rect, __physical(private)[0], __fields(private)[0])
+      var { base_output = base, stride_output = stride } = get_base_and_stride(rect, __physical(private)[1], __fields(private)[1])
+      regentlib.assert(stride_output == stride_input, "strides do not match")
 
       var weights : double[(2*radius + 1)*(2*radius + 1)]
       for i = -radius, radius + 1 do
@@ -263,10 +261,11 @@ local function make_stencil_interior(private, interior, radius)
         weights[weight(-i,  0, radius)] = -1.0/(2.0*i*radius)
       end
 
-      cstencil.stencil(base_pointer_input, base_pointer_output, weights,
-                       offset_input / [terralib.sizeof(DTYPE)],
-                       0, rect.hi.x[0] - rect.lo.x[0] + 1,
-                       0, rect.hi.x[1] - rect.lo.x[1] + 1)
+      var interior_rect = get_rect(interior.ispace)
+      cstencil.stencil(base_input, base_output, weights,
+                       stride_input / [terralib.sizeof(DTYPE)],
+                       0, interior_rect.hi.x[0] - interior_rect.lo.x[0] + 1,
+                       0, interior_rect.hi.x[1] - interior_rect.lo.x[1] + 1)
     end
   end
 end
@@ -320,6 +319,27 @@ local function make_stencil(radius)
 end
 local stencil = make_stencil(RADIUS)
 
+local function make_increment_interior(private, exterior)
+  if not USE_FOREIGN then
+    return rquote
+      for i in exterior do
+        private[i].input = private[i].input + 1
+      end
+    end
+  else
+    return rquote
+      var rect = get_rect(private.ispace)
+      var { base_input = base, stride_input = stride } = get_base_and_stride(rect, __physical(private)[0], __fields(private)[0])
+
+      var exterior_rect = get_rect(exterior.ispace)
+      cstencil.increment(base_input,
+                         stride_input / [terralib.sizeof(DTYPE)],
+                         0, exterior_rect.hi.x[0] - exterior_rect.lo.x[0] + 1,
+                         0, exterior_rect.hi.x[1] - exterior_rect.lo.x[1] + 1)
+    end
+  end
+end
+
 task increment(private : region(ispace(int2d), point),
                exterior : region(ispace(int2d), point),
                xm : region(ispace(int2d), point),
@@ -328,9 +348,7 @@ task increment(private : region(ispace(int2d), point),
                yp : region(ispace(int2d), point),
                print_ts : bool)
 where reads writes(private.input, xm.input, xp.input, ym.input, yp.input) do
-  for i in exterior do
-    private[i].input = private[i].input + 1
-  end
+  [make_increment_interior(private, exterior)]
   for i in xm do i.input += 1 end
   for i in xp do i.input += 1 end
   for i in ym do i.input += 1 end

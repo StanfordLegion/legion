@@ -38,3 +38,18 @@ void stencil(DTYPE* RESTRICT inputPtr,
 #undef OUT
 #undef WEIGHT
 }
+
+void increment(DTYPE* RESTRICT inputPtr,
+               coord_t haloX, coord_t startX, coord_t endX,
+               coord_t startY, coord_t endY)
+{
+#define IN(i, j)     inputPtr[(j) * haloX + i]
+  for (coord_t j = startY; j < endY; ++j)
+    for (coord_t i = startX; i < endX; ++i)
+      {
+        IN(i, j) += 1;
+      }
+#undef IN
+#undef OUT
+#undef WEIGHT
+}
