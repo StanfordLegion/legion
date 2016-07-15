@@ -573,6 +573,35 @@ namespace Legion {
         derez.deserialize(redop);
     }
 
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_normal(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (kind == NORMAL_SPECIALIZE);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_virtual(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (kind == VIRTUAL_SPECIALIZE);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_reduction(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ((kind == REDUCTION_FOLD_SPECIALIZE) || 
+              (kind == REDUCTION_LIST_SPECIALIZE));
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_file(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (GENERIC_FILE_SPECIALIZE <= kind);
+    }
+
     /////////////////////////////////////////////////////////////
     // Memory Constraint 
     /////////////////////////////////////////////////////////////

@@ -232,11 +232,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
-      enum InstanceFlag {
-        NO_INSTANCE_FLAG = 0x00000000,
-        ATTACH_FILE_FLAG = 0x00000001,
-      };
-    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       MemoryManager *memory, PhysicalInstance inst, 
@@ -244,8 +239,7 @@ namespace Legion {
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
                       RtUserEvent destruction_event,
-                      bool register_now, ApEvent use_event, 
-                      InstanceFlag flag = NO_INSTANCE_FLAG);
+                      bool register_now, ApEvent use_event); 
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -295,13 +289,6 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event;
-    protected:
-      // This is monotonic variable that once it becomes true
-      // will remain true for the duration of the instance lifetime.
-      // If set to true, it should prevent the instance from ever
-      // being collected before the context in which it was created
-      // is destroyed.
-      InstanceFlag instance_flags;
     };
 
     /**

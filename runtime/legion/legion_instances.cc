@@ -980,12 +980,10 @@ namespace Legion {
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
                                      RtUserEvent destruction_event, 
-                                     bool register_now, ApEvent u_event, 
-                                     InstanceFlag flags/*=NO_INSTANCE_FLAGS*/)
+                                     bool register_now, ApEvent u_event) 
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
-                        own, destruction_event, register_now),
-        use_event(u_event), instance_flags(flags)
+                        own, destruction_event, register_now),use_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1215,7 +1213,6 @@ namespace Legion {
         rez.serialize(instance_domain);
         rez.serialize(region_node->handle);
         rez.serialize(use_event);
-        rez.serialize(instance_flags);
         rez.serialize(destroy_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
@@ -1244,8 +1241,6 @@ namespace Legion {
       derez.deserialize(handle);
       ApEvent use_event;
       derez.deserialize(use_event);
-      InstanceFlag flags;
-      derez.deserialize(flags);
       RtUserEvent destroy_event;
       derez.deserialize(destroy_event);
       RegionNode *target_node = runtime->forest->get_node(handle);
@@ -1263,14 +1258,13 @@ namespace Legion {
                                              memory, inst, inst_domain, 
                                              false/*owns*/, target_node, layout,
                                              pointer_constraint, destroy_event,
-                                             false/*reg now*/, use_event,flags);
+                                             false/*reg now*/, use_event);
       else
         man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
                                     runtime->address_space, memory, inst,
                                     inst_domain, false/*owns*/,
                                     target_node, layout, pointer_constraint, 
-                                    destroy_event, false/*reg now*/, 
-                                    use_event, flags);
+                                    destroy_event, false/*reg now*/, use_event);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1279,7 +1273,7 @@ namespace Legion {
     bool InstanceManager::is_attached_file(void) const
     //--------------------------------------------------------------------------
     {
-      return (instance_flags & ATTACH_FILE_FLAG);
+      return layout->constraints->specialized_constraint.is_file();
     }
 
     /////////////////////////////////////////////////////////////

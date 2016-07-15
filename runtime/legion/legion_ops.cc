@@ -10403,6 +10403,22 @@ namespace Legion {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
       return region;
     }
 
@@ -10441,6 +10457,22 @@ namespace Legion {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
       return region;
     }
 
@@ -10620,10 +10652,9 @@ namespace Legion {
              const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
-      // TODO: Update attach operation to fill in 
-      // constraints for different file types
-      assert(false);
-      if (file_type == HDF5_FILE) {
+      PhysicalInstance result = PhysicalInstance::NO_INST;
+      if (file_type == HDF5_FILE) 
+      {
         // First build the set of field paths
         std::vector<const char*> field_files(field_map.size());
         unsigned idx = 0;
@@ -10633,20 +10664,39 @@ namespace Legion {
           field_files[idx] = it->second;
         }
         // Now ask the low-level runtime to create the instance
-        PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
-                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
+        result = dom.create_hdf5_instance(file_name, sizes,
+                            field_files, (file_mode == LEGION_FILE_READ_ONLY));
+        constraints.specialized_constraint = 
+          SpecializedConstraint(HDF5_FILE_SPECIALIZE);
+      } 
+      else if (file_type == NORMAL_FILE) 
+      {
+        result = dom.create_file_instance(file_name, sizes, file_mode);
+        constraints.specialized_constraint = 
+          SpecializedConstraint(GENERIC_FILE_SPECIALIZE);
+      }
+      else // unknown file type
+        assert(false);
 #ifdef DEBUG_LEGION
       assert(result.exists());
-#endif
-        return result;
-      } else if (file_type == NORMAL_FILE) {
-        PhysicalInstance result = 
-          dom.create_file_instance(file_name, sizes, file_mode);
-        return result;
-      } else {
-        assert(0);
-        return PhysicalInstance::NO_INST;
+#endif      
+      constraints.field_constraint = 
+        FieldConstraint(requirement.privilege_fields, 
+                        false/*contiguous*/, false/*inorder*/);
+      constraints.memory_constraint = 
+        MemoryConstraint(result.get_location().kind());
+      // TODO: Fill in the other constraints: 
+      // OrderingConstraint, SplittingConstraints DimensionConstraints,
+      // AlignmentConstraints, OffsetConstraints
+      // Fill in the rest of the constraints
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::set<FieldID>::const_iterator it = 
+              requirement.privilege_fields.begin(); it !=
+              requirement.privilege_fields.end(); it++)
+          LegionSpy::log_mapping_decision(unique_op_id,0/*idx*/,*it,result.id);
       }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10840,6 +10890,22 @@ namespace Legion {
       // Delay getting a reference until trigger_execution().  This means we
       //  have to keep region
       this->region = region;
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
     }
 
     //--------------------------------------------------------------------------

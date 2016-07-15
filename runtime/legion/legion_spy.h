@@ -291,6 +291,20 @@ namespace Legion {
 		      context, deletion);
       }
 
+      static inline void log_attach_operation(UniqueID context,
+                                              UniqueID attach)
+      {
+        log_spy.print("Attach Operation %llu %llu", 
+                      context, attach);
+      }
+
+      static inline void log_detach_operation(UniqueID context,
+                                              UniqueID detach)
+      {
+        log_spy.print("Detach Operation %llu %llu",
+                      context, detach);
+      }
+
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,

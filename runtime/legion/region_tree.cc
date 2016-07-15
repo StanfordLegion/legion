@@ -9553,6 +9553,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
+      assert(layout->constraints->specialized_constraint.is_file());
 #endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
       MemoryManager *memory = 
@@ -9564,8 +9565,7 @@ namespace Legion {
                                          node, layout, pointer_constraint,
                                          RtUserEvent::NO_RT_USER_EVENT,
                                          true/*register now*/, 
-                                         ApEvent::NO_AP_EVENT,
-                                         InstanceManager::ATTACH_FILE_FLAG);
+                                         ApEvent::NO_AP_EVENT);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

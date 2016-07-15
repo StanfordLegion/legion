@@ -510,6 +510,9 @@ typedef enum legion_specialized_constraint_t {
   REDUCTION_FOLD_SPECIALIZE = 2,
   REDUCTION_LIST_SPECIALIZE = 3,
   VIRTUAL_SPECIALIZE = 4,
+  // All file types must go below here, everything else above
+  GENERIC_FILE_SPECIALIZE = 5,
+  HDF5_FILE_SPECIALIZE = 6,
 } legion_specialized_constraint_t;
 
 //==========================================================================
