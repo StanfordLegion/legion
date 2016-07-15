@@ -817,6 +817,9 @@ create_cross_product_tree(HighLevelRuntime *runtime,
   }
 }
 
+// Takes the "shallow" cross product between lists of structured index spaces
+// `lhs` and `rhs`.  Specifically, if `lhs[i]` and `rhs[j]` intersect,
+// `result[i][j]` is populated with `rhs[j]`.
 static void
 create_cross_product_shallow_structured(HighLevelRuntime *runtime,
                                         Context ctx,
@@ -845,6 +848,7 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
   }
 }
 
+// Takes the shallow cross product between lists of unstructured index spaces.
 static void
 create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
                                           Context ctx,
@@ -1261,6 +1265,21 @@ legion_terra_index_cross_product_create_list_shallow(
   return result;
 }
 
+// "Completes" a shallow cross product between lists of structured index spaces.
+// After a shallow cross product determines which index spaces intersect, this
+// function actually creates partitions corresponding to the intersections.
+//
+// Specifically, this function partitions each "RHS" index space according to
+// the LHS index spaces it intersects.
+//
+// Params:
+//    lhs: list of left-hand side index spaces.
+//    lhs_part_disjoint: true if the LHS partition is disjoint.
+//    product: maps each LHS index space to the list of RHS index spaces that
+//             intersect it.
+//    result: `result[i][j]` is populated with the IndexSpace that is the
+//            intersection of `lhs[i]` and `product[lhs[i]][j]`.  This
+//            IndexSpace belongs to a Partition of the RHS IndexSpace.
 static inline void
 create_cross_product_complete_structured(
     HighLevelRuntime *runtime,
@@ -1338,6 +1357,7 @@ create_cross_product_complete_structured(
   }
 }
 
+// Completes the shallow cross product between two lists of unstructured index spaces.
 static inline void
 create_cross_product_complete_unstructured(
     HighLevelRuntime *runtime,
