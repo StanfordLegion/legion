@@ -21,6 +21,10 @@ local std = require("regent/std")
 
 local parser = {}
 
+function parser.lookaheadif(p, tok)
+  return p:lookahead().type == tok
+end
+
 function parser.annotation_level(p)
   if p:nextif("__allow") then
     return ast.annotation.Allow { value = false }
@@ -1043,7 +1047,7 @@ end
 
 function parser.field(p)
   local start = ast.save(p)
-  if p:matches(p.name) and p:lookahead("=") then
+  if p:matches(p.name) and p:lookaheadif("=") then
     local name = p:expect(p.name).value
     p:expect("=")
     local value = p:expr()
@@ -1599,7 +1603,7 @@ function parser.stat_expr_assignment(p, start, first_lhs, annotations)
   local op
   -- Hack: Terra's lexer doesn't understand += as a single operator so
   -- for the moment read it as + followed by =.
-  if p:lookahead("=") then
+  if p:lookaheadif("=") then
     op = p:reduction_op(true)
     p:expect("=")
   else
@@ -1659,12 +1663,12 @@ function parser.stat_expr(p, annotations)
 
   if p:matches(",") or
     p:matches("=") or
-    (p:matches("+") and p:lookahead("=")) or
-    (p:matches("-") and p:lookahead("=")) or
-    (p:matches("*") and p:lookahead("=")) or
-    (p:matches("/") and p:lookahead("=")) or
-    (p:matches("max") and p:lookahead("=")) or
-    (p:matches("min") and p:lookahead("="))
+    (p:matches("+") and p:lookaheadif("=")) or
+    (p:matches("-") and p:lookaheadif("=")) or
+    (p:matches("*") and p:lookaheadif("=")) or
+    (p:matches("/") and p:lookaheadif("=")) or
+    (p:matches("max") and p:lookaheadif("=")) or
+    (p:matches("min") and p:lookaheadif("="))
   then
     return p:stat_expr_assignment(start, first_lhs, annotations)
   elseif quoted_maybe_stat then
