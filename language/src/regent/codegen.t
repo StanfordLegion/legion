@@ -1602,6 +1602,73 @@ function codegen.expr_field_access(cx, node)
         `([expr_type] { impl = [value.value].impl.index_space }),
         expr_type),
       expr_type)
+  elseif (std.is_ispace(value_type) or std.is_region(value_type)) and
+         field_name == "bounds" then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local expr_type = std.as_read(node.expr_type)
+    assert(expr_type.is_rect_type)
+    local index_type = expr_type.index_type
+    local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+    local lo = terralib.newsymbol(index_type.impl_type, "lo")
+    local hi = terralib.newsymbol(index_type.impl_type, "hi")
+
+    local actions = quote
+      [value.actions]
+      var [lo], [hi]
+    end
+    if std.is_ispace(value_type) then
+      actions = quote
+        [actions]
+        var [domain] =
+          c.legion_index_space_get_domain([cx.runtime], [value.value].impl)
+      end
+    else
+      assert(std.is_region(value_type))
+      actions = quote
+        [actions]
+        var [domain] =
+          c.legion_index_space_get_domain([cx.runtime],
+                                          [value.value].impl.index_space)
+      end
+    end
+
+    if index_type == std.int1d then
+      actions = quote
+        [actions]
+        [lo] = [domain].rect_data[0]
+        [hi] = [domain].rect_data[1]
+      end
+    elseif index_type == std.int2d then
+      actions = quote
+        [actions]
+        [lo].x = [domain].rect_data[0]
+        [lo].y = [domain].rect_data[1]
+        [hi].x = [domain].rect_data[2]
+        [hi].y = [domain].rect_data[3]
+      end
+    elseif index_type == std.int3d then
+      actions = quote
+        [actions]
+        [lo].x = [domain].rect_data[0]
+        [lo].y = [domain].rect_data[1]
+        [lo].z = [domain].rect_data[2]
+        [hi].x = [domain].rect_data[3]
+        [hi].y = [domain].rect_data[4]
+        [hi].z = [domain].rect_data[5]
+      end
+    end
+
+    actions = quote
+      [actions]
+      [emit_debuginfo(node)]
+    end
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type] { lo = [lo], hi = [hi] }),
+        expr_type),
+      expr_type)
   else
     return codegen.expr(cx, node.value):get_field(cx, node, field_name, field_type, node.value.expr_type)
   end
