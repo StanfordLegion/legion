@@ -525,6 +525,20 @@ function type_check.expr_field_access(cx, node)
   local field_type
   if std.is_region(std.as_read(unpack_type)) and node.field_name == "ispace" then
     field_type = std.as_read(unpack_type):ispace()
+  elseif std.is_ispace(std.as_read(unpack_type)) and node.field_name == "bounds" then
+    local index_type = std.as_read(unpack_type).index_type
+    if index_type:is_opaque() then
+      log.error(node, "no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(unpack_type)))
+    end
+    field_type = std.rect_type(index_type)
+  elseif std.is_region(std.as_read(unpack_type)) and node.field_name == "bounds" then
+    local index_type = std.as_read(unpack_type):ispace().index_type
+    if index_type:is_opaque() then
+      log.error(node, "no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(unpack_type)))
+    end
+    field_type = std.rect_type(index_type)
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
     log.error(node, "no field '" .. node.field_name .. "' in type " ..
                 tostring(std.as_read(value_type)))
@@ -1420,11 +1434,6 @@ function type_check.expr_partition(cx, node)
 
   if colors and not std.is_ispace(colors_type) then
     log.error(node, "type mismatch in argument 4: expected ispace but got " ..
-                tostring(colors_type))
-  end
-  if colors and data.max(colors_type.dim, 1) ~= data.max(region_type:ispace().dim, 1) then
-    log.error(node, "type mismatch in argument 4: expected ispace with " ..
-                tostring(region_type:ispace().dim) .. " dimensions but got " ..
                 tostring(colors_type))
   end
 

@@ -1760,29 +1760,73 @@ function specialize.stat(cx, node)
   end
 end
 
+local function make_symbols(cx, node, var_name)
+  if type(var_name) == "string" then
+    return terralib.newlist({{var_name, std.newsymbol(var_name)}})
+  end
+
+  var_name = var_name(cx.env:env())
+  if std.is_symbol(var_name) then
+    return terralib.newlist({{var_name, var_name}})
+  elseif terralib.islist(var_name) then
+    if not data.all(unpack(var_name:map(std.is_symbol))) then
+      log.error(node, "param list contains non-symbol")
+    end
+    return var_name:map(function(v) return {v, v} end)
+  end
+
+  log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+end
+
 function specialize.top_task_param(cx, node)
   -- Hack: Params which are regions can be recursive on the name of
   -- the region so introduce the symbol before type checking to allow
   -- for this recursion.
-  local symbol = std.newsymbol(node.param_name)
-  cx.env:insert(node, node.param_name, symbol)
-  cx.env:insert(node, symbol, symbol)
-  local param_type = node.type_expr(cx.env:env())
-  if not param_type then
-    log.error(node, "param type is undefined or nil")
-  end
-  symbol:settype(param_type)
+  local params = make_symbols(cx, node, node.param_name)
 
-  return ast.specialized.top.TaskParam {
-    symbol = symbol,
-    annotations = node.annotations,
-    span = node.span,
-  }
+  local result = terralib.newlist()
+  for _, param in ipairs(params) do
+    local param_name, symbol = unpack(param)
+
+    cx.env:insert(node, param_name, symbol)
+    if not std.is_symbol(param_name) then cx.env:insert(node, symbol, symbol) end
+
+    local param_type
+    if std.is_symbol(param_name) then
+      if not param_name:hastype() then
+        log.error(node, "param symbol must be typed")
+      end
+      param_type = param_name:gettype()
+    else
+      param_type = node.type_expr(cx.env:env())
+    end
+
+    if not param_type then
+      log.error(node, "param type is undefined or nil")
+    end
+    if not terralib.types.istype(param_type) then
+      log.error(node, "param type is not a type")
+    end
+
+    if not symbol:hastype() then
+      symbol:settype(param_type)
+    end
+    assert(std.type_eq(symbol:gettype(), param_type))
+
+    result:insert(
+      ast.specialized.top.TaskParam {
+        symbol = symbol,
+        annotations = node.annotations,
+        span = node.span,
+      })
+  end
+  return result
 end
 
 function specialize.top_task_params(cx, node)
-  return node:map(
-    function(param) return specialize.top_task_param(cx, param) end)
+  return data.flatmap(
+    function(param) return specialize.top_task_param(cx, param) end,
+    node)
 end
 
 function specialize.top_task(cx, node)

@@ -12,19 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_partition4.rg:28: type mismatch in argument 3: expected legion_point_coloring_t but got legion_domain_point_coloring_t
---   var p = partition(disjoint, r, s, t)
---                   ^
-
 import "regent"
 
-local c = regentlib.c
-
-task f() : int
-  var r = region(ispace(ptr, 5), int)
-  var s = c.legion_domain_point_coloring_create()
-  var t = ispace(int2d, { x = 1, y = 2 })
-  var p = partition(disjoint, r, s, t)
+local function make_task()
+  local b = regentlib.newsymbol(int, "b")
+  local c = regentlib.newsymbol(double, "c")
+  local d = regentlib.newsymbol(bool, "d")
+  local rest = terralib.newlist({ c, d })
+  local task result(a : int, [b], [rest]) : int
+    if d then
+      return 314
+    else
+      return a + b*c
+    end
+  end
+  return result
 end
-f:compile()
+local f = make_task()
+
+task main()
+  regentlib.assert(f(23, 200, 0.5, false) == 123, "test failed")
+end
+regentlib.start(main)

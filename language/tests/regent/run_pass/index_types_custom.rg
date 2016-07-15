@@ -18,6 +18,9 @@ local struct i2 { x : int, y : int }
 terra i2.metamethods.__add(a : i2, b : i2) : i2
   return i2 { x = a.x + b.x, y = a.y + b.y }
 end
+terra i2.metamethods.__sub(a : i2, b : i2) : i2
+  return i2 { x = a.x - b.x, y = a.y - b.y }
+end
 local i2d = index_type(i2, "i2d")
 
 task main()

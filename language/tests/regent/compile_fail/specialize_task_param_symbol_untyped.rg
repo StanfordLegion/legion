@@ -13,18 +13,13 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition4.rg:28: type mismatch in argument 3: expected legion_point_coloring_t but got legion_domain_point_coloring_t
---   var p = partition(disjoint, r, s, t)
---                   ^
+-- specialize_task_param_symbol_untyped.rg:23: param symbol must be typed
+-- task f([a]) : int
+--        ^
 
 import "regent"
 
-local c = regentlib.c
-
-task f() : int
-  var r = region(ispace(ptr, 5), int)
-  var s = c.legion_domain_point_coloring_create()
-  var t = ispace(int2d, { x = 1, y = 2 })
-  var p = partition(disjoint, r, s, t)
+local a = regentlib.newsymbol("a")
+task f([a]) : int
 end
 f:compile()

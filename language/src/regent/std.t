@@ -526,6 +526,10 @@ function std.is_index_type(t)
   return terralib.types.istype(t) and rawget(t, "is_index_type")
 end
 
+function std.is_rect_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_rect_type")
+end
+
 function std.is_ispace(t)
   return terralib.types.istype(t) and rawget(t, "is_ispace")
 end
@@ -1780,6 +1784,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
     return a + b
   end
+  terra st.metamethods.__sub(a : st.index_type, b : st.index_type) : st.index_type
+    return a - b
+  end
 
   terra st:to_point()
     return ([index_type](@self)):to_point()
@@ -1890,7 +1897,11 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = [expr] })
       end
     elseif std.is_index_type(from) then
-      if from:is_opaque() and std.validate_implicit_cast(int, to) then
+      if std.type_eq(to, c.legion_domain_point_t) then
+        return `([expr]:to_domain_point())
+      elseif std.type_eq(to, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+        return `([expr]:to_point())
+      elseif from:is_opaque() and std.validate_implicit_cast(int, to) then
         return `([to]([expr].__ptr.value))
       elseif not from:is_opaque() and std.validate_implicit_cast(from.base_type, to) then
         return `([to]([expr].__ptr))
@@ -1903,22 +1914,32 @@ function std.index_type(base_type, displayname)
     terra st.metamethods.__add(a : st, b : st) : st
       return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
     end
+    terra st.metamethods.__sub(a : st, b : st) : st
+      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value - b.__ptr.value } }
+    end
   else
     terra st.metamethods.__add(a : st, b : st) : st
       return st { __ptr = a.__ptr + b.__ptr }
     end
+    terra st.metamethods.__sub(a : st, b : st) : st
+      return st { __ptr = a.__ptr - b.__ptr }
+    end
   end
 
-  function st:zero()
+  function st:const(v)
     assert(self.dim >= 1)
     local fields = self.fields
     local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
 
     if fields then
-      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return 0 end)] } })
+      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return v end)] } })
     else
-      return `(self({ __ptr = [self.impl_type](0) }))
+      return `(self({ __ptr = [self.impl_type](v) }))
     end
+  end
+
+  function st:zero()
+    return st:const(0)
   end
 
   local function make_point(expr)
@@ -1975,14 +1996,60 @@ local struct __int2d { x : int, y : int }
 terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
   return __int2d { x = a.x + b.x, y = a.y + b.y }
 end
+terra __int2d.metamethods.__sub(a : __int2d, b : __int2d) : __int2d
+  return __int2d { x = a.x - b.x, y = a.y - b.y }
+end
 local struct __int3d { x : int, y : int, z : int }
 terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
   return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+end
+terra __int3d.metamethods.__sub(a : __int3d, b : __int3d) : __int3d
+  return __int3d { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z }
 end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
+
+std.rect_type = terralib.memoize(function(index_type, displayname)
+  local st = terralib.types.newstruct(displayname or
+                                      "rect(" .. tostring(index_type) ..")")
+  assert(not index_type:is_opaque())
+  st.entries = terralib.newlist({
+      { "lo", index_type },
+      { "hi", index_type },
+  })
+
+  st.is_rect_type = true
+  st.index_type = index_type
+  st.dim = index_type.dim
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_rect_type(from) then
+      if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        local ty = to.entries[1].type
+        return `([to] { lo = [ty]([expr].lo),
+                        hi = [ty]([expr].hi) })
+      elseif std.type_eq(to, c.legion_domain_t) then
+        return `([expr]:to_domain())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain()
+    return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
+  end
+
+  terra st:size()
+    return self.hi - self.lo + [st.index_type:const(1)]
+  end
+
+  return st
+end)
+std.rect1d = std.rect_type(std.int1d, "rect1d")
+std.rect2d = std.rect_type(std.int2d, "rect2d")
+std.rect3d = std.rect_type(std.int3d, "rect3d")
 
 local next_ispace_id = 1
 function std.ispace(index_type)
