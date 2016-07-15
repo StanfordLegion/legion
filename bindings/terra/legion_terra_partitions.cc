@@ -1222,7 +1222,7 @@ legion_terra_index_cross_product_create_list_shallow(
 
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
-  if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part)
+  if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part))
       || (rhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, rhs_part))) {
       // Structured index spaces.
     create_cross_product_shallow_structured(runtime, ctx, lhs, rhs, result);
@@ -1261,25 +1261,6 @@ legion_terra_index_cross_product_create_list_shallow(
   return result;
 }
 
-// Populates `colors` with colors of the index spaces in `index_spaces`.
-// `colors` should be initially empty.
-static void
-get_index_space_colors(
-    HighLevelRuntime *runtime, Context ctx,
-    const std::vector<IndexSpace>& index_spaces,
-    std::vector<DomainPoint>& colors)
-{
-  assert(colors.empty());
-  colors.reserve(index_spaces.size());
-  for (std::vector<IndexSpace>::const_iterator it = index_spaces.begin();
-       it != index_spaces.end(); ++it) {
-
-    IndexSpace index_space = *it;
-    DomainPoint color = runtime->get_index_space_color_point(ctx, index_space);
-    colors.push_back(color);
-  }
-}
-
 static inline void
 create_cross_product_complete_structured(
     HighLevelRuntime *runtime,
@@ -1290,9 +1271,15 @@ create_cross_product_complete_structured(
     legion_terra_index_space_list_list_t &result)
 {
   std::vector<DomainPoint> lhs_colors;
-  get_index_space_colors(runtime, ctx, lhs, lhs_colors);
+  lhs_colors.reserve(lhs.size());
+  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
+    IndexSpace& lh_space = lhs[lhs_idx];
+    DomainPoint lh_color = runtime->get_index_space_color_point(ctx, lh_space);
+    lhs_colors.push_back(lh_color);
+  }
 
   std::map<IndexSpace, DomainPointColoring> coloring; // Partition coloring for each RHS ispace.
+  std::map<IndexSpace, Domain> color_spaces; // Color space for each partitioning.
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace lh_space = lhs[lhs_idx];
     // Doesn't currently handle structured index spaces consisting of multiple
@@ -1312,22 +1299,25 @@ create_cross_product_complete_structured(
       assert(rh_domain.get_dim() > 0);
 
       coloring[rh_space][lh_color] = rh_domain.intersection(lh_domain);
+      if (color_spaces.count(rh_space) > 0) {
+        color_spaces[rh_space] =
+          color_spaces[rh_space].convex_hull(lh_color);
+      } else {
+        color_spaces[rh_space] = Domain::from_domain_point(lh_color);
+      }
     }
   }
 
-  // We use `lhs_color_space` as color space for partitions in the cross product.
-  // TODO(zhangwen): take bounding rectangle.
-  Domain lhs_color_space = runtime->get_index_partition_color_space(ctx,
-      partition_from_list(runtime, ctx, lhs));
   std::map<IndexSpace, IndexPartition> rh_partitions;
   for (std::map<IndexSpace, DomainPointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
 
     IndexSpace rh_space = it->first;
     const DomainPointColoring& coloring = it->second;
+    assert(color_spaces.count(rh_space) > 0);
 
     IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ lhs_color_space,
+        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
         coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[rh_space] = ip;
   }
@@ -1358,7 +1348,12 @@ create_cross_product_complete_unstructured(
     legion_terra_index_space_list_list_t &result)
 {
   std::vector<Color> lhs_colors;
-  get_index_space_colors(runtime, ctx, lhs, lhs_colors);
+  lhs_colors.reserve(lhs.size());
+  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
+    IndexSpace& lh_space = lhs[lhs_idx];
+    Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+    lhs_colors.push_back(lh_color);
+  }
 
   std::map<IndexSpace, Coloring> coloring;
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
