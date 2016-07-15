@@ -54,12 +54,6 @@ rawset(_G, "srand48", std.srand48)
 
 -- declare fortran-order 2D indexspace
 local struct __f2d { y : int, x : int }
-terra __f2d.metamethods.__add(a : __f2d, b : __f2d) : __f2d
-  return __f2d { x = a.x + b.x, y = a.y + b.y }
-end
-terra __f2d.metamethods.__sub(a : __f2d, b : __f2d) : __f2d
-  return __f2d { x = a.x - b.x, y = a.y - b.y }
-end
 local f2d = regentlib.index_type(__f2d, "f2d")
 
 task make_pds_matrix(p : f2d, n : int, rA : region(ispace(f2d), double))

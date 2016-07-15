@@ -1658,6 +1658,56 @@ end
 -- ## Types
 -- #################
 
+local metamethod_combinators = {
+  ["__add"] = function(a, b) return `([a] + [b]) end,
+  ["__sub"] = function(a, b) return `([a] - [b]) end,
+  ["__mul"] = function(a, b) return `([a] * [b]) end,
+  ["__div"] = function(a, b) return `([a] / [b]) end,
+  ["__mod"] = function(a, b) return `([a] % [b]) end,
+}
+
+local function generate_arithmetic_metamethod_body(ty, method, e1, e2)
+  local combinator = metamethod_combinators[method]
+  if ty:isprimitive() then
+    return combinator(e1, e2)
+  elseif ty:isstruct() then
+    if ty.metamethods[method] then
+      return combinator(e1, e2)
+    end
+    local entries = ty:getentries():map(function(entry)
+      return generate_arithmetic_metamethod_body(entry.type, method,
+                                                 `(e1.[entry.field]),
+                                                 `(e2.[entry.field]))
+    end)
+    return `([ty] { [entries] })
+  elseif ty:isarray() then
+    local entries = terralib.newlist()
+    for idx = 0, ty.N - 1 do
+      entries:insert(
+        generate_arithmetic_metamethod_body(ty.type, method,
+                                            `(e1[ [idx] ]),
+                                            `(e2[ [idx] ])))
+    end
+    return `(arrayof([ty.type], [entries]))
+  end
+  assert(false)
+end
+
+function std.generate_arithmetic_metamethod(ty, method)
+  local a = terralib.newsymbol(ty, "a")
+  local b = terralib.newsymbol(ty, "b")
+  local body = generate_arithmetic_metamethod_body(ty, method, a, b)
+  return terra([a], [b]) : ty return [body] end
+end
+
+function std.generate_arithmetic_metamethods(ty)
+  local methods = {}
+  for method, _ in pairs(metamethod_combinators) do
+    methods[method] = std.generate_arithmetic_metamethod(ty, method)
+  end
+  return methods
+end
+
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
 --
@@ -1781,11 +1831,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
-    return a + b
-  end
-  terra st.metamethods.__sub(a : st.index_type, b : st.index_type) : st.index_type
-    return a - b
+  for method, _ in pairs(metamethod_combinators) do
+    st.metamethods[method] =
+      std.generate_arithmetic_metamethod(st.index_type, method)
   end
 
   terra st:to_point()
@@ -1871,6 +1919,42 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
+std.rect_type = terralib.memoize(function(index_type, displayname)
+  local st = terralib.types.newstruct(displayname or
+                                      "rect(" .. tostring(index_type) ..")")
+  assert(not index_type:is_opaque())
+  st.entries = terralib.newlist({
+      { "lo", index_type },
+      { "hi", index_type },
+  })
+
+  st.is_rect_type = true
+  st.index_type = index_type
+  st.dim = index_type.dim
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_rect_type(from) then
+      if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        local ty = to.entries[1].type
+        return `([to] { lo = [ty]([expr].lo),
+                        hi = [ty]([expr].hi) })
+      elseif std.type_eq(to, c.legion_domain_t) then
+        return `([expr]:to_domain())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain()
+    return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
+  end
+
+  terra st:size()
+    return self.hi - self.lo + [st.index_type:const(1)]
+  end
+
+  return st
+end)
 function std.index_type(base_type, displayname)
   local impl_type, dim, fields = validate_index_base_type(base_type)
 
@@ -1913,22 +1997,6 @@ function std.index_type(base_type, displayname)
       end
     end
     assert(false)
-  end
-
-  if st:is_opaque() then
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
-    end
-    terra st.metamethods.__sub(a : st, b : st) : st
-      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value - b.__ptr.value } }
-    end
-  else
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = a.__ptr + b.__ptr }
-    end
-    terra st.metamethods.__sub(a : st, b : st) : st
-      return st { __ptr = a.__ptr - b.__ptr }
-    end
   end
 
   function st:const(v)
@@ -1994,64 +2062,29 @@ function std.index_type(base_type, displayname)
     return [make_domain_point(self)]
   end
 
+  for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
+    st.metamethods[method_name] = method
+  end
+  if not st:is_opaque() then
+    st.metamethods.__mod = terralib.overloadedfunction(
+      "__mod", {
+        st.metamethods.__mod,
+        terra(a : st, b : std.rect_type(st)) : st
+          return (a + b:size()) % b:size()
+        end
+      })
+  end
+
   return setmetatable(st, index_type)
 end
 
 local struct __int2d { x : int, y : int }
-terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
-  return __int2d { x = a.x + b.x, y = a.y + b.y }
-end
-terra __int2d.metamethods.__sub(a : __int2d, b : __int2d) : __int2d
-  return __int2d { x = a.x - b.x, y = a.y - b.y }
-end
 local struct __int3d { x : int, y : int, z : int }
-terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
-  return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
-end
-terra __int3d.metamethods.__sub(a : __int3d, b : __int3d) : __int3d
-  return __int3d { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z }
-end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
-std.rect_type = terralib.memoize(function(index_type, displayname)
-  local st = terralib.types.newstruct(displayname or
-                                      "rect(" .. tostring(index_type) ..")")
-  assert(not index_type:is_opaque())
-  st.entries = terralib.newlist({
-      { "lo", index_type },
-      { "hi", index_type },
-  })
-
-  st.is_rect_type = true
-  st.index_type = index_type
-  st.dim = index_type.dim
-
-  function st.metamethods.__cast(from, to, expr)
-    if std.is_rect_type(from) then
-      if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
-        local ty = to.entries[1].type
-        return `([to] { lo = [ty]([expr].lo),
-                        hi = [ty]([expr].hi) })
-      elseif std.type_eq(to, c.legion_domain_t) then
-        return `([expr]:to_domain())
-      end
-    end
-    assert(false)
-  end
-
-  terra st:to_domain()
-    return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
-  end
-
-  terra st:size()
-    return self.hi - self.lo + [st.index_type:const(1)]
-  end
-
-  return st
-end)
 std.rect1d = std.rect_type(std.int1d, "rect1d")
 std.rect2d = std.rect_type(std.int2d, "rect2d")
 std.rect3d = std.rect_type(std.int3d, "rect3d")
