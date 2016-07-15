@@ -499,9 +499,9 @@ namespace Legion {
       }
 
       static inline void log_instance_offset_constraint(IDType inst_id,
-                                              FieldID fid, off_t offset)
+                                      FieldID fid, long offset)
       {
-        log_spy.print("Instance Offset Constraint " IDFMT " %d %lld",
+        log_spy.print("Instance Offset Constraint " IDFMT " %d %ld",
                       inst_id, fid, offset);
       }
 
