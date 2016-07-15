@@ -1741,9 +1741,16 @@ function parser.top_task_params(p)
   if not p:matches(")") then
     repeat
       local start = ast.save(p)
-      local param_name = p:expect(p.name).value
-      p:expect(":")
-      local param_type = p:luaexpr()
+      local param_name, param_type
+      if p:nextif("[") then
+        param_name = p:luaexpr()
+        param_type = false
+        p:expect("]")
+      else
+        param_name = p:expect(p.name).value
+        p:expect(":")
+        param_type = p:luaexpr()
+      end
       params:insert(ast.unspecialized.top.TaskParam {
           param_name = param_name,
           type_expr = param_type,
