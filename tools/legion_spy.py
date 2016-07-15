@@ -2167,6 +2167,8 @@ class IndexSpace(object):
         return self.point_set
 
     def intersection(self, other):
+        if self is other:
+            return self.get_point_set()
         if other in self.intersections:
             return self.intersections[other]
         intersection = self.get_point_set() & other.get_point_set()
@@ -2177,9 +2179,13 @@ class IndexSpace(object):
         return intersection
 
     def intersects(self, other):
+        if self is other:
+            return True
         return self.intersection(other) is not None
 
     def dominates(self, other):
+        if self is other:
+            return True
         if other in self.dominated:
             return self.dominated[other]
         non_dominated = other.get_point_set() - self.get_point_set()
@@ -2340,6 +2346,8 @@ class IndexPartition(object):
         return self.point_set
 
     def intersection(self, other):
+        if self is other:
+            return self.get_point_set()
         if other in self.intersections:
             return self.intersections[other]
         intersection = self.get_point_set() & other.get_point_set()
@@ -2350,9 +2358,13 @@ class IndexPartition(object):
         return intersection
         
     def intersects(self, other):
+        if self is other:
+            return True
         return self.intersection(other) is not None
 
     def dominates(self, other):
+        if self is other:
+            return True
         if other in self.dominated:
             return self.dominated[other]
         non_dominated = other.get_point_set() - self.get_point_set()
@@ -3520,7 +3532,7 @@ class Restriction(object):
         req.restricted_fields[self.field] = self.inst
         return True
 
-    def add_acquire(self, node, field):
+    def add_acquisition(self, node, field):
         if self.node.tree_id <> node.tree_id:
             return False
         if field is not self.field:
@@ -3533,14 +3545,14 @@ class Restriction(object):
             return False
         if self.acquires:
             for acquire in self.acquires:
-                if acquire.add_acquire(node, field):
+                if acquire.add_acquisition(node, field):
                     return True
         else:
             self.acquires = list()
-        self.acquires.append(Acquire(node, field))
+        self.acquires.append(Acquisition(node, field))
         return True
 
-    def remove_acquire(self, node, field):
+    def remove_acquisition(self, node, field):
         if self.node.tree_id <> node.tree_id:
             return False
         if field is not self.field:
@@ -3552,7 +3564,7 @@ class Restriction(object):
                 if acquire.matches(node, field):
                     self.acquires.remove(acquire)
                     return True
-                if acquire.remove_acquire(node, field):
+                if acquire.remove_acquisition(node, field):
                     return True
         return False
 
@@ -3596,7 +3608,7 @@ class Restriction(object):
             return True
         return False
 
-class Acquire(object):
+class Acquisition(object):
     __slots__ = ['node', 'field', 'restrictions'] 
     def __init__(self, node, field):
         self.node = node
@@ -3614,7 +3626,7 @@ class Acquire(object):
                     return True
         return False
 
-    def add_acquire(self, node, field):
+    def add_acquisition(self, node, field):
         if self.node.tree_id <> node.tree_id:
             return False
         if field is not self.field:
@@ -3623,7 +3635,7 @@ class Acquire(object):
             return False
         if self.restrictions:
             for restrict in self.restrictions:
-                if restrict.add_acquire(node, field):
+                if restrict.add_acquisition(node, field):
                     return True
         # Interference if we get here
         print "ERROR: Interfering acquires performed"
@@ -3631,14 +3643,14 @@ class Acquire(object):
             assert False
         return False
 
-    def remove_acquire(self, node, field):
+    def remove_acquisition(self, node, field):
         if self.node.tree_id <> node.tree_id:
             return False
         if field is not self.field:
             return False
         if self.restrictions:
             for restrict in self.restrictions:
-                if restrict.remove_acquire(node, field):
+                if restrict.remove_acquisition(node, field):
                     return True
         return False
 
@@ -4827,11 +4839,11 @@ class Operation(object):
         # properties of the enclosing context
         if self.kind == ACQUIRE_OP_KIND:
             assert 0 in self.reqs
-            if not self.context.add_acquire(self.reqs[0]):
+            if not self.context.add_acquisition(self.reqs[0]):
                 return False
         elif self.kind == RELEASE_OP_KIND:
             assert 0 in self.reqs
-            if not self.context.remove_acquire(self.reqs[0]):
+            if not self.context.remove_acquisition(self.reqs[0]):
                 return False
         elif self.kind == ATTACH_OP_KIND:
             assert 0 in self.reqs
@@ -5170,7 +5182,7 @@ class Operation(object):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
-            if field in req.restricted_fields:
+            if req.restricted_fields and field in req.restricted_fields:
                 if not req.logical_node.perform_physical_analysis(depth, field,
                     self, req, req.restricted_fields[field], perform_checks):
                     return False
@@ -5577,7 +5589,7 @@ class Operation(object):
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
-                 'current_fence', 'restrictions', 'dumb_acquires', 
+                 'current_fence', 'restrictions', 'dumb_acquisitions', 
                  'used_instances', 'virtual_indexes', 'processor', 'priority', 
                  'premappings', 'postmappings', 'tunables', 
                  'operation_indexes', 'close_indexes']
@@ -5591,7 +5603,7 @@ class Task(object):
         self.depth = None
         self.current_fence = None
         self.restrictions = None
-        self.dumb_acquires = None
+        self.dumb_acquisitions = None
         self.used_instances = None
         self.virtual_indexes = None
         self.processor = None
@@ -5733,7 +5745,8 @@ class Task(object):
         # See if we have any restrictions that we need to care about
         if self.op.reqs:
             for idx,req in self.op.reqs.iteritems():
-                if req.priv == READ_WRITE and req.coher == SIMULTANEOUS: 
+                if (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
+                    req.coher == SIMULTANEOUS: 
                     assert idx in self.op.mappings
                     mapping = self.op.mappings[idx]
                     # Add a restriction for all the fields 
@@ -5755,7 +5768,7 @@ class Task(object):
         self.op.state.reset_logical_state()
         # We can clear this out now since we don't need them anymore
         self.restrictions = None 
-        self.dumb_acquires = None
+        self.dumb_acquisitions = None
         print "Pass" if success else "FAIL"
         return success
 
@@ -5779,43 +5792,43 @@ class Task(object):
                     # and go on to the next field
                     break
 
-    def add_acquire(self, req):
+    def add_acquisition(self, req):
         if not self.restrictions:
             print "WARNING: Unnecessary acquire in "+str(self)+\
                   " with no restrictions"
-            if not self.dumb_acquires:
-                self.dumb_acquires = list()
+            if not self.dumb_acquisitions:
+                self.dumb_acquisitions = list()
             for field in req.fields:
-                self.dumb_acquires.append(Acquire(req.logical_node, field))
+                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
         for field in req.fields:
             # Try to add it to any of the existing restrictions
             success = False
             for restrict in self.restrictions:
-                if restrict.add_acquire(req.logical_node, field):
+                if restrict.add_acquisition(req.logical_node, field):
                     success = True
                     break
             if not success:
                 print "WARNING: Unnecessary acquire in "+str(self)
-                if not self.dumb_acquires:
-                    self.dumb_acquires = list()
-                self.dumb_acquires.append(Acquire(req.logical_node, field))
+                if not self.dumb_acquisitions:
+                    self.dumb_acquisitions = list()
+                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
         return True
 
-    def remove_acquire(self, req):
+    def remove_acquisition(self, req):
         for field in req.fields:
             success = False
             if self.restrictions:
                 for restrict in self.restrictions:
-                    if restrict.remove_acquire(req.logical_node, field):
+                    if restrict.remove_acquisition(req.logical_node, field):
                         success = True
                         break
-            if not success and self.dumb_acquires:
-                for acquire in self.dumb_acquires:
+            if not success and self.dumb_acquisitions:
+                for acquire in self.dumb_acquisitions:
                     if acquire.matches(req.logical_node, field):
                         success = True
-                        self.dumb_acquires.remove(acquire)
+                        self.dumb_acquisitions.remove(acquire)
                         break
-                    if acquire.remove_acquire(req.logical_node, field):
+                    if acquire.remove_acquisition(req.logical_node, field):
                         success = True
                         break
             if not success:
@@ -5855,8 +5868,8 @@ class Task(object):
                     if restrict.remove_restrict(req.logical_node, field):
                         success = True
                         break
-            if not success and self.dumb_acquires:
-                for acquire in self.dumb_acquires:
+            if not success and self.dumb_acquisitions:
+                for acquire in self.dumb_acquisitions:
                     if acquire.remove_restrict(req.logical_node, field):
                         success = True
                         break
