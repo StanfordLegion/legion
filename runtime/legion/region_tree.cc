@@ -2075,8 +2075,8 @@ namespace Legion {
       }
       // We don't currently support partial restrictions
       if (!!possibly_restricted && 
-          (unsigned(FieldMask::pop_count(possibly_restricted) < 
-                                  req.privilege_fields.size())))
+          (unsigned(FieldMask::pop_count(possibly_restricted)) < 
+                                  req.privilege_fields.size()))
         return false;
       else
         return true;
