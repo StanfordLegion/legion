@@ -5285,13 +5285,11 @@ namespace Legion {
     void SingleTask::release_restrictions(void)
     //--------------------------------------------------------------------------
     {
-#if 0
       for (std::list<Restriction*>::const_iterator it = 
             coherence_restrictions.begin(); it != 
             coherence_restrictions.end(); it++)
         delete (*it);
       coherence_restrictions.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
