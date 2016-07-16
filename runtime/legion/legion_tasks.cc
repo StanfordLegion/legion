@@ -5285,11 +5285,13 @@ namespace Legion {
     void SingleTask::release_restrictions(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       for (std::list<Restriction*>::const_iterator it = 
             coherence_restrictions.begin(); it != 
             coherence_restrictions.end(); it++)
         delete (*it);
       coherence_restrictions.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8761,6 +8763,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
+      // Release any restrictions we might have had
+      if (!coherence_restrictions.empty())
+        release_restrictions();
       // For remote cases we have to keep track of the events for
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
@@ -8885,9 +8890,6 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
-      // Release any restrictions we might have had
-      if (!coherence_restrictions.empty())
-        release_restrictions();
       // We used to have to apply our virtual state here, but that is now
       // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
@@ -9534,11 +9536,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
+      // Release any restrictions we might have had
+      if (!coherence_restrictions.empty())
+        release_restrictions();
       // Pass back our created and deleted operations 
       slice_owner->return_privileges(this);
 
       slice_owner->record_child_complete();
-
       // Since this point is now complete we know
       // that we can trigger it. Note we don't need to do
       // this if we're a leaf task with no virtual mappings
@@ -9680,9 +9684,7 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
-      // Release any restrictions we might have had
-      if (!coherence_restrictions.empty())
-        release_restrictions();
+      
       // Handle remaining state flowing back out for virtual mappings
       // and newly created regions and fields
       convert_virtual_instance_top_views(remote_instances);
