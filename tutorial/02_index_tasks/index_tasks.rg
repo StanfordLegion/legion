@@ -18,7 +18,7 @@ local c = terralib.includec("stdio.h")
 
 -- Return types may be inferred. The following task returns an int.
 task double_of(i : int, x : int)
-  c.printf("Hello world from task %lld!\n", i)
+  c.printf("Hello world from task %d!\n", i)
   return 2*x
 end
 
