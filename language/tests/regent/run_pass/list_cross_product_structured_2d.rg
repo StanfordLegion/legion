@@ -127,9 +127,6 @@ task main()
     { -1, -1, -1, -1, -1, -1 },
   }) ])
 
-  -- TODO: the next two tests are currently commented out because they make it
-  -- harder to produce the correct result overall with "-fmapping" on.
-  --[[
   -- Verify `prod_complete[1]`.
   fill(r, -1); copy(r, lh_list); copy(r, rh_list)
   myfill_list(prod_complete[1], 3)
@@ -155,6 +152,5 @@ task main()
     {  0,  0,  0,  1,  1,  1 },
     {  0,  0,  0,  1,  1,  1 },
   }) ])
-  ]]
 end
 regentlib.start(main)
