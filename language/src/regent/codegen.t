@@ -1669,6 +1669,25 @@ function codegen.expr_field_access(cx, node)
         `([expr_type] { lo = [lo], hi = [hi] }),
         expr_type),
       expr_type)
+  elseif std.is_partition(value_type) and field_name == "colors" then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local expr_type = std.as_read(node.expr_type)
+    local is = terralib.newsymbol(c.legion_index_space_t, "colors")
+    local actions = quote
+      [value.actions]
+      var domain =
+        c.legion_index_partition_get_color_space([cx.runtime],
+                                                 [value.value].impl.index_partition)
+      var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context],
+                                                    domain)
+    end
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type]({ impl = [is] })),
+        expr_type),
+      expr_type)
   else
     return codegen.expr(cx, node.value):get_field(cx, node, field_name, field_type, node.value.expr_type)
   end
