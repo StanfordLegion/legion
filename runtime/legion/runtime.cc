@@ -20506,6 +20506,11 @@ namespace Legion {
             VersionState::process_remove_version_state_ref(args);
             break;
           }
+        case HLR_DEFER_RESTRICTED_MANAGER_TASK_ID:
+          {
+            RestrictInfo::handle_deferred_reference(args);
+            break;
+          }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
           {
             Runtime::get_runtime(p)->attempt_runtime_shutdown();

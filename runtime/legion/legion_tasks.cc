@@ -696,6 +696,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RestrictInfo& TaskOp::get_restrict_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // this should never be called
+      assert(false);
+      return (*(new RestrictInfo()));
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -829,7 +838,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::unpack_restrict_infos(Deserializer &derez,
-                                       std::vector<RestrictInfo> &infos)
+              std::vector<RestrictInfo> &infos, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -848,7 +857,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(index < infos.size());
 #endif
-          infos[index].unpack_info(derez, source, runtime->forest);
+          infos[index].unpack_info(derez, runtime, ready_events);
         }
       }
     }
@@ -2089,22 +2098,15 @@ namespace Legion {
             it != must_premap.end(); it++)
       {
         VersionInfo &version_info = get_version_info(*it);
+        RestrictInfo &restrict_info = get_restrict_info(*it);
         RegionTreeContext req_ctx = get_parent_context(*it);
         InstanceSet &chosen_instances = early_mapped_regions[*it];
         // If this is restricted then we know what the answer is so
         // just ignore whatever the mapper did
         if (regions[*it].is_restricted())
         {
-          // Since we know we are on the owner node, we know we can
-          // always ask our parent context to find the restricted instances
-          InstanceSet restricted_instances;
-          parent_ctx->get_physical_references(
-              parent_req_indexes[*it], restricted_instances);
-          // Now do the conversion to get the instances that we should
-          // actually use, no need to check for errors since we know
-          // that the parent task is keeping hold of these regions
-          runtime->forest->physical_convert_restricted(this, regions[*it],
-                                   restricted_instances, chosen_instances);
+          // Get the restricted instances
+          restrict_info.get_instances(chosen_instances);
         }
         else
         {
@@ -2689,7 +2691,7 @@ namespace Legion {
       executed_children.clear();
       complete_children.clear();
       safe_cast_domains.clear();
-      restricted_trees.clear();
+      coherence_restrictions.clear();
       frame_events.clear();
       map_applied_conditions.clear();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
@@ -5212,36 +5214,95 @@ namespace Legion {
         // If we make it here then we are good
       return NO_ERROR;
     }
-
+    
     //--------------------------------------------------------------------------
-    bool SingleTask::has_tree_restriction(RegionTreeID tid, 
-                                          const FieldMask &mask)
+    void SingleTask::add_acquisition(AcquireOp *op,const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      // No need for the lock because we know that this processo
-      // is serialized by the dependence analysis stage
-      LegionMap<RegionTreeID,FieldMask>::aligned::const_iterator finder = 
-        restricted_trees.find(tid);
-      if ((finder != restricted_trees.end()) &&
-          (!(finder->second * mask)))
-        return true;
-      return false;
+      if (!runtime->forest->add_acquisition(coherence_restrictions, op, req))
+      {
+        // We faiiled to acquire, report the error
+        log_run.error("Illegal acquire operation (ID %lld) performed in "
+                      "task %s (ID %lld). Acquire was performed on a non-"
+                      "restricted region.", op->get_unique_op_id(),
+                      get_task_name(), get_unique_op_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNRESTRICTED_ACQUIRE);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_tree_restriction(RegionTreeID tid,
-                                          const FieldMask &mask)
+    void SingleTask::remove_acquisition(ReleaseOp *op, 
+                                        const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      // No need to hold the lock because we know access to this data
-      // structure is serialized by the mapping process
-      LegionMap<RegionTreeID,FieldMask>::aligned::iterator finder = 
-        restricted_trees.find(tid);
-      if (finder == restricted_trees.end())
-        restricted_trees[tid] = mask;
-      else
-        finder->second |= mask;
-    } 
+      if (!runtime->forest->remove_acquisition(coherence_restrictions, op, req))
+      {
+        // We failed to release, report the error
+        log_run.error("Illegal release operation (ID %lld) performed in "
+                      "task %s (ID %lld). Release was performed on a region "
+                      "that had not previously been acquired.",
+                      op->get_unique_op_id(), get_task_name(), 
+                      get_unique_op_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNACQUIRED_RELEASE);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::add_restriction(AttachOp *op, InstanceManager *inst,
+                                     const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      runtime->forest->add_restriction(coherence_restrictions, op, inst, req);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::remove_restriction(DetachOp *op, 
+                                        const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->forest->remove_restriction(coherence_restrictions, op, req))
+      {
+        // We failed to remove the restriction
+        log_run.error("Illegal detach operation (ID %lld) performed in "
+                      "task %s (ID %lld). Detach was performed on an region "
+                      "that had not previously been attached.",
+                      op->get_unique_op_id(), get_task_name(),
+                      get_unique_op_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNATTACHED_DETACH);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::release_restrictions(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::list<Restriction*>::const_iterator it = 
+            coherence_restrictions.begin(); it != 
+            coherence_restrictions.end(); it++)
+        delete (*it);
+      coherence_restrictions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::perform_restricted_analysis(const RegionRequirement &req,
+                                                 RestrictInfo &restrict_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!coherence_restrictions.empty());
+#endif
+      return runtime->forest->perform_restricted_analysis(
+                                coherence_restrictions, req, restrict_info);
+    }
 
     //--------------------------------------------------------------------------
     RegionTreeContext SingleTask::find_enclosing_context(unsigned idx)
@@ -6374,10 +6435,13 @@ namespace Legion {
 #endif
           // If we need to add restricted coherence, do that now
           // Not we only need to do this for non-virtually mapped task
-          if ((regions[idx].prop == SIMULTANEOUS) ||
-              has_restrictions(idx, regions[idx].region)) 
-            runtime->forest->restrict_user_coherence(context, this, 
-                      regions[idx].region, regions[idx].privilege_fields);
+          if ((regions[idx].prop == SIMULTANEOUS) && 
+              ((regions[idx].privilege == READ_ONLY) ||
+               (regions[idx].privilege == READ_WRITE) ||
+               (regions[idx].privilege == WRITE_DISCARD)))
+            coherence_restrictions.push_back(
+                runtime->forest->create_coherence_restriction(regions[idx],
+                                                  physical_instances[idx]));
         }
         else
         {
@@ -7840,6 +7904,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RestrictInfo& MultiTask::get_restrict_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < restrict_infos.size());
+#endif
+      return restrict_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* MultiTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -8582,6 +8656,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RestrictInfo& IndividualTask::get_restrict_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < restrict_infos.size());
+#endif
+      return restrict_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* IndividualTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -8801,6 +8885,9 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
+      // Release any restrictions we might have had
+      if (!coherence_restrictions.empty())
+        release_restrictions();
       // We used to have to apply our virtual state here, but that is now
       // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
@@ -8916,7 +9003,7 @@ namespace Legion {
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
       unpack_version_infos(derez, version_infos);
-      unpack_restrict_infos(derez, restrict_infos);
+      unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
       {
@@ -9337,6 +9424,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RestrictInfo& PointTask::get_restrict_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_restrict_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* PointTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -9586,6 +9680,9 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
+      // Release any restrictions we might have had
+      if (!coherence_restrictions.empty())
+        release_restrictions();
       // Handle remaining state flowing back out for virtual mappings
       // and newly created regions and fields
       convert_virtual_instance_top_views(remote_instances);
@@ -11233,10 +11330,10 @@ namespace Legion {
       // Handle the case of inline tasks
       if (restrict_infos.empty())
         return false;
-      if (restrict_infos[idx].has_restrictions())
-        return runtime->forest->has_restrictions(handle, restrict_infos[idx],
-                                                 regions[idx].privilege_fields);
-      return false;
+#ifdef DEBUG_LEGION
+      assert(idx < restrict_infos.size());
+#endif
+      return restrict_infos[idx].has_restrictions();
     }
 
     //--------------------------------------------------------------------------
@@ -12157,10 +12254,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(idx < restrict_infos.size());
 #endif
-        if (restrict_infos[idx].has_restrictions())
-          return runtime->forest->has_restrictions(handle, restrict_infos[idx],
-                                                 regions[idx].privilege_fields);
-        return false;
+        return restrict_infos[idx].has_restrictions();
       }
       else
         return index_owner->has_restrictions(idx, handle);
@@ -12313,7 +12407,7 @@ namespace Legion {
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
       unpack_version_infos(derez, version_infos);
-      unpack_restrict_infos(derez, restrict_infos);
+      unpack_restrict_infos(derez, restrict_infos, ready_events);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)
