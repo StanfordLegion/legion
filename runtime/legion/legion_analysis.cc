@@ -1279,17 +1279,21 @@ namespace Legion {
           legion_delete(it->first);
       }
       restrictions.clear();
+      restricted_instances.clear();
     }
 
     //--------------------------------------------------------------------------
-    void RestrictInfo::get_instances(InstanceSet &instances) const
+    const InstanceSet& RestrictInfo::get_instances(void)
     //--------------------------------------------------------------------------
     {
-      instances.resize(restrictions.size());
+      if (restricted_instances.size() == restrictions.size())
+        return restricted_instances;
+      restricted_instances.resize(restrictions.size());
       unsigned idx = 0;
       for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
             restrictions.begin(); it != restrictions.end(); it++, idx++)
-        instances[idx] = InstanceRef(it->first, it->second);
+        restricted_instances[idx] = InstanceRef(it->first, it->second);
+      return restricted_instances;
     }
 
     //--------------------------------------------------------------------------

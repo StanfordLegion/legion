@@ -104,6 +104,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -519,7 +520,7 @@ namespace Legion {
       void release_restrictions(void);
       inline bool has_restrictions(void) const 
         { return !coherence_restrictions.empty(); }
-      bool perform_restricted_analysis(const RegionRequirement &req, 
+      void perform_restricted_analysis(const RegionRequirement &req, 
                                        RestrictInfo &restrict_info);
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -761,6 +762,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
@@ -861,6 +863,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -973,6 +976,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
       virtual bool is_inline_task(void) const;
     public:
