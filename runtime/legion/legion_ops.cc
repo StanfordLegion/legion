@@ -2476,9 +2476,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -3830,9 +3831,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -5188,9 +5190,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
