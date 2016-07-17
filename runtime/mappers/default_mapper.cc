@@ -653,6 +653,7 @@ namespace Legion {
         if (task.regions[it->first].is_restricted())
         {
           output.premapped_instances.insert(*it);
+          runtime->acquire_instances(ctx, it->second);
           has_restricted_regions = true;
           continue;
         }
