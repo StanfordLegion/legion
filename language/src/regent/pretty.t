@@ -1012,7 +1012,11 @@ end
 function pretty.top_task_constraints(cx, node)
   if not node then return terralib.newlist() end
   return node:map(
-    function(constraint) return text.Line { value = tostring(constraint) } end)
+    function(constraint)
+      return join({tostring(constraint.lhs), tostring(constraint.op),
+                   tostring(constraint.rhs)},
+        true)
+    end)
 end
 
 function pretty.task_config_options(cx, node)
