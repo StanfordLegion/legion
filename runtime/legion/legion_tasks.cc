@@ -6619,45 +6619,23 @@ namespace Legion {
           }
           if (!has_overlapping_fields)
             continue;
+          // We definitely need to do the analysis, since we are a
+          // sub-region and have overlapping fields, get the parent
+          // context view if we haven't done so already
+          if (parent_context_view == NULL)
+          {
+            // Note that this recursion ensures that we handle nested
+            // virtual mappings correctly
+            SingleTask *parent_context = find_parent_context();
+            parent_context_view = 
+              parent_context->create_instance_top_view(manager, 
+                                                      runtime->address_space);
+          }
           // Now we clone across for the given region requirement
-          // Nasty deadlock case: if the request came from a different node
-          // we have to defer this because we are in the view virtual channel
-          // and we might invoke the update virtual channel, but we already
-          // know it's possible for the update channel to block waiting on
-          // the view virtual channel (paging views), so to avoid the cycle
-          // we have to launch a meta-task and record when it is done
-          if (request_source != runtime->address_space)
-          {
-            DeferredViewConversionArgs args;
-            args.hlr_id = HLR_DEFER_VIEW_CONVERSION_TASK_ID;
-            args.proxy_this = this;
-            args.idx = idx;
-            args.manager = manager;
-            args.result = result;
-            RtEvent done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_DEFER_VIEW_CONVERSION_TASK_ID, HLR_LATENCY_PRIORITY, this);
-            trigger_preconditions.insert(done);
-          }
-          else
-          {
-            // The non-deferred path
-            // We definitely need to do the analysis, since we are a
-            // sub-region and have overlapping fields, get the parent
-            // context view if we haven't done so already
-            if (parent_context_view == NULL)
-            {
-              // Note that this recursion ensures that we handle nested
-              // virtual mappings correctly
-              SingleTask *parent_context = find_parent_context();
-              parent_context_view = 
-                parent_context->create_instance_top_view(manager, 
-                                                        runtime->address_space);
-            }
-            VersionInfo &info = get_version_info(idx); 
-            runtime->forest->convert_views_into_context(regions[idx], this, idx,
-                       info, parent_context_view, result, get_task_completion(),
-                       path, map_applied_conditions);
-          }
+          VersionInfo &info = get_version_info(idx); 
+          runtime->forest->convert_views_into_context(regions[idx], this, idx,
+                     info, parent_context_view, result, get_task_completion(),
+                     path, map_applied_conditions);
         }
       }
       // Record the result and trigger any user event to signal that the
@@ -6691,34 +6669,6 @@ namespace Legion {
       else if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::perform_deferred_view_conversion(
-                                         const DeferredViewConversionArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask *parent_context = find_parent_context();
-      InstanceView *parent_context_view = 
-        parent_context->create_instance_top_view(args->manager,
-                                                 runtime->address_space);
-      const LogicalRegion &handle = args->manager->region_node->handle;
-      std::vector<ColorPoint> path;
-      runtime->forest->compute_index_path(handle.get_index_space(), 
-                            regions[args->idx].region.get_index_space(), path);
-      VersionInfo &info = get_version_info(args->idx);
-      runtime->forest->convert_views_into_context(regions[args->idx], this, 
-                       args->idx, info, parent_context_view, args->result, 
-                       get_task_completion(), path, map_applied_conditions);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void SingleTask::handle_defer_view_conversion(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredViewConversionArgs *cargs = 
-        (const DeferredViewConversionArgs*)args;
-      cargs->proxy_this->perform_deferred_view_conversion(cargs);
     }
 
     //--------------------------------------------------------------------------
@@ -6873,18 +6823,41 @@ namespace Legion {
 #else
       PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
 #endif
-      RtEvent ready_event;
-      InstanceView *result = context->create_instance_top_view(manager, 
-                                                  source, &ready_event);
+      // Nasty deadlock case: if the request came from a different node
+      // we have to defer this because we are in the view virtual channel
+      // and we might invoke the update virtual channel, but we already
+      // know it's possible for the update channel to block waiting on
+      // the view virtual channel (paging views), so to avoid the cycle
+      // we have to launch a meta-task and record when it is done
+      RemoteCreateViewArgs args;
+      args.hlr_id = HLR_REMOTE_VIEW_CREATION_TASK_ID;
+      args.proxy_this = context;
+      args.manager = manager;
+      args.target = target;
+      args.to_trigger = to_trigger;
+      args.source = source;
+      runtime->issue_runtime_meta_task(&args, sizeof(args), 
+          HLR_REMOTE_VIEW_CREATION_TASK_ID, HLR_LATENCY_PRIORITY, context);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::handle_remote_view_creation(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const RemoteCreateViewArgs *rargs = (const RemoteCreateViewArgs*)args;
+      
+      InstanceView *result = rargs->proxy_this->create_instance_top_view(
+                                                 rargs->manager, rargs->source);
+      // Now we can send the response
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(result->did);
-        rez.serialize(target);
-        rez.serialize(to_trigger);
-        rez.serialize(ready_event);
+        rez.serialize(rargs->target);
+        rez.serialize(rargs->to_trigger);
       }
-      runtime->send_create_top_view_response(source, rez);
+      rargs->proxy_this->runtime->send_create_top_view_response(rargs->source, 
+                                                                rez);
     }
 
     //--------------------------------------------------------------------------
@@ -6899,28 +6872,15 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      RtEvent remote_ready;
-      derez.deserialize(remote_ready);
       RtEvent ready;
       LogicalView *view = 
         runtime->find_or_request_logical_view(result_did, ready);
       // Have to static cast since it might not be ready
       *target = static_cast<InstanceView*>(view);
       if (ready.exists())
-      {
-        if (remote_ready.exists())
-          Runtime::trigger_event(to_trigger,
-              Runtime::merge_events(ready, remote_ready));
-        else
-          Runtime::trigger_event(to_trigger, ready);
-      }
+        Runtime::trigger_event(to_trigger, ready);
       else
-      {
-        if (remote_ready.exists())
-          Runtime::trigger_event(to_trigger, remote_ready);
-        else
-          Runtime::trigger_event(to_trigger);
-      }
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------

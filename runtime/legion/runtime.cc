@@ -20511,9 +20511,9 @@ namespace Legion {
             RestrictInfo::handle_deferred_reference(args);
             break;
           }
-        case HLR_DEFER_VIEW_CONVERSION_TASK_ID:
+        case HLR_REMOTE_VIEW_CREATION_TASK_ID:
           {
-            SingleTask::handle_defer_view_conversion(args);
+            SingleTask::handle_remote_view_creation(args);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
