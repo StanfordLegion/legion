@@ -198,50 +198,7 @@ namespace Legion {
       bool packed;
       void *packed_buffer;
       size_t packed_size;
-    };
-
-    /**
-     * \class RestrictInfo
-     * A class for tracking mapping restrictions based 
-     * on region usage.
-     */
-    class RestrictInfo {
-    public:
-      struct DeferRestrictedManagerArgs {
-      public:
-        HLRTaskID hlr_id;
-        InstanceManager *manager;
-      };
-    public:
-      RestrictInfo(void);
-      RestrictInfo(const RestrictInfo &rhs); 
-      ~RestrictInfo(void);
-    public:
-      RestrictInfo& operator=(const RestrictInfo &rhs);
-    public:
-      inline bool has_restrictions(void) const { return !restrictions.empty(); }
-    public:
-      void record_restriction(InstanceManager *inst, const FieldMask &mask);
-      void populate_restrict_fields(FieldMask &to_fill) const;
-      void clear(void);
-      void get_instances(InstanceSet &instances) const;
-    public:
-      void pack_info(Serializer &rez);
-      void unpack_info(Deserializer &derez, Runtime *runtime,
-                       std::set<RtEvent> &ready_events);
-      static void handle_deferred_reference(const void *args);
-    protected:
-      // We only need garbage collection references on these
-      // instances because we know one of two things is always
-      // true: either they are attached files so they aren't 
-      // subject to memories in which garbage collection will
-      // occur, or they are simultaneous restricted, so that
-      // enclosing context of the parent task has a valid 
-      // reference to them so there is no need for us to 
-      // have a valid reference.
-      // // Same in Restriction
-      LegionMap<InstanceManager*,FieldMask>::aligned restrictions;
-    };
+    }; 
 
     /**
      * \class Restriction
@@ -388,7 +345,7 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
-                    const RegionRequirement &req, VersionInfo &version_info, 
+                    const RegionRequirement &req, VersionInfo &version_info,
                     const FieldMask &traversal_mask, 
                     std::set<RtEvent> &map_applied_events);
     public:
@@ -1390,6 +1347,52 @@ namespace Legion {
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
+     * \class RestrictInfo
+     * A class for tracking mapping restrictions based 
+     * on region usage.
+     */
+    class RestrictInfo {
+    public:
+      struct DeferRestrictedManagerArgs {
+      public:
+        HLRTaskID hlr_id;
+        InstanceManager *manager;
+      };
+    public:
+      RestrictInfo(void);
+      RestrictInfo(const RestrictInfo &rhs); 
+      ~RestrictInfo(void);
+    public:
+      RestrictInfo& operator=(const RestrictInfo &rhs);
+    public:
+      inline bool has_restrictions(void) const 
+        { return !restrictions.empty(); }
+    public:
+      void record_restriction(InstanceManager *inst, const FieldMask &mask);
+      void populate_restrict_fields(FieldMask &to_fill) const;
+      void clear(void);
+      const InstanceSet& get_instances(void);
+    public:
+      void pack_info(Serializer &rez);
+      void unpack_info(Deserializer &derez, Runtime *runtime,
+                       std::set<RtEvent> &ready_events);
+      static void handle_deferred_reference(const void *args);
+    protected:
+      // We only need garbage collection references on these
+      // instances because we know one of two things is always
+      // true: either they are attached files so they aren't 
+      // subject to memories in which garbage collection will
+      // occur, or they are simultaneous restricted, so that
+      // enclosing context of the parent task has a valid 
+      // reference to them so there is no need for us to 
+      // have a valid reference.
+      // // Same in Restriction
+      LegionMap<InstanceManager*,FieldMask>::aligned restrictions;
+    protected:
+      InstanceSet restricted_instances;
     };
 
   }; // namespace Internal 

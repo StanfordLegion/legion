@@ -104,6 +104,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -318,6 +319,14 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *op;
       };
+      struct DeferredViewConversionArgs {
+      public:
+        HLRTaskID hlr_id;
+        SingleTask *proxy_this;
+        unsigned idx;
+        PhysicalManager *manager;
+        InstanceView *result;
+      };
       struct PostEndArgs {
       public:
         HLRTaskID hlr_id;
@@ -519,7 +528,7 @@ namespace Legion {
       void release_restrictions(void);
       inline bool has_restrictions(void) const 
         { return !coherence_restrictions.empty(); }
-      bool perform_restricted_analysis(const RegionRequirement &req, 
+      void perform_restricted_analysis(const RegionRequirement &req, 
                                        RestrictInfo &restrict_info);
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -549,7 +558,7 @@ namespace Legion {
       void invalidate_region_tree_contexts(void);
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                             AddressSpaceID source); 
+                         AddressSpaceID source, RtEvent *ready = NULL); 
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
       void convert_virtual_instance_top_views(
@@ -558,6 +567,9 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
+      void perform_deferred_view_conversion(
+                             const DeferredViewConversionArgs *args);
+      static void handle_defer_view_conversion(const void *args);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
@@ -761,6 +773,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
@@ -861,6 +874,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -973,6 +987,7 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
       virtual bool is_inline_task(void) const;
     public:

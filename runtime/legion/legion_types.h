@@ -277,6 +277,7 @@ namespace Legion {
       HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
+      HLR_DEFER_VIEW_CONVERSION_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -346,6 +347,7 @@ namespace Legion {
         "Update View References for Version State",               \
         "Deferred Remove Version State Valid Ref",                \
         "Deferred Restricted Manager GC Ref",                     \
+        "Deferred View Conversion",                               \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \

@@ -279,7 +279,7 @@ namespace Legion {
                            InstanceManager *inst, const RegionRequirement &req);
       bool remove_restriction(std::list<Restriction*> &restrictions,
                               DetachOp *op, const RegionRequirement &req);
-      bool perform_restricted_analysis(
+      void perform_restricted_analysis(
                               const std::list<Restriction*> &restrictions,
                               const RegionRequirement &req, 
                               RestrictInfo &restrict_info);
@@ -301,6 +301,7 @@ namespace Legion {
                                  RegionTreePath &path,
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
+                                 RestrictInfo &restrict_info,
                                  Operation *op, unsigned index,
                                  ApEvent term_event, 
                                  bool defer_add_users,
@@ -327,6 +328,7 @@ namespace Legion {
       void physical_register_only(RegionTreeContext ctx,
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
+                                  RestrictInfo &restrict_info,
                                   Operation *op, unsigned index,
                                   ApEvent term_event,
                                   bool defer_add_users,
@@ -341,7 +343,9 @@ namespace Legion {
       void physical_register_users(Operation *op, ApEvent term_event,
                    const std::vector<RegionRequirement> &regions,
                    const std::vector<bool> &to_skip,
-                   const std::vector<VersionInfo> &version_infos,
+                   std::vector<VersionInfo> &version_infos,
+                   std::vector<RestrictInfo> &restrict_infos,
+                   const std::vector<RegionTreeContext> &contexts,
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events);
       ApEvent physical_perform_close(RegionTreeContext ctx,
@@ -1449,6 +1453,15 @@ namespace Legion {
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
+      // Helper methods for doing copy/reduce-out for restricted coherence
+      void issue_restricted_copies(const TraversalInfo &info,
+         const InstanceSet &restricted_instances,
+         const std::vector<MaterializedView*> &restricted_views,
+         const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views);
+      void issue_restricted_reductions(const TraversalInfo &info,
+         const InstanceSet &restricted_instances,
+         const std::vector<MaterializedView*> &restricted_views,
+         const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
@@ -1726,7 +1739,8 @@ namespace Legion {
                                        const FieldMask &virtual_mask,
                                        VersionInfo &version_info,
                                        SingleTask *target_ctx);
-      void register_region(const TraversalInfo &info, ApEvent term_event,
+      void register_region(const TraversalInfo &info, 
+                           RestrictInfo &restrict_info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
                            InstanceSet &targets);
       void register_virtual(ContextID ctx, const InstanceRef &ref,
