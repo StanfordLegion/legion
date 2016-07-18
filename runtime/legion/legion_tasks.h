@@ -319,13 +319,14 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *op;
       };
-      struct DeferredViewConversionArgs {
+      struct RemoteCreateViewArgs {
       public:
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
-        unsigned idx;
         PhysicalManager *manager;
-        InstanceView *result;
+        InstanceView **target;
+        RtUserEvent to_trigger;
+        AddressSpaceID source;
       };
       struct PostEndArgs {
       public:
@@ -559,6 +560,7 @@ namespace Legion {
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
                          AddressSpaceID source, RtEvent *ready = NULL); 
+      static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
       void convert_virtual_instance_top_views(
@@ -567,9 +569,6 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
-      void perform_deferred_view_conversion(
-                             const DeferredViewConversionArgs *args);
-      static void handle_defer_view_conversion(const void *args);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
