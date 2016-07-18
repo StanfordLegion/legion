@@ -2588,17 +2588,23 @@ namespace Legion {
         }
       }
       // Also record the src preconditions
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+#ifdef DEBUG_LEGION
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      if (!src_fields.empty())
       {
-        if (int(idx) == src_composite_index)
-          continue;
-        copy_preconditions.insert(src_targets[idx].get_ready_event());
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+        {
+          if (int(idx) == src_composite_index)
+            continue;
+          copy_preconditions.insert(src_targets[idx].get_ready_event());
+        }
+        ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
+        ApEvent copy_post = dst_node->issue_copy(op, src_fields, 
+                                                 dst_fields, copy_pre);
+        if (copy_post.exists())
+          result_events.insert(copy_post);
       }
-      ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
-      ApEvent copy_post = dst_node->issue_copy(op, src_fields, 
-                                               dst_fields, copy_pre);
-      if (copy_post.exists())
-        result_events.insert(copy_post);
       // Return the merge of all the result events
       return Runtime::merge_events(result_events);
     }
