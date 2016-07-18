@@ -26,22 +26,6 @@ fspace point {
   output : double,
 }
 
-terra make_bloated_rect(rect : c.legion_rect_2d_t, radius : int)
-  return c.legion_rect_2d_t {
-    lo = c.legion_point_2d_t {
-      x = arrayof(c.coord_t, rect.lo.x[0] - radius, rect.lo.x[1] - radius) },
-    hi = c.legion_point_2d_t {
-      x = arrayof(c.coord_t, rect.hi.x[0] + radius, rect.hi.x[1] + radius) },
-  }
-end
-
-terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
-  return c.legion_rect_2d_t {
-    lo = lo:to_point(),
-    hi = hi:to_point(),
-  }
-end
-
 task make_tile_partition(points : region(ispace(int2d), point),
                          tiles : ispace(int2d),
                          n : int64, nt : int64)
@@ -49,9 +33,8 @@ task make_tile_partition(points : region(ispace(int2d), point),
   for i in tiles do
     var lo = int2d { x = i.x * n / nt, y = i.y * n / nt }
     var hi = int2d { x = (i.x + 1) * n / nt - 1, y = (i.y + 1) * n / nt - 1 }
-    var rect = to_rect(lo, hi)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+    var rect = rect2d { lo = lo, hi = hi }
+    c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -65,9 +48,8 @@ task make_interior_partition(points : region(ispace(int2d), point),
   for i in tiles do
     var lo = int2d { x = max(radius, i.x * n / nt), y = max(radius, i.y * n / nt) }
     var hi = int2d { x = min(n - radius, (i.x + 1) * n / nt) - 1, y = min(n - radius, (i.y + 1) * n / nt) - 1 }
-    var rect = to_rect(lo, hi)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+    var rect = rect2d { lo = lo, hi = hi }
+    c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -81,12 +63,10 @@ task make_bloated_partition(points : region(ispace(int2d), point),
   var coloring = c.legion_domain_point_coloring_create()
   for i in tiles do
     var pts = private[i]
-    var rect = c.legion_domain_get_rect_2d(
-      c.legion_index_space_get_domain(
-        __runtime(), (__raw(pts)).index_space))
-    var bloated = make_bloated_rect(rect, radius)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(bloated))
+    var rect = pts.bounds
+    var bloated = rect2d { lo = rect.lo - { x = radius, y = radius },
+                           hi = rect.hi + { x = radius, y = radius } }
+    c.legion_domain_point_coloring_color_domain(coloring, i, bloated)
   end
   var p = partition(aliased, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -117,7 +97,7 @@ local function make_stencil(radius)
   local task st(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
   where reads writes(private.output), reads(ghost.input) do
     for i in private do
-      private[i].output = ghost[i].input +
+      private[i].output = private[i].output +
         [make_stencil_pattern(ghost, i,  0, -1, radius)] +
         [make_stencil_pattern(ghost, i, -1,  0, radius)] +
         [make_stencil_pattern(ghost, i,  1,  0, radius)] +
@@ -140,7 +120,7 @@ end
 task check(points : region(ispace(int2d), point), tsteps : int64, init : int64)
 where reads(points.{input, output}) do
   var expect_in = init + tsteps
-  var expect_out = init + tsteps - 1
+  var expect_out = init
   for i in points do
     if points[i].input ~= expect_in then
       for i2 in points do
@@ -160,10 +140,13 @@ where reads(points.{input, output}) do
 end
 
 task main()
-  var n : int64 = 12
+  var nbloated : int64 = 12 -- Grid size along each dimension, including border.
   var nt : int64 = 4
   var tsteps : int64 = 10
   var init : int64 = 1000
+
+  var n = nbloated -- Continue to use bloated grid size below.
+  regentlib.assert(n >= nt, "grid too small")
 
   var radius : int64 = RADIUS
   var grid = ispace(int2d, { x = n, y = n })

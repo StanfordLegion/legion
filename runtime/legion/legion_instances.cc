@@ -539,6 +539,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::log_instance_creation(UniqueID creator_id,
+                Processor proc, const std::vector<LogicalRegion> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(Runtime::legion_spy_enabled);
+#endif
+      LegionSpy::log_physical_instance_creator(instance.id, creator_id,proc.id);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        LegionSpy::log_physical_instance_creation_region(instance.id, 
+                                                         regions[idx]);
+      const LayoutConstraints *constraints = layout->constraints;
+      LegionSpy::log_instance_specialized_constraint(instance.id,
+          constraints->specialized_constraint.kind, 
+          constraints->specialized_constraint.redop);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(constraints->memory_constraint.has_kind);
+#endif
+      LegionSpy::log_instance_memory_constraint(instance.id,
+          constraints->memory_constraint.kind);
+      LegionSpy::log_instance_field_constraint(instance.id,
+          constraints->field_constraint.contiguous, 
+          constraints->field_constraint.inorder,
+          constraints->field_constraint.field_set.size());
+      for (std::vector<FieldID>::const_iterator it = 
+            constraints->field_constraint.field_set.begin(); it !=
+            constraints->field_constraint.field_set.end(); it++)
+        LegionSpy::log_instance_field_constraint_field(instance.id, *it);
+      LegionSpy::log_instance_ordering_constraint(instance.id,
+          constraints->ordering_constraint.contiguous,
+          constraints->ordering_constraint.ordering.size());
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraints->ordering_constraint.ordering.begin(); it !=
+            constraints->ordering_constraint.ordering.end(); it++)
+        LegionSpy::log_instance_ordering_constraint_dimension(instance.id, *it);
+      for (std::vector<SplittingConstraint>::const_iterator it = 
+            constraints->splitting_constraints.begin(); it !=
+            constraints->splitting_constraints.end(); it++)
+        LegionSpy::log_instance_splitting_constraint(instance.id,
+                                it->kind, it->value, it->chunks);
+      for (std::vector<DimensionConstraint>::const_iterator it = 
+            constraints->dimension_constraints.begin(); it !=
+            constraints->dimension_constraints.end(); it++)
+        LegionSpy::log_instance_dimension_constraint(instance.id,
+                                    it->kind, it->eqk, it->value);
+      for (std::vector<AlignmentConstraint>::const_iterator it = 
+            constraints->alignment_constraints.begin(); it !=
+            constraints->alignment_constraints.end(); it++)
+        LegionSpy::log_instance_alignment_constraint(instance.id,
+                                it->fid, it->eqk, it->alignment);
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            constraints->offset_constraints.begin(); it != 
+            constraints->offset_constraints.end(); it++)
+        LegionSpy::log_instance_offset_constraint(instance.id,
+                                          it->fid, it->offset);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -862,7 +920,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      log_garbage.info("Deleting physical instance " IDFMT " in memory " 
+      log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
@@ -922,12 +980,10 @@ namespace Legion {
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
                                      RtUserEvent destruction_event, 
-                                     bool register_now, ApEvent u_event, 
-                                     InstanceFlag flags/*=NO_INSTANCE_FLAGS*/)
+                                     bool register_now, ApEvent u_event) 
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
-                        own, destruction_event, register_now),
-        use_event(u_event), instance_flags(flags)
+                        own, destruction_event, register_now),use_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1157,7 +1213,6 @@ namespace Legion {
         rez.serialize(instance_domain);
         rez.serialize(region_node->handle);
         rez.serialize(use_event);
-        rez.serialize(instance_flags);
         rez.serialize(destroy_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
@@ -1186,8 +1241,6 @@ namespace Legion {
       derez.deserialize(handle);
       ApEvent use_event;
       derez.deserialize(use_event);
-      InstanceFlag flags;
-      derez.deserialize(flags);
       RtUserEvent destroy_event;
       derez.deserialize(destroy_event);
       RegionNode *target_node = runtime->forest->get_node(handle);
@@ -1205,14 +1258,13 @@ namespace Legion {
                                              memory, inst, inst_domain, 
                                              false/*owns*/, target_node, layout,
                                              pointer_constraint, destroy_event,
-                                             false/*reg now*/, use_event,flags);
+                                             false/*reg now*/, use_event);
       else
         man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
                                     runtime->address_space, memory, inst,
                                     inst_domain, false/*owns*/,
                                     target_node, layout, pointer_constraint, 
-                                    destroy_event, false/*reg now*/, 
-                                    use_event, flags);
+                                    destroy_event, false/*reg now*/, use_event);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1221,7 +1273,7 @@ namespace Legion {
     bool InstanceManager::is_attached_file(void) const
     //--------------------------------------------------------------------------
     {
-      return (instance_flags & ATTACH_FILE_FLAG);
+      return layout->constraints->specialized_constraint.is_file();
     }
 
     /////////////////////////////////////////////////////////////

@@ -409,6 +409,7 @@ namespace Legion {
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
+      unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -634,6 +635,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -648,6 +650,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
+      RestrictInfo restrict_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
@@ -707,6 +710,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
@@ -726,6 +730,8 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
+      std::vector<RestrictInfo>   src_restrict_infos;
+      std::vector<RestrictInfo>   dst_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -890,6 +896,7 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       void activate_close(void);
@@ -987,7 +994,6 @@ namespace Legion {
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
-                      const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
@@ -1172,6 +1178,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1184,6 +1191,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1238,6 +1246,7 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1250,6 +1259,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -2032,6 +2042,7 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
+      InstanceManager *file_instance;
     };
 
     /**

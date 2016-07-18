@@ -48,15 +48,15 @@ namespace Legion {
       MEMORY_MANAGER_REF = 9,
       COMPOSITE_NODE_REF = 10,
       COMPOSITE_HANDLE_REF = 11,
-      PERSISTENCE_REF = 12,
       REMOTE_CREATE_REF = 13,
       INSTANCE_MAPPER_REF = 14,
       APPLICATION_REF = 15,
       MAPPING_ACQUIRE_REF = 16,
       NEVER_GC_REF = 17,
       CONTEXT_REF = 18,
-      LEVEL_INFO_REF = 19,
-      LAST_SOURCE_REF = 20,
+      RESTRICTED_REF = 19,
+      LEVEL_INFO_REF = 20,
+      LAST_SOURCE_REF = 21,
     };
 
     enum ReferenceKind {
@@ -79,7 +79,6 @@ namespace Legion {
       "Memory Manager Reference",                   \
       "Composite Node Reference",                   \
       "Composite Handle Reference",                 \
-      "Persistent Reference",                       \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \
       "Application Reference",                      \
@@ -87,6 +86,7 @@ namespace Legion {
       "Never GC Reference",                         \
       "Level Info Reference",                       \
       "Context Reference",                          \
+      "Restricted Reference",                       \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;

@@ -280,6 +280,9 @@ namespace Legion {
       HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
       HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
       HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID,
+      HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
+      HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
+      HLR_REMOTE_VIEW_CREATION_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -348,6 +351,9 @@ namespace Legion {
         "Deferred Mapper Message",                                \
         "Update View References for Version State",               \
         "Deferred Remove Version Number Valid Ref",               \
+        "Deferred Remove Version State Valid Ref",                \
+        "Deferred Restricted Manager GC Ref",                     \
+        "Remote View Creation",                                   \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
@@ -1142,7 +1148,6 @@ namespace Legion {
     class PhysicalTraverser;
     class PremapTraverser;
     class MappingTraverser;
-    class RestrictInfo;
 
     class CurrentState;
     class PhysicalState;
@@ -1151,6 +1156,8 @@ namespace Legion {
     class AggregateVersion;
     class VersionInfo;
     class RestrictInfo;
+    class Restriction;
+    class Acquisition;
 
     class Collectable;
     class Notifiable;

@@ -26,7 +26,6 @@ branches:
     - stable
     - master
 before_install:
-  - git submodule update --init
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
@@ -57,29 +56,29 @@ script:
   - |
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
-    tutorial/00_hello_world/hello_world
+    tutorial/00_hello_world/hello_world -logfile out_%.log
     make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
-    tutorial/01_tasks_and_futures/tasks_and_futures
+    tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
     make -s -C tutorial/02_index_tasks LG_RT_DIR=../../runtime
-    tutorial/02_index_tasks/index_tasks
+    tutorial/02_index_tasks/index_tasks -logfile out_%.log
     make -s -C tutorial/03_global_vars LG_RT_DIR=../../runtime
-    tutorial/03_global_vars/global_vars
+    tutorial/03_global_vars/global_vars -logfile out_%.log
     make -s -C tutorial/04_logical_regions LG_RT_DIR=../../runtime
-    tutorial/04_logical_regions/logical_regions
+    tutorial/04_logical_regions/logical_regions -logfile out_%.log
     make -s -C tutorial/05_physical_regions LG_RT_DIR=../../runtime
-    tutorial/05_physical_regions/physical_regions
+    tutorial/05_physical_regions/physical_regions -logfile out_%.log
     make -s -C tutorial/06_privileges LG_RT_DIR=../../runtime
-    tutorial/06_privileges/privileges
+    tutorial/06_privileges/privileges -logfile out_%.log
     make -s -C tutorial/07_partitioning LG_RT_DIR=../../runtime
-    tutorial/07_partitioning/partitioning
+    tutorial/07_partitioning/partitioning -logfile out_%.log
     make -s -C tutorial/08_multiple_partitions LG_RT_DIR=../../runtime
-    tutorial/08_multiple_partitions/multiple_partitions
+    tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
     make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
-    tutorial/09_custom_mapper/custom_mapper
+    tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
     make -s -C examples/full_circuit LG_RT_DIR=../../runtime
-    examples/full_circuit/ckt_sim
+    examples/full_circuit/ckt_sim -logfile out_%.log
     make -s -C examples/full_ghost LG_RT_DIR=../../runtime
-    examples/full_ghost/ghost -ll:cpu 4
+    examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
   - |
     if [[ "$DEBUG" -eq 0 ]]; then
       make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean

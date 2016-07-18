@@ -670,19 +670,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      Serializer rez;
-      {
-        rez.serialize(did);
-        RezCheck z(rez);
-        rez.serialize(result_size);
-        rez.serialize(result,result_size);
-      }
       // Need to hold the lock when reading the set of remote spaces
       AutoLock gc(gc_lock,1,false/*exclusive*/);
-      for (std::set<AddressSpaceID>::const_iterator it = 
-            registered_waiters.begin(); it != registered_waiters.end(); it++)
+      if (!registered_waiters.empty())
       {
-        runtime->send_future_result(*it, rez); 
+        Serializer rez;
+        {
+          rez.serialize(did);
+          RezCheck z(rez);
+          rez.serialize(result_size);
+          rez.serialize(result,result_size);
+        }
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              registered_waiters.begin(); it != registered_waiters.end(); it++)
+        {
+          runtime->send_future_result(*it, rez); 
+        }
       }
     }
 
@@ -2483,6 +2486,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2535,6 +2540,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2604,6 +2611,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // We're definitely going to succeed one way or another
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -2684,6 +2693,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // If we make it here we're definitely going to succeed
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -8345,10 +8356,12 @@ namespace Legion {
       Domain parent_dom = forest->get_index_space_domain(parent);
       const size_t num_elmts = 
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
       {
-        Realm::ElementMask child_mask(num_elmts);
+        Realm::ElementMask child_mask(num_elmts, first_element);
         const ColoredPoints<ptr_t> &pcoloring = it->second;
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
@@ -12998,6 +13011,8 @@ namespace Legion {
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
+      if (legion_spy_enabled)
+        args.tunable_index = ctx->get_tunable_index();
       args.task = ctx;
       args.result = result;
       issue_runtime_meta_task(&args, sizeof(args),
@@ -13012,7 +13027,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Future f = select_tunable_value(ctx, tid, mid, tag);
-      return f.get_result<int>();
+      int result = f.get_result<int>();
+      if (legion_spy_enabled)
+      {
+        unsigned index = ctx->get_tunable_index();
+        LegionSpy::log_tunable_value(ctx->get_unique_op_id(), index,
+                                     &result, sizeof(result));
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -13029,6 +13051,9 @@ namespace Legion {
       output.value = NULL;
       output.size = 0;
       mapper->invoke_select_tunable_value(args->task, &input, &output);
+      if (legion_spy_enabled)
+        LegionSpy::log_tunable_value(args->task->get_unique_op_id(), 
+            args->tunable_index, output.value, output.size);
       // Set and complete the future
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, true/*own*/);
@@ -13329,7 +13354,7 @@ namespace Legion {
       if (need_zero_check && (pid == 0))
       {
         log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
@@ -13344,7 +13369,7 @@ namespace Legion {
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
@@ -13369,7 +13394,7 @@ namespace Legion {
       if (pid == 0)
       {
         log_run.error("ERROR: ProjectionID zero is reserved.\n");
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
@@ -13382,7 +13407,7 @@ namespace Legion {
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
-#ifdef DEBUG_HIGH_LEVEl
+#ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_PROJECTION_ID);
@@ -13927,13 +13952,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::process_mapper_message(Processor target, MapperID map_id,
-                     Processor source, const void *message, size_t message_size)
+                                     Processor source, const void *message,
+                                     size_t message_size, unsigned message_kind)
     //--------------------------------------------------------------------------
     {
       if (is_local(target))
       {
         Mapper::MapperMessage message_args;
         message_args.sender = source;
+        message_args.kind = message_kind;
         message_args.message = message;
         message_args.size = message_size;
         message_args.broadcast = false;
@@ -13948,6 +13975,7 @@ namespace Legion {
           rez.serialize(target);
           rez.serialize(map_id);
           rez.serialize(source);
+          rez.serialize(message_kind);
           rez.serialize(message_size);
           rez.serialize(message, message_size);
         }
@@ -13957,7 +13985,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::process_mapper_broadcast(MapperID map_id, Processor source, 
-                 const void *message, size_t message_size, int radix, int index)
+                                    const void *message, size_t message_size, 
+                                    unsigned message_kind, int radix, int index)
     //--------------------------------------------------------------------------
     {
       // First forward the message onto any remote nodes
@@ -13977,6 +14006,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(map_id);
           rez.serialize(source);
+          rez.serialize(message_kind);
           rez.serialize(radix);
           rez.serialize(offset);
           rez.serialize(message_size);
@@ -13993,6 +14023,7 @@ namespace Legion {
       }
       Mapper::MapperMessage message_args;
       message_args.sender = source;
+      message_args.kind = message_kind;
       message_args.message = message;
       message_args.size = message_size;
       message_args.broadcast = true;
@@ -15583,11 +15614,14 @@ namespace Legion {
       derez.deserialize(map_id);
       Processor source;
       derez.deserialize(source);
+      unsigned message_kind;
+      derez.deserialize(message_kind);
       size_t message_size;
       derez.deserialize(message_size);
       const void *message = derez.get_current_pointer();
       derez.advance_pointer(message_size);
-      process_mapper_message(target, map_id, source, message, message_size);
+      process_mapper_message(target, map_id, source, message, 
+                             message_size, message_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -15599,6 +15633,8 @@ namespace Legion {
       derez.deserialize(map_id);
       Processor source;
       derez.deserialize(source);
+      unsigned message_kind;
+      derez.deserialize(message_kind);
       int radix;
       derez.deserialize(radix);
       int index;
@@ -15608,7 +15644,7 @@ namespace Legion {
       const void *message = derez.get_current_pointer();
       derez.advance_pointer(message_size);
       process_mapper_broadcast(map_id, source, message, 
-                               message_size, radix, index);
+                               message_size, message_kind, radix, index);
     }
 
     //--------------------------------------------------------------------------
@@ -17953,6 +17989,38 @@ namespace Legion {
       AutoLock ctx_lock(context_lock);
       available_contexts.push_back(context);
       // Remove use from the set of contexts
+      std::map<UniqueID,SingleTask*>::iterator finder = 
+        local_contexts.find(context_uid);
+#ifdef DEBUG_LEGION
+      assert(finder != local_contexts.end());
+#endif
+      local_contexts.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_temporary_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(local_contexts.find(context_uid) == local_contexts.end());
+#endif
+      local_contexts[context_uid] = task;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_temporary_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
       std::map<UniqueID,SingleTask*>::iterator finder = 
         local_contexts.find(context_uid);
 #ifdef DEBUG_LEGION
@@ -20612,6 +20680,16 @@ namespace Legion {
         case HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID:
           {
             VersionNumber::process_remove_version_number_ref(args);
+            break;
+          }
+        case HLR_DEFER_RESTRICTED_MANAGER_TASK_ID:
+          {
+            RestrictInfo::handle_deferred_reference(args);
+            break;
+          }
+        case HLR_REMOTE_VIEW_CREATION_TASK_ID:
+          {
+            SingleTask::handle_remote_view_creation(args);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:

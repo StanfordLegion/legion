@@ -526,6 +526,10 @@ function std.is_index_type(t)
   return terralib.types.istype(t) and rawget(t, "is_index_type")
 end
 
+function std.is_rect_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_rect_type")
+end
+
 function std.is_ispace(t)
   return terralib.types.istype(t) and rawget(t, "is_ispace")
 end
@@ -949,6 +953,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
     mapping = {}
   end
 
+  local need_cast = terralib.newlist()
   for i, param in ipairs(params) do
     local arg = args[i]
     local param_type = param:gettype()
@@ -963,6 +968,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] == arg_type
     then
       -- Ok
+      need_cast[i] = false
     elseif type_compatible(param_type, arg_type) then
       -- Regions (and other unique types) require a special pass here 
 
@@ -993,14 +999,17 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
+      need_cast[i] = false
     elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
       log.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
                   " but got " .. tostring(arg_type))
+    else
+      need_cast[i] = not std.type_eq(arg_type, param_type, mapping)
     end
   end
-  return reconstruct_return_as_arg_type(return_type, mapping)
+  return reconstruct_return_as_arg_type(return_type, mapping), need_cast
 end
 
 local function unpack_type(old_type, mapping)
@@ -1649,6 +1658,56 @@ end
 -- ## Types
 -- #################
 
+local metamethod_combinators = {
+  ["__add"] = function(a, b) return `([a] + [b]) end,
+  ["__sub"] = function(a, b) return `([a] - [b]) end,
+  ["__mul"] = function(a, b) return `([a] * [b]) end,
+  ["__div"] = function(a, b) return `([a] / [b]) end,
+  ["__mod"] = function(a, b) return `([a] % [b]) end,
+}
+
+local function generate_arithmetic_metamethod_body(ty, method, e1, e2)
+  local combinator = metamethod_combinators[method]
+  if ty:isprimitive() then
+    return combinator(e1, e2)
+  elseif ty:isstruct() then
+    if ty.metamethods[method] then
+      return combinator(e1, e2)
+    end
+    local entries = ty:getentries():map(function(entry)
+      return generate_arithmetic_metamethod_body(entry.type, method,
+                                                 `(e1.[entry.field]),
+                                                 `(e2.[entry.field]))
+    end)
+    return `([ty] { [entries] })
+  elseif ty:isarray() then
+    local entries = terralib.newlist()
+    for idx = 0, ty.N - 1 do
+      entries:insert(
+        generate_arithmetic_metamethod_body(ty.type, method,
+                                            `(e1[ [idx] ]),
+                                            `(e2[ [idx] ])))
+    end
+    return `(arrayof([ty.type], [entries]))
+  end
+  assert(false)
+end
+
+function std.generate_arithmetic_metamethod(ty, method)
+  local a = terralib.newsymbol(ty, "a")
+  local b = terralib.newsymbol(ty, "b")
+  local body = generate_arithmetic_metamethod_body(ty, method, a, b)
+  return terra([a], [b]) : ty return [body] end
+end
+
+function std.generate_arithmetic_metamethods(ty)
+  local methods = {}
+  for method, _ in pairs(metamethod_combinators) do
+    methods[method] = std.generate_arithmetic_metamethod(ty, method)
+  end
+  return methods
+end
+
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
 --
@@ -1772,8 +1831,9 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
-    return a + b
+  for method, _ in pairs(metamethod_combinators) do
+    st.metamethods[method] =
+      std.generate_arithmetic_metamethod(st.index_type, method)
   end
 
   terra st:to_point()
@@ -1859,6 +1919,42 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
+std.rect_type = terralib.memoize(function(index_type, displayname)
+  local st = terralib.types.newstruct(displayname or
+                                      "rect(" .. tostring(index_type) ..")")
+  assert(not index_type:is_opaque())
+  st.entries = terralib.newlist({
+      { "lo", index_type },
+      { "hi", index_type },
+  })
+
+  st.is_rect_type = true
+  st.index_type = index_type
+  st.dim = index_type.dim
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_rect_type(from) then
+      if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        local ty = to.entries[1].type
+        return `([to] { lo = [ty]([expr].lo),
+                        hi = [ty]([expr].hi) })
+      elseif std.type_eq(to, c.legion_domain_t) then
+        return `([expr]:to_domain())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain()
+    return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
+  end
+
+  terra st:size()
+    return self.hi - self.lo + [st.index_type:const(1)]
+  end
+
+  return st
+end)
 function std.index_type(base_type, displayname)
   local impl_type, dim, fields = validate_index_base_type(base_type)
 
@@ -1885,35 +1981,38 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = [expr] })
       end
     elseif std.is_index_type(from) then
-      if from:is_opaque() and std.validate_implicit_cast(int, to) then
-        return `([to]([expr].__ptr.value))
-      elseif not from:is_opaque() and std.validate_implicit_cast(from.base_type, to) then
-        return `([to]([expr].__ptr))
+      if std.type_eq(to, c.legion_domain_point_t) then
+        return `([expr]:to_domain_point())
+      elseif from:is_opaque() then
+        if std.validate_implicit_cast(int, to) then
+          return `([to]([expr].__ptr.value))
+        end
+      else
+        assert(not from:is_opaque())
+        if std.type_eq(to, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+          return `([expr]:to_point())
+        elseif std.validate_implicit_cast(from.base_type, to) then
+          return `([to]([expr].__ptr))
+        end
       end
     end
     assert(false)
   end
 
-  if st:is_opaque() then
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
-    end
-  else
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = a.__ptr + b.__ptr }
-    end
-  end
-
-  function st:zero()
+  function st:const(v)
     assert(self.dim >= 1)
     local fields = self.fields
     local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
 
     if fields then
-      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return 0 end)] } })
+      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return v end)] } })
     else
-      return `(self({ __ptr = [self.impl_type](0) }))
+      return `(self({ __ptr = [self.impl_type](v) }))
     end
+  end
+
+  function st:zero()
+    return st:const(0)
   end
 
   local function make_point(expr)
@@ -1963,21 +2062,32 @@ function std.index_type(base_type, displayname)
     return [make_domain_point(self)]
   end
 
+  for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
+    st.metamethods[method_name] = method
+  end
+  if not st:is_opaque() then
+    st.metamethods.__mod = terralib.overloadedfunction(
+      "__mod", {
+        st.metamethods.__mod,
+        terra(a : st, b : std.rect_type(st)) : st
+          return (a + b:size()) % b:size()
+        end
+      })
+  end
+
   return setmetatable(st, index_type)
 end
 
 local struct __int2d { x : int, y : int }
-terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
-  return __int2d { x = a.x + b.x, y = a.y + b.y }
-end
 local struct __int3d { x : int, y : int, z : int }
-terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
-  return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
-end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
+
+std.rect1d = std.rect_type(std.int1d, "rect1d")
+std.rect2d = std.rect_type(std.int2d, "rect2d")
+std.rect3d = std.rect_type(std.int3d, "rect3d")
 
 local next_ispace_id = 1
 function std.ispace(index_type)
@@ -2296,7 +2406,8 @@ function std.cross_product(...)
     region_type = region_type or self:subregion_dynamic()
     assert(std.is_region(region_type))
     local region_symbol = std.newsymbol(region_type)
-    local partition = std.partition(self:partition(2).disjointness, region_symbol)
+    local partition = std.partition(self:partition(2).disjointness, region_symbol,
+                                    self:partition(2).colors_symbol)
     if #partition_symbols > 2 then
       local partition_symbol = std.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})
@@ -3376,10 +3487,10 @@ function std.setup(main_task, extra_setup_thunk)
   return main, names
 end
 
-function std.start(main_task)
+function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
-  local main = std.setup(main_task)
+  local main = std.setup(main_task, extra_setup_thunk)
 
   local args = std.args
   local argc = #args
@@ -3398,14 +3509,17 @@ function std.start(main_task)
   wrapper()
 end
 
-function std.saveobj(main_task, filename, filetype)
-  local main, names = std.setup(main_task)
+function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  local main, names = std.setup(main_task, extra_setup_thunk)
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
+  local flags = terralib.newlist()
+  if link_flags then flags:insertall(link_flags) end
+  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
   if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, filetype, names, flags)
   else
-    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, names, flags)
   end
 end
 
@@ -3496,4 +3610,3 @@ do
 end
 
 return std
-

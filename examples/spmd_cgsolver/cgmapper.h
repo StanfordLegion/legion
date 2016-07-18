@@ -1,11 +1,12 @@
 // mapper for SPMD CG solver
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
+using namespace Legion::Mapping;
 
-class CGMapper : public DefaultMapper {
+class CGMapper : public ShimMapper {
 public:
   CGMapper(Machine machine, HighLevelRuntime *rt, Processor local);
   virtual ~CGMapper(void);

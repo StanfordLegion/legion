@@ -283,9 +283,15 @@ namespace Legion {
                           const FinishMapperCallContinuationArgs *args);
     public:
       void send_message(MappingCallInfo *info, Processor target, 
-                        const void *message, size_t message_size);
+                        const void *message, size_t message_size, 
+                        unsigned message_kind);
       void broadcast(MappingCallInfo *info, const void *message, 
-                     size_t message_size, int radix);
+                     size_t message_size, unsigned message_kind, int radix);
+    public:
+      void pack_physical_instance(MappingCallInfo *info, Serializer &rez,
+                                  MappingInstance instance);
+      void unpack_physical_instance(MappingCallInfo *info, Deserializer &derez,
+                                    MappingInstance &instance);
     public:
       MapperEvent create_mapper_event(MappingCallInfo *ctx);
       bool has_mapper_event_triggered(MappingCallInfo *ctx, MapperEvent event);
@@ -444,6 +450,9 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
                                                       LogicalRegion parent, 
                                                       Color color);
+      LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
+                                                      LogicalRegion parent,
+                                                      const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(MappingCallInfo *info,
                                                      IndexPartition handle, 
                                            FieldSpace fspace, RegionTreeID tid);
@@ -453,6 +462,9 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
                                                    LogicalPartition parent, 
                                                    Color color);
+      LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
+                                                   LogicalPartition parent,
+                                                   const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(MappingCallInfo *info,
                                                   IndexSpace handle, 
                                           FieldSpace fspace, RegionTreeID tid);

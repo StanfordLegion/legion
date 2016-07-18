@@ -1602,7 +1602,7 @@ namespace Legion {
     public:
       AcquireLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1615,6 +1615,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1635,7 +1636,7 @@ namespace Legion {
     public:
       ReleaseLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1648,6 +1649,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1753,7 +1755,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Mappable(void);
     public:
+      // Return a globally unique ID for this operation
       virtual UniqueID get_unique_id(void) const = 0;
+      // Return the number of operations that came before
+      // this operation in the same context (close operations
+      // return number of previous close operations)
+      virtual unsigned get_context_index(void) const = 0;
+      // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
       MapperID                                  map_id;
@@ -1859,7 +1867,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1882,7 +1889,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;

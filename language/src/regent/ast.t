@@ -115,7 +115,7 @@ function ast_node:type()
   return self.node_type
 end
 
-function ast_node:fields()
+function ast_node:get_fields()
   local result = {}
   for k, v in pairs(self) do
     if k ~= "node_type" then
@@ -327,6 +327,22 @@ function ast.traverse_node_postorder(fn, node)
   elseif terralib.islist(node) then
     for _, child in ipairs(node) do
       ast.traverse_node_postorder(fn, child)
+    end
+  end
+end
+
+function ast.traverse_node_prepostorder(pre_fn, post_fn, node)
+  if ast.is_node(node) then
+    pre_fn(node)
+    for k, child in pairs(node) do
+      if k ~= "node_type" then
+        ast.traverse_node_prepostorder(pre_fn, post_fn, child)
+      end
+    end
+    post_fn(node)
+  elseif terralib.islist(node) then
+    for _, child in ipairs(node) do
+      ast.traverse_node_prepostorder(pre_fn, post_fn, child)
     end
   end
 end

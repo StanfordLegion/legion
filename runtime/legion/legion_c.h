@@ -89,6 +89,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_physical_instance_t);
   NEW_OPAQUE_TYPE(legion_mapper_runtime_t);
   NEW_OPAQUE_TYPE(legion_mapper_context_t);
+  NEW_OPAQUE_TYPE(legion_field_map_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -2277,6 +2278,10 @@ typedef long long int coord_t;
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
                                    legion_context_t ctx);
 
+  // -----------------------------------------------------------------------
+  // Fill Field Operations
+  // -----------------------------------------------------------------------
+
   /**
    * @see Legion::Runtime::fill_field()
    */
@@ -2303,6 +2308,51 @@ typedef long long int coord_t;
     legion_field_id_t fid,
     legion_future_t f,
     legion_predicate_t pred /* = legion_predicate_true() */);
+
+  // -----------------------------------------------------------------------
+  // File Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   */
+  legion_field_map_t
+  legion_field_map_create();
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   */
+  void
+  legion_field_map_destroy(legion_field_map_t handle);
+
+  void
+  legion_field_map_insert(legion_field_map_t handle,
+                          legion_field_id_t key,
+                          const char *value);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::attach_hdf5()
+   */
+  legion_physical_region_t
+  legion_runtime_attach_hdf5(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    const char *filename,
+    legion_logical_region_t handle,
+    legion_logical_region_t parent,
+    legion_field_map_t field_map,
+    legion_file_mode_t mode);
+
+  /**
+   * @see Legion::Runtime::detach_hdf5()
+   */
+  void
+  legion_runtime_detach_hdf5(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_physical_region_t region);
 
   // -----------------------------------------------------------------------
   // Copy Operations
