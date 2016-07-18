@@ -2974,16 +2974,18 @@ function type_check.stat_for_list(cx, node)
 end
 
 function type_check.stat_repeat(cx, node)
-  local until_cond = type_check.expr(cx, node.until_cond)
-  local until_cond_type = std.check_read(cx, until_cond)
+  local block_cx = cx:new_local_scope()
+  local block = type_check.block(cx, node.block)
+
+  local until_cond = type_check.expr(block_cx, node.until_cond)
+  local until_cond_type = std.check_read(block_cx, until_cond)
   if not std.validate_implicit_cast(until_cond_type, bool) then
     log.error(node.until_cond, "type mismatch: expected " .. tostring(bool) .. " but got " .. tostring(until_cond_type))
   end
   until_cond = insert_implicit_cast(until_cond, until_cond_type, bool)
 
-  local cx = cx:new_local_scope()
   return ast.typed.stat.Repeat {
-    block = type_check.block(cx, node.block),
+    block = block,
     until_cond = until_cond,
     annotations = node.annotations,
     span = node.span,

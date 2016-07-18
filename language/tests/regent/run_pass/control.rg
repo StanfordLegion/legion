@@ -55,8 +55,9 @@ task f() : int
   end
 
   repeat
-    x = x + 1
-  until true
+    var y = x + 1
+    x = y
+  until y > 0
 
   return x
 end

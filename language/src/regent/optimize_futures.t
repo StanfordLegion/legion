@@ -19,6 +19,7 @@
 -- directly rather than blocking in order to obtain a concrete value.
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local context = {}
@@ -1120,19 +1121,22 @@ end
 
 function optimize_futures.block(cx, node)
   return node {
-    stats = node.stats:map(
-      function(stat) return optimize_futures.stat(cx, stat) end),
+    stats = data.flatmap(
+      function(stat) return optimize_futures.stat(cx, stat) end,
+      node.stats),
   }
 end
 
 function optimize_futures.stat_if(cx, node)
-  return node {
-    cond = concretize(optimize_futures.expr(cx, node.cond)),
-    then_block = optimize_futures.block(cx, node.then_block),
-    elseif_blocks = node.elseif_blocks:map(
-      function(block) return optimize_futures.stat_elseif(cx, block) end),
-    else_block = optimize_futures.block(cx, node.else_block),
-  }
+  return terralib.newlist({
+    node {
+      cond = concretize(optimize_futures.expr(cx, node.cond)),
+      then_block = optimize_futures.block(cx, node.then_block),
+      elseif_blocks = node.elseif_blocks:map(
+        function(block) return optimize_futures.stat_elseif(cx, block) end),
+      else_block = optimize_futures.block(cx, node.else_block),
+    }
+  })
 end
 
 function optimize_futures.stat_elseif(cx, node)
@@ -1143,44 +1147,56 @@ function optimize_futures.stat_elseif(cx, node)
 end
 
 function optimize_futures.stat_while(cx, node)
-  return node {
-    cond = concretize(optimize_futures.expr(cx, node.cond)),
-    block = optimize_futures.block(cx, node.block),
-  }
+  return terralib.newlist({
+    node {
+      cond = concretize(optimize_futures.expr(cx, node.cond)),
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
 end
 
 function optimize_futures.stat_for_num(cx, node)
-  return node {
-    values = node.values:map(
-      function(value) return concretize(optimize_futures.expr(cx, value)) end),
-    block = optimize_futures.block(cx, node.block),
-  }
+  return terralib.newlist({
+    node {
+      values = node.values:map(
+        function(value) return concretize(optimize_futures.expr(cx, value)) end),
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
 end
 
 function optimize_futures.stat_for_list(cx, node)
-  return node {
-    value = concretize(optimize_futures.expr(cx, node.value)),
-    block = optimize_futures.block(cx, node.block),
-  }
+  return terralib.newlist({
+    node {
+      value = concretize(optimize_futures.expr(cx, node.value)),
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
 end
 
 function optimize_futures.stat_repeat(cx, node)
-  return node {
-    block = optimize_futures.block(cx, node.block),
-    until_cond = concretize(optimize_futures.expr(cx, node.until_cond)),
-  }
+  return terralib.newlist({
+    node {
+      block = optimize_futures.block(cx, node.block),
+      until_cond = concretize(optimize_futures.expr(cx, node.until_cond)),
+    }
+  })
 end
 
 function optimize_futures.stat_must_epoch(cx, node)
-  return node {
-    block = optimize_futures.block(cx, node.block),
-  }
+  return terralib.newlist({
+    node {
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
 end
 
 function optimize_futures.stat_block(cx, node)
-  return node {
-    block = optimize_futures.block(cx, node.block),
-  }
+  return terralib.newlist({
+    node {
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
 end
 
 function optimize_futures.stat_index_launch_num(cx, node)
@@ -1209,11 +1225,13 @@ function optimize_futures.stat_index_launch_num(cx, node)
     end
   end
 
-  return node {
-    values = values,
-    call = call,
-    reduce_lhs = reduce_lhs,
-  }
+  return terralib.newlist({
+    node {
+      values = values,
+      call = call,
+      reduce_lhs = reduce_lhs,
+    }
+  })
 end
 
 function optimize_futures.stat_index_launch_list(cx, node)
@@ -1241,14 +1259,18 @@ function optimize_futures.stat_index_launch_list(cx, node)
     end
   end
 
-  return node {
-    value = value,
-    call = call,
-    reduce_lhs = reduce_lhs,
-  }
+  return terralib.newlist({
+    node {
+      value = value,
+      call = call,
+      reduce_lhs = reduce_lhs,
+    }
+  })
 end
 
 function optimize_futures.stat_var(cx, node)
+  local stats = terralib.newlist()
+
   local symbols = terralib.newlist()
   local types = terralib.newlist()
   local values = terralib.newlist()
@@ -1275,30 +1297,54 @@ function optimize_futures.stat_var(cx, node)
       else
         new_value = concretize(optimize_futures.expr(cx, value))
       end
+    else
+      if cx:is_var_future(symbol) then
+        -- This is an uninitialized future. Create an empty value and
+        -- use it to initialize the future, otherwise future will hold
+        -- an uninitialized pointer.
+        local empty_symbol = std.newsymbol(value_type)
+        local empty_var = node {
+          symbols = terralib.newlist({empty_symbol}),
+          types = terralib.newlist({value_type}),
+          values = terralib.newlist(),
+        }
+        local empty_ref = ast.typed.expr.ID {
+          value = empty_symbol,
+          expr_type = std.rawref(&value_type),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        }
+
+        new_value = promote(empty_ref, new_type)
+        stats:insert(empty_var)
+      end
     end
     values[i] = new_value
   end
 
-  return node {
+  stats:insert(node {
     symbols = symbols,
     types = types,
     values = values,
-  }
+  })
+  return stats
 end
 
 function optimize_futures.stat_var_unpack(cx, node)
-  return node {
-    value = concretize(optimize_futures.expr(cx, node.value)),
-  }
+  return terralib.newlist({
+    node {
+      value = concretize(optimize_futures.expr(cx, node.value)),
+    }
+  })
 end
 
 function optimize_futures.stat_return(cx, node)
   local value = node.value and concretize(optimize_futures.expr(cx, node.value))
-  return node { value = value }
+  return terralib.newlist({node { value = value } })
 end
 
 function optimize_futures.stat_break(cx, node)
-  return node
+  return terralib.newlist({node})
 end
 
 function optimize_futures.stat_assignment(cx, node)
@@ -1317,10 +1363,12 @@ function optimize_futures.stat_assignment(cx, node)
     end
   end
 
-  return node {
-    lhs = lhs,
-    rhs = normalized_rhs,
-  }
+  return terralib.newlist({
+    node {
+      lhs = lhs,
+      rhs = normalized_rhs,
+    }
+  })
 end
 
 function optimize_futures.stat_reduce(cx, node)
@@ -1338,22 +1386,28 @@ function optimize_futures.stat_reduce(cx, node)
     end
   end
 
-  return node {
-    lhs = lhs,
-    rhs = normalized_rhs,
-  }
+  return terralib.newlist({
+    node {
+      lhs = lhs,
+      rhs = normalized_rhs,
+    }
+  })
 end
 
 function optimize_futures.stat_expr(cx, node)
-  return node {
-    expr = optimize_futures.expr(cx, node.expr),
-  }
+  return terralib.newlist({
+    node {
+      expr = optimize_futures.expr(cx, node.expr),
+    }
+  })
 end
 
 function optimize_futures.stat_raw_delete(cx, node)
-  return node {
-    value = optimize_futures.expr(cx, node.value),
-  }
+  return terralib.newlist({
+    node {
+      value = optimize_futures.expr(cx, node.value),
+    }
+  })
 end
 
 function optimize_futures.stat(cx, node)

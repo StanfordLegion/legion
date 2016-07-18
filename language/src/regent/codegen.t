@@ -74,6 +74,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point)
     ispaces = self.ispaces:new_local_scope(),
     regions = self.regions:new_local_scope(),
     lists_of_regions = self.lists_of_regions:new_local_scope(),
+    cleanup_items = terralib.newlist(),
   }, context)
 end
 
@@ -93,6 +94,7 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     ispaces = symbol_table.new_global_scope({}),
     regions = symbol_table.new_global_scope({}),
     lists_of_regions = symbol_table.new_global_scope({}),
+    cleanup_items = terralib.newlist(),
   }, context)
 end
 
@@ -387,6 +389,21 @@ function context:region_or_list(value_type)
   end
 end
 
+function context:add_cleanup_item(item)
+  assert(self.cleanup_items and item)
+  self.cleanup_items:insert(item)
+end
+
+function context:get_cleanup_items()
+  assert(self.cleanup_items)
+  local items = terralib.newlist()
+  -- Add cleanup items in reverse order.
+  for i = #self.cleanup_items, 1, -1 do
+    items:insert(self.cleanup_items[i])
+  end
+  return quote [items] end
+end
+
 local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
   assert(index_type and field_type and field_id and privilege and physical_region)
   local get_accessor = c.legion_physical_region_get_field_accessor_generic
@@ -488,6 +505,46 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
          end)]
     end
     return actions, base_pointer, strides
+  end
+end
+
+local function make_copy(cx, value, value_type)
+  value_type = std.as_read(value_type)
+  if std.is_future(value_type) then
+    return `([value_type]{ __result = c.legion_future_copy([value].__result) })
+
+  else
+    return value
+  end
+end
+
+local function make_cleanup_item(cx, value, value_type)
+  value_type = std.as_read(value_type)
+  if std.is_future(value_type) then
+    -- Futures are reference counted by the Legion runtime, so
+    -- deleting a reference is always ok. (If there are other live
+    -- references, they won't be invalidated.)
+    return quote
+      c.legion_future_destroy([value].__result)
+    end
+
+  -- FIXME: Currently, Regent leaks nearly everything. This is mostly
+  -- ok in a world where objects are allocated during program
+  -- initialization and used for the duration of the program. However,
+  -- objects with shorter lifetimes will accumulate and can
+  -- potentially cause issues.
+
+  -- WARNING: If you intend to add a cleanup for a new type, proceed
+  -- with caution. Some data types are reference counted by the Legion
+  -- runtime, others are not. Generally speaking, if a type is
+  -- reference counted, it is ok to destroy the value as soon as the
+  -- reference is no longer needed (this has no impact on other
+  -- references, if any). However, if a type is not reference counted,
+  -- you must ensure that there can be no other references to the
+  -- object, ever. Practically speaking, this means implementing an
+  -- escape analysis to determine the object's lifetime.
+  else
+    return quote end
   end
 end
 
@@ -1440,9 +1497,11 @@ end
 function rawref:write(cx, value)
   local value_expr = value:read(cx)
   local ref_expr = self:__ref(cx)
+  local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local actions = quote
     [value_expr.actions];
     [ref_expr.actions];
+    [cleanup];
     [ref_expr.value] = [value_expr.value]
   end
   return expr.just(actions, quote end)
@@ -5902,24 +5961,30 @@ function codegen.block(cx, node)
     function(stat) return codegen.stat(cx, stat) end)
 end
 
+local function cleanup_after(cx, block)
+  local result = terralib.newlist({quote [block] end})
+  result:insert(cx:get_cleanup_items())
+  return quote [result] end
+end
+
 function codegen.stat_if(cx, node)
   local clauses = terralib.newlist()
 
   -- Insert first clause in chain.
   local cond = codegen.expr(cx, node.cond):read(cx)
   local then_cx = cx:new_local_scope()
-  local then_block = codegen.block(then_cx, node.then_block)
+  local then_block = cleanup_after(then_cx, codegen.block(then_cx, node.then_block))
   clauses:insert({cond, then_block})
 
   -- Add rest of clauses.
   for _, elseif_block in ipairs(node.elseif_blocks) do
-    local cond = codegen.expr(cx, elseif_block.cond):read(cx)
+ cond = codegen.expr(cx, elseif_block.cond):read(cx)
     local elseif_cx = cx:new_local_scope()
-    local block = codegen.block(elseif_cx, elseif_block.block)
+    local block = cleanup_after(elseif_cx, codegen.block(elseif_cx, elseif_block.block))
     clauses:insert({cond, block})
   end
   local else_cx = cx:new_local_scope()
-  local else_block = codegen.block(else_cx, node.else_block)
+  local else_block = cleanup_after(else_cx, codegen.block(else_cx, node.else_block))
 
   -- Build chain of clauses backwards.
   local tail = else_block
@@ -5939,7 +6004,7 @@ end
 function codegen.stat_while(cx, node)
   local cond = codegen.expr(cx, node.cond):read(cx)
   local body_cx = cx:new_local_scope()
-  local block = codegen.block(body_cx, node.block)
+  local block = cleanup_after(body_cx, codegen.block(body_cx, node.block))
   return quote
     while [quote [cond.actions] in [cond.value] end] do
       [block]
@@ -5952,7 +6017,7 @@ function codegen.stat_for_num(cx, node)
   local cx = cx:new_local_scope()
   local bounds = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
   local cx = cx:new_local_scope()
-  local block = codegen.block(cx, node.block)
+  local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local v1, v2, v3 = unpack(bounds)
   if #bounds == 2 then
@@ -5978,7 +6043,7 @@ function codegen.stat_for_list(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
   local cx = cx:new_local_scope()
-  local block = codegen.block(cx, node.block)
+  local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local ispace_type, is, it
   if std.is_ispace(value_type) then
@@ -6250,8 +6315,8 @@ function codegen.stat_for_list_vectorized(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
   local cx = cx:new_local_scope()
-  local block = codegen.block(cx, node.block)
-  local orig_block = codegen.block(cx, node.orig_block)
+  local block = cleanup_after(cx, codegen.block(cx, node.block))
+  local orig_block = cleanup_after(cx, codegen.block(cx, node.orig_block))
   local vector_width = node.vector_width
 
   local ispace_type, is, it
@@ -6411,8 +6476,10 @@ function codegen.stat_repeat(cx, node)
   local until_cond = codegen.expr(cx, node.until_cond):read(cx)
   return quote
     repeat
-      [block]
-    until [quote [until_cond.actions] in [until_cond.value] end]
+      [block];
+      [until_cond.actions];
+      [cx:get_cleanup_items()]
+    until [until_cond.value]
   end
 end
 
@@ -6428,7 +6495,7 @@ function codegen.stat_must_epoch(cx, node)
     [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
     var [must_epoch_point] = 0
-    [codegen.block(cx, node.block)]
+    [cleanup_after(cx, codegen.block(cx, node.block))]
     var [future_map] = c.legion_must_epoch_launcher_execute(
       [cx.runtime], [cx.context], [must_epoch])
     c.legion_must_epoch_launcher_destroy([must_epoch])
@@ -6446,7 +6513,7 @@ function codegen.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return quote
     do
-      [codegen.block(cx, node.block)]
+      [cleanup_after(cx, codegen.block(cx, node.block))]
     end
   end
 end
@@ -6848,17 +6915,27 @@ end
 
 function codegen.stat_var(cx, node)
   local lhs = node.symbols:map(function(lh) return lh:getsymbol() end)
-  local types = node.types
+
+  -- Capture rhs values (copying if necessary).
   local rhs = terralib.newlist()
   for i, value in pairs(node.values) do
-    local rh = codegen.expr(cx, value)
-    rhs:insert(rh:read(cx, value.expr_type))
+    local rh = codegen.expr(cx, value):read(cx, value.expr_type)
+
+    local rh_value = rh.value
+    if value:is(ast.typed.expr.ID) then
+      -- If this is a variable, copy the value to preserve ownership.
+      rh_value = make_copy(cx, rh_value, value.expr_type)
+    end
+    rh = expr.just(rh.actions, rh_value)
+
+    rhs:insert(rh)
   end
 
+  -- Cast rhs values to lhs types.
   local rhs_values = terralib.newlist()
   for i, rh in ipairs(rhs) do
     local rhs_type = std.as_read(node.values[i].expr_type)
-    local lhs_type = types[i]
+    local lhs_type = node.types[i]
     if lhs_type then
       rhs_values:insert(std.implicit_cast(rhs_type, lhs_type, rh.value))
     else
@@ -6866,6 +6943,12 @@ function codegen.stat_var(cx, node)
     end
   end
   local actions = rhs:map(function(rh) return rh.actions end)
+
+  -- Register cleanup items for lhs.
+  for i, lh in ipairs(lhs) do
+    local lh_type = node.symbols[i]:gettype()
+    cx:add_cleanup_item(make_cleanup_item(cx, lh, lh_type))
+  end
 
   local function is_partitioning_expr(node)
     if node:is(ast.typed.expr.Partition) or node:is(ast.typed.expr.PartitionEqual) or
@@ -6975,9 +7058,18 @@ function codegen.stat_assignment(cx, node)
     function(pair)
       local rh_value, rh_node = unpack(pair)
       local rh_expr = rh_value:read(cx, rh_node.expr_type)
+
       -- Capture the rhs value in a temporary so that it doesn't get
       -- overridden on assignment to the lhs (if lhs and rhs alias).
-      rh_expr = expr.once_only(rh_expr.actions, rh_expr.value, rh_node.expr_type)
+      do
+        local rh_expr_value = rh_expr.value
+        if rh_node:is(ast.typed.expr.ID) then
+          -- If this is a variable, copy the value to preserve ownership.
+          rh_expr_value = make_copy(cx, rh_expr_value, rh_node.expr_type)
+        end
+        rh_expr = expr.once_only(rh_expr.actions, rh_expr_value, rh_node.expr_type)
+      end
+
       actions:insert(rh_expr.actions)
       return values.value(
         rh_node,
@@ -7022,7 +7114,15 @@ end
 
 function codegen.stat_expr(cx, node)
   local expr = codegen.expr(cx, node.expr):read(cx)
-  return quote [expr.actions] end
+
+  -- If the value is stored in a variable, it will be cleaned up at
+  -- the end of the variable's lifetime. Otherwise cleanup now.
+  if not node.expr:is(ast.typed.expr.ID) then
+    local cleanup = make_cleanup_item(cx, expr.value, node.expr.expr_type)
+    return quote [expr.actions]; [cleanup] end
+  else
+    return quote [expr.actions] end
+  end
 end
 
 function codegen.stat_begin_trace(cx, node)
@@ -7629,7 +7729,7 @@ function codegen.top_task(cx, node)
 
     if cases then
       local div_cx = cx:new_local_scope()
-      local body_div = codegen.block(div_cx, node.body)
+      local body_div = cleanup_after(div_cx, codegen.block(div_cx, node.body))
       local check_div = quote end
       if dynamic_branches_assert then
         check_div = quote
@@ -7639,7 +7739,7 @@ function codegen.top_task(cx, node)
       end
 
       local nodiv_cx = cx:new_local_scope(region_divergence)
-      local body_nodiv = codegen.block(nodiv_cx, node.body)
+      local body_nodiv = cleanup_after(nodiv_cx, codegen.block(nodiv_cx, node.body))
 
       body = quote
         if [cases] then
@@ -7650,10 +7750,10 @@ function codegen.top_task(cx, node)
         end
       end
     else
-      body = codegen.block(cx, node.body)
+      body = cleanup_after(cx, codegen.block(cx, node.body))
     end
   else
-    body = codegen.block(cx, node.body)
+    body = cleanup_after(cx, codegen.block(cx, node.body))
   end
 
   local result_type = std.type_size_bucket_type(return_type)
