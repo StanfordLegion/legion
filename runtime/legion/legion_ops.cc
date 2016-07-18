@@ -3348,7 +3348,7 @@ namespace Legion {
         // Apply our changes to the version states
         // Don't apply changes to the source if we have a composite instance
         // because it is unsound to mutate the region tree that way
-        if (src_composite > -1)
+        if (src_composite == -1)
           src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
                               runtime->address_space, map_applied_conditions);
         dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),

@@ -2619,6 +2619,15 @@ legion_future_from_bytes(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(result);
 }
 
+legion_future_t
+legion_future_copy(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+
+  Future *result = new Future(*handle);
+  return CObjectWrapper::wrap(result);
+}
+
 void
 legion_future_destroy(legion_future_t handle_)
 {

@@ -1805,6 +1805,14 @@ typedef long long int coord_t;
 			   size_t size);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Future::Future()
+   */
+  legion_future_t
+  legion_future_copy(legion_future_t handle);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Future::~Future()
