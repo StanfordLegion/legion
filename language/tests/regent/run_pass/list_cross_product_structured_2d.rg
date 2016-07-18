@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
--- FIXME: Broken (wrong answer).
-
 -- Test: shallow cross product between lists of structured, 2d ispaces.
 
 import "regent"
@@ -55,6 +50,25 @@ task verify(r : region(ispace(int2d), int), expected : int[6][6])
 where reads(r) do
   for x = 0, 6 do
     for y = 0, 6 do
+      if r[{ x=x, y=y }] ~= expected[x][y] then
+        c.printf("actual\n")
+        for i = 0, 6 do
+          for j = 0, 6 do
+            c.printf("%3d", r[{ x=i, y=j }])
+          end
+          c.printf("\n")
+        end
+
+        c.printf("expected\n")
+        for i = 0, 6 do
+          for j = 0, 6 do
+            c.printf("%3d", expected[i][j])
+          end
+          c.printf("\n")
+        end
+
+        c.printf("comparing (%d %d) = actual %d (expected %d)\n", x, y, r[{ x=x, y=y }], expected[x][y])
+      end
       regentlib.assert(r[{ x=x, y=y }] == expected[x][y], "value doesn't match")
     end
   end
@@ -111,14 +125,6 @@ task main()
   fill(r, -1); copy(r, lh_list); copy(r, rh_list)
   myfill_list(prod_complete[0], 4)
   for i = 0, 4 do copy((rh_list[i]), (part_b[i])) end
-
-  for i = 0, 6 do
-    for j = 0, 6 do
-      c.printf("%3d", r[{ x=i, y=j }])
-    end
-    c.printf("\n")
-  end
-
   verify(r, [ terralib.new(int[6][6], {
     {  0,  0,  0,  0, -1, -1 },
     {  1,  1,  1,  2, -1, -1 },
