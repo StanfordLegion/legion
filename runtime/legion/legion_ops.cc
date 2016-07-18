@@ -436,8 +436,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result->is_instance_manager());
 #endif
-      InstanceView *view = 
-        parent_ctx->create_instance_top_view(result, runtime->address_space);
+      InstanceView *view = parent_ctx->create_instance_top_view(result, 
+                                                runtime->address_space);
       return view->as_materialized_view();
     }
 
