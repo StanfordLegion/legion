@@ -13,10 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fmapping", "0"]]
+-- []
+
+-- FIXME: Broken (wrong answer).
 
 -- Test: shallow cross product between lists of structured, 2d ispaces.
--- TODO: this test yields non-deterministic results when "-fmapping" is on.
 
 import "regent"
 
