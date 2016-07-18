@@ -14,26 +14,23 @@
 
 import "regent"
 
-local c = terralib.includec("stdio.h")
+local c = regentlib.c
 
--- Return types may be inferred. The following task returns an int.
-task double_of(i : int, x : int)
-  c.printf("Hello world from task %d!\n", i)
-  return 2*x
+task test_structured()
+  var is = ispace(int2d, {10, 10})
+  var r = region(is, int)
+  var color_space = ispace(int2d, {2, 2})
+  var p = partition(equal, r, color_space)
+  for e in r do @e = e.x + e.y end
+  for color in p.colors do
+    for e in p[color] do
+      regentlib.assert(@e == e.x + e.y, "test failed")
+    end
+  end
 end
 
 task main()
-  var num_points = 4
-
-  -- Regent automatically converts loops of task calls into index
-  -- space launches. The __demand annotation is **NOT** required, but
-  -- ensures that the compiler will throw an error if the optimization
-  -- fails.
-  var total = 0
-  __demand(__parallel)
-  for i = 0, num_points do
-    total += double_of(i, i + 10)
-  end
-  regentlib.assert(total == 92, "check failed")
+  test_structured()
 end
+
 regentlib.start(main)

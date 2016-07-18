@@ -419,13 +419,13 @@ task main()
   fill(ym.{input, output}, init)
   fill(yp.{input, output}, init)
 
-  -- __demand(__spmd)
+  __demand(__spmd)
   for t = 0, tsteps do
-    __demand(__parallel)
+    -- __demand(__parallel)
     for i = 0, nt2 do
       stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == 0)
     end
-    __demand(__parallel)
+    -- __demand(__parallel)
     for i = 0, nt2 do
       increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - 1)
     end
