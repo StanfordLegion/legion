@@ -231,12 +231,18 @@ assign_list_list(legion_terra_index_space_list_list_t& ls,
   assign_list(ls.sublists[idx1], idx2, is);
 }
 
+// Returns true if the index space `is` is structured.
+static bool
+is_structured(HighLevelRuntime *runtime, Context ctx, IndexSpace is) {
+  Domain is_domain = runtime->get_index_space_domain(ctx, is);
+  return is_domain.get_dim() > 0;
+}
+
 // Returns true if the index space `ip` belongs to is structured.
 static bool
 is_structured(HighLevelRuntime *runtime, Context ctx, IndexPartition ip) {
   IndexSpace is = runtime->get_parent_index_space(ctx, ip);
-  Domain is_domain = runtime->get_index_space_domain(ctx, is);
-  return is_domain.get_dim() > 0;
+  return is_structured(runtime, ctx, is);
 }
 
 // Returns true if `lhs` and `rhs` should be switched when we take their
@@ -346,7 +352,7 @@ create_cross_product_structured(HighLevelRuntime *runtime,
     if (chosen_colors) {
       (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
     }
-    if (rhs_color == Color(-1) and consistent_ids) {
+    if (rhs_color == Color(-1) && consistent_ids) {
       rhs_color = runtime->get_index_partition_color(ctx, part);
     }
   }
@@ -486,7 +492,7 @@ create_cross_product_unstructured(HighLevelRuntime *runtime,
     if (chosen_colors) {
       (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
     }
-    if (rhs_color == Color(-1) and consistent_ids) {
+    if (rhs_color == Color(-1) && consistent_ids) {
       rhs_color = runtime->get_index_partition_color(ctx, part);
     }
   }
@@ -527,6 +533,8 @@ create_cross_product(HighLevelRuntime *runtime,
 #endif
 }
 
+// For each unstructured IndexSpace in `index_spaces`, stores its bounds (first & last
+// element) as pairs in `bounds`.
 static inline void
 get_bounding_boxes(HighLevelRuntime *runtime,
                    Context ctx,
@@ -809,16 +817,48 @@ create_cross_product_tree(HighLevelRuntime *runtime,
   }
 }
 
+// Takes the "shallow" cross product between lists of structured index spaces
+// `lhs` and `rhs`.  Specifically, if `lhs[i]` and `rhs[j]` intersect,
+// `result[i][j]` is populated with `rhs[j]`.
 static void
-create_cross_product_shallow(HighLevelRuntime *runtime,
-                             Context ctx,
-                             bool flip,
-                             const std::vector<IndexSpace> &lhs,
-                             bool lhs_disjoint,
-                             const std::vector<IndexSpace> &rhs,
-                             bool rhs_disjoint,
-                             legion_terra_index_space_list_list_t &result)
-                             //std::map<IndexSpace, std::vector<IndexSpace> > &result)
+create_cross_product_shallow_structured(HighLevelRuntime *runtime,
+                                        Context ctx,
+                                        const std::vector<IndexSpace> &lhs,
+                                        const std::vector<IndexSpace> &rhs,
+                                        legion_terra_index_space_list_list_t &result)
+{
+  for (size_t i = 0; i < lhs.size(); i++) {
+    const IndexSpace &lh_space = lhs[i];
+    // Doesn't currently handle structured index spaces with multiple domains.
+    assert(!runtime->has_multiple_domains(lh_space));
+    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
+    assert(lh_domain.get_dim() > 0); // Should be structured.
+
+    for (size_t j = 0; j < rhs.size(); j++) {
+      const IndexSpace &rh_space = rhs[j];
+      assert(!runtime->has_multiple_domains(rh_space));
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
+      assert(rh_domain.get_dim() > 0);
+
+      if (lh_domain.intersection(rh_domain).get_volume() > 0) {
+        // Intersection isn't empty.
+        assign_list_list(result, i, j, CObjectWrapper::wrap(rh_space));
+      }
+    }
+  }
+}
+
+// Takes the shallow cross product between lists of unstructured index spaces.
+static void
+create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
+                                          Context ctx,
+                                          bool flip,
+                                          const std::vector<IndexSpace> &lhs,
+                                          bool lhs_disjoint,
+                                          const std::vector<IndexSpace> &rhs,
+                                          bool rhs_disjoint,
+                                          legion_terra_index_space_list_list_t &result)
+                                          //std::map<IndexSpace, std::vector<IndexSpace> > &result)
 {
   //typedef std::map<IndexSpace, std::vector<IndexSpace> >::iterator iterator_t;
   if (lhs_disjoint) // || rhs_disjoint)
@@ -1169,16 +1209,6 @@ legion_terra_index_cross_product_create_list_shallow(
   std::vector<IndexSpace> rhs;
   unwrap_list(rhs_, rhs);
 
-  IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
-  IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
-  bool lhs_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
-  bool rhs_disjoint = runtime->is_index_partition_disjoint(ctx, rhs_part);
-
-  bool flip = false;
-  if (lhs_part != IndexPartition::NO_PART and rhs_part != IndexPartition::NO_PART) {
-    flip = should_flip_cross_product(runtime, ctx, lhs_part, rhs_part);
-  }
-
   //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
   //std::map<IndexSpace, std::vector<IndexSpace> > result;
   //size_t rhs_size = rhs.size();
@@ -1194,10 +1224,26 @@ legion_terra_index_cross_product_create_list_shallow(
   //fprintf(stderr, "initialize map %zd x %zd: %lld us\n",
   //    lhs.size(), rhs.size(), ts_stop - ts_start);
 
-  if (flip) {
-    create_cross_product_shallow(runtime, ctx, flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
-  } else {
-    create_cross_product_shallow(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
+  IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
+  IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
+  if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part))
+      || (rhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, rhs_part))) {
+      // Structured index spaces.
+    create_cross_product_shallow_structured(runtime, ctx, lhs, rhs, result);
+  } else { // Unstructured index spaces.
+    bool lhs_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
+    bool rhs_disjoint = runtime->is_index_partition_disjoint(ctx, rhs_part);
+
+    bool flip = false;
+    if (lhs_part != IndexPartition::NO_PART && rhs_part != IndexPartition::NO_PART) {
+      flip = should_flip_cross_product(runtime, ctx, lhs_part, rhs_part);
+    }
+
+    if (flip) {
+      create_cross_product_shallow_unstructured(runtime, ctx, flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
+    } else {
+      create_cross_product_shallow_unstructured(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
+    }
   }
 
   //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
@@ -1219,13 +1265,107 @@ legion_terra_index_cross_product_create_list_shallow(
   return result;
 }
 
+// "Completes" a shallow cross product between lists of structured index spaces.
+// After a shallow cross product determines which index spaces intersect, this
+// function actually creates partitions corresponding to the intersections.
+//
+// Specifically, this function partitions each "RHS" index space according to
+// the LHS index spaces it intersects.
+//
+// Params:
+//    lhs: list of left-hand side index spaces.
+//    lhs_part_disjoint: true if the LHS partition is disjoint.
+//    product: maps each LHS index space to the list of RHS index spaces that
+//             intersect it.
+//    result: `result[i][j]` is populated with the IndexSpace that is the
+//            intersection of `lhs[i]` and `product[lhs[i]][j]`.  This
+//            IndexSpace belongs to a Partition of the RHS IndexSpace.
 static inline void
-create_cross_product_complete(HighLevelRuntime *runtime,
-                              Context ctx,
-                              std::vector<IndexSpace>& lhs,
-                              bool lhs_part_disjoint,
-                              std::map<IndexSpace, std::vector<IndexSpace> >& product,
-                              legion_terra_index_space_list_list_t &result)
+create_cross_product_complete_structured(
+    HighLevelRuntime *runtime,
+    Context ctx,
+    std::vector<IndexSpace>& lhs,
+    bool lhs_part_disjoint,
+    std::map<IndexSpace, std::vector<IndexSpace> >& product,
+    legion_terra_index_space_list_list_t &result)
+{
+  std::vector<DomainPoint> lhs_colors;
+  lhs_colors.reserve(lhs.size());
+  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
+    IndexSpace& lh_space = lhs[lhs_idx];
+    DomainPoint lh_color = runtime->get_index_space_color_point(ctx, lh_space);
+    lhs_colors.push_back(lh_color);
+  }
+
+  std::map<IndexSpace, DomainPointColoring> coloring; // Partition coloring for each RHS ispace.
+  std::map<IndexSpace, Domain> color_spaces; // Color space for each partitioning.
+  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
+    IndexSpace lh_space = lhs[lhs_idx];
+    // Doesn't currently handle structured index spaces consisting of multiple
+    // domains.
+    assert(!runtime->has_multiple_domains(lh_space));
+    Domain lh_domain = runtime->get_index_space_domain(lh_space);
+    // Verify that index space is indeed structured.
+    assert(lh_domain.get_dim() > 0);
+
+    const std::vector<IndexSpace>& rh_spaces = product[lh_space];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
+
+    for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
+      IndexSpace rh_space = rh_spaces[rhs_idx];
+      assert(!runtime->has_multiple_domains(rh_space));
+      Domain rh_domain = runtime->get_index_space_domain(rh_space);
+      assert(rh_domain.get_dim() > 0);
+
+      coloring[rh_space][lh_color] = rh_domain.intersection(lh_domain);
+      if (color_spaces.count(rh_space) > 0) {
+        color_spaces[rh_space] =
+          color_spaces[rh_space].convex_hull(lh_color);
+      } else {
+        color_spaces[rh_space] = Domain::from_domain_point(lh_color);
+      }
+    }
+  }
+
+  std::map<IndexSpace, IndexPartition> rh_partitions;
+  for (std::map<IndexSpace, DomainPointColoring>::iterator it = coloring.begin();
+       it != coloring.end(); ++it) {
+
+    IndexSpace rh_space = it->first;
+    const DomainPointColoring& coloring = it->second;
+    assert(color_spaces.count(rh_space) > 0);
+
+    IndexPartition ip = runtime->create_index_partition(
+        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
+    rh_partitions[rh_space] = ip;
+  }
+
+  for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
+    IndexSpace lh_space = lhs[lhs_idx];
+    std::vector<IndexSpace>& rh_spaces = product[lh_space];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
+
+    for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
+      IndexSpace& rh_space = rh_spaces[rhs_idx];
+      IndexPartition& rh_partition = rh_partitions[rh_space];
+      IndexSpace is = runtime->get_index_subspace(ctx, rh_partition, lh_color);
+      assert(lhs_idx >= 0 && lhs_idx < result.count);
+      assert(rhs_idx >= 0 && rhs_idx < result.sublists[lhs_idx].count);
+      assign_list_list(result, lhs_idx, rhs_idx, CObjectWrapper::wrap(is));
+    }
+  }
+}
+
+// Completes the shallow cross product between two lists of unstructured index spaces.
+static inline void
+create_cross_product_complete_unstructured(
+    HighLevelRuntime *runtime,
+    Context ctx,
+    std::vector<IndexSpace>& lhs,
+    bool lhs_part_disjoint,
+    std::map<IndexSpace, std::vector<IndexSpace> >& product,
+    legion_terra_index_space_list_list_t &result)
 {
   std::vector<Color> lhs_colors;
   lhs_colors.reserve(lhs.size());
@@ -1309,13 +1449,20 @@ legion_terra_index_cross_product_create_list_complete(
   std::map<IndexSpace, std::vector<IndexSpace> > product;
   unwrap_list_list(product_, product);
 
+  legion_terra_index_space_list_list_t result = create_list_list(lhs, product);
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   bool lhs_part_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
-  legion_terra_index_space_list_list_t result = create_list_list(lhs, product);
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
-  create_cross_product_complete(runtime, ctx, lhs, lhs_part_disjoint, product, result);
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "create_cross_product_complete: %ld us\n", ts_stop - ts_start);
+  if (lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part)) {
+    // Structured index spaces.
+    create_cross_product_complete_structured(runtime, ctx, lhs, lhs_part_disjoint,
+        product, result);
+  } else { // Unstructured index spaces.
+    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+    create_cross_product_complete_unstructured(runtime, ctx, lhs, lhs_part_disjoint,
+        product, result);
+    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+    //fprintf(stderr, "create_cross_product_complete: %ld us\n", ts_stop - ts_start);
+  }
   return result;
 
   //IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);

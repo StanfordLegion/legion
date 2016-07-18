@@ -1377,19 +1377,8 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
-    local main, names = regentlib.setup(main_task, extra_setup_thunk)
-    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
-
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    end
-  end
-
-  saveobj(toplevel, "pennant", "executable", cpennant.register_mappers)
+  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
-  cpennant.register_mappers()
-  regentlib.start(toplevel)
+  regentlib.start(toplevel, cpennant.register_mappers)
 end
