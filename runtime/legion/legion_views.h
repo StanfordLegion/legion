@@ -250,8 +250,6 @@ namespace Legion {
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
     public:
-      virtual void unregister_collectable(void);
-    public:
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
     public:

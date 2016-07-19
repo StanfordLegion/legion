@@ -406,10 +406,6 @@ namespace Legion {
     {
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
-      // If we're not the owner, add a resource reference on ourself that
-      // will be removed when the owner cleans up
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Future %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -432,15 +428,6 @@ namespace Legion {
     FutureImpl::~FutureImpl(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our remote references  
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       // don't want to leak events
       if (!ready_event.has_triggered())
         Runtime::trigger_event(ready_event);

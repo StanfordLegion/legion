@@ -121,7 +121,12 @@ namespace Legion {
       if (do_registration)
         runtime->register_distributed_collectable(did, this);
       if (!is_owner())
+      {
         remote_instances.add(owner_space);
+        // Add a base resource ref that will be held until
+        // the owner node removes it with an unregister message
+        add_base_resource_ref(REMOTE_DID_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -133,6 +138,14 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
+      if (is_owner() && registered_with_runtime)
+      {
+        runtime->unregister_distributed_collectable(did);
+        if (!remote_instances.empty())
+          runtime->recycle_distributed_id(did, send_unregister_messages());
+        else
+          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+      }
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
     }

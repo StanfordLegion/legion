@@ -509,25 +509,12 @@ namespace Legion {
     {
       if (region_node != NULL)
         region_node->register_physical_manager(this);
-      // If we are not the owner, add a resource reference
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
     }
 
     //--------------------------------------------------------------------------
     PhysicalManager::~PhysicalManager(void)
     //--------------------------------------------------------------------------
     {
-      // Put this here to be safe, but we should have released these
-      // when the instance was deleted
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       if (region_node != NULL)
         region_node->unregister_physical_manager(this);
       // Remote references removed by DistributedCollectable destructor
@@ -941,16 +928,6 @@ namespace Legion {
       {
         it->first->notify_instance_deletion(
             const_cast<PhysicalManager*>(this), it->second);
-      }
-      // We can unregister ourselves from the runtime at this point
-      if (registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-        registered_with_runtime = false;
       }
     }
 

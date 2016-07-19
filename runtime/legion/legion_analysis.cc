@@ -5600,12 +5600,9 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      // If we are not the owner, add a valid and resource reference
+      // If we are not the owner, add a valid reference
       if (!is_owner())
-      {
         add_base_valid_ref(REMOTE_DID_REF);
-        add_base_resource_ref(REMOTE_DID_REF);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5626,15 +5623,6 @@ namespace Legion {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our remote references
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
