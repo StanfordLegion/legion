@@ -52,7 +52,10 @@ before_install:
       popd
     fi
 script:
+  # Regent
   - ./language/travis.py
+
+  # Legion tutorials
   - |
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
@@ -75,10 +78,18 @@ script:
     tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
     make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
     tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
-    make -s -C examples/full_circuit LG_RT_DIR=../../runtime
-    examples/full_circuit/ckt_sim -logfile out_%.log
-    make -s -C examples/full_ghost LG_RT_DIR=../../runtime
-    examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+
+  # Legion examples
+  - |
+    # these are taking a long time so disable them under Legion Spy
+    if [[ "$TEST_SPY" -eq 0 ]]; then
+      make -s -C examples/full_circuit LG_RT_DIR=../../runtime
+      examples/full_circuit/ckt_sim -logfile out_%.log
+      make -s -C examples/full_ghost LG_RT_DIR=../../runtime
+      examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+    fi
+
+  # Realm
   - |
     if [[ "$DEBUG" -eq 0 ]]; then
       make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
