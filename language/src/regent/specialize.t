@@ -114,6 +114,7 @@ local function convert_lua_value(cx, node, value)
       span = node.span,
     }
   elseif std.is_symbol(value) then
+    value = cx.env:safe_lookup(value) or value
     return ast.specialized.expr.ID {
       value = value,
       annotations = node.annotations,
@@ -1435,16 +1436,45 @@ function specialize.stat_while(cx, node)
   }
 end
 
+local function make_symbol(cx, node, var_name, var_type)
+  if type(var_name) == "string" then
+    return var_name, std.newsymbol(var_type or nil, var_name)
+  end
+
+  var_name = var_name(cx.env:env())
+  if std.is_symbol(var_name) then
+    if cx.is_quote then
+      return var_name, var_name
+    else
+      return var_name, std.newsymbol(var_name:hastype(), var_name:hasname())
+    end
+  end
+
+  log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+end
+
 function specialize.stat_for_num(cx, node)
   local values = node.values:map(
     function(value) return specialize.expr(cx, value) end)
 
+  local var_type
+  if node.type_expr then
+    var_type = node.type_expr(cx.env:env())
+  end
+
   -- Enter scope for header.
   local cx = cx:new_local_scope()
-  local var_type = node.type_expr(cx.env:env())
-  local symbol = std.newsymbol(var_type, node.name)
-  cx.env:insert(node, node.name, symbol)
-  cx.env:insert(node, symbol, symbol)
+  local var_name, symbol = make_symbol(cx, node, node.name)
+  if std.is_symbol(var_name) then
+    cx.mapping[var_name] = symbol
+  else
+    cx.env:insert(node, symbol, symbol)
+  end
+  cx.env:insert(node, var_name, symbol)
+
+  if var_type then
+    symbol:settype(var_type)
+  end
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
@@ -1462,15 +1492,24 @@ end
 function specialize.stat_for_list(cx, node)
   local value = specialize.expr(cx, node.value)
 
-  -- Enter scope for header.
-  local cx = cx:new_local_scope()
   local var_type
   if node.type_expr then
     var_type = node.type_expr(cx.env:env())
   end
-  local symbol = std.newsymbol(var_type, node.name)
-  cx.env:insert(node, node.name, symbol)
-  cx.env:insert(node, symbol, symbol)
+
+  -- Enter scope for header.
+  local cx = cx:new_local_scope()
+  local var_name, symbol = make_symbol(cx, node, node.name)
+  if std.is_symbol(var_name) then
+    cx.mapping[var_name] = symbol
+  else
+    cx.env:insert(node, symbol, symbol)
+  end
+  cx.env:insert(node, var_name, symbol)
+
+  if var_type then
+    symbol:settype(var_type)
+  end
 
   -- Enter scope for body.
   local cx = cx:new_local_scope()
@@ -1511,23 +1550,6 @@ function specialize.stat_block(cx, node)
     annotations = node.annotations,
     span = node.span,
   }
-end
-
-local function make_symbol(cx, node, var_name, var_type)
-  if type(var_name) == "string" then
-    return var_name, std.newsymbol(var_type or nil, var_name)
-  end
-
-  var_name = var_name(cx.env:env())
-  if std.is_symbol(var_name) then
-    if cx.is_quote then
-      return var_name, var_name
-    else
-      return var_name, std.newsymbol(var_name:hastype(), var_name:hasname())
-    end
-  end
-
-  log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
 end
 
 function specialize.stat_var(cx, node)

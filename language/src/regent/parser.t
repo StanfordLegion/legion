@@ -1439,12 +1439,18 @@ function parser.stat_for(p, annotations)
   local start = ast.save(p)
   p:expect("for")
 
-  local name = p:expect(p.name).value
-  local type_expr
-  if p:nextif(":") then
-    type_expr = p:luaexpr()
+  local name, type_expr
+  if p:nextif("[") then
+    name = p:luaexpr()
+    type_expr = false
+    p:expect("]")
   else
-    type_expr = function(env) end
+    name = p:expect(p.name).value
+    if p:nextif(":") then
+      type_expr = p:luaexpr()
+    else
+      type_expr = false
+    end
   end
 
   if p:nextif("=") then
