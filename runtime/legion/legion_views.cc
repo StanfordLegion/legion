@@ -251,13 +251,7 @@ namespace Legion {
       if (parent != NULL)
         add_nested_resource_ref(parent->did);
       else 
-      {
         manager->add_nested_resource_ref(did);
-        // If we are the root and remote add a resource reference from
-        // the owner node
-        if (!is_owner())
-          add_base_resource_ref(REMOTE_DID_REF);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %ld %d %ld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
@@ -281,15 +275,6 @@ namespace Legion {
     {
       // Always unregister ourselves with the region tree node
       logical_node->unregister_instance_view(manager, owner_context);
-      // If we're the owner, remove our remote references
-      if (is_owner() && (parent == NULL) && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
@@ -339,22 +324,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::unregister_collectable(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-      assert(registered_with_runtime);
-#endif
-      // Unregister ourselves first, and then unregister all our children
-      DistributedCollectable::unregister_collectable();
-      // No need for the lock since we shouldn't be adding any more children
-      for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->second->unregister_collectable();
     }
 
     //--------------------------------------------------------------------------
@@ -3663,9 +3632,6 @@ namespace Legion {
     {
       version_info->add_reference();
       root->set_owner_did(did);
-      // Do remote registration if necessary
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3686,15 +3652,6 @@ namespace Legion {
     CompositeView::~CompositeView(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our remote references
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       // Delete our root
       legion_delete(root);
       // See if we can delete our version info
@@ -5132,8 +5089,6 @@ namespace Legion {
       assert(value != NULL);
 #endif
       value->add_reference();
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5153,15 +5108,6 @@ namespace Legion {
     FillView::~FillView(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our remote references
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       if (value->remove_reference())
         delete value;
 #ifdef LEGION_GC
@@ -5348,8 +5294,6 @@ namespace Legion {
 #endif
       logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %ld %d %ld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
@@ -5370,15 +5314,6 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
-      // Remove our remote references
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       // Always unregister ourselves with the region tree node
       logical_node->unregister_instance_view(manager, owner_context);
       if (manager->remove_nested_resource_ref(did))

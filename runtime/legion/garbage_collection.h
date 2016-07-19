@@ -344,7 +344,7 @@ namespace Legion {
       RtEvent send_unregister_messages(void) const;
     public:
       // This for remote nodes only
-      virtual void unregister_collectable(void);
+      void unregister_collectable(void);
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
