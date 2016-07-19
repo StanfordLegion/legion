@@ -5397,6 +5397,11 @@ class Operation(object):
                 prefix += '  '
             print prefix+'-------------------------------------------------'
             print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
+
+            if self.kind == SINGLE_TASK_KIND and self.task is not None:
+                self.task.print_task_mapping_decisions()
+                print prefix+'  Task Mapped to ' + str(self.task.processor)
+
             for index,mappings in self.mappings.iteritems():
                 assert index in self.reqs
                 req = self.reqs[index]
