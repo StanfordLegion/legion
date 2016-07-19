@@ -8202,8 +8202,7 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       update_no_access_regions();
       if (Runtime::legion_spy_enabled)
@@ -8255,8 +8254,7 @@ namespace Legion {
       initialize_paths();
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       update_no_access_regions();
       if (Runtime::legion_spy_enabled)
@@ -10715,8 +10713,7 @@ namespace Legion {
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime,
             true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
@@ -10846,8 +10843,7 @@ namespace Legion {
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime, 
             true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {

@@ -394,9 +394,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
                            AddressSpaceID own_space, AddressSpaceID loc_space,
-                           RtUserEvent destroy_event, Operation *o /*= NULL*/)
-      : DistributedCollectable(rt, did, own_space, loc_space, 
-                               destroy_event, register_now),
+                           Operation *o /*= NULL*/)
+      : DistributedCollectable(rt, did, own_space, loc_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
@@ -433,13 +432,14 @@ namespace Legion {
     FutureImpl::~FutureImpl(void)
     //--------------------------------------------------------------------------
     {
-      // If we are the owner, remove our resource references on all
-      // the instances on remote nodes
-      if (is_owner())
+      // Remove our remote references  
+      if (is_owner() && registered_with_runtime)
       {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
+        runtime->unregister_distributed_collectable(did);
+        if (!remote_instances.empty())
+          runtime->recycle_distributed_id(did, send_unregister_messages());
+        else
+          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
       }
       // don't want to leak events
       if (!ready_event.has_triggered())
@@ -4909,6 +4909,11 @@ namespace Legion {
           case DISTRIBUTED_CREATE_REMOVE:
             {
               runtime->handle_did_create_remove(derez);
+              break;
+            }
+          case DISTRIBUTED_UNREGISTER:
+            {
+              runtime->handle_did_remote_unregister(derez);
               break;
             }
           case SEND_ATOMIC_RESERVATION_REQUEST:
@@ -10887,8 +10892,7 @@ namespace Legion {
         }
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -11095,8 +11099,7 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/, 
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -11168,8 +11171,7 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT));
+          get_available_distributed_id(true), address_space, address_space));
       IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -11273,8 +11275,7 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT));
+          get_available_distributed_id(true), address_space, address_space));
       IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -12825,8 +12826,7 @@ namespace Legion {
 #endif
       FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
                               get_available_distributed_id(true),
-                              address_space, address_space, 
-                              RtUserEvent::NO_RT_USER_EVENT, ctx);
+                              address_space, address_space, ctx);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs args;
       args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
@@ -14431,6 +14431,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_remote_unregister(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_UNREGISTER,
+                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_atomic_reservation_request(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15273,6 +15282,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remove_create(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_remote_unregister(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_unregister_collectable(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16534,8 +16550,7 @@ namespace Legion {
       }
       AddressSpaceID owner_space = determine_owner(did);
       FutureImpl *result = legion_new<FutureImpl>(this, false/*register*/, did,
-                                                 owner_space, address_space,
-                                                 RtUserEvent::NO_RT_USER_EVENT);
+                                                 owner_space, address_space);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -18201,8 +18216,7 @@ namespace Legion {
     {
       return Future(legion_new<FutureImpl>(this, true/*register*/,
                                      get_available_distributed_id(true),
-                                     address_space, address_space, 
-                                     RtUserEvent::NO_RT_USER_EVENT, op));
+                                     address_space, address_space, op));
     }
 
     //--------------------------------------------------------------------------

@@ -232,12 +232,22 @@ namespace Legion {
         ReferenceMutator *const mutator;
         unsigned count;
       };
+      class UnregisterFunctor {
+      public:
+        UnregisterFunctor(Runtime *rt, DistributedID d,
+                          std::set<RtEvent> &done)
+          : runtime(rt), did(d), done_events(done) { }
+      public:
+        void apply(AddressSpaceID target);
+      protected:
+        Runtime *const runtime;
+        const DistributedID did;
+        std::set<RtEvent> &done_events;
+      };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              AddressSpaceID local_space,
-                             RtUserEvent dest_event 
-                              = RtUserEvent::NO_RT_USER_EVENT,
                              bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:
@@ -323,8 +333,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
-      inline RtEvent get_destruction_event(void) const 
-        { return destruction_event; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
     public:
@@ -332,9 +340,13 @@ namespace Legion {
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
-      void register_remote_instance(AddressSpaceID source, 
-                                    RtEvent destroy_event);
       void register_with_runtime(ReferenceMutator *mutator);
+      RtEvent send_unregister_messages(void) const;
+    public:
+      // This for remote nodes only
+      virtual void unregister_collectable(void);
+      static void handle_unregister_collectable(Runtime *runtime,
+                                                Deserializer &derez);
     public:
       virtual void send_remote_registration(ReferenceMutator *mutator);
       void send_remote_valid_update(AddressSpaceID target, 
@@ -408,13 +420,7 @@ namespace Legion {
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;
     protected:
-      // Only valid on owner
-      std::set<RtEvent>        recycle_events;
-    protected:
-      // Only matter on remote nodes
-      RtUserEvent destruction_event;
-    protected:
-      bool registered_with_runtime;
+      mutable bool registered_with_runtime;
     };
 
     //--------------------------------------------------------------------------
