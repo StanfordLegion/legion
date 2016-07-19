@@ -53,7 +53,7 @@ task main()
   end
 
   var tinit = 0
-  var tfinal = 10
+  var tfinal = 3
 
   __demand(__spmd)
   for t = tinit, tfinal do
@@ -69,7 +69,8 @@ task main()
   end
 
   for x in r do
-    regentlib.assert(@x == 73210, "test failed")
+    regentlib.c.printf("%d\n", @x)
+    regentlib.assert(@x == 70963, "test failed")
   end
 end
 regentlib.start(main)
