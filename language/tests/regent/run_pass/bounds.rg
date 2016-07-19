@@ -47,5 +47,16 @@ task main()
   regentlib.assert(r11_bounds.hi.y == 7, "test failed")
   regentlib.assert(r_size.x == 4, "test failed")
   regentlib.assert(r_size.y == 8, "test failed")
+
+  var coloring = c.legion_domain_coloring_create()
+  c.legion_domain_coloring_color_domain(
+    coloring, 0, rect2d { {0, 0}, {3, 3} })
+  c.legion_domain_coloring_color_domain(
+    coloring, 1, rect2d { {0, 4}, {3, 7} })
+  var p2 = partition(disjoint, r, coloring)
+  var lp = list_duplicate_partition(p2, list_range(0, 2))
+  c.legion_domain_coloring_destroy(coloring)
+  regentlib.assert(lp[0].bounds:size() == lp[1].bounds:size(),
+                   "test failed")
 end
 regentlib.start(main)
