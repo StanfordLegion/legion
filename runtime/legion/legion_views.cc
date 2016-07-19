@@ -282,7 +282,7 @@ namespace Legion {
       // Always unregister ourselves with the region tree node
       logical_node->unregister_instance_view(manager, owner_context);
       // If we're the owner, remove our remote references
-      if (is_owner() && registered_with_runtime)
+      if (is_owner() && (parent == NULL) && registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);
         if (!remote_instances.empty())
