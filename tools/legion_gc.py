@@ -371,7 +371,7 @@ class Base(object):
         self.report_references(printer, RESOURCE_REF_KIND, verbose)
         print "----------------------------------------------------------------"
         if isinstance(self,Manager):
-            return (True,False)
+            return (False,False)
         return False
 
     def report_references(self, printer, kind, verbose):
