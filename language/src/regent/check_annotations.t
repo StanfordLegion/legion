@@ -167,7 +167,7 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "inline"}))
+      check(cx, node, data.set({"cuda", "inline", "parallel"}))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or
