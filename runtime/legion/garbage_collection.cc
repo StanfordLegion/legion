@@ -1196,6 +1196,7 @@ namespace Legion {
       assert(registered_with_runtime);
 #endif
       runtime->unregister_distributed_collectable(did);
+      registered_with_runtime = false;
       // If the virtual channel is MAX_NUM_VIRTUAL_CHANNELS we'll use
       // that as a signal to avoid sending any messages
       if (!remote_instances.empty() && (vc != MAX_NUM_VIRTUAL_CHANNELS))
