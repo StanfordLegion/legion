@@ -5314,6 +5314,9 @@ namespace Legion {
                       malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(remote != runtime->address_space);
+#endif
       // Figure out which processor to send to based on our address
       // space ID.  If there is an explicit utility processor for one
       // of the processors in our set then we use that.  Otherwise we
