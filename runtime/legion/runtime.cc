@@ -2274,7 +2274,6 @@ namespace Legion {
     {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
-      
     }
 
     //--------------------------------------------------------------------------
@@ -2306,6 +2305,10 @@ namespace Legion {
         for (std::vector<PhysicalManager*>::const_iterator it = 
               instances.begin(); it != instances.end(); it++)
         {
+          // Tell these instances that they are no longer registered
+          // with the runtime to avoid them sending messages when they
+          // are deleted
+          (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
           if ((*it)->try_active_deletion())
             record_deleted_instance(*it);
           // Remove our base resource reference
@@ -16800,7 +16803,6 @@ namespace Legion {
         {
           shutdown_events.insert(
               RtEvent(it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
-                                  
         }
       }
       else

@@ -6900,7 +6900,22 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       // Get the event to wait on unless we are 
       // doing the inner task optimization
-      if (!variant->is_inner())
+      bool do_inner_task_optimization = variant->is_inner();
+      if (do_inner_task_optimization)
+      {
+        // We can't do the inner task optimization if we can
+        // see side effects through our regions
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if ((regions[idx].prop != EXCLUSIVE) && 
+              (regions[idx].prop != ATOMIC))
+          {
+            do_inner_task_optimization = false;
+            break;
+          }
+        }
+      }
+      if (!do_inner_task_optimization)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -6955,7 +6970,7 @@ namespace Legion {
             // mapped it which means we will map in the parent's
             // context
           }
-          else if (variant->is_inner())
+          else if (do_inner_task_optimization)
           {
             // If this is an inner task then we don't map
             // the region with a physical region, but instead
@@ -7053,7 +7068,7 @@ namespace Legion {
           // all sub-users should be chained.
           initialize_region_tree_contexts(clone_requirements,
                                           unmap_events, wait_on_events);
-          if (!variant->is_inner())
+          if (!do_inner_task_optimization)
           {
             for (unsigned idx = 0; idx < physical_regions.size(); idx++)
             {
