@@ -138,14 +138,6 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (is_owner() && registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (!remote_instances.empty())
-          runtime->recycle_distributed_id(did, send_unregister_messages());
-        else
-          runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-      }
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
     }
@@ -1195,6 +1187,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::unregister_with_runtime(
+                                                    VirtualChannelKind vc) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(registered_with_runtime);
+#endif
+      runtime->unregister_distributed_collectable(did);
+      if (!remote_instances.empty())
+        runtime->recycle_distributed_id(did, send_unregister_messages(vc));
+      else
+        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::UnregisterFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -1202,12 +1210,13 @@ namespace Legion {
       Serializer rez;
       rez.serialize(did);
       rez.serialize(done_event); 
-      runtime->send_did_remote_unregister(target, rez);
+      runtime->send_did_remote_unregister(target, rez, vc);
       done_events.insert(done_event);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DistributedCollectable::send_unregister_messages(void) const
+    RtEvent DistributedCollectable::send_unregister_messages(
+                                                    VirtualChannelKind vc) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1215,7 +1224,7 @@ namespace Legion {
       assert(!remote_instances.empty());
 #endif
       std::set<RtEvent> done_events;
-      UnregisterFunctor functor(runtime, did, done_events); 
+      UnregisterFunctor functor(runtime, did, vc, done_events); 
       // No need for the lock since we're being destroyed
       remote_instances.map(functor);
       return Runtime::merge_events(done_events);

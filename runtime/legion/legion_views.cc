@@ -49,6 +49,8 @@ namespace Legion {
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(VIEW_VIRTUAL_CHANNEL);
       view_lock.destroy_reservation();
       view_lock = Reservation::NO_RESERVATION;
     }

@@ -156,6 +156,9 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      virtual VirtualChannelKind get_virtual_channel(void) const 
+        { return DEFAULT_VIRTUAL_CHANNEL; }
+    public:
       void get_void_result(void);
       void* get_untyped_result(void);
       bool is_empty(bool block);
@@ -1904,7 +1907,8 @@ namespace Legion {
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
-      void send_did_remote_unregister(AddressSpaceID target, Serializer &rez);
+      void send_did_remote_unregister(AddressSpaceID target, Serializer &rez,
+                                      VirtualChannelKind vc);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
                                            Serializer &rez);

@@ -234,14 +234,15 @@ namespace Legion {
       };
       class UnregisterFunctor {
       public:
-        UnregisterFunctor(Runtime *rt, DistributedID d,
-                          std::set<RtEvent> &done)
-          : runtime(rt), did(d), done_events(done) { }
+        UnregisterFunctor(Runtime *rt, const DistributedID d,
+                          VirtualChannelKind v, std::set<RtEvent> &done)
+          : runtime(rt), did(d), vc(v), done_events(done) { }
       public:
         void apply(AddressSpaceID target);
       protected:
         Runtime *const runtime;
         const DistributedID did;
+        const VirtualChannelKind vc;
         std::set<RtEvent> &done_events;
       };
     public:
@@ -341,7 +342,8 @@ namespace Legion {
     public:
       // This is for the owner node only
       void register_with_runtime(ReferenceMutator *mutator);
-      RtEvent send_unregister_messages(void) const;
+      void unregister_with_runtime(VirtualChannelKind vc) const;
+      RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:
       // This for remote nodes only
       void unregister_collectable(void);

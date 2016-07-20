@@ -515,6 +515,8 @@ namespace Legion {
     PhysicalManager::~PhysicalManager(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(MANAGER_VIRTUAL_CHANNEL);
       if (region_node != NULL)
         region_node->unregister_physical_manager(this);
       // Remote references removed by DistributedCollectable destructor

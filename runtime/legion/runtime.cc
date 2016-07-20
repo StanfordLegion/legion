@@ -428,6 +428,8 @@ namespace Legion {
     FutureImpl::~FutureImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       // don't want to leak events
       if (!ready_event.has_triggered())
         Runtime::trigger_event(ready_event);
@@ -14422,11 +14424,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_did_remote_unregister(AddressSpaceID target, 
-                                             Serializer &rez)
+                                         Serializer &rez, VirtualChannelKind vc)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_UNREGISTER,
-                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                           vc, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
