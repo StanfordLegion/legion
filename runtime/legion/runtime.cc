@@ -2308,7 +2308,8 @@ namespace Legion {
           // Tell these instances that they are no longer registered
           // with the runtime to avoid them sending messages when they
           // are deleted
-          (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
+          if ((*it)->is_registered())
+            (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
           if ((*it)->try_active_deletion())
             record_deleted_instance(*it);
           // Remove our base resource reference
