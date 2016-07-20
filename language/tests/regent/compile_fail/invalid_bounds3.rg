@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_bounds3.rg:28: type mismatch: write expected an lvalue but got rect(int1d)
+-- invalid_bounds3.rg:28: type mismatch: write expected an lvalue but got rect1d
 --   r.bounds = new_bounds
 --    ^
 
