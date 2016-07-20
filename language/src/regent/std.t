@@ -1992,9 +1992,8 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
-std.rect_type = terralib.memoize(function(index_type, displayname)
-  local st = terralib.types.newstruct(displayname or
-                                      "rect(" .. tostring(index_type) ..")")
+std.rect_type = terralib.memoize(function(index_type)
+  local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
   assert(not index_type:is_opaque())
   st.entries = terralib.newlist({
       { "lo", index_type },
@@ -2161,9 +2160,9 @@ std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
-std.rect1d = std.rect_type(std.int1d, "rect1d")
-std.rect2d = std.rect_type(std.int2d, "rect2d")
-std.rect3d = std.rect_type(std.int3d, "rect3d")
+std.rect1d = std.rect_type(std.int1d)
+std.rect2d = std.rect_type(std.int2d)
+std.rect3d = std.rect_type(std.int3d)
 
 local next_ispace_id = 1
 function std.ispace(index_type)
