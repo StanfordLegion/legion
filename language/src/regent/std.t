@@ -3348,17 +3348,17 @@ local function make_normal_layout()
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
-    -- SOA, Fortran array order
-    var dims : c.legion_dimension_kind_t[4]
-    dims[0] = c.DIM_X
-    dims[1] = c.DIM_Y
-    dims[2] = c.DIM_Z
-    dims[3] = c.DIM_F
-    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+    -- -- SOA, Fortran array order
+    -- var dims : c.legion_dimension_kind_t[4]
+    -- dims[0] = c.DIM_X
+    -- dims[1] = c.DIM_Y
+    -- dims[2] = c.DIM_Z
+    -- dims[3] = c.DIM_F
+    -- c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
 
-    -- Normal instance
-    c.legion_layout_constraint_set_add_specialized_constraint(
-      layout, c.NORMAL_SPECIALIZE, 0)
+    -- -- Normal instance
+    -- c.legion_layout_constraint_set_add_specialized_constraint(
+    --   layout, c.NORMAL_SPECIALIZE, 0)
 
     var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "SOA")
     c.legion_layout_constraint_set_destroy(layout)
@@ -3370,9 +3370,9 @@ local function make_virtual_layout()
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
-    -- Virtual instance
-    c.legion_layout_constraint_set_add_specialized_constraint(
-      layout, c.VIRTUAL_SPECIALIZE, 0)
+    -- -- Virtual instance
+    -- c.legion_layout_constraint_set_add_specialized_constraint(
+    --   layout, c.VIRTUAL_SPECIALIZE, 0)
 
     var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "virtual")
     c.legion_layout_constraint_set_destroy(layout)
@@ -3384,8 +3384,8 @@ local function make_unconstrained_layout()
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
-    c.legion_layout_constraint_set_add_specialized_constraint(
-      layout, c.NO_SPECIALIZE, 0)
+    -- c.legion_layout_constraint_set_add_specialized_constraint(
+    --   layout, c.NO_SPECIALIZE, 0)
 
     var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "unconstrained")
     c.legion_layout_constraint_set_destroy(layout)
@@ -3397,17 +3397,17 @@ local function make_reduction_layout(op_id)
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
-    -- SOA, Fortran array order
-    var dims : c.legion_dimension_kind_t[4]
-    dims[0] = c.DIM_X
-    dims[1] = c.DIM_Y
-    dims[2] = c.DIM_Z
-    dims[3] = c.DIM_F
-    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+    -- -- SOA, Fortran array order
+    -- var dims : c.legion_dimension_kind_t[4]
+    -- dims[0] = c.DIM_X
+    -- dims[1] = c.DIM_Y
+    -- dims[2] = c.DIM_Z
+    -- dims[3] = c.DIM_F
+    -- c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
 
-    -- Reduction fold instance
-    c.legion_layout_constraint_set_add_specialized_constraint(
-      layout, c.REDUCTION_FOLD_SPECIALIZE, [op_id])
+    -- -- Reduction fold instance
+    -- c.legion_layout_constraint_set_add_specialized_constraint(
+    --   layout, c.REDUCTION_FOLD_SPECIALIZE, [op_id])
 
     var [layout_id] = c.legion_layout_constraint_set_preregister(layout, ["SOA(" .. tostring(op_id) .. ")"])
     c.legion_layout_constraint_set_destroy(layout)

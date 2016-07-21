@@ -462,7 +462,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       var accessor = [get_accessor]([accessor_args])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
-      var domain = c.legion_index_space_get_domain([cx.runtime], region.index_space)
+      var domain = c.legion_index_space_get_domain([cx.runtime], [cx.context], region.index_space)
       var rect = [domain_get_rect](domain)
 
       var subrect : rect_t
@@ -515,14 +515,14 @@ local function index_space_bounds(cx, is, index_type)
   local actions
   if index_type.dim == 1 then
     actions = quote
-      var domain = c.legion_index_space_get_domain([cx.runtime], [is])
+      var domain = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
       [bounds].lo = domain.rect_data[0]
       [bounds].hi = domain.rect_data[1]
     end
   else
     local domain = terralib.newsymbol(c.legion_domain_t)
     actions = quote
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
     local idx = 0
     local fields = terralib.newlist { "lo", "hi" }
@@ -1734,7 +1734,7 @@ function codegen.expr_field_access(cx, node)
     local actions = quote
       [value.actions]
       var domain =
-        c.legion_index_partition_get_color_space([cx.runtime],
+        c.legion_index_partition_get_color_space([cx.runtime], [cx.context],
                                                  [value.value].impl.index_partition)
       var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context],
                                                     domain)
@@ -1792,7 +1792,7 @@ function codegen.expr_index_access(cx, node)
       [actions]
       var dp = [color]:to_domain_point()
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-        [cx.runtime], [value.value].impl, dp)
+        [cx.runtime], [cx.context], [value.value].impl, dp)
       var [is] = [lr].index_space
       var [r] = [expr_type] { impl = [lr] }
     end
@@ -1858,7 +1858,7 @@ function codegen.expr_index_access(cx, node)
         [actions]
         var dp = [color]:to_domain_point()
         var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-          [cx.runtime], [value.value].impl, dp)
+          [cx.runtime], [cx.context], [value.value].impl, dp)
         var [is] = [lr].index_space
         var [r] = [region_type] { impl = [lr] }
       end
@@ -2242,10 +2242,11 @@ local function expr_call_setup_ispace_arg(
 end
 
 local terra get_root_of_tree(runtime : c.legion_runtime_t,
+                             ctx : c.legion_context_t,
                              r : c.legion_logical_region_t)
-  while c.legion_logical_region_has_parent_logical_partition(runtime, r) do
+  while c.legion_logical_region_has_parent_logical_partition(runtime, ctx, r) do
     r = c.legion_logical_partition_get_parent_logical_region(
-      runtime, c.legion_logical_region_get_parent_logical_partition(runtime, r))
+      runtime, ctx, c.legion_logical_region_get_parent_logical_partition(runtime, ctx, r))
   end
   return r
 end
@@ -2263,7 +2264,7 @@ local function raise_privilege_depth(cx, value, container_type, field_paths, opt
   end
 
   if scratch then
-    value = `(get_root_of_tree([cx.runtime], [value]))
+    value = `(get_root_of_tree([cx.runtime], [cx.context], [value]))
   elseif std.is_region(container_type) then
     local region = cx:region(
       cx:region(container_type).root_region_type).logical_region
@@ -2277,9 +2278,9 @@ local function raise_privilege_depth(cx, value, container_type, field_paths, opt
     for i = 1, container_type.privilege_depth do
       value = `(
         c.legion_logical_partition_get_parent_logical_region(
-          [cx.runtime],
+          [cx.runtime], [cx.context],
           c.legion_logical_region_get_parent_logical_partition(
-            [cx.runtime], [value])))
+            [cx.runtime], [cx.context], [value])))
     end
   else
     assert(false)
@@ -3406,7 +3407,7 @@ function codegen.expr_partition(cx, node)
     actions = quote
       [actions]
       var [color_space] = c.legion_index_space_get_domain(
-        [cx.runtime], [colors.value].impl)
+        [cx.runtime], [cx.context], [colors.value].impl)
     end
   elseif coloring_type == std.c.legion_domain_coloring_t then
     local color_space = terralib.newsymbol(c.legion_domain_t)
@@ -3485,7 +3486,7 @@ function codegen.expr_partition_equal(cx, node)
     actions = quote
       [actions]
       var domain = c.legion_index_space_get_domain(
-        [cx.runtime], [colors.value].impl)
+        [cx.runtime], [cx.context], [colors.value].impl)
       var [ip] = c.legion_index_partition_create_equal(
       [cx.runtime], [cx.context], [region.value].impl.index_space,
       domain, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]], false)
@@ -3504,10 +3505,10 @@ function codegen.expr_partition_equal(cx, node)
     actions = quote
       [actions]
       var region_domain = c.legion_index_space_get_domain(
-        [cx.runtime], [region.value].impl.index_space)
+        [cx.runtime], [cx.context], [region.value].impl.index_space)
       var region_rect = [domain_get_rect](region_domain)
       var color_domain = c.legion_index_space_get_domain(
-        [cx.runtime], [colors.value].impl)
+        [cx.runtime], [cx.context], [colors.value].impl)
       var color_rect = [domain_get_rect](color_domain)
 
       var [blockify]
@@ -3562,7 +3563,7 @@ function codegen.expr_partition_by_field(cx, node)
   actions = quote
     [actions]
     var domain = c.legion_index_space_get_domain(
-      [cx.runtime], [colors.value].impl)
+      [cx.runtime], [cx.context], [colors.value].impl)
     var [ip] = c.legion_index_partition_create_by_field(
     [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
     field_id, domain, -1, false)
@@ -3620,7 +3621,7 @@ function codegen.expr_image(cx, node)
   actions = quote
     [actions]
     var domain = c.legion_index_partition_get_color_space(
-      [cx.runtime], [partition.value].impl.index_partition)
+      [cx.runtime], [cx.context], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_image(
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
@@ -3680,7 +3681,7 @@ function codegen.expr_preimage(cx, node)
   actions = quote
     [actions]
     var domain = c.legion_index_partition_get_color_space(
-      [cx.runtime], [partition.value].impl.index_partition)
+      [cx.runtime], [cx.context], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_preimage(
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, domain,
@@ -3762,7 +3763,7 @@ function codegen.expr_cross_product_array(cx, node)
     var start : double = c.legion_get_current_time_in_micros()/double(1e6)
     var color_domain =
       c.legion_index_partition_get_color_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
+        [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
     regentlib.assert(color_domain.dim == 1, "color domain should be 1D")
     var start_color = color_domain.rect_data[0]
     var end_color = color_domain.rect_data[1]
@@ -3772,21 +3773,21 @@ function codegen.expr_cross_product_array(cx, node)
     var lhs_ip = [lp].index_partition
     var [colors]
     [colors][0] = c.legion_index_partition_get_color(
-      [cx.runtime], lhs_ip)
+      [cx.runtime], [cx.context], lhs_ip)
     var other_color = -1
 
     for color = start_color, end_color + 1 do
       var lhs_subregion = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [lp], color)
+        [cx.runtime], [cx.context], [lp], color)
       var lhs_subspace = c.legion_index_partition_get_index_subspace(
-        [cx.runtime], lhs_ip, color)
+        [cx.runtime], [cx.context], lhs_ip, color)
       var rhs_ip = c.legion_index_partition_create_coloring(
         [cx.runtime], [cx.context], lhs_subspace, [colorings.value] [color],
         [disjoint], other_color)
       var rhs_lp = c.legion_logical_partition_create([cx.runtime], [cx.context],
         lhs_subregion, rhs_ip)
       other_color =
-        c.legion_index_partition_get_color([cx.runtime], rhs_ip)
+        c.legion_index_partition_get_color([cx.runtime], [cx.context], rhs_ip)
     end
 
     [colors][1] = other_color
@@ -3849,7 +3850,7 @@ function codegen.expr_list_slice_partition(cx, node)
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
       var r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+        [cx.runtime], [cx.context], [partition.value].impl, color)
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
@@ -3898,24 +3899,24 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
     -- Grab the root region to copy semantic info.
     var root = c.legion_logical_partition_get_parent_logical_region(
-      [cx.runtime], [partition.value].impl)
+      [cx.runtime], [cx.context], [partition.value].impl)
     while c.legion_logical_region_has_parent_logical_partition(
-      [cx.runtime], root)
+      [cx.runtime], [cx.context], root)
     do
       var part = c.legion_logical_region_get_parent_logical_partition(
-        [cx.runtime], root)
+        [cx.runtime], [cx.context], root)
       root = c.legion_logical_partition_get_parent_logical_region(
-        [cx.runtime], part)
+        [cx.runtime], [cx.context], part)
     end
 
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
       var orig_r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+        [cx.runtime], [cx.context], [partition.value].impl, color)
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
       var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
-        [cx.runtime], orig_r.index_space, orig_r.field_space, r.tree_id)
+        [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space, r.tree_id)
 
       -- Attach semantic info.
       var name : &int8
@@ -4304,7 +4305,7 @@ function codegen.expr_list_invert(cx, node)
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
         var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+          [cx.runtime], [cx.context], rhs_elt)
         if i == 0 then
           min_color, max_color = rhs_color, rhs_color
         else
@@ -4326,7 +4327,7 @@ function codegen.expr_list_invert(cx, node)
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
         var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+          [cx.runtime], [cx.context], rhs_elt)
 
         regentlib.assert(
           color_to_index[rhs_color - min_color] == -1,
@@ -4348,17 +4349,17 @@ function codegen.expr_list_invert(cx, node)
           if not [product_type.shallow] then
             regentlib.assert(
               c.legion_logical_region_has_parent_logical_partition(
-                [cx.runtime], leaf),
+                [cx.runtime], [cx.context], leaf),
               "missing color in list_invert")
             var part = c.legion_logical_region_get_parent_logical_partition(
-              [cx.runtime], leaf)
+              [cx.runtime], [cx.context], leaf)
             var parent = c.legion_logical_partition_get_parent_logical_region(
-              [cx.runtime], part)
+              [cx.runtime], [cx.context], part)
             inner = parent
           end
 
           var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
+            [cx.runtime], [cx.context], inner)
           var i = color_to_index[inner_color - min_color]
           [expr_type:data(result)][i].__size =
             [expr_type:data(result)][i].__size + 1
@@ -4392,17 +4393,17 @@ function codegen.expr_list_invert(cx, node)
           if not [product_type.shallow] then
             regentlib.assert(
               c.legion_logical_region_has_parent_logical_partition(
-                [cx.runtime], leaf),
+                [cx.runtime], [cx.context], leaf),
               "missing parent in list_invert")
             var part = c.legion_logical_region_get_parent_logical_partition(
-              [cx.runtime], leaf)
+              [cx.runtime], [cx.context], leaf)
             var parent = c.legion_logical_partition_get_parent_logical_region(
-              [cx.runtime], part)
+              [cx.runtime], [cx.context], part)
             inner = parent
           end
 
           var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
+            [cx.runtime], [cx.context], inner)
           var i = color_to_index[inner_color - min_color]
           regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
                            "overflowed sublist in list_invert")
@@ -5631,7 +5632,7 @@ function codegen.expr_binary(cx, node)
     actions = quote
       [actions]
       var is = c.legion_index_partition_get_parent_index_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
+        [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
       var [ip] = [create_partition](
         [cx.runtime], [cx.context],
         is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
@@ -6127,7 +6128,7 @@ function codegen.stat_for_list(cx, node)
     domain = terralib.newsymbol(c.legion_domain_t, "domain")
     actions = quote
       [actions]
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
   end
 
@@ -6390,7 +6391,7 @@ function codegen.stat_for_list_vectorized(cx, node)
     domain = terralib.newsymbol(c.legion_domain_t, "domain")
     actions = quote
       [actions]
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+      var [domain] = c.legion_index_space_get_domain([cx.runtime], [cx.context], [is])
     end
   end
 
@@ -6927,13 +6928,13 @@ function codegen.stat_index_launch_list(cx, node)
     actions = quote
       [value.actions]
       var [domain] = c.legion_index_space_get_domain(
-        [cx.runtime], [value.value].impl)
+        [cx.runtime], [cx.context], [value.value].impl)
     end
   elseif std.is_region(value_type) then
     actions = quote
       [value.actions]
       var [domain] = c.legion_index_space_get_domain(
-        [cx.runtime], [value.value].impl.index_space)
+        [cx.runtime], [cx.context], [value.value].impl.index_space)
     end
   else
     assert(false)

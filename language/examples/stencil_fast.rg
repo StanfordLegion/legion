@@ -205,7 +205,7 @@ end
 __demand(__inline)
 task get_rect(is : ispace(int2d))
   return c.legion_domain_get_rect_2d(
-    c.legion_index_space_get_domain(__runtime(), __raw(is)))
+    c.legion_index_space_get_domain(__runtime(), __context(), __raw(is)))
 end
 
 terra get_base_and_stride(rect : c.legion_rect_2d_t,

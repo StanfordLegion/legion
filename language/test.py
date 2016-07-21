@@ -179,7 +179,7 @@ def get_test_specs(include_spy):
         # Don't include backtraces on those expected to fail
         ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
          (os.path.join('tests', 'regent', 'compile_fail'),
-          os.path.join('tests', 'bishop', 'compile_fail'),
+          # os.path.join('tests', 'bishop', 'compile_fail'),
          )),
         ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
@@ -188,7 +188,7 @@ def get_test_specs(include_spy):
          )),
         ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'bishop', 'run_pass'),
+          # os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
          )),
@@ -196,7 +196,7 @@ def get_test_specs(include_spy):
     spy = [
         ('spy', (test_spy, ([], {})),
          (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('tests', 'bishop', 'run_pass'),
+          # os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
          )),
