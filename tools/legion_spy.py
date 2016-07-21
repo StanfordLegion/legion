@@ -9258,6 +9258,7 @@ class State(object):
         # Now merge the tasks and delete the other task
         p1.merge(p2)
         del self.tasks[p2.op]
+        return p1
 
     def perform_logical_analysis(self, perform_checks, sanity_checks):
         # Run the full analysis first, this will confirm that
