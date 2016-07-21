@@ -34,6 +34,9 @@ local default_options = {
   ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
 
+  -- Experimental auto-parallelization flags:
+  ["parallelize"] = true,
+
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
   ["cached-iterators"] = false,

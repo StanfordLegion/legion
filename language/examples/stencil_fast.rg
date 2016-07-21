@@ -365,20 +365,21 @@ where reads(private.{input, output}) do
   var expect_out = init
   for i in interior do
     if private[i].input ~= expect_in then
-      for i2 in interior do
-        c.printf("input (%lld,%lld): %.0f should be %lld\n",
-                 i2.x, i2.y, private[i2].input, expect_in)
-      end
+      c.printf("input (%lld,%lld): %.0f should be %lld\n",
+               i.x, i.y, private[i].input, expect_in)
     end
-    regentlib.assert(private[i].input == expect_in, "test failed")
+  end
+  for i in interior do
     if private[i].output ~= expect_out then
-      for i2 in interior do
-        c.printf("output (%lld,%lld): %.0f should be %lld\n",
-                 i2.x, i2.y, private[i2].output, expect_out)
-      end
+      c.printf("output (%lld,%lld): %.0f should be %lld\n",
+               i.x, i.y, private[i].output, expect_out)
     end
+  end
+  for i in interior do
+    regentlib.assert(private[i].input == expect_in, "test failed")
     regentlib.assert(private[i].output == expect_out, "test failed")
   end
+  c.printf("check completed successfully\n")
 end
 
 task main()
