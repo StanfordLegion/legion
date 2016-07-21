@@ -51,122 +51,60 @@ local print_point = {
 }
 
 -- TODO: needs to automatically generate these functions
+local function get_ghost_rect_body(res, sz, r, s, f)
+  local acc = function(expr) return `([expr].[f]) end
+  if not f then acc = function(expr) return expr end end
+  return quote
+    if [acc(`([s].lo.__ptr))] == [acc(`([r].lo.__ptr))] then
+      [acc(`([res].lo.__ptr))] = [acc(`([r].lo.__ptr))]
+      [acc(`([res].hi.__ptr))] = [acc(`([r].hi.__ptr))]
+    else
+      -- wrapped around left, periodic boundary
+      if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        -- shift left
+        if [acc(`([r].lo.__ptr))] < [acc(`([s].hi.__ptr))] then
+          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+          [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
+        -- shift right
+        else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
+          [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
+          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+        end
+      else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
+        -- shift left
+        if [acc(`([s].lo.__ptr))] < [acc(`([r].lo.__ptr))] then
+          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+          [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
+        -- shift right
+        else -- [acc(`([s].lo.__ptr)) > [acc(`([r].lo.__ptr))
+          [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
+          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+        end
+      end
+    end
+  end
+end
+
 local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr > s.hi.__ptr then
-      diff_rect.lo.__ptr = s.lo.__ptr
-      diff_rect.hi.__ptr = (r.lo.__ptr - 1 + sz.__ptr) % sz.__ptr
-    -- shift left
-    elseif s.lo.__ptr < r.lo.__ptr then
-      diff_rect.lo.__ptr = s.lo.__ptr
-      diff_rect.hi.__ptr = r.lo.__ptr - 1
-    -- shift right
-    elseif s.lo.__ptr > r.lo.__ptr then
-      diff_rect.lo.__ptr = r.hi.__ptr + 1
-      diff_rect.hi.__ptr = s.hi.__ptr
-    else
-      diff_rect.lo.__ptr = r.lo.__ptr
-      diff_rect.hi.__ptr = r.hi.__ptr
-    end
-
+    [get_ghost_rect_body(diff_rect, sz, r, s)]
     return diff_rect
   end,
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr.x > s.hi.__ptr.x then
-      diff_rect.lo.__ptr.x = s.lo.__ptr.x
-      diff_rect.hi.__ptr.x = (r.lo.__ptr.x - 1 + sz.__ptr.x) % sz.__ptr.x
-    -- shift left
-    elseif s.lo.__ptr.x < r.lo.__ptr.x then
-      diff_rect.lo.__ptr.x = s.lo.__ptr.x
-      diff_rect.hi.__ptr.x = r.lo.__ptr.x - 1
-    -- shift right
-    elseif s.lo.__ptr.x > r.lo.__ptr.x then
-      diff_rect.lo.__ptr.x = r.hi.__ptr.x + 1
-      diff_rect.hi.__ptr.x = s.hi.__ptr.x
-    else
-      diff_rect.lo.__ptr.x = r.lo.__ptr.x
-      diff_rect.hi.__ptr.x = r.hi.__ptr.x
-    end
-
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr.y > s.hi.__ptr.y then
-      diff_rect.lo.__ptr.y = s.lo.__ptr.y
-      diff_rect.hi.__ptr.y = (r.lo.__ptr.y - 1 + sz.__ptr.y) % sz.__ptr.y
-    -- shift up
-    elseif s.lo.__ptr.y < r.lo.__ptr.y then
-      diff_rect.lo.__ptr.y = s.lo.__ptr.y
-      diff_rect.hi.__ptr.y = r.lo.__ptr.y - 1
-    -- shift down
-    elseif s.lo.__ptr.y > r.lo.__ptr.y then
-      diff_rect.lo.__ptr.y = r.hi.__ptr.y + 1
-      diff_rect.hi.__ptr.y = s.hi.__ptr.y
-    else
-      diff_rect.lo.__ptr.y = r.lo.__ptr.y
-      diff_rect.hi.__ptr.y = r.hi.__ptr.y
-    end
+    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
     return diff_rect
   end,
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr.x > s.hi.__ptr.x then
-      diff_rect.lo.__ptr.x = s.lo.__ptr.x
-      diff_rect.hi.__ptr.x = (r.lo.__ptr.x - 1 + sz.__ptr.x) % sz.__ptr.x
-    -- shift left
-    elseif s.lo.__ptr.x < r.lo.__ptr.x then
-      diff_rect.lo.__ptr.x = s.lo.__ptr.x
-      diff_rect.hi.__ptr.x = r.lo.__ptr.x - 1
-    -- shift right
-    elseif s.lo.__ptr.x > r.lo.__ptr.x then
-      diff_rect.lo.__ptr.x = r.hi.__ptr.x + 1
-      diff_rect.hi.__ptr.x = s.hi.__ptr.x
-    else
-      diff_rect.lo.__ptr.x = r.lo.__ptr.x
-      diff_rect.hi.__ptr.x = r.hi.__ptr.x
-    end
-
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr.y > s.hi.__ptr.y then
-      diff_rect.lo.__ptr.y = s.lo.__ptr.y
-      diff_rect.hi.__ptr.y = (r.lo.__ptr.y - 1 + sz.__ptr.y) % sz.__ptr.y
-    -- shift up
-    elseif s.lo.__ptr.y < r.lo.__ptr.y then
-      diff_rect.lo.__ptr.y = s.lo.__ptr.y
-      diff_rect.hi.__ptr.y = r.lo.__ptr.y - 1
-    -- shift down
-    elseif s.lo.__ptr.y > r.lo.__ptr.y then
-      diff_rect.lo.__ptr.y = r.hi.__ptr.y + 1
-      diff_rect.hi.__ptr.y = s.hi.__ptr.y
-    else
-      diff_rect.lo.__ptr.y = r.lo.__ptr.y
-      diff_rect.hi.__ptr.y = r.hi.__ptr.y
-    end
-
-    -- wrapped around, periodic boundary
-    if s.lo.__ptr.z > s.hi.__ptr.z then
-      diff_rect.lo.__ptr.z = s.lo.__ptr.z
-      diff_rect.hi.__ptr.z = (r.lo.__ptr.z - 1 + sz.__ptr.z) % sz.__ptr.z
-    -- shift up
-    elseif s.lo.__ptr.z < r.lo.__ptr.z then
-      diff_rect.lo.__ptr.z = s.lo.__ptr.z
-      diff_rect.hi.__ptr.z = r.lo.__ptr.z - 1
-    -- shift down
-    elseif s.lo.__ptr.z > r.lo.__ptr.z then
-      diff_rect.lo.__ptr.z = r.hi.__ptr.z + 1
-      diff_rect.hi.__ptr.z = s.hi.__ptr.z
-    else
-      diff_rect.lo.__ptr.z = r.lo.__ptr.z
-      diff_rect.hi.__ptr.z = r.hi.__ptr.z
-    end
-
+    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
     return diff_rect
   end
 }
@@ -680,6 +618,11 @@ local function create_image_partition(pr, pp, stencil)
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
                                     mk_expr_id(tmp_var) })
+  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                                           sr_bounds_expr)))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                                           ghost_rect_expr)))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf, mk_expr_constant("\n", rawstring))))
   loop_body:insert(mk_stat_expr(
     mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
@@ -1159,6 +1102,32 @@ end
 
 local parallelize_tasks = {}
 
+local function fixup_ref_type(expr)
+  if expr:is(ast.typed.expr.FieldAccess) then
+    local value = fixup_ref_type(expr.value)
+    if value ~= expr.value then
+      return expr { value = value }
+    else
+      return expr
+    end
+  elseif expr:is(ast.typed.expr.IndexAccess) then
+    assert(expr.value:is(ast.typed.expr.ID))
+    local ref_type = expr.expr_type
+    if ref_type.region_symbol ~= expr.value.value then
+      local pointer_type = ref_type.pointer_type
+      local index_type = pointer_type.index_type
+      return expr {
+        expr_type = std.ref(index_type(pointer_type.points_to_type,
+                                       expr.value.value)),
+      }
+    else
+      return expr
+    end
+  else
+    return expr
+  end
+end
+
 function parallelize_tasks.stat_for_list(cx, node)
   local loop_var = node.symbol
   local stats = terralib.newlist()
@@ -1210,7 +1179,8 @@ function parallelize_tasks.stat_for_list(cx, node)
           local region_id_expr = mk_expr_id(region_symbol, region_type)
           local bounds_expr = mk_expr_bounds_access(region_id_expr)
           local cond = mk_expr_binary("<=", point_symbol_expr, bounds_expr)
-          local region_access = value_stencil(region_symbol)(loop_var)
+          local region_access =
+            fixup_ref_type(value_stencil(region_symbol)(loop_var))
           local result_assignment = mk_stat_assignment(result_expr, region_access)
           if idx == 0 then
             case_split_if = mk_stat_if(cond, result_assignment)
@@ -1220,14 +1190,15 @@ function parallelize_tasks.stat_for_list(cx, node)
           end
         end
         assert(case_split_if)
-        -- FIXME: adding calls to assertion slows down code considerably,
-        --        potentially due to instruction cache misses from error string
-        --case_split_if.else_block.stats:insert(mk_stat_expr(mk_expr_call(
-        --  std.assert,
-        --  terralib.newlist {
-        --    mk_expr_constant(false, bool),
-        --    mk_expr_constant("unreachable", rawstring)
-        --  })))
+        if std.config["debug"] then
+          case_split_if.else_block.stats:insertall(terralib.newlist {
+            mk_stat_expr(mk_expr_call(std.assert,
+                         terralib.newlist {
+                           mk_expr_constant(false, bool),
+                           mk_expr_constant("unreachable", rawstring)
+                         })),
+          })
+        end
         stats:insert(case_split_if)
       else
         stats:insert(stat)
