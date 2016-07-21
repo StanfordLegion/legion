@@ -1473,7 +1473,7 @@ namespace LegionRuntime {
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
 
-      if(impl->metadata.block_size == 1) {
+      if(impl->metadata.block_size <= 1) {
 	offset += index * impl->metadata.elmt_size + field_offset;
 	elmt_stride = impl->metadata.elmt_size;
       } else {
