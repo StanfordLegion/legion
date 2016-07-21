@@ -890,26 +890,39 @@ function stencil_analysis.expr(cx, expr)
         return expr { lhs = lhs }
       end)
     elseif expr.op == "+" or expr.op == "-" then
-      assert(expr.rhs:is(ast.typed.expr.Ctor))
-      local convert = function(n) return n end
-      if expr.op == "-" then
-        convert = function(n)
-          if n.value.value == 0 then return n
-          else
-            return n {
-              value = n.value {
-                value = -n.value.value,
-              },
-            }
+      if expr.rhs:is(ast.typed.expr.Ctor) then
+        local convert = function(n) return n end
+        if expr.op == "-" then
+          convert = function(n)
+            if n.value.value == 0 then return n
+            else
+              return n {
+                value = n.value {
+                  value = -n.value.value,
+                },
+              }
+            end
           end
         end
+        return stencil_analysis.expr(cx, expr.rhs):map(function(rhs)
+          return expr {
+            op = "+",
+            rhs = rhs { fields = rhs.fields:map(convert) },
+          }
+        end)
+      elseif expr.rhs:is(ast.typed.expr.Constant) and
+             expr.rhs.expr_type.type == "integer" then
+        if expr.op == "-" then
+          return terralib.newlist { expr {
+            op = "+",
+            rhs = expr.rhs { value = -expr.rhs.value }
+          }}
+        else
+          return terralib.newlist { expr }
+        end
+      else
+        assert(false)
       end
-      return stencil_analysis.expr(cx, expr.rhs):map(function(rhs)
-        return expr {
-          op = "+",
-          rhs = rhs { fields = rhs.fields:map(convert) },
-        }
-      end)
     else
       assert(false)
     end
@@ -1023,6 +1036,13 @@ function stencil_analysis.join_stencil(cx, s1, s2)
           end)
         }
       end
+    elseif s1:is(ast.typed.expr.Constant) then
+      local o1 = s1.value
+      local o2 = s2.value
+      if o1 == o2 and o1 == 0 then return s1
+      elseif o1 * o2 < 0 then return nil
+      elseif math.abs(o1) > math.abs(o2) then return s1
+      else return s2 end
     else
       return nil
     end

@@ -27,7 +27,7 @@ fspace fs
 }
 
 __demand(__parallel)
-task init(r : region(ispace(int3d), fs))
+task init(r : region(ispace(int1d), fs))
 where reads writes(r)
 do
   for e in r do e.f = c.drand48() end
@@ -36,35 +36,31 @@ do
 end
 
 __demand(__parallel)
-task stencil(r : region(ispace(int3d), fs))
+task stencil(r : region(ispace(int1d), fs))
 where reads(r.f), reads writes(r.g)
 do
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     e.g = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+                 r[(e + 2) % r.bounds].f +
+                 r[(e + 1) % r.bounds].f +
+                 r[(e - 1) % r.bounds].f +
+                 r[(e - 2) % r.bounds].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
-task stencil_serial(r : region(ispace(int3d), fs))
+task stencil_serial(r : region(ispace(int1d), fs))
 where reads(r.f), reads writes(r.h)
 do
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     e.h = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+                 r[(e + 2) % r.bounds].f +
+                 r[(e + 1) % r.bounds].f +
+                 r[(e - 1) % r.bounds].f +
+                 r[(e - 2) % r.bounds].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("serial version: %lu us\n", ts_end - ts_start)
@@ -74,10 +70,10 @@ local cmath = terralib.includec("math.h")
 
 task test(size : int)
   c.srand48(12345)
-  var is = ispace(int3d, {size, size, size})
+  var is = ispace(int1d, size)
   var primary_region = region(is, fs)
-  var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int3d, {np, np, np}))
+  var np = 4
+  var primary_partition = partition(equal, primary_region, ispace(int1d, np))
   init(primary_region)
   stencil(primary_region)
   stencil_serial(primary_region)
@@ -87,8 +83,8 @@ task test(size : int)
 end
 
 task toplevel()
-  test(50)
-  test(100)
+  test(1000)
+  test(10000)
 end
 
 regentlib.start(toplevel)
