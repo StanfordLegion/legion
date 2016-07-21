@@ -23,7 +23,7 @@
 #include "legion_utilities.h"
 
 namespace Realm {
-  typedef Legion::Internal::NodeSet NodeSet;
+  typedef LegionRuntime::HighLevel::NodeSet NodeSet;
 };
 
 #endif // ifndef REALM_NODESET_H

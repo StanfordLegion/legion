@@ -30,10 +30,6 @@
 #include "arrays.h"
 #include "custom_serdez.h"
 
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-#include "legion_realm.h" // forward declarations for legion types
-#endif
-
 namespace Realm {
 
   class ProfilingRequestSet;
@@ -41,23 +37,23 @@ namespace Realm {
     class ElementMask {
     public:
       ElementMask(void);
-      explicit ElementMask(size_t num_elements, coord_t first_element = 0);
-      explicit ElementMask(const ElementMask &copy_from, size_t num_elements, coord_t first_element = -1LL);
+      explicit ElementMask(size_t num_elements, off_t first_element = 0);
+      explicit ElementMask(const ElementMask &copy_from, size_t num_elements, off_t first_element = -1LL);
       ElementMask(const ElementMask &copy_from, bool trim = false);
       ~ElementMask(void);
 
-      void init(coord_t _first_element, size_t _num_elements, Memory _memory, coord_t _offset);
+      void init(off_t _first_element, size_t _num_elements, Memory _memory, off_t _offset);
 
-      coord_t get_first_element(void) const { return first_element; }
+      off_t get_first_element(void) const { return first_element; }
       size_t get_num_elmts(void) const { return num_elements; }
 
-      void enable(coord_t start, size_t count = 1);
-      void disable(coord_t start, size_t count = 1);
+      void enable(off_t start, size_t count = 1);
+      void disable(off_t start, size_t count = 1);
 
-      coord_t find_enabled(size_t count = 1, coord_t start = 0) const;
-      coord_t find_disabled(size_t count = 1, coord_t start = 0) const;
+      off_t find_enabled(size_t count = 1, off_t start = 0) const;
+      off_t find_disabled(size_t count = 1, off_t start = 0) const;
 
-      bool is_set(coord_t ptr) const;
+      bool is_set(off_t ptr) const;
       size_t pop_count(bool enabled = true) const;
       bool operator!(void) const;
       bool operator==(const ElementMask &other) const;
@@ -71,34 +67,34 @@ namespace Realm {
       ElementMask& operator&=(const ElementMask &other);
       ElementMask& operator-=(const ElementMask &other);
 
-      coord_t first_enabled(void) const { return first_enabled_elmt; }
-      coord_t last_enabled(void) const { return last_enabled_elmt; }
+      off_t first_enabled(void) const { return first_enabled_elmt; }
+      off_t last_enabled(void) const { return last_enabled_elmt; }
 
       ElementMask& operator=(const ElementMask &rhs);
 
       enum OverlapResult { OVERLAP_NO, OVERLAP_MAYBE, OVERLAP_YES };
 
       OverlapResult overlaps_with(const ElementMask& other,
-				  coord_t max_effort = -1LL) const;
+				  off_t max_effort = -1LL) const;
 
       ElementMask intersect_with(const ElementMask &other);
 
       class Enumerator {
       public:
-	Enumerator(const ElementMask& _mask, coord_t _start, int _polarity);
+	Enumerator(const ElementMask& _mask, off_t _start, int _polarity);
 	~Enumerator(void);
 
-	bool get_next(coord_t &position, size_t &length);
-	bool peek_next(coord_t &position, size_t &length);
+	bool get_next(off_t &position, size_t &length);
+	bool peek_next(off_t &position, size_t &length);
 
       protected:
 	const ElementMask& mask;
-	coord_t pos;
+	off_t pos;
 	int polarity;
       };
 
-      Enumerator *enumerate_enabled(coord_t start = 0) const;
-      Enumerator *enumerate_disabled(coord_t start = 0) const;
+      Enumerator *enumerate_enabled(off_t start = 0) const;
+      Enumerator *enumerate_disabled(off_t start = 0) const;
 
       size_t raw_size(void) const;
       const void *get_raw(void) const;
@@ -108,14 +104,14 @@ namespace Realm {
       template <class T>
       static size_t forall_ranges(T &executor,
                                   const ElementMask &mask,
-			          coord_t start = 0, coord_t count = -1LL,
+			          off_t start = 0, off_t count = -1LL,
 			          bool do_enabled = true);
 
       template <class T>
       static size_t forall_ranges(T &executor,
                                   const ElementMask &mask1,
 			          const ElementMask &mask2,
-			          coord_t start = 0, coord_t count = -1LL,
+			          off_t start = 0, off_t count = -1LL,
 			          bool do_enabled1 = true,
 			          bool do_enabled2 = true);
 
@@ -123,12 +119,12 @@ namespace Realm {
       void recalc_first_last_enabled(void);
 
       friend class Enumerator;
-      coord_t first_element;
+      off_t first_element;
       size_t num_elements;
       Memory memory;
-      coord_t offset;
+      off_t offset;
       char *raw_data;
-      coord_t first_enabled_elmt, last_enabled_elmt;
+      off_t first_enabled_elmt, last_enabled_elmt;
     };
 
     class IndexSpaceAllocator;
@@ -155,7 +151,7 @@ namespace Realm {
 
       static IndexSpace expand_index_space(IndexSpace child,
 					   size_t num_elmts,
-					   coord_t child_offset = 0);
+					   off_t child_offset = 0);
 
       void destroy(Event wait_on = Event::NO_EVENT) const;
 
@@ -307,7 +303,7 @@ namespace Realm {
         for (int i = 0; i < MAX_POINT_DIM; i++)
           point_data[i] = 0;
       }
-      DomainPoint(coord_t index) : dim(0)
+      DomainPoint(off_t index) : dim(0)
       {
         point_data[0] = index;
         for (int i = 1; i < MAX_POINT_DIM; i++)
@@ -398,33 +394,15 @@ namespace Realm {
       template <int DIM>
       LegionRuntime::Arrays::Point<DIM> get_point(void) const { assert(dim == DIM); return LegionRuntime::Arrays::Point<DIM>(point_data); }
 
-      bool is_null(void) const { return (dim == -1); }
+      bool is_null(void) const { return (dim > -1); }
 
       static DomainPoint nil(void) { DomainPoint p; p.dim = -1; return p; }
 
     protected:
     public:
       int dim;
-      coord_t point_data[MAX_POINT_DIM];
-
-      friend std::ostream& operator<<(std::ostream& os, const DomainPoint& dp);
+      off_t point_data[MAX_POINT_DIM];
     };
-
-    inline /*friend */std::ostream& operator<<(std::ostream& os,
-					       const DomainPoint& dp)
-    {
-      switch(dp.dim) {
-      case 0: { os << '[' << dp.point_data[0] << ']'; break; }
-      case 1: { os << '(' << dp.point_data[0] << ')'; break; }
-      case 2: { os << '(' << dp.point_data[0]
-		   << ',' << dp.point_data[1] << ')'; break; }
-      case 3: { os << '(' << dp.point_data[0]
-		   << ',' << dp.point_data[1]
-		   << ',' << dp.point_data[2] << ')'; break; }
-      default: assert(0);
-      }
-      return os;
-    }
 
     class DomainLinearization {
     public:
@@ -662,23 +640,6 @@ namespace Realm {
         return d;
       }
 
-      // Only works for structured DomainPoint.
-      static Domain from_domain_point(const DomainPoint &p) {
-        switch (p.dim) {
-          case 0:
-            assert(false);
-          case 1:
-            return Domain::from_point<1>(p.get_point<1>());
-          case 2:
-            return Domain::from_point<2>(p.get_point<2>());
-          case 3:
-            return Domain::from_point<3>(p.get_point<3>());
-          default:
-            assert(false);
-        }
-        return Domain::NO_DOMAIN;
-      }
-
       size_t compute_size(void) const
       {
         size_t result;
@@ -831,62 +792,6 @@ namespace Realm {
         return 0;
       }
 
-      // Intersects this Domain with another Domain and returns the result.
-      // WARNING: currently only works with structured Domains.
-      Domain intersection(const Domain &other) const
-      {
-        assert(dim == other.dim);
-
-        switch (dim)
-        {
-          case 0:
-            assert(false);
-          case 1:
-            return Domain::from_rect<1>(get_rect<1>().intersection(other.get_rect<1>()));
-          case 2:
-            return Domain::from_rect<2>(get_rect<2>().intersection(other.get_rect<2>()));
-          case 3:
-            return Domain::from_rect<3>(get_rect<3>().intersection(other.get_rect<3>()));
-          default:
-            assert(false);
-        }
-        return Domain::NO_DOMAIN;
-      }
-
-      // Returns the bounding box for this Domain and a point.
-      // WARNING: only works with structured Domain.
-      Domain convex_hull(const DomainPoint &p) const
-      {
-        assert(dim == p.dim);
-
-        switch (dim)
-        {
-          case 0:
-            assert(false);
-          case 1:
-            {
-              LegionRuntime::Arrays::Point<1> pt = p.get_point<1>();
-              return Domain::from_rect<1>(get_rect<1>().convex_hull(
-                    LegionRuntime::Arrays::Rect<1>(pt, pt)));
-             }
-          case 2:
-            {
-              LegionRuntime::Arrays::Point<2> pt = p.get_point<2>();
-              return Domain::from_rect<2>(get_rect<2>().convex_hull(
-                    LegionRuntime::Arrays::Rect<2>(pt, pt)));
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Point<3> pt = p.get_point<3>();
-              return Domain::from_rect<3>(get_rect<3>().convex_hull(
-                    LegionRuntime::Arrays::Rect<3>(pt, pt)));
-            }
-          default:
-            assert(false);
-        }
-        return Domain::NO_DOMAIN;
-      }
-
       template <int DIM>
       LegionRuntime::Arrays::Rect<DIM> get_rect(void) const { assert(dim == DIM); return LegionRuntime::Arrays::Rect<DIM>(rect_data); }
 
@@ -1026,7 +931,7 @@ namespace Realm {
     public:
       IDType is_id;
       int dim;
-      coord_t rect_data[2 * MAX_RECT_DIM];
+      off_t rect_data[2 * MAX_RECT_DIM];
 
     public:
       // simple instance creation for the lazy
@@ -1048,16 +953,6 @@ namespace Realm {
                                      const ProfilingRequestSet &reqs,
 				     ReductionOpID redop_id = 0) const;
 
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-      // Note that the constraints are not const so that Realm can add
-      // to the set with additional constraints describing the exact 
-      // instance that was created.
-      Event create_instance(RegionInstance &result,
-              const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
-              const Legion::LayoutConstraintSet &constraints, 
-              const ProfilingRequestSet &reqs) const;
-#endif
-
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
@@ -1068,20 +963,15 @@ namespace Realm {
       struct CopySrcDstField {
       public:
         CopySrcDstField(void) 
-          : inst(RegionInstance::NO_INST), offset(0), size(0), 
-            field_id(0), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s)
-          : inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s, unsigned f)
-          : inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s, 
-                        unsigned f, CustomSerdezID sid)
-          : inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
+          : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, off_t o, size_t s)
+          : inst(i), offset(o), size(s), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, off_t o, size_t s, CustomSerdezID sid)
+          : inst(i), offset(o), size(s), serdez_id(sid) { }
       public:
 	RegionInstance inst;
-	coord_t offset;
+	off_t offset;
         size_t size;
-        unsigned field_id;
 	CustomSerdezID serdez_id;
       };
 
@@ -1154,9 +1044,9 @@ namespace Realm {
       IndexSpaceAllocator(const IndexSpaceAllocator& to_copy)
 	: impl(to_copy.impl) {}
 
-      coord_t alloc(size_t count = 1) const;
-      void reserve(coord_t ptr, size_t count = 1) const;
-      void free(coord_t ptr, size_t count = 1) const;
+      off_t alloc(size_t count = 1) const;
+      void reserve(off_t ptr, size_t count = 1) const;
+      void free(off_t ptr, size_t count = 1) const;
 
       template <typename LIN>
       void reserve(const LIN& linearizer, LegionRuntime::Arrays::Point<LIN::IDIM> point) const;
@@ -1169,8 +1059,8 @@ namespace Realm {
     template <class T>
     /*static*/ size_t ElementMask::forall_ranges(T &executor,
                                                  const ElementMask &mask,
-					         coord_t start /*= 0*/,
-					         coord_t count /*= -1*/,
+					         off_t start /*= 0*/,
+					         off_t count /*= -1*/,
 					         bool do_enabled /*= true*/)
     {
       if(count == 0) return 0;
@@ -1179,23 +1069,22 @@ namespace Realm {
 
       size_t total = 0;
 
-      coord_t pos;
+      off_t pos;
       size_t len;
       while(enum1.get_next(pos, len)) {
-        coord_t len_ = len;
 	if(pos < start) {
-	  len_ -= (start - pos);
+	  len -= (start - pos);
 	  pos = start;
 	}
 
-	if((count > 0) && ((pos + len_) > (start + count))) {
-	  len_ = start + count - pos;
+	if((count > 0) && ((pos + len) > (start + count))) {
+	  len = start + count - pos;
 	}
 
-	if(len_ > 0) {
+	if(len > 0) {
 	  //printf("S:%d(%d)\n", pos, len);
-	  executor.do_span(pos, len_);
-	  total += len_;
+	  executor.do_span(pos, len);
+	  total += len;
 	}
       }
 
@@ -1206,15 +1095,15 @@ namespace Realm {
     /*static*/ size_t ElementMask::forall_ranges(T &executor,
                                                  const ElementMask &mask1,
 					         const ElementMask &mask2,
-					         coord_t start /*= 0*/,
-					         coord_t count /*= -1*/,
+					         off_t start /*= 0*/,
+					         off_t count /*= -1*/,
 					         bool do_enabled1 /*= true*/,
 					         bool do_enabled2 /*= true*/)
     {
       ElementMask::Enumerator enum1(mask1, start, do_enabled1 ? 1 : 0);
       ElementMask::Enumerator enum2(mask2, start, do_enabled2 ? 1 : 0);
 
-      coord_t pos1, pos2;
+      off_t pos1, pos2;
       size_t len1, len2;
 
       if(!enum1.get_next(pos1, len1)) return 0;
@@ -1223,52 +1112,49 @@ namespace Realm {
 
       size_t total = 0;
 
-      coord_t len1_ = len1, len2_ = len1;
       while(true) {
 	//printf("S:%d(%d) T:%d(%d)\n", pos1, len1, pos2, len2);
 
-	if(len1_ <= 0) {
+	if(len1 <= 0) {
 	  if(!enum1.get_next(pos1, len1)) break;
-          len1_ = len1;
-	  if((count > 0) && ((pos1 + len1_) > (start + count))) {
-	    len1_ = (start + count) - pos1;
-	    if(len1_ < 0) break;
+	  if((count > 0) && ((pos1 + len1) > (start + count))) {
+	    len1 = (start + count) - pos1;
+	    if(len1 < 0) break;
 	  }
 	  continue;
 	}
 
-	if(len2_ <= 0) {
+	if(len2 <= 0) {
 	  if(!enum2.get_next(pos2, len2)) break;
-          len2_ = len2;
-	  if((count > 0) && ((pos2 + len2_) > (start + count))) {
-	    len2_ = (start + count) - pos2;
-	    if(len2_ < 0) break;
+	  if((count > 0) && ((pos2 + len2) > (start + count))) {
+	    len2 = (start + count) - pos2;
+	    if(len2 < 0) break;
 	  }
 	  continue;
 	}
 
 	if(pos1 < pos2) {
-	  len1_ -= (pos2 - pos1);
+	  len1 -= (pos2 - pos1);
 	  pos1 = pos2;
 	  continue;
 	}
 
 	if(pos2 < pos1) {
-	  len2_ -= (pos1 - pos2);
+	  len2 -= (pos1 - pos2);
 	  pos2 = pos1;
 	  continue;
 	}
 
-	assert((pos1 == pos2) && (len1_ > 0) && (len2_ > 0));
+	assert((pos1 == pos2) && (len1 > 0) && (len2 > 0));
 
-	size_t span_len = (len1_ < len2_) ? len1_ : len2_;
+	size_t span_len = (len1 < len2) ? len1 : len2;
 
 	executor.do_span(pos1, span_len);
 
 	pos1 += span_len;
-	len1_ -= span_len;
+	len1 -= span_len;
 	pos2 += span_len;
-	len2_ -= span_len;
+	len2 -= span_len;
 
 	total += span_len;
       }

@@ -24,11 +24,6 @@
 #include "activemsg.h"
 #include "nodeset.h"
 
-//define REALM_RSRV_USE_CIRCQUEUE
-#ifdef REALM_RSRV_USE_CIRCQUEUE
-#include "circ_queue.h"
-#endif
-
 namespace Realm {
 
 #ifdef LOCK_TRACING
@@ -78,14 +73,7 @@ namespace Realm {
       // bitmasks of which remote nodes are waiting on a lock (or sharing it)
       NodeSet remote_waiter_mask, remote_sharer_mask;
       //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
-
-#ifdef REALM_RSRV_USE_CIRCQUEUE
-      typedef CircularQueue<Event> WaiterList;
-#else
-      typedef std::deque<Event> WaiterList;
-#endif
-
-      std::map<unsigned, WaiterList> local_waiters;
+      std::map<unsigned, std::deque<Event> > local_waiters;
       std::map<unsigned, unsigned> retry_count;
       std::map<unsigned, Event> retry_events;
       bool requested; // do we have a request for the lock in flight?
@@ -118,7 +106,7 @@ namespace Realm {
 		    AcquireType acquire_type,
 		    Event after_lock = Event::NO_EVENT);
 
-      bool select_local_waiters(WaiterList& to_wake);
+      bool select_local_waiters(std::deque<Event>& to_wake);
 
       void release(void);
 

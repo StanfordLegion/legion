@@ -18,8 +18,6 @@
 // nop, but helps IDEs
 #include "logging.h"
 
-#include <assert.h>
-
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -237,12 +235,6 @@ namespace Realm {
   inline bool LoggerMessage::is_active(void) const
   {
     return active;
-  }
-
-  inline std::ostream& LoggerMessage::get_stream(void)
-  {
-    assert(active);
-    return (*oss);
   }
 
 }; // namespace Realm

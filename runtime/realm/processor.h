@@ -65,6 +65,8 @@ namespace Realm {
       Kind kind(void) const;
       // Return the address space for this processor
       AddressSpace address_space(void) const;
+      // Return the local ID within the address space
+      id_t local_id(void) const;
 
       static Processor create_group(const std::vector<Processor>& members);
       void get_group_members(std::vector<Processor>& members);
@@ -114,8 +116,6 @@ namespace Realm {
       // reports a problem with a processor in general (this is primarily for fault injection)
       void report_processor_fault(int reason,
 				  const void *reason_data, size_t reason_size) const;
-
-      static const char* get_kind_name(Kind kind);
     };
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }

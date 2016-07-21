@@ -60,7 +60,7 @@ namespace Realm {
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
       // are we creating a local group?
-      if((members.size() == 0) || (ID(members[0]).proc.owner_node == gasnet_mynode())) {
+      if((members.size() == 0) || (ID(members[0]).node() == gasnet_mynode())) {
 	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
@@ -99,12 +99,12 @@ namespace Realm {
     void Processor::get_group_members(std::vector<Processor>& members)
     {
       // if we're a plain old processor, the only member of our "group" is ourself
-      if(ID(*this).is_processor()) {
+      if(ID(*this).type() == ID::ID_PROCESSOR) {
 	members.push_back(*this);
 	return;
       }
 
-      assert(ID(*this).is_procgroup());
+      assert(ID(*this).type() == ID::ID_PROCGROUP);
 
       ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
       grp->get_group_members(members);
@@ -162,10 +162,12 @@ namespace Realm {
 
     AddressSpace Processor::address_space(void) const
     {
-      // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
-      ID id(*this);
-      assert(id.is_processor());
-      return id.proc.owner_node;
+      return ID(id).node();
+    }
+
+    ID::IDType Processor::local_id(void) const
+    {
+      return ID(id).index();
     }
 
     Event Processor::register_task(TaskFuncID func_id,
@@ -200,16 +202,14 @@ namespace Realm {
       std::vector<Processor> local_procs;
       std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
       // is the target a single processor or a group?
-      ID id(*this);
-      if(id.is_processor()) {
-	gasnet_node_t n = id.proc.owner_node;
+      if(ID(*this).type() == ID::ID_PROCESSOR) {
+	gasnet_node_t n = ID(*this).node();
 	if(n == gasnet_mynode())
 	  local_procs.push_back(*this);
 	else
 	  remote_procs[n].push_back(*this);
       } else {
 	// assume we're a group
-	assert(id.is_procgroup());
 	ProcessorGroup *grp = get_runtime()->get_procgroup_impl(*this);
 	std::vector<Processor> members;
 	grp->get_group_members(members);
@@ -217,7 +217,7 @@ namespace Realm {
 	    it != members.end();
 	    it++) {
 	  Processor p = *it;
-	  gasnet_node_t n = ID(p).proc.owner_node;
+	  gasnet_node_t n = ID(p).node();
 	  if(n == gasnet_mynode())
 	    local_procs.push_back(p);
 	  else
@@ -353,28 +353,6 @@ namespace Realm {
       assert(0);
     }
 
-    /*static*/ const char* Processor::get_kind_name(Kind kind)
-    {
-      switch (kind)
-      {
-        case NO_KIND:
-          return "NO_KIND";
-        case TOC_PROC:
-          return "TOC_PROC";
-        case LOC_PROC:
-          return "LOC_PROC";
-        case UTIL_PROC:
-          return "UTIL_PROC";
-        case IO_PROC:
-          return "IO_PROC";
-        case PROC_GROUP:
-          return "PROC_GROUP";
-        default:
-          assert(0);
-      }
-      return NULL;
-    }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -429,16 +407,16 @@ namespace Realm {
 
     void ProcessorGroup::init(Processor _me, int _owner)
     {
-      assert(ID(_me).pgroup.owner_node == (unsigned)_owner);
+      assert(ID(_me).node() == (unsigned)_owner);
 
       me = _me;
-      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup.owner_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).node());
     }
 
     void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
     {
-      // can only be performed on owner node
-      assert(ID(me).pgroup.owner_node == gasnet_mynode());
+      // can only be perform on owner node
+      assert(ID(me).node() == gasnet_mynode());
       
       // can only be done once
       assert(!members_valid);
@@ -537,11 +515,6 @@ namespace Realm {
       os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
     }
 
-    Event DeferredTaskSpawn::get_finish_event(void) const
-    {
-      return task->get_finish_event();
-    }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -555,10 +528,16 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
 
+    Event start_event, finish_event;
+    start_event.id = args.start_id;
+    start_event.gen = args.start_gen;
+    finish_event.id = args.finish_id;
+    finish_event.gen = args.finish_gen;
+
     log_task.debug() << "received remote spawn request:"
 		     << " func=" << args.func_id
 		     << " proc=" << args.proc
-		     << " finish=" << args.finish_event;
+		     << " finish=" << finish_event;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
     fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
@@ -569,7 +548,7 @@ namespace Realm {
       fbd >> prs;
       
     p->spawn_task(args.func_id, data, args.user_arglen, prs,
-		  args.start_event, args.finish_event, args.priority);
+		  start_event, finish_event, args.priority);
   }
 
   /*static*/ void SpawnTaskMessage::send_request(gasnet_node_t target, Processor proc,
@@ -583,8 +562,10 @@ namespace Realm {
 
     r_args.proc = proc;
     r_args.func_id = func_id;
-    r_args.start_event = start_event;
-    r_args.finish_event = finish_event;
+    r_args.start_id = start_event.id;
+    r_args.start_gen = start_event.gen;
+    r_args.finish_id = finish_event.id;
+    r_args.finish_gen = finish_event.gen;
     r_args.priority = priority;
     r_args.user_arglen = arglen;
     
@@ -740,15 +721,7 @@ namespace Realm {
 		       << " proc=" << me
 		       << " finish=" << finish_event;
 
-      ID id(me);
-      gasnet_node_t target;
-      if(id.is_processor())
-	target = id.proc.owner_node;
-      else if(id.is_procgroup())
-	target = id.pgroup.owner_node;
-      else {
-	assert(0);
-      }
+      gasnet_node_t target = ID(me).node();
 
       get_runtime()->optable.add_remote_operation(finish_event, target);
 

@@ -18,7 +18,8 @@
 // Useful for IDEs 
 #include "legion.h"
 
-namespace Legion {
+namespace LegionRuntime {
+  namespace HighLevel {
 
     /**
      * \struct SerdezRedopFns
@@ -803,7 +804,7 @@ namespace Legion {
     inline void TaskLauncher::add_field(unsigned idx, FieldID fid, bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(idx < region_requirements.size());
 #endif
       region_requirements[idx].add_field(fid, inst);
@@ -873,7 +874,7 @@ namespace Legion {
     inline void IndexLauncher::add_field(unsigned idx, FieldID fid, bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(idx < region_requirements.size());
 #endif
       region_requirements[idx].add_field(fid, inst);
@@ -934,7 +935,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unsigned result = src_requirements.size();
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(result == dst_requirements.size());
 #endif
       src_requirements.push_back(src);
@@ -946,7 +947,7 @@ namespace Legion {
     inline void CopyLauncher::add_src_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(idx < src_requirements.size());
 #endif
       src_requirements[idx].add_field(fid, inst);
@@ -956,7 +957,7 @@ namespace Legion {
     inline void CopyLauncher::add_dst_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(idx < dst_requirements.size());
 #endif
       dst_requirements[idx].add_field(fid, inst);
@@ -1364,7 +1365,7 @@ namespace Legion {
     inline ptr_t IndexIterator::next(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(!finished);
 #endif
       ptr_t result = current_pointer;
@@ -1384,7 +1385,7 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(!finished);
 #endif
       ptr_t result = current_pointer;
@@ -1406,30 +1407,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline UniqueID Task::get_unique_task_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Copy::get_unique_copy_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Inline::get_unique_inline_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Acquire::get_unique_acquire_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
+    inline UniqueID Release::get_unique_release_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_unique_mappable_id();
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     IndexPartition Runtime::create_index_partition(Context ctx,
         IndexSpace parent, const T& mapping, int part_color /*= AUTO_GENERATE*/)
     //--------------------------------------------------------------------------
     {
-      LegionRuntime::Arrays::Rect<T::IDIM> parent_rect = 
+      Arrays::Rect<T::IDIM> parent_rect = 
         get_index_space_domain(ctx, parent).get_rect<T::IDIM>();
-      LegionRuntime::Arrays::Rect<T::ODIM> color_space = 
-        mapping.image_convex(parent_rect);
+      Arrays::Rect<T::ODIM> color_space = mapping.image_convex(parent_rect);
       DomainPointColoring c;
       for (typename T::PointInOutputRectIterator pir(color_space); 
           pir; pir++) 
       {
-        LegionRuntime::Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
-#ifdef DEBUG_LEGION
+        Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
+#ifdef DEBUG_HIGH_LEVEL
         assert(mapping.preimage_is_dense(pir.p));
 #endif
         c[DomainPoint::from_point<T::IDIM>(pir.p)] =
-          Domain::from_rect<T::IDIM>(preimage.intersection(parent_rect));
+          Domain::from_rect<T::IDIM>(preimage);
       }
       IndexPartition result = create_index_partition(ctx, parent, 
               Domain::from_rect<T::ODIM>(color_space), c, 
               DISJOINT_KIND, part_color);
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       // We don't actually know if we're supposed to check disjointness
       // so if we're in debug mode then just do it.
       {
@@ -1443,10 +1478,8 @@ namespace Legion {
           {
             if (current_colors.find(it2->first) != current_colors.end())
               continue;
-            LegionRuntime::Arrays::Rect<T::IDIM> rect1 = 
-              it1->second.get_rect<T::IDIM>();
-            LegionRuntime::Arrays::Rect<T::IDIM> rect2 = 
-              it2->second.get_rect<T::IDIM>();
+            Arrays::Rect<T::IDIM> rect1 = it1->second.get_rect<T::IDIM>();
+            Arrays::Rect<T::IDIM> rect2 = it2->second.get_rect<T::IDIM>();
             if (rect1.overlaps(rect2))
             {
               switch (it1->first.dim)
@@ -1490,7 +1523,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<unsigned DIM>
     IndexSpace Runtime::get_index_subspace(Context ctx, 
-                IndexPartition p, LegionRuntime::Arrays::Point<DIM> color_point)
+                              IndexPartition p, Arrays::Point<DIM> color_point)
     //--------------------------------------------------------------------------
     {
       DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
@@ -1526,7 +1559,7 @@ namespace Legion {
       if (redop_id == 0)
       {
         fprintf(stderr,"ERROR: ReductionOpID zero is reserved.\n");
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_RESERVED_REDOP_ID);
@@ -1537,7 +1570,7 @@ namespace Legion {
       {
         fprintf(stderr,"ERROR: ReductionOpID %d has already been used " 
                        "in the reduction table\n",redop_id);
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_REDOP_ID);
@@ -1558,7 +1591,7 @@ namespace Legion {
       if (serdez_id == 0)
       {
         fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_RESERVED_SERDEZ_ID);
@@ -1569,7 +1602,7 @@ namespace Legion {
       {
         fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
                        "in the serdez operation table\n", serdez_id);
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_DUPLICATE_SERDEZ_ID);
@@ -1578,34 +1611,6 @@ namespace Legion {
         Realm::CustomSerdezUntyped::create_custom_serdez<SERDEZ>();
     }
 
-    namespace Internal {
-      // Wrapper class for old projection functions
-      template<RegionProjectionFnptr FNPTR>
-      class RegionProjectionWrapper : public ProjectionFunctor {
-      public:
-        RegionProjectionWrapper(void) 
-          : ProjectionFunctor() { }
-        virtual ~RegionProjectionWrapper(void) { }
-      public:
-        virtual LogicalRegion project(Context ctx, Task *task,
-                                      unsigned index,
-                                      LogicalRegion upper_bound,
-                                      const DomainPoint &point)
-        {
-          return (*FNPTR)(upper_bound, point, runtime); 
-        }
-        virtual LogicalRegion project(Context ctx, Task *task,
-                                      unsigned index,
-                                      LogicalPartition upper_bound,
-                                      const DomainPoint &point)
-        {
-          assert(false);
-          return LogicalRegion::NO_REGION;
-        }
-        virtual bool is_exclusive(void) const { return false; }
-      };
-    };
-
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
                                        Runtime*)>
@@ -1613,38 +1618,9 @@ namespace Legion {
                                                             ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      Runtime::preregister_projection_functor(handle,
-          new Internal::RegionProjectionWrapper<PROJ_PTR>());
-      return handle;
+      return Runtime::register_region_projection_function(
+                                  handle, reinterpret_cast<void *>(PROJ_PTR));
     }
-
-    namespace Internal {
-      // Wrapper class for old projection functions
-      template<PartitionProjectionFnptr FNPTR>
-      class PartitionProjectionWrapper : public ProjectionFunctor {
-      public:
-        PartitionProjectionWrapper(void)
-          : ProjectionFunctor() { }
-        virtual ~PartitionProjectionWrapper(void) { }
-      public:
-        virtual LogicalRegion project(Context ctx, Task *task,
-                                      unsigned index,
-                                      LogicalRegion upper_bound,
-                                      const DomainPoint &point)
-        {
-          assert(false);
-          return LogicalRegion::NO_REGION;
-        }
-        virtual LogicalRegion project(Context ctx, Task *task,
-                                      unsigned index,
-                                      LogicalPartition upper_bound,
-                                      const DomainPoint &point)
-        {
-          return (*FNPTR)(upper_bound, point, runtime);
-        }
-        virtual bool is_exclusive(void) const { return false; }
-      };
-    };
 
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
@@ -1653,11 +1629,20 @@ namespace Legion {
                                                     ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      Runtime::preregister_projection_functor(handle,
-          new Internal::PartitionProjectionWrapper<PROJ_PTR>());
-      return handle;
+      return Runtime::register_partition_projection_function(
+                                  handle, reinterpret_cast<void *>(PROJ_PTR));
     }
 
+    //--------------------------------------------------------------------------
+    template<unsigned DIM>
+    IndexSpace Mapper::get_index_subspace(IndexPartition p,
+                                          Arrays::Point<DIM> &color_point) const
+    //--------------------------------------------------------------------------
+    {
+      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
+      return get_index_subspace(p, dom_point);
+    }
+    
     //--------------------------------------------------------------------------
     // Wrapper functions for high-level tasks
     //--------------------------------------------------------------------------
@@ -1728,7 +1713,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1758,7 +1743,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1791,7 +1776,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -1823,7 +1808,7 @@ namespace Legion {
       Runtime *runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(arglen == sizeof(Context));
 #endif
       Context ctx = *((const Context*)args);
@@ -2195,8 +2180,7 @@ namespace Legion {
     inline std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr)
     //--------------------------------------------------------------------------
     {
-      os << "LogicalRegion(" << lr.tree_id << "," 
-         << lr.index_space << "," << lr.field_space << ")";
+      os << "LogicalRegion(" << lr.tree_id << "," << lr.index_space << "," << lr.field_space << ")";
       return os;
     }
 
@@ -2224,156 +2208,5 @@ namespace Legion {
       return os;
     }
 
-}; // namespace Legion
-
-// This is for backwards compatibility with the old namespace scheme
-namespace LegionRuntime {
-  namespace HighLevel {
-    typedef Legion::IndexSpace IndexSpace;
-    typedef Legion::IndexPartition IndexPartition;
-    typedef Legion::FieldSpace FieldSpace;
-    typedef Legion::LogicalRegion LogicalRegion;
-    typedef Legion::LogicalPartition LogicalPartition;
-    typedef Legion::IndexAllocator IndexAllocator;
-    typedef Legion::FieldAllocator FieldAllocator;
-    typedef Legion::TaskArgument TaskArgument;
-    typedef Legion::ArgumentMap ArgumentMap;
-    typedef Legion::Predicate Predicate;
-    typedef Legion::Lock Lock;
-    typedef Legion::LockRequest LockRequest;
-    typedef Legion::Grant Grant;
-    typedef Legion::PhaseBarrier PhaseBarrier;
-    typedef Legion::DynamicCollective DynamicCollective;
-    typedef Legion::RegionRequirement RegionRequirement;
-    typedef Legion::IndexSpaceRequirement IndexSpaceRequirement;
-    typedef Legion::FieldSpaceRequirement FieldSpaceRequirement;
-    typedef Legion::Future Future;
-    typedef Legion::FutureMap FutureMap;
-    typedef Legion::TaskLauncher TaskLauncher;
-    typedef Legion::IndexLauncher IndexLauncher;
-    typedef Legion::InlineLauncher InlineLauncher;
-    typedef Legion::CopyLauncher CopyLauncher;
-    typedef Legion::PhysicalRegion PhysicalRegion;
-    typedef Legion::IndexIterator IndexIterator;
-    typedef Legion::AcquireLauncher AcquireLauncher;
-    typedef Legion::ReleaseLauncher ReleaseLauncher;
-    typedef Legion::TaskVariantRegistrar TaskVariantRegistrar;
-    typedef Legion::MustEpochLauncher MustEpochLauncher;
-    typedef Legion::MPILegionHandshake MPILegionHandshake;
-    typedef Legion::Mappable Mappable;
-    typedef Legion::Task Task;
-    typedef Legion::Copy Copy;
-    typedef Legion::InlineMapping Inline;
-    typedef Legion::Acquire Acquire;
-    typedef Legion::Release Release;
-    typedef Legion::Mapping::Mapper Mapper;
-    typedef Legion::InputArgs InputArgs;
-    typedef Legion::TaskConfigOptions TaskConfigOptions;
-    typedef Legion::ProjectionFunctor ProjectionFunctor;
-    typedef Legion::Runtime Runtime;
-    typedef Legion::Runtime HighLevelRuntime; // for backwards compatibility
-    typedef Legion::ColoringSerializer ColoringSerializer;
-    typedef Legion::DomainColoringSerializer DomainColoringSerializer;
-    typedef Legion::Serializer Serializer;
-    typedef Legion::Deserializer Deserializer;
-    typedef Legion::TaskResult TaskResult;
-    typedef Legion::CObjectWrapper CObjectWrapper;
-    typedef Legion::ImmovableAutoLock AutoLock;
-    typedef Legion::ISAConstraint ISAConstraint;
-    typedef Legion::ProcessorConstraint ProcessorConstraint;
-    typedef Legion::ResourceConstraint ResourceConstraint;
-    typedef Legion::LaunchConstraint LaunchConstraint;
-    typedef Legion::ColocationConstraint ColocationConstraint;
-    typedef Legion::ExecutionConstraintSet ExecutionConstraintSet;
-    typedef Legion::SpecializedConstraint SpecializedConstraint;
-    typedef Legion::MemoryConstraint MemoryConstraint;
-    typedef Legion::FieldConstraint FieldConstraint;
-    typedef Legion::OrderingConstraint OrderingConstraint;
-    typedef Legion::SplittingConstraint SplittingConstraint;
-    typedef Legion::DimensionConstraint DimensionConstraint;
-    typedef Legion::AlignmentConstraint AlignmentConstraint;
-    typedef Legion::OffsetConstraint OffsetConstraint;
-    typedef Legion::PointerConstraint PointerConstraint;
-    typedef Legion::LayoutConstraintSet LayoutConstraintSet;
-    typedef Legion::TaskLayoutConstraintSet TaskLayoutConstraintSet;
-    typedef Realm::Runtime RealmRuntime;
-    typedef Realm::Machine Machine;
-    typedef Realm::Domain Domain;
-    typedef Realm::DomainPoint DomainPoint;
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-    typedef Realm::RegionInstance PhysicalInstance;
-    typedef Realm::Memory Memory;
-    typedef Realm::Processor Processor;
-    typedef Realm::CodeDescriptor CodeDescriptor;
-    typedef Realm::Event Event;
-    typedef Realm::Event MapperEvent;
-    typedef Realm::UserEvent UserEvent;
-    typedef Realm::Reservation Reservation;
-    typedef Realm::Barrier Barrier;
-    typedef ::legion_reduction_op_id_t ReductionOpID;
-    typedef Realm::ReductionOpUntyped ReductionOp;
-    typedef ::legion_custom_serdez_id_t CustomSerdezID;
-    typedef Realm::CustomSerdezUntyped SerdezOp;
-    typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
-    typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    typedef Realm::ElementMask::Enumerator Enumerator;
-    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
-    typedef std::map<CustomSerdezID, 
-                     const Realm::CustomSerdezUntyped *> SerdezOpTable;
-    typedef std::map<Realm::ReductionOpID, 
-            const Realm::ReductionOpUntyped *> ReductionOpTable;
-    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
-    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
-    typedef std::map<Realm::ReductionOpID, 
-                     Legion::SerdezRedopFns> SerdezRedopTable;
-    typedef ::legion_address_space_t AddressSpace;
-    typedef ::legion_task_priority_t TaskPriority;
-    typedef ::legion_color_t Color;
-    typedef ::legion_field_id_t FieldID;
-    typedef ::legion_trace_id_t TraceID;
-    typedef ::legion_mapper_id_t MapperID;
-    typedef ::legion_context_id_t ContextID;
-    typedef ::legion_instance_id_t InstanceID;
-    typedef ::legion_index_space_id_t IndexSpaceID;
-    typedef ::legion_index_partition_id_t IndexPartitionID;
-    typedef ::legion_index_tree_id_t IndexTreeID;
-    typedef ::legion_field_space_id_t FieldSpaceID;
-    typedef ::legion_generation_id_t GenerationID;
-    typedef ::legion_type_handle TypeHandle;
-    typedef ::legion_projection_id_t ProjectionID;
-    typedef ::legion_region_tree_id_t RegionTreeID;
-    typedef ::legion_distributed_id_t DistributedID;
-    typedef ::legion_address_space_id_t AddressSpaceID;
-    typedef ::legion_tunable_id_t TunableID;
-    typedef ::legion_mapping_tag_id_t MappingTagID;
-    typedef ::legion_semantic_tag_t SemanticTag;
-    typedef ::legion_variant_id_t VariantID;
-    typedef ::legion_unique_id_t UniqueID;
-    typedef ::legion_version_id_t VersionID;
-    typedef ::legion_task_id_t TaskID;
-    typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-    typedef std::map<Color,Legion::ColoredPoints<ptr_t> > Coloring;
-    typedef std::map<Color,Domain> DomainColoring;
-    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-    typedef std::map<DomainPoint,Legion::ColoredPoints<ptr_t> > PointColoring;
-    typedef std::map<DomainPoint,Domain> DomainPointColoring;
-    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-        Runtime *rt, const std::set<Processor> &local_procs);
-    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
-        const DomainPoint&, Runtime *rt);
-    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
-        const DomainPoint&, Runtime *rt);
-    typedef bool (*PredicateFnptr)(const void*, size_t, 
-        const std::vector<Future> futures);
-    typedef std::map<ProjectionID,RegionProjectionFnptr> 
-      RegionProjectionTable;
-    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
-      PartitionProjectionTable;
-    typedef void (*RealmFnptr)(const void*,size_t,
-                               const void*,size_t,Processor);
-    typedef Legion::Internal::SingleTask* Context; 
   };
 };
-

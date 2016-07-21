@@ -223,7 +223,9 @@ namespace Realm {
   void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event.exists())
-      GenEventImpl::trigger(finish_event, poisoned);
+      get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
+                                                              gasnet_mynode(),
+							      poisoned);
   }
 
   void Operation::clear_profiling(void)
@@ -287,11 +289,6 @@ namespace Realm {
   void OperationTable::TableCleaner::print(std::ostream& os) const
   {
     os << "operation table cleaner (table=" << table << ")";
-  }
-
-  Event OperationTable::TableCleaner::get_finish_event(void) const
-  {
-    return Event::NO_EVENT;
   }
 
 
@@ -454,7 +451,7 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).event.creator_node;
+      int owner = ID(finish_event).node();
 
       if(owner == gasnet_mynode()) {
 	// if we're the owner, it's probably for an event that already completed successfully,

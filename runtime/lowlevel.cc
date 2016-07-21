@@ -104,7 +104,7 @@ namespace LegionRuntime {
 	    (*it)->print(os);
 	    os << "\n";
 	  }
-	  for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
 	      it != e->future_local_waiters.end();
 	      it++) {
 	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
@@ -136,7 +136,7 @@ namespace LegionRuntime {
 
 	  os << "Barrier " << b->me << ": gen=" << b->generation
 	     << " subscr=" << b->gen_subscribed << "\n";
-          for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
+          for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
@@ -1228,7 +1228,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.instance.inst_idx;
+        unsigned index = id.index_l();
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->get_bytes(index, dp, fid, dst, bytes);
         return;
@@ -1294,7 +1294,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.instance.inst_idx;
+        unsigned index = id.index_l();
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->put_bytes(index, dp, fid, src, bytes);
         return;
@@ -1473,7 +1473,7 @@ namespace LegionRuntime {
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
 
-      if(impl->metadata.block_size <= 1) {
+      if(impl->metadata.block_size == 1) {
 	offset += index * impl->metadata.elmt_size + field_offset;
 	elmt_stride = impl->metadata.elmt_size;
       } else {

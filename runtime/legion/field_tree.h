@@ -19,8 +19,8 @@
 
 #include "legion_types.h"
 
-namespace Legion {
-  namespace Internal {
+namespace LegionRuntime {
+  namespace HighLevel {
 
     /**
      * \class FieldTree
@@ -859,7 +859,7 @@ namespace Legion {
           delete (*it);
         }
       }
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       dominator_node->check_state();
 #endif
       return dominator_node;
@@ -932,7 +932,7 @@ namespace Legion {
     {
       if (child->single_node)
       {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(FieldMask::pop_count(child->local_mask) == 1);
         assert(child->local_mask != local_mask);
         assert(!(child->local_mask - local_mask));
@@ -941,7 +941,7 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
         assert(FieldMask::pop_count(child->local_mask) > 1);
         assert(child->local_mask != local_mask);
         assert(!(child->local_mask - local_mask));
@@ -982,8 +982,8 @@ namespace Legion {
       }
     }
     
-  }; // namespace Internal
-}; // namespace Legion
+  };
+};
 
 #endif // __LEGION_FIELD_TREE_H__
 

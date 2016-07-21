@@ -138,7 +138,6 @@ namespace Realm {
       TableCleaner(OperationTable *_table);
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
-      virtual Event get_finish_event(void) const;
 
     protected:
       OperationTable *table;

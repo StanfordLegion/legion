@@ -40,13 +40,4 @@
 // can Realm use exceptions to propagate errors back to the profiling interace?
 #define REALM_USE_EXCEPTIONS
 
-// runtime configuration settings
-namespace Realm {
-  namespace Config {
-    // if non-zero, eagerly checks deferred user event triggers for loops up to the
-    //  specified limit
-    extern int event_loop_detection_limit;
-  };
-};
-
 #endif

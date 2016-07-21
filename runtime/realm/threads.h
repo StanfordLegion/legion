@@ -348,12 +348,7 @@ namespace Realm {
     friend std::ostream& operator<<(std::ostream& os, const CoreMap& cm);
 
     // in general, you'll want to discover the core map rather than set it up yourself
-    // hyperthread_sharing - if true, hyperthreads are considered to share a core, which prevents
-    //                         them both from being if a reservation asks for exclusive access to the
-    //                         core
-    //                       if false, hyperthreads are considered to be separate cores, making more
-    //                         cores available, but potentially exposing the app to contention issues
-    static CoreMap *discover_core_map(bool hyperthread_sharing);
+    static CoreMap *discover_core_map(void);
 
     // creates a simple synthetic core map - it is symmetric and hierarchical:
     //   numa domains -> cores -> fp clusters (shared fpu) -> hyperthreads (shared alu/ldst)
@@ -380,7 +375,7 @@ namespace Realm {
   class CoreReservationSet {
   public:
     // if constructed without a CoreMap, it'll attempt to discover one itself
-    CoreReservationSet(bool hyperthread_sharing);
+    CoreReservationSet(void);
     CoreReservationSet(const CoreMap* _cm);
 
     ~CoreReservationSet(void);

@@ -226,24 +226,17 @@ namespace Realm {
     ~ProfilingMeasurementCollection(void);
 
     void import_requests(const ProfilingRequestSet& prs);
-    void send_responses(const ProfilingRequestSet& prs);
+    void send_responses(const ProfilingRequestSet& prs) const;
     void clear(void);
 
     template <typename T>
     bool wants_measurement(void) const;
 
     template <typename T>
-    void add_measurement(const T& data, bool send_complete_responses = true);
+    void add_measurement(const T& data);
 
   protected:
-    void send_response(const ProfilingRequest& pr) const;
-
-    // in order to efficiently send responses as soon as we have all the requested measurements, we
-    //  need to know which profiling requests are needed by a given measurement and how many more
-    //  measurements each request wants
-    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> > requested_measurements;
-    std::map<const ProfilingRequest *, int> measurements_left;
-    bool completed_requests_present;  // set if a request is completed but could not be sent right away
+    std::set<ProfilingMeasurementID> requested_measurements;
 
     std::map<ProfilingMeasurementID, ByteArray> measurements;
   };

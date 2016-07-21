@@ -21,21 +21,29 @@
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
-namespace Legion {
+namespace LegionRuntime {
+  namespace HighLevel {
 
-    namespace Internal {
-      LEGION_EXTERN_LOGGER_DECLARATIONS
+    // If you add a logger, update the LEGION_EXTERN_LOGGER_DECLARATIONS
+    // macro in legion_types.h
+    Logger::Category log_run("runtime");
+    Logger::Category log_task("tasks");
+    Logger::Category log_index("index_spaces");
+    Logger::Category log_field("field_spaces");
+    Logger::Category log_region("regions");
+    Logger::Category log_inst("instances");
+    Logger::Category log_leak("leaks");
+    Logger::Category log_variant("variants");
+    Logger::Category log_allocation("allocation");
+    Logger::Category log_prof("legion_prof");
+    Logger::Category log_garbage("legion_gc");
+    Logger::Category log_shutdown("shutdown");
+    namespace LegionSpy {
+      Logger::Category log_spy("legion_spy");
     };
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
-    const LgEvent LgEvent::NO_LG_EVENT = LgEvent();
-    const ApEvent ApEvent::NO_AP_EVENT = ApEvent();
-    const ApUserEvent ApUserEvent::NO_AP_USER_EVENT = ApUserEvent();
-    const ApBarrier ApBarrier::NO_AP_BARRIER = ApBarrier();
-    const RtEvent RtEvent::NO_RT_EVENT = RtEvent();
-    const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
-    const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -43,7 +51,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Mappable::Mappable(void)
-      : map_id(0), tag(0)
+      : map_id(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -54,10 +62,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Task::Task(void)
-      : Mappable(), args(NULL), arglen(0), local_args(NULL), local_arglen(0),
-        parent_task(NULL)
+      : Mappable(), args(NULL), arglen(0), local_args(NULL), local_arglen(0)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Task::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return depth;
     }
 
     /////////////////////////////////////////////////////////////
@@ -71,15 +85,29 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Copy::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
+    }
+
     /////////////////////////////////////////////////////////////
-    // Inline Mapping 
+    // Inline 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InlineMapping::InlineMapping(void)
+    Inline::Inline(void)
       : Mappable(), parent_task(NULL)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Inline::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -93,6 +121,13 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    unsigned Acquire::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_task->depth+1);
+    }
+
     /////////////////////////////////////////////////////////////
     // Release 
     /////////////////////////////////////////////////////////////
@@ -104,15 +139,11 @@ namespace Legion {
     {
     }
 
-    /////////////////////////////////////////////////////////////
-    // Close 
-    /////////////////////////////////////////////////////////////
-
     //--------------------------------------------------------------------------
-    Close::Close(void)
-      : Mappable(), parent_task(NULL)
+    unsigned Release::get_depth(void) const
     //--------------------------------------------------------------------------
     {
+      return (parent_task->depth+1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -343,8 +374,8 @@ namespace Legion {
     ArgumentMap::ArgumentMap(void)
     //--------------------------------------------------------------------------
     {
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>();
-#ifdef DEBUG_LEGION
+      impl = legion_new<ArgumentMap::Impl>();
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->add_reference();
@@ -360,7 +391,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ArgumentMap::ArgumentMap(Internal::ArgumentMapImpl *i)
+    ArgumentMap::ArgumentMap(Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -378,7 +409,7 @@ namespace Legion {
         // last reference holder, then delete it
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         }
         impl = NULL;
       }
@@ -394,7 +425,7 @@ namespace Legion {
       {
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         }
       }
       impl = rhs.impl;
@@ -410,7 +441,7 @@ namespace Legion {
     bool ArgumentMap::has_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->has_point(point);
@@ -421,7 +452,7 @@ namespace Legion {
                                 const TaskArgument &arg, bool replace/*= true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->set_point(point, arg, replace);
@@ -431,7 +462,7 @@ namespace Legion {
     bool ArgumentMap::remove_point(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->remove_point(point);
@@ -441,7 +472,7 @@ namespace Legion {
     TaskArgument ArgumentMap::get_point(const DomainPoint &point) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->get_point(point);
@@ -479,7 +510,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate::Predicate(Internal::PredicateImpl *i)
+    Predicate::Predicate(Predicate::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -547,19 +578,25 @@ namespace Legion {
     void Lock::acquire(unsigned mode /*=0*/, bool exclusive /*=true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(reservation_lock.exists());
 #endif
-      ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
+      Event lock_event = reservation_lock.acquire(mode,exclusive);
       if (!lock_event.has_triggered())
+      {
+        Processor proc = Processor::get_executing_processor();
+        Internal *rt = Internal::get_runtime(proc);
+        rt->pre_wait(proc);
         lock_event.wait();
+        rt->post_wait(proc);
+      }
     }
 
     //--------------------------------------------------------------------------
     void Lock::release(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(reservation_lock.exists());
 #endif
       reservation_lock.release();
@@ -577,7 +614,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Grant::Grant(Internal::GrantImpl *i)
+    Grant::Grant(Grant::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -601,7 +638,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -613,7 +650,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -627,13 +664,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
-      : phase_barrier(ApBarrier::NO_AP_BARRIER)
+      : phase_barrier(Barrier::NO_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhaseBarrier::PhaseBarrier(ApBarrier b)
+    PhaseBarrier::PhaseBarrier(Barrier b)
       : phase_barrier(b)
     //--------------------------------------------------------------------------
     {
@@ -664,29 +701,35 @@ namespace Legion {
     void PhaseBarrier::arrive(unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      Internal::Runtime::phase_barrier_arrive(*this, count);
+      phase_barrier.arrive(count);
     }
 
     //--------------------------------------------------------------------------
     void PhaseBarrier::wait(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      ApEvent e = Internal::Runtime::get_previous_phase(*this);
+      Event e = phase_barrier.get_previous_phase();
       if (!e.has_triggered())
+      {
+        Processor proc = Processor::get_executing_processor();
+        Internal *rt = Internal::get_runtime(proc);
+        rt->pre_wait(proc);
         e.wait();
+        rt->post_wait(proc);
+      }
     }
 
     //--------------------------------------------------------------------------
     void PhaseBarrier::alter_arrival_count(int delta)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::alter_arrival_count(*this, delta);
+      phase_barrier.alter_arrival_count(delta);
     }
 
     /////////////////////////////////////////////////////////////
@@ -701,7 +744,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DynamicCollective::DynamicCollective(ApBarrier b, ReductionOpID r)
+    DynamicCollective::DynamicCollective(Barrier b, ReductionOpID r)
       : PhaseBarrier(b), redop(r)
     //--------------------------------------------------------------------------
     {
@@ -712,8 +755,7 @@ namespace Legion {
                                    unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::phase_barrier_arrive(*this, count, 
-                                            ApEvent::NO_AP_EVENT, value, size);
+      phase_barrier.arrive(count, Event::NO_EVENT, value, size); 
     }
 
     /////////////////////////////////////////////////////////////
@@ -741,11 +783,11 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -766,11 +808,11 @@ namespace Legion {
     { 
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -791,11 +833,11 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -816,10 +858,10 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -841,10 +883,10 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -866,10 +908,10 @@ namespace Legion {
     {
       privilege_fields = priv_fields;
       instance_fields = inst_fields;
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -888,11 +930,11 @@ namespace Legion {
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -912,11 +954,11 @@ namespace Legion {
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     { 
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -936,11 +978,11 @@ namespace Legion {
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
-                                   "constructor for reductions");
+        log_region.error("ERROR: Use different RegionRequirement "
+                                "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
       }
@@ -959,10 +1001,10 @@ namespace Legion {
         handle_type(SINGULAR)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -982,10 +1024,10 @@ namespace Legion {
         handle_type(PART_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1005,10 +1047,10 @@ namespace Legion {
         handle_type(REG_PROJECTION), projection(_proj)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        log_region.error("Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1131,24 +1173,24 @@ namespace Legion {
 
 #ifdef PRIVILEGE_CHECKS
     //--------------------------------------------------------------------------
-    unsigned RegionRequirement::get_accessor_privilege(void) const
+    AccessorPrivilege RegionRequirement::get_accessor_privilege(void) const
     //--------------------------------------------------------------------------
     {
       switch (privilege)
       {
         case NO_ACCESS:
-          return LegionRuntime::ACCESSOR_NONE;
+          return ACCESSOR_NONE;
         case READ_ONLY:
-          return LegionRuntime::ACCESSOR_READ;
+          return ACCESSOR_READ;
         case READ_WRITE:
         case WRITE_DISCARD:
-          return LegionRuntime::ACCESSOR_ALL;
+          return ACCESSOR_ALL;
         case REDUCE:
-          return LegionRuntime::ACCESSOR_REDUCE;
+          return ACCESSOR_REDUCE;
         default:
           assert(false);
       }
-      return LegionRuntime::ACCESSOR_NONE;
+      return ACCESSOR_NONE;
     }
 #endif
 
@@ -1157,6 +1199,46 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (privilege_fields.find(fid) != privilege_fields.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRequirement::copy_without_mapping_info(
+                                                  const RegionRequirement &rhs)
+    //--------------------------------------------------------------------------
+    {
+      region = rhs.region;
+      partition = rhs.partition;
+      privilege_fields = rhs.privilege_fields;
+      instance_fields = rhs.instance_fields;
+      privilege = rhs.privilege;
+      prop = rhs.prop;
+      parent = rhs.parent;
+      redop = rhs.redop;
+      tag = rhs.tag;
+      flags = rhs.flags;
+      handle_type = rhs.handle_type;
+      projection = rhs.projection;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRequirement::initialize_mapping_fields(void)
+    //--------------------------------------------------------------------------
+    {
+      premapped = false;
+      must_early_map = false;
+      restricted = false;
+      max_blocking_factor = 1;
+      current_instances.clear();
+      virtual_map = false;
+      early_map = false;
+      enable_WAR_optimization = false;
+      reduction_list = false;
+      make_persistent = false;
+      blocking_factor = 1;
+      target_ranking.clear();
+      additional_fields.clear();
+      mapping_failed = false;
+      selected_memory = Memory::NO_MEMORY;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1322,16 +1404,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineLauncher::InlineLauncher(void)
-      : map_id(0), tag(0), layout_constraint_id(0)
+      : map_id(0), tag(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
-                                   MapperID mid /*=0*/, MappingTagID t /*=0*/,
-                                   LayoutConstraintID lay_id /*=0*/)
-      : requirement(req), map_id(mid), tag(t), layout_constraint_id(lay_id)
+                                   MapperID mid /*=0*/, MappingTagID t /*=0*/)
+      : requirement(req), map_id(mid), tag(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -1493,13 +1574,13 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         impl = NULL;
       }
     }
 
     //--------------------------------------------------------------------------
-    MPILegionHandshake::MPILegionHandshake(Internal::MPILegionHandshakeImpl *i)
+    MPILegionHandshake::MPILegionHandshake(MPILegionHandshake::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -1515,7 +1596,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1527,7 +1608,7 @@ namespace Legion {
     void MPILegionHandshake::mpi_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->mpi_handoff_to_legion();
@@ -1537,7 +1618,7 @@ namespace Legion {
     void MPILegionHandshake::mpi_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->mpi_wait_on_legion();
@@ -1547,7 +1628,7 @@ namespace Legion {
     void MPILegionHandshake::legion_handoff_to_mpi(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->legion_handoff_to_mpi();
@@ -1557,7 +1638,7 @@ namespace Legion {
     void MPILegionHandshake::legion_wait_on_mpi(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->legion_wait_on_mpi();
@@ -1580,7 +1661,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1589,19 +1670,19 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
+          legion_delete(impl);
         impl = NULL;
       }
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Internal::FutureImpl *i)
+    Future::Future(Future::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1610,12 +1691,12 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+        if (impl->remove_base_gc_ref(FUTURE_HANDLE_REF))
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       return *this;
     }
 
@@ -1667,7 +1748,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(Internal::FutureMapImpl *i)
+    FutureMap::FutureMap(FutureMap::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -1682,7 +1763,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -1694,7 +1775,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1706,7 +1787,7 @@ namespace Legion {
     Future FutureMap::get_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->get_future(point);
@@ -1749,7 +1830,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion::PhysicalRegion(Internal::PhysicalRegionImpl *i)
+    PhysicalRegion::PhysicalRegion(PhysicalRegion::Impl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -1764,7 +1845,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
         impl = NULL;
       }
     }
@@ -1776,7 +1857,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1788,7 +1869,7 @@ namespace Legion {
     void PhysicalRegion::wait_until_valid(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       impl->wait_until_valid();
@@ -1798,7 +1879,7 @@ namespace Legion {
     bool PhysicalRegion::is_valid(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->is_valid();
@@ -1808,31 +1889,29 @@ namespace Legion {
     LogicalRegion PhysicalRegion::get_logical_region(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->get_logical_region();
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_accessor(void) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+      PhysicalRegion::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->get_accessor();
     }
 
     //--------------------------------------------------------------------------
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_field_accessor(FieldID fid) const
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
+      PhysicalRegion::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(impl != NULL);
 #endif
       return impl->get_field_accessor(fid);
@@ -1911,6 +1990,120 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Task Variant Collection
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool TaskVariantCollection::has_variant(Processor::Kind kind, 
+                                            bool single,
+                                            bool index_space)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<VariantID,Variant>::const_iterator it = variants.begin();
+            it != variants.end(); it++)
+      {
+        if ((it->second.proc_kind == kind) && 
+            ((it->second.single_task <= single) || 
+            (it->second.index_space <= index_space)))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantID TaskVariantCollection::get_variant(Processor::Kind kind, 
+                                                 bool single,
+                                                 bool index_space)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<VariantID,Variant>::const_iterator it = variants.begin();
+            it != variants.end(); it++)
+      {
+        if ((it->second.proc_kind == kind) && 
+            ((it->second.single_task <= single) || 
+            (it->second.index_space <= index_space)))
+        {
+          return it->first;
+        }
+      }
+      log_variant.error("User task %s (ID %d) has no registered variants "
+                              "for processors of kind %d and index space %d",
+                              name, user_id, kind, index_space);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_UNREGISTERED_VARIANT);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskVariantCollection::has_variant(VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      return (variants.find(vid) != variants.end());
+    }
+
+    //--------------------------------------------------------------------------
+    const TaskVariantCollection::Variant& TaskVariantCollection::get_variant(
+                                                                  VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(variants.find(vid) != variants.end());
+#endif
+      return variants[vid];
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskVariantCollection::add_variant(Processor::TaskFuncID low_id, 
+                                            Processor::Kind kind, 
+                                            bool single, bool index,
+                                            bool inner, bool leaf,
+                                            VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      if (vid == AUTO_GENERATE_ID)
+      {
+        for (unsigned idx = 0; idx < AUTO_GENERATE_ID; idx++)
+        {
+          if (variants.find(idx) == variants.end())
+          {
+            vid = idx;
+            break;
+          }
+        }
+      }
+      variants[vid] = Variant(low_id, kind, single, index, inner, leaf, vid);
+    }
+
+    //--------------------------------------------------------------------------
+    const TaskVariantCollection::Variant& TaskVariantCollection::select_variant(
+                                  bool single, bool index, Processor::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<VariantID,Variant>::const_iterator it = variants.begin();
+            it != variants.end(); it++)
+      {
+        if ((it->second.proc_kind == kind) && 
+            (it->second.single_task <= single) &&
+            (it->second.index_space <= index))
+        {
+          return it->second;
+        }
+      }
+      log_variant.error("User task %s (ID %d) has no registered variants "
+                              "for processors of kind %d and index space %d",
+                              name, user_id, kind, index);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(false);
+#endif
+      exit(ERROR_UNREGISTERED_VARIANT);
+      return variants[0];
     }
 
     /////////////////////////////////////////////////////////////
@@ -2102,7 +2295,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    Runtime::Runtime(Internal::Runtime *rt)
+    Runtime::Runtime(Internal *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -2216,9 +2409,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(
                                           Context ctx, IndexSpace parent,
-    LegionRuntime::Accessor::RegionAccessor<
-      LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                      int part_color)
+    Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
+                                          int part_color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_index_partition(ctx, parent, field_accessor, 
@@ -2417,34 +2609,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition(parent, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(IndexSpace parent,
-                                                const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition(parent, color);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->has_index_partition(ctx, parent, color);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_index_partition(IndexSpace parent,
-                                      const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2464,33 +2633,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_subspace(p, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, 
-                                           const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_subspace(p, color);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::has_index_subspace(Context ctx, 
                                      IndexPartition p, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->has_index_subspace(ctx, p, color);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_index_subspace(IndexPartition p, const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_index_subspace(p, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2501,24 +2648,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_multiple_domains(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_multiple_domains(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
+    Domain Runtime::get_index_space_domain(Context ctx, 
+                                                    IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_domain(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2530,26 +2664,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_domains(IndexSpace handle,
-                                          std::vector<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      runtime->get_index_space_domains(handle, domains);
-    }
-
-    //--------------------------------------------------------------------------
     Domain Runtime::get_index_partition_color_space(Context ctx, 
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_space(ctx, p);
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_partition_color_space(IndexPartition p)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition_color_space(p);
     }
 
     //--------------------------------------------------------------------------
@@ -2569,22 +2688,6 @@ namespace Legion {
     {
       runtime->get_index_space_partition_colors(ctx, sp, colors);
     }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(IndexSpace sp,
-                                                   std::set<Color> &colors)
-    //--------------------------------------------------------------------------
-    {
-      runtime->get_index_space_partition_colors(sp, colors);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(IndexSpace sp,
-                                                  std::set<DomainPoint> &colors)
-    //--------------------------------------------------------------------------
-    {
-      runtime->get_index_space_partition_colors(sp, colors);
-    }
 
     //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
@@ -2594,24 +2697,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_disjoint(IndexPartition p)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->is_index_partition_disjoint(p);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->is_index_partition_complete(ctx, p);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_complete(IndexPartition p)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->is_index_partition_complete(p);
     }
 
     //--------------------------------------------------------------------------
@@ -2623,25 +2712,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_space_color(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_space_color(handle);
-    }
-
-    //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(Context ctx,
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_color_point(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2653,25 +2728,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_partition_color(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition_color(handle);
-    }
-
-    //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_partition_color_point(Context ctx,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_point(ctx, handle);
-    }
-    
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_partition_color_point(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2683,13 +2744,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_parent_index_space(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_parent_index_space(handle);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::has_parent_index_partition(Context ctx,
                                                       IndexSpace handle)
     //--------------------------------------------------------------------------
@@ -2698,54 +2752,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_index_partition(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_parent_index_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
     IndexPartition Runtime::get_parent_index_partition(Context ctx,
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_index_partition(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_parent_index_partition(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_parent_index_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::get_index_space_depth(Context ctx, IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_space_depth(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::get_index_space_depth(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_space_depth(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::get_index_partition_depth(Context ctx,  
-                                                IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition_depth(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::get_index_partition_depth(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_index_partition_depth(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2787,46 +2798,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t Runtime::get_field_size(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_field_size(handle, fid);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
-                                         std::vector<FieldID> &fields)
+                                         std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       runtime->get_field_space_fields(ctx, handle, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_field_space_fields(FieldSpace handle,
-                                         std::vector<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      runtime->get_field_space_fields(handle, fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
-                                         std::set<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> local;
-      runtime->get_field_space_fields(ctx, handle, local);
-      fields.insert(local.begin(), local.end());
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_field_space_fields(FieldSpace handle,
-                                         std::set<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> local;
-      runtime->get_field_space_fields(handle, local);
-      fields.insert(local.begin(), local.end());
     }
 
     //--------------------------------------------------------------------------
@@ -2862,14 +2838,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition(LogicalRegion parent, 
-                                                    IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition(parent, handle);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_logical_partition_by_color(
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
@@ -2886,35 +2854,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(
-                                                  LogicalRegion parent, Color c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_by_color(parent, c);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(
-                                     LogicalRegion parent, const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_by_color(parent, c);
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::has_logical_partition_by_color(Context ctx,
                                      LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
       return runtime->has_logical_partition_by_color(ctx, parent, c);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_logical_partition_by_color(LogicalRegion parent, 
-                                                 const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_logical_partition_by_color(parent, c);
     }
 
     //--------------------------------------------------------------------------
@@ -2927,28 +2871,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_tree(
-                                            IndexPartition handle, 
-                                            FieldSpace fspace, RegionTreeID tid) 
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_by_tree(handle, fspace, tid);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion(Context ctx, 
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion(ctx, parent, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion(LogicalPartition parent, 
-                                                 IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_subregion(parent, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2968,35 +2895,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(
-                                               LogicalPartition parent, Color c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_subregion_by_color(parent, c);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(
-                                  LogicalPartition parent, const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_subregion_by_color(parent, c);
-    }
-    
-    //--------------------------------------------------------------------------
     bool Runtime::has_logical_subregion_by_color(Context ctx,
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
       return runtime->has_logical_subregion_by_color(ctx, parent, c);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_logical_subregion_by_color(LogicalPartition parent, 
-                                                 const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_logical_subregion_by_color(parent, c);
     }
 
     //--------------------------------------------------------------------------
@@ -3008,41 +2911,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_tree(IndexSpace handle, 
-                                            FieldSpace fspace, RegionTreeID tid)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_subregion_by_tree(handle, fspace, tid);
-    }
-
-    //--------------------------------------------------------------------------
     Color Runtime::get_logical_region_color(Context ctx,
                                                      LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_region_color(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_region_color_point(Context ctx,
-                                                        LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_region_color_point(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    Color Runtime::get_logical_region_color(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_region_color(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_region_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -3054,41 +2927,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_partition_color_point(Context ctx,
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_color_point(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    Color Runtime::get_logical_partition_color(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_color(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_partition_color_point(
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_partition_color_point(handle);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_parent_logical_region(Context ctx,
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_region(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_parent_logical_region(LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_parent_logical_region(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -3100,25 +2943,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_parent_logical_partition(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->has_parent_logical_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalPartition Runtime::get_parent_logical_partition(Context ctx,
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_partition(ctx, handle);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_parent_logical_partition(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -3385,7 +3214,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Predicate Runtime::predicate_and(Context ctx, 
-                                       const Predicate &p1, const Predicate &p2)
+                                       const Predicate &p1, const Predicate &p2) 
     //--------------------------------------------------------------------------
     {
       return runtime->predicate_and(ctx, p1, p2);
@@ -3567,14 +3396,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->select_tunable_value(ctx, tid, mid, tag);
-    }
-
-    //--------------------------------------------------------------------------
     int Runtime::get_tunable_value(Context ctx, TunableID tid,
                                             MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
@@ -3611,7 +3432,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Mapping::Mapper* Runtime::get_mapper(Context ctx, MapperID id,
+    Mapper* Runtime::get_mapper(Context ctx, MapperID id,
                                          Processor target)
     //--------------------------------------------------------------------------
     {
@@ -3651,13 +3472,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Mapping::MapperRuntime* Runtime::get_mapper_runtime(void)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_mapper_runtime();
-    }
-
-    //--------------------------------------------------------------------------
     MapperID Runtime::generate_dynamic_mapper_id(void)
     //--------------------------------------------------------------------------
     {
@@ -3668,19 +3482,20 @@ namespace Legion {
     /*static*/ MapperID Runtime::generate_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::generate_static_mapper_id();
+      return Internal::generate_static_mapper_id();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_mapper(MapperID map_id, Mapping::Mapper *mapper, 
-                             Processor proc)
+    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
+                                      Processor proc)
     //--------------------------------------------------------------------------
     {
       runtime->add_mapper(map_id, mapper, proc);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::replace_default_mapper(Mapping::Mapper *mapper,Processor proc)
+    void Runtime::replace_default_mapper(Mapper *mapper, 
+                                                  Processor proc)
     //--------------------------------------------------------------------------
     {
       runtime->replace_default_mapper(mapper, proc);
@@ -3692,14 +3507,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->register_projection_functor(pid, func);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::preregister_projection_functor(ProjectionID pid,
-                                                        ProjectionFunctor *func)
-    //--------------------------------------------------------------------------
-    {
-      Internal::Runtime::preregister_projection_functor(pid, func);
     }
 
     //--------------------------------------------------------------------------
@@ -4061,14 +3868,14 @@ namespace Legion {
                                            bool background)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::start(argc, argv, background);
+      return Internal::start(argc, argv, background);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::wait_for_shutdown();
+      Internal::wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -4076,14 +3883,14 @@ namespace Legion {
                                                   Processor::TaskFuncID top_id)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::set_top_level_task_id(top_id);
+      Internal::set_top_level_task_id(top_id);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::configure_MPI_interoperability(int rank)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::configure_MPI_interoperability(rank);
+      Internal::configure_MPI_interoperability(rank);
     }
 
     //--------------------------------------------------------------------------
@@ -4093,12 +3900,12 @@ namespace Legion {
                                                         int legion_participants)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(mpi_participants > 0);
       assert(legion_participants > 0);
 #endif
       return MPILegionHandshake(
-          Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
+          legion_new<MPILegionHandshake::Impl>(init_in_MPI,
                                        mpi_participants, legion_participants));
     }
 
@@ -4107,14 +3914,14 @@ namespace Legion {
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_reduction_op(redop_id);
+      return Internal::get_reduction_op(redop_id);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_serdez_op(serdez_id);
+      return Internal::get_serdez_op(serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -4122,41 +3929,60 @@ namespace Legion {
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::set_registration_callback(callback);
+      Internal::set_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ const InputArgs& Runtime::get_input_args(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_input_args();
+      return Internal::get_input_args();
     }
 
     //--------------------------------------------------------------------------
     /*static*/ Runtime* Runtime::get_runtime(Processor p)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_runtime(p)->external;
+      return Internal::get_runtime(p)->high_level;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_reduction_table();
+      return Internal::get_reduction_table();
     }
 
     //--------------------------------------------------------------------------
     /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_serdez_table();
+      return Internal::get_serdez_table();
     }
 
     /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::get_serdez_redop_table();
+      return Internal::get_serdez_redop_table();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::
+      register_region_projection_function(ProjectionID handle, void *func_ptr)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::register_region_projection_function(handle, 
+                                                                func_ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::
+      register_partition_projection_function(ProjectionID handle, 
+                                             void *func_ptr)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::register_partition_projection_function(handle,
+                                                                   func_ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -4170,7 +3996,7 @@ namespace Legion {
     /*static*/ TaskID Runtime::generate_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::generate_static_task_id();
+      return Internal::generate_static_task_id();
     }
 
     //--------------------------------------------------------------------------
@@ -4222,8 +4048,8 @@ namespace Legion {
                                   bool check_task_id)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::preregister_variant(registrar, user_data, 
-                  user_data_size, realm, has_return, task_name, check_task_id);
+      return Internal::preregister_variant(registrar, user_data, user_data_size,
+                                   realm, has_return, task_name, check_task_id);
     } 
 
     //--------------------------------------------------------------------------
@@ -4256,7 +4082,7 @@ namespace Legion {
     void Runtime::release_layout(LayoutConstraintID layout_id)
     //--------------------------------------------------------------------------
     {
-      runtime->release_layout(layout_id);
+      runtime->release_layout(layout_id, runtime->address_space/*local*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4265,7 +4091,7 @@ namespace Legion {
                                      LayoutConstraintID layout_id)
     //--------------------------------------------------------------------------
     {
-      return Internal::Runtime::preregister_layout(registrar, layout_id);
+      return Internal::preregister_layout(registrar, layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -4278,7 +4104,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::get_layout_constraints(LayoutConstraintID layout_id,
-                                        LayoutConstraintSet &layout_constraints)
+                                        LayoutConstraintSet &layout_constraints)   
     //--------------------------------------------------------------------------
     {
       runtime->get_layout_constraints(layout_id, layout_constraints);
@@ -4290,6 +4116,282 @@ namespace Legion {
     {
       return runtime->get_layout_constraints_name(id);
     }
+
+    /////////////////////////////////////////////////////////////
+    // Mapper 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void Mapper::send_message(Processor target, 
+                              const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->handle_mapper_send_message(this, target, 
+                                                   message, length);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::broadcast_message(const void *message, size_t length, 
+                                   int radix /*=4*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->handle_mapper_broadcast(this, message, length, radix);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperEvent Mapper::launch_mapper_task(Processor::TaskFuncID tid,
+                                           const TaskArgument &arg)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->launch_mapper_task(this, tid, arg);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::defer_mapper_call(MapperEvent event)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->defer_mapper_call(this, event);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperEvent Mapper::merge_mapper_events(const std::set<MapperEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      return Event::merge_events(events);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Mapper::get_index_partition(IndexSpace parent, 
+                                               Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_index_subspace(IndexPartition p, Color c) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_subspace(p, c);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_index_subspace(IndexPartition p, 
+                                          const DomainPoint &color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_subspace(p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::has_multiple_domains(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Mapper::get_index_space_domain(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_index_space_domains(IndexSpace handle,
+                                         std::vector<Domain> &domains) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_domains(handle, domains);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain Mapper::get_index_partition_color_space(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition_color_space(p);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_index_space_partition_colors(
+                              IndexSpace handle, std::set<Color> &colors) const
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->get_index_space_partition_colors(handle, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::is_index_partition_disjoint(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_index_space_color(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_space_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_index_partition_color(IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_index_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Mapper::get_parent_index_space(IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::has_parent_index_partition(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Mapper::get_parent_index_partition(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::get_field_size(FieldSpace handle, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_field_space_fields(FieldSpace handle, 
+                                        std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->get_field_space_fields(handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition(LogicalRegion parent,
+                                                   IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition_by_color(LogicalRegion par,
+                                                            Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_logical_partition_by_tree(
+                                                        IndexPartition part,
+                                                        FieldSpace fspace, 
+                                                        RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_by_tree(part, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion(LogicalPartition parent,
+                                                IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion_by_color(LogicalPartition par,
+                                                         Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_logical_subregion_by_tree(IndexSpace handle,
+                                                        FieldSpace fspace,
+                                                        RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_subregion_by_tree(handle, 
+                                                             fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_logical_region_color(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_region_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color Mapper::get_logical_partition_color(LogicalPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion Mapper::get_parent_logical_region(LogicalPartition part) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_logical_region(part);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool Mapper::has_parent_logical_partition(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition Mapper::get_parent_logical_partition(LogicalRegion r) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->get_parent_logical_partition(r);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::sample_allocated_space(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_allocated_space(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Mapper::sample_free_space(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_free_space(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Mapper::sample_allocated_instances(Memory mem) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_allocated_instances(mem);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned Mapper::sample_unmapped_tasks(Processor proc) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->runtime->sample_unmapped_tasks(proc, 
+                                                     const_cast<Mapper*>(this));
+    } 
 
     /////////////////////////////////////////////////////////////
     // LegionTaskWrapper
@@ -4310,7 +4412,7 @@ namespace Legion {
       runtime = Runtime::get_runtime(p);
 
       // Read the context out of the buffer
-#ifdef DEBUG_LEGION
+#ifdef DEBUG_HIGH_LEVEL
       assert(datalen == sizeof(Context));
 #endif
       ctx = *((const Context*)data);
@@ -4329,7 +4431,8 @@ namespace Legion {
       runtime->end_task(ctx, retvalptr, retvalsize);
     }
 
-}; // namespace Legion
+  }; // namespace HighLevel
+}; // namespace LegionRuntime
 
 // EOF
 

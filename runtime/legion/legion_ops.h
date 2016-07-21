@@ -19,17 +19,15 @@
 
 #include "legion.h"
 #include "region_tree.h"
-#include "legion_mapping.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "legion_analysis.h"
-#include "mapper_manager.h"
 
-namespace Legion {
-  namespace Internal {
+namespace LegionRuntime {
+  namespace HighLevel {
 
     // Special typedef for predicates
-    typedef PredicateImpl PredicateOp; 
+    typedef Predicate::Impl PredicateOp; 
 
     /**
      * \class Operation
@@ -37,7 +35,7 @@ namespace Legion {
      * of all operations that can be performed in a Legion
      * program.
      */
-    class Operation : public ReferenceMutator {
+    class Operation {
     public:
       enum OpKind {
         MAP_OP_KIND,
@@ -112,65 +110,53 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
-      struct TriggerCompleteArgs {
-      public:
-        HLRTaskID hlr_id;
-        Operation *proxy_this;
-      };
       struct DeferredCompleteArgs {
-      public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
-      };
-      struct DeferredCommitTriggerArgs {
-      public:
-        HLRTaskID hlr_id;
-        Operation *proxy_this;
-        GenerationID gen;
       };
       struct DeferredCommitArgs {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
-        bool deactivate;
+        GenerationID gen;
       };
       struct StateAnalysisArgs {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_op;
-        RtUserEvent ready_event;
+        UserEvent ready_event;
       };
     public:
       class MappingDependenceTracker {
       public:
-        inline void add_mapping_dependence(RtEvent dependence)
+        inline void add_mapping_dependence(Event dependence)
           { mapping_dependences.insert(dependence); }
-        inline void add_resolution_dependence(RtEvent dependence)
+        inline void add_resolution_dependence(Event dependence)
           { resolution_dependences.insert(dependence); }
-        void issue_stage_triggers(Operation *op, Runtime *runtime, 
+        void issue_stage_triggers(Operation *op, Internal *runtime, 
                                   MustEpochOp *must_epoch);
       private:
-        std::set<RtEvent> mapping_dependences;
-        std::set<RtEvent> resolution_dependences;
+        std::set<Event> mapping_dependences;
+        std::set<Event> resolution_dependences;
       };
       class CommitDependenceTracker {
       public:
-        inline void add_commit_dependence(RtEvent dependence)
+        inline void add_commit_dependence(Event dependence)
           { commit_dependences.insert(dependence); }
-        bool issue_commit_trigger(Operation *op, Runtime *runtime);
+        bool issue_commit_trigger(Operation *op, Internal *runtime);
       private:
-        std::set<RtEvent> commit_dependences;
+        std::set<Event> commit_dependences;
       };
     public:
-      Operation(Runtime *rt);
+      Operation(Internal *rt);
       virtual ~Operation(void);
     public:
       static const char* get_string_rep(OpKind kind);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
-      virtual const char* get_logging_name(void) const = 0;
-      virtual OpKind get_operation_kind(void) const  = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
@@ -179,10 +165,10 @@ namespace Legion {
       void deactivate_operation(void);
     public:
       inline GenerationID get_generation(void) const { return gen; }
-      inline RtEvent get_mapped_event(void) const { return mapped_event; }
-      inline RtEvent get_resolved_event(void) const { return resolved_event; }
-      inline ApEvent get_completion_event(void) const {return completion_event;}
-      inline RtEvent get_commit_event(void) const { return commit_event; }
+      inline Event get_mapped_event(void) const { return mapped_event; }
+      inline Event get_resolved_event(void) const { return resolved_event; }
+      inline Event get_completion_event(void) const { return completion_event; }
+      inline Event get_commit_event(void) const { return commit_event; }
       inline SingleTask* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
@@ -213,16 +199,11 @@ namespace Legion {
       // This means that region == parent and the
       // coherence mode is exclusive
       static void localize_region_requirement(RegionRequirement &req);
-      void release_acquired_instances(std::map<PhysicalManager*,
-                        std::pair<unsigned,bool> > &acquired_instances);
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
       void initialize_operation(SingleTask *ctx, bool track,
                                 unsigned num_regions = 0); 
-    public:
-      // Inherited from ReferenceMutator
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // The following two calls may be implemented
       // differently depending on the operation, but we
@@ -240,7 +221,7 @@ namespace Legion {
       // runtime prior to calling trigger_execution to allow
       // the operation to specify an event precondition to wait
       // on for all remote state to arrive on the necessary node.
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       // The function to call for executing an operation
       // Note that this one is not invoked by the Operation class
       // but by the runtime, therefore any operations must be
@@ -260,7 +241,7 @@ namespace Legion {
       // part of the default pipeline)
       virtual void deferred_execute(void);
       // Helper function for deferring commit operations
-      virtual void deferred_commit_trigger(GenerationID commit_gen);
+      virtual void deferred_commit(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -282,48 +263,22 @@ namespace Legion {
       virtual bool is_close_op(void) const { return false; }
       // Determine if this operation is a partition operation
       virtual bool is_partition_op(void) const { return false; }
-    public: // virtual methods for mapping
-      // Pick the sources for a copy operations
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                                       get_acquired_instances_ref(void);
-      // Update the set of atomic locks for this operation
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
-    public:
-      // Help for creating temporary instances
-      MaterializedView* create_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager* dst,
-                              unsigned index, const FieldMask &needed_fields);
-      void validate_temporary_instance(PhysicalManager *result,
-                              std::set<PhysicalManager*> &previous_managers,
-         const std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
-                              const FieldMask &needed_fields, 
-                              LogicalRegion needed_region,
-                              MapperManager *mapper,
-                              const char *mapper_call_name) const;
-      void log_temporary_instance(PhysicalManager *result, unsigned index,
-                                  const FieldMask &needed_fields) const;
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
       //
       // Indicate that we are done mapping this operation
-      void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT); 
+      void complete_mapping(Event wait_on = Event::NO_EVENT); 
       // Indicate when this operation has finished executing
-      void complete_execution(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void complete_execution(Event wait_on = Event::NO_EVENT);
       // Indicate when we have resolved the speculation for
       // this operation
-      void resolve_speculation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void resolve_speculation(Event wait_on = Event::NO_EVENT);
       // Indicate that we are completing this operation
       // which will also verify any regions for our producers
-      void complete_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void complete_operation(void);
       // Indicate that we are committing this operation
-      void commit_operation(bool do_deactivate,
-                            RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void commit_operation(void);
       // Indicate that this operation is hardened against failure
       void harden_operation(void);
       // Quash this task and do what is necessary to the
@@ -370,7 +325,7 @@ namespace Legion {
                                 Operation *op, GenerationID op_gen,
                                 bool &registered_dependence,
                                 MappingDependenceTracker *tracker,
-                                RtEvent other_commit_event);
+                                Event other_commit_event);
       // Check to see if the operation is still valid
       // for the given GenerationID.  This method is not precise
       // and may return false when the operation has committed.
@@ -383,7 +338,7 @@ namespace Legion {
       void add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
       // Ask the operation to perform the state analysis
-      RtEvent invoke_state_analysis(void);
+      Event invoke_state_analysis(void);
     public:
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
@@ -396,25 +351,12 @@ namespace Legion {
       // been verified (flows up edges)
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
-    public: // Support for mapping operations
-      static void prepare_for_mapping(const InstanceRef &ref,
-                                      MappingInstance &instance);
-      static void prepare_for_mapping(const InstanceSet &valid,
-                           std::vector<MappingInstance> &input_valid);
-      static void prepare_for_mapping(const InstanceSet &valid,
-                           const std::set<Memory> &filter_memories,
-                           std::vector<MappingInstance> &input_valid);
-      static void compute_ranking(
-          const std::deque<MappingInstance>         &output,
-          const InstanceSet                         &sources,
-          std::vector<unsigned>                     &ranking);
     public:
-      Runtime *const runtime;
+      Internal *const runtime;
     protected:
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
-      unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -427,7 +369,10 @@ namespace Legion {
       // For each of our regions, a map of operations to the regions
       // which we can verify for each operation
       std::map<Operation*,std::set<unsigned> > verify_regions;
-#ifdef DEBUG_LEGION
+      // Set of events from operations we depend that describe when
+      // all of their children have mapped
+      //std::set<Event> dependent_children_mapped;
+#ifdef DEBUG_HIGH_LEVEL
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -459,15 +404,15 @@ namespace Legion {
       // The enclosing context for this operation
       SingleTask *parent_ctx;
       // The mapped event for this operation
-      RtUserEvent mapped_event;
+      UserEvent mapped_event;
       // The resolved event for this operation
-      RtUserEvent resolved_event;
+      UserEvent resolved_event;
       // The event for when any children this operation has are mapped
       //Event children_mapped;
       // The completion event for this operation
-      ApUserEvent completion_event;
+      UserEvent completion_event;
       // The commit event for this operation
-      RtUserEvent commit_event;
+      UserEvent commit_event;
       // The trace for this operation if any
       LegionTrace *trace;
       // Track whether we are tracing this operation
@@ -496,15 +441,15 @@ namespace Legion {
     };
 
     /**
-     * \class Predicate 
+     * \class Predicate::Impl 
      * A predicate operation is an abstract class that
      * contains a method that allows other operations to
      * sample their values and see if they are resolved
      * or whether they are speculated values.
      */
-    class PredicateImpl : public Operation {
+    class Predicate::Impl : public Operation {
     public:
-      PredicateImpl(Runtime *rt);
+      Impl(Internal *rt);
     public:
       void activate_predicate(void);
       void deactivate_predicate(void);
@@ -544,13 +489,13 @@ namespace Legion {
         RESOLVE_FALSE_STATE,
       };
     public:
-      SpeculativeOp(Runtime *rt);
+      SpeculativeOp(Internal *rt);
     public:
       void activate_speculative(void);
       void deactivate_speculative(void);
     public:
-      void initialize_speculation(SingleTask *ctx, bool track, unsigned regions,
-                                  const Predicate &p);
+      void initialize_speculation(SingleTask *ctx, bool track, 
+                                  unsigned regions, const Predicate &p);
       void register_predicate_dependence(void);
       bool is_predicated(void) const;
       // Wait until the predicate is valid and then return
@@ -577,7 +522,7 @@ namespace Legion {
       PredicateOp *predicate;
       bool received_trigger_resolution;
     protected:
-      RtUserEvent predicate_waiter; // used only when needed
+      UserEvent predicate_waiter; // used only when needed
     };
 
     /**
@@ -595,11 +540,11 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public InlineMapping, public Operation {
+    class MapOp : public Inline, public Operation {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
-      MapOp(Runtime *rt);
+      MapOp(Internal *rt);
       MapOp(const MapOp &rhs);
       virtual ~MapOp(void);
     public:
@@ -618,52 +563,36 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
     public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual int get_depth(void) const;
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(const InstanceSet &valid_instances,
-                               InstanceSet &mapped_instances);
-      void report_profiling_results(void);
     protected:
       bool remap_region;
-      ApUserEvent termination_event;
+      UserEvent termination_event;
       PhysicalRegion region;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
       RestrictInfo restrict_info;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::map<Reservation,bool> atomic_locks;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager *mapper;
-    protected:
-      Mapper::InlineProfilingInfo profiling_results;
-      RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -677,7 +606,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
-      CopyOp(Runtime *rt);
+      CopyOp(Internal *rt);
       CopyOp(const CopyOp &rhs);
       virtual ~CopyOp(void);
     public:
@@ -689,13 +618,13 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -704,30 +633,18 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void update_atomic_locks(Reservation lock, bool exclusive);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
     public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual int get_depth(void) const;
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
       void compute_parent_indexes(void);
-      template<bool IS_SRC>
-      int perform_conversion(unsigned idx, const RegionRequirement &req,
-                             std::vector<MappingInstance> &output,
-                             InstanceSet &targets, bool is_reduce = false);
-      inline void set_mapping_state(unsigned idx, bool is_src) 
-        { current_index = idx; current_src = is_src; }
-      void report_profiling_results(void);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
@@ -735,19 +652,8 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-      std::vector<RestrictInfo>   src_restrict_infos;
-      std::vector<RestrictInfo>   dst_restrict_infos;
-    protected: // for support with mapping
-      MapperManager*              mapper;
-      unsigned                    current_index;
-      bool                        current_src;
-    protected:
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::vector<std::map<Reservation,bool> > atomic_locks;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      Mapper::CopyProfilingInfo   profiling_results;
-      RtUserEvent                 profiling_reported;
+      std::vector<RestrictInfo>   src_restrictions;
+      std::vector<RestrictInfo>   dst_restrictions;
     };
 
     /**
@@ -770,7 +676,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
-      FenceOp(Runtime *rt);
+      FenceOp(Internal *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
     public:
@@ -780,8 +686,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -802,24 +708,24 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
-      FrameOp(Runtime *rt);
+      FrameOp(Internal *rt);
       FrameOp(const FrameOp &rhs);
       virtual ~FrameOp(void);
     public:
       FrameOp& operator=(const FrameOp &rhs);
     public:
       void initialize(SingleTask *ctx);
-      void set_previous(ApEvent previous);
+      void set_previous(Event previous);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
     protected:
-      ApEvent previous_completion;
+      Event previous_completion;
     };
 
     /**
@@ -843,7 +749,7 @@ namespace Legion {
         LOGICAL_PARTITION_DELETION,
       };
     public:
-      DeletionOp(Runtime *rt);
+      DeletionOp(Internal *rt);
       DeletionOp(const DeletionOp &rhs);
       virtual ~DeletionOp(void);
     public:
@@ -865,12 +771,11 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_execution(void);
-      virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_commit(void);
     protected:
       DeletionKind kind;
       IndexSpace index_space;
@@ -879,7 +784,6 @@ namespace Legion {
       LogicalRegion logical_region;
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
-      std::vector<unsigned> parent_req_indexes;
     }; 
 
     /**
@@ -890,42 +794,38 @@ namespace Legion {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Close, public Operation {
+    class CloseOp : public Operation {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
-      CloseOp(Runtime *rt);
+      CloseOp(Internal *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
     public:
       CloseOp& operator=(const CloseOp &rhs);
     public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual int get_depth(void) const;
-    public:
       void activate_close(void);
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void initialize_close(SingleTask *ctx, unsigned idx, bool track);
-      void perform_logging(bool is_intermediate_close_op, bool read_only);
+      void perform_logging(bool is_intermediate_close_op);
     public:
       // For recording trace dependences
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual const char* get_logging_name(void) const = 0;
-      virtual OpKind get_operation_kind(void) const = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
       virtual size_t get_region_count(void) const;
       virtual bool is_close_op(void) const { return true; }
     public:
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void trigger_commit(void);
     protected:
+      RegionRequirement requirement;
       RegionTreePath privilege_path;
-      VersionInfo    version_info;
-      RestrictInfo   restrict_info;
+      VersionInfo  version_info;
+      RestrictInfo restrict_info;
     };
 
     /**
@@ -935,13 +835,13 @@ namespace Legion {
      */
     class TraceCloseOp : public CloseOp {
     public:
-      TraceCloseOp(Runtime *runtime);
+      TraceCloseOp(Internal *runtime);
       virtual ~TraceCloseOp(void);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual const char* get_logging_name(void) const = 0;
-      virtual OpKind get_operation_kind(void) const = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
     public:
       void initialize_trace_close_op(SingleTask *ctx, 
                                      const RegionRequirement &req,
@@ -988,7 +888,7 @@ namespace Legion {
      */
     class InterCloseOp : public TraceCloseOp {
     public:
-      InterCloseOp(Runtime *runtime);
+      InterCloseOp(Internal *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
     public:
@@ -999,37 +899,18 @@ namespace Legion {
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
+                      const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
-      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
-    protected:
-      int invoke_mapper(const InstanceSet &valid_instances,
-                              InstanceSet &chosen_instances);
-      void report_profiling_results(void);
     protected:
       unsigned parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager *mapper;
-    protected:
-      Mapper::CloseProfilingInfo  profiling_results;
-      RtUserEvent                 profiling_reported;
     };
     
     /**
@@ -1045,7 +926,7 @@ namespace Legion {
      */
     class ReadCloseOp : public TraceCloseOp {
     public:
-      ReadCloseOp(Runtime *runtime);
+      ReadCloseOp(Internal *runtime);
       ReadCloseOp(const ReadCloseOp &rhs);
       virtual ~ReadCloseOp(void);
     public:
@@ -1058,8 +939,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual unsigned find_parent_index(unsigned idx);
     protected:
@@ -1075,42 +956,26 @@ namespace Legion {
      */
     class PostCloseOp : public CloseOp {
     public:
-      PostCloseOp(Runtime *runtime);
+      PostCloseOp(Internal *runtime);
       PostCloseOp(const PostCloseOp &rhs);
       virtual ~PostCloseOp(void);
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index); 
+      void initialize(SingleTask *ctx, unsigned index, 
+                      const InstanceRef &reference);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
-      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
     protected:
-      void report_profiling_results(void);
-    protected:
+      InstanceRef reference;
       unsigned parent_idx;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager *mapper;
-    protected:
-      Mapper::CloseProfilingInfo  profiling_results;
-      RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1122,7 +987,7 @@ namespace Legion {
      */
     class VirtualCloseOp : public CloseOp {
     public:
-      VirtualCloseOp(Runtime *runtime);
+      VirtualCloseOp(Internal *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
       virtual ~VirtualCloseOp(void);
     public:
@@ -1132,16 +997,14 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       unsigned parent_idx;
-      std::set<RtEvent> map_applied_conditions;
     };
 
     /**
@@ -1154,7 +1017,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
-      AcquireOp(Runtime *rt);
+      AcquireOp(Internal *rt);
       AcquireOp(const AcquireOp &rhs);
       virtual ~AcquireOp(void);
     public:
@@ -1165,46 +1028,38 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const; 
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void); 
+      virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-    public: 
-      virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual int get_depth(void) const;
+    public:
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(void);
-      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager*    mapper;
-    protected:
-      Mapper::AcquireProfilingInfo  profiling_results;
-      RtUserEvent                   profiling_reported;
     };
 
     /**
@@ -1217,7 +1072,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
-      ReleaseOp(Runtime *rt);
+      ReleaseOp(Internal *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
     public:
@@ -1228,51 +1083,38 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                   get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
-      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
-                              unsigned index, const FieldMask &needed_fields);
     public:
-      virtual UniqueID get_unique_id(void) const;
-      virtual unsigned get_context_index(void) const;
-      virtual int get_depth(void) const;
+      virtual MappableKind get_mappable_kind(void) const;
+      virtual Task* as_mappable_task(void) const;
+      virtual Copy* as_mappable_copy(void) const;
+      virtual Inline* as_mappable_inline(void) const;
+      virtual Acquire* as_mappable_acquire(void) const;
+      virtual Release* as_mappable_release(void) const;
+      virtual UniqueID get_unique_mappable_id(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(void);
-      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
-      std::set<RtEvent> map_applied_conditions;
-    protected:
-      MapperManager*    mapper;
-    protected:
-      Mapper::ReleaseProfilingInfo  profiling_results;
-      RtUserEvent                   profiling_reported;
     };
 
     /**
@@ -1286,7 +1128,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
-      DynamicCollectiveOp(Runtime *rt);
+      DynamicCollectiveOp(Internal *rt);
       DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
       virtual ~DynamicCollectiveOp(void);
     public:
@@ -1296,8 +1138,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
@@ -1311,7 +1153,7 @@ namespace Legion {
      * \class FuturePredOp
      * A class for making predicates out of futures.
      */
-    class FuturePredOp : public PredicateOp {
+    class FuturePredOp : public Predicate::Impl {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
@@ -1320,7 +1162,7 @@ namespace Legion {
         FuturePredOp *future_pred_op;
       };
     public:
-      FuturePredOp(Runtime *rt);
+      FuturePredOp(Internal *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
@@ -1331,8 +1173,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      const char* get_logging_name(void) const;
-      OpKind get_operation_kind(void) const;
+      const char* get_logging_name(void);
+      OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1344,11 +1186,11 @@ namespace Legion {
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public PredicateOp, PredicateWaiter {
+    class NotPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
-      NotPredOp(Runtime *rt);
+      NotPredOp(Internal *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
     public:
@@ -1358,8 +1200,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1372,11 +1214,11 @@ namespace Legion {
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public PredicateOp, PredicateWaiter {
+    class AndPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
-      AndPredOp(Runtime *rt);
+      AndPredOp(Internal *rt);
       AndPredOp(const AndPredOp &rhs);
       virtual ~AndPredOp(void);
     public:
@@ -1387,8 +1229,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1407,11 +1249,11 @@ namespace Legion {
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public PredicateOp, PredicateWaiter {
+    class OrPredOp : public Predicate::Impl, PredicateWaiter {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
-      OrPredOp(Runtime *rt);
+      OrPredOp(Internal *rt);
       OrPredOp(const OrPredOp &rhs);
       virtual ~OrPredOp(void);
     public:
@@ -1422,8 +1264,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1453,33 +1295,40 @@ namespace Legion {
     public:
       struct DependenceRecord {
       public:
-        inline void add_entry(unsigned op_idx, unsigned req_idx)
-          { op_indexes.push_back(op_idx); req_indexes.push_back(req_idx); }
+        DependenceRecord(unsigned op1, unsigned op2,
+                         unsigned reg1, unsigned reg2,
+                         DependenceType d)
+          : op1_idx(op1), op2_idx(op2), 
+            reg1_idx(reg1), reg2_idx(reg2),
+            dtype(d) { }
       public:
-        std::vector<unsigned> op_indexes;
-        std::vector<unsigned> req_indexes;
+        unsigned op1_idx;
+        unsigned op2_idx;
+        unsigned reg1_idx;
+        unsigned reg2_idx;
+        DependenceType dtype;
       };
     public:
-      MustEpochOp(Runtime *rt);
+      MustEpochOp(Internal *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
       FutureMap initialize(SingleTask *ctx,
-                                   const MustEpochLauncher &launcher,
-                                   bool check_privileges);
-      void find_conflicted_regions(
-          std::vector<PhysicalRegion> &unmapped); 
+                           const MustEpochLauncher &launcher,
+                           bool check_privileges);
+      void set_task_options(ProcessorManager *manager);
+      void find_conflicted_regions(std::vector<PhysicalRegion> &unmapped); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
+      virtual const char* get_logging_name(void);
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
@@ -1490,14 +1339,8 @@ namespace Legion {
                              Operation *target_op, GenerationID target_gen,
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
-      void must_epoch_map_task_callback(SingleTask *task, 
-                                        Mapper::MapTaskInput &input,
-                                        Mapper::MapTaskOutput &output);
-      // Get a reference to our data structure for tracking acquired instances
-      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
-                                       get_acquired_instances_ref(void);
     public:
-      void add_mapping_dependence(RtEvent precondition);
+      void add_mapping_dependence(Event precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
       void set_future(const DomainPoint &point, 
@@ -1523,8 +1366,6 @@ namespace Legion {
       // Use a deque to keep everything in order
       std::deque<SingleTask*>      single_tasks;
     protected:
-      Mapper::MapMustEpochInput    input;
-      Mapper::MapMustEpochOutput   output;
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;
     protected:
@@ -1539,13 +1380,10 @@ namespace Legion {
       std::vector<Mapper::MappingConstraint> constraints;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
-      // Track the physical instances that we've acquired
-      std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
-      std::map<std::pair<unsigned/*task index*/,unsigned/*req index*/>,
-               unsigned/*dependence index*/> dependence_map;
-      std::vector<DependenceRecord*> dependences;
-      std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
+      std::deque<DependenceRecord> dependences;
+      std::vector<unsigned> dependence_count;
+      std::map<SingleTask*,std::deque<SingleTask*> > mapping_dependences;
     };
 
     /**
@@ -1575,7 +1413,9 @@ namespace Legion {
       bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
                          std::vector<bool> &indiv_triggered,
                          const std::vector<IndexTask*> &index_tasks,
-                         std::vector<bool> &index_triggered);
+                         std::vector<bool> &index_triggered,
+                   const std::deque<MustEpochOp::DependenceRecord> &deps,
+                         const std::vector<unsigned> &dep_count);
       void trigger_individual(IndividualTask *task);
       void trigger_index(IndexTask *task);
     public:
@@ -1607,7 +1447,8 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks);
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
+          const std::map<SingleTask*,std::deque<SingleTask*> > &mapping_deps);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);
@@ -1635,7 +1476,7 @@ namespace Legion {
     public:
       MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
     public:
-      void distribute_tasks(Runtime *runtime,
+      void distribute_tasks(Internal *runtime,
                             const std::vector<IndividualTask*> &indiv_tasks,
                             const std::set<SliceTask*> &slice_tasks);
     public:
@@ -1662,7 +1503,7 @@ namespace Legion {
       public:
         virtual ~PendingPartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest) = 0;
+        virtual Event perform(RegionTreeForest *forest) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
@@ -1671,7 +1512,7 @@ namespace Legion {
           : pid(id), granularity(g) { }
         virtual ~EqualPartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_equal_partition(pid, granularity); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1685,7 +1526,7 @@ namespace Legion {
           : pid(id), weights(w), granularity(g) { }
         virtual ~WeightedPartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_weighted_partition(pid, granularity, weights); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1700,7 +1541,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~UnionPartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_union(pid, handle1, handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1715,7 +1556,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~IntersectionPartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(pid, handle1, 
                                                           handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1731,7 +1572,7 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~DifferencePartitionThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_partition_by_difference(pid, handle1, 
                                                         handle2); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1747,7 +1588,7 @@ namespace Legion {
           : base(b), source(s), handles(h) { }
         virtual ~CrossProductThunk(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(base, source, 
                                                          handles); }
         virtual void perform_logging(PendingPartitionOp* op);
@@ -1765,7 +1606,7 @@ namespace Legion {
           : is_union(is), is_partition(true), target(t), handle(h) { }
         virtual ~ComputePendingSpace(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { if (is_partition)
             return forest->compute_pending_space(target, handle, is_union);
           else
@@ -1784,7 +1625,7 @@ namespace Legion {
           : target(t), initial(i), handles(h) { }
         virtual ~ComputePendingDifference(void) { }
       public:
-        virtual ApEvent perform(RegionTreeForest *forest)
+        virtual Event perform(RegionTreeForest *forest)
         { return forest->compute_pending_space(target, initial, handles); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
@@ -1792,7 +1633,7 @@ namespace Legion {
         std::vector<IndexSpace> handles;
       };
     public:
-      PendingPartitionOp(Runtime *rt);
+      PendingPartitionOp(Internal *rt);
       PendingPartitionOp(const PendingPartitionOp &rhs);
       virtual ~PendingPartitionOp(void);
     public:
@@ -1833,17 +1674,17 @@ namespace Legion {
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
       void perform_logging();
-      inline ApEvent get_handle_ready(void) const { return handle_ready; }
+      inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual bool trigger_execution(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     protected:
-      ApUserEvent handle_ready;
+      UserEvent handle_ready;
       PendingPartitionThunk *thunk;
     };
 
@@ -1863,7 +1704,7 @@ namespace Legion {
         BY_PREIMAGE,
       };
     public:
-      DependentPartitionOp(Runtime *rt);
+      DependentPartitionOp(Internal *rt);
       DependentPartitionOp(const DependentPartitionOp &rhs);
       virtual ~DependentPartitionOp(void);
     public:
@@ -1882,10 +1723,10 @@ namespace Legion {
                                const Domain &color_space);
       void perform_logging();
       const RegionRequirement& get_requirement(void) const;
-      inline ApEvent get_handle_ready(void) const { return handle_ready; }
+      inline Event get_handle_ready(void) const { return handle_ready; }
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
@@ -1893,15 +1734,14 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       void compute_parent_index(void);
     protected:
-      ApUserEvent handle_ready;
+      UserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
       VersionInfo version_info;
@@ -1911,7 +1751,6 @@ namespace Legion {
       IndexPartition projection; /* for pre-image only*/
       RegionTreePath privilege_path;
       unsigned parent_req_index;
-      std::set<RtEvent> map_applied_conditions;
     };
 
     /**
@@ -1923,7 +1762,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
-      FillOp(Runtime *rt);
+      FillOp(Internal *rt);
       FillOp(const FillOp &rhs);
       virtual ~FillOp(void);
     public:
@@ -1934,7 +1773,7 @@ namespace Legion {
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,const Future &f,
+                      LogicalRegion parent, FieldID fid, const Future &f,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
@@ -1953,12 +1792,12 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
+      virtual const char* get_logging_name(void);
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
       virtual void resolve_true(void);
@@ -1969,7 +1808,7 @@ namespace Legion {
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
-      ApEvent compute_sync_precondition(void) const;
+      Event compute_sync_precondition(void) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
@@ -1979,7 +1818,6 @@ namespace Legion {
       void *value;
       size_t value_size;
       Future future;
-      std::set<RtEvent> map_applied_conditions;
     protected:
       std::vector<Grant>        grants;
       std::vector<PhaseBarrier> wait_barriers;
@@ -1999,19 +1837,17 @@ namespace Legion {
         IN_MEMORY_DATA
       };
     public:
-      AttachOp(Runtime *rt);
+      AttachOp(Internal *rt);
       AttachOp(const AttachOp &rhs);
       virtual ~AttachOp(void);
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize_hdf5(
-                                 SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_hdf5(SingleTask *ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
-      PhysicalRegion initialize_file(
-                                     SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
                                      LogicalRegion handle, LogicalRegion parent,
                                      const std::vector<FieldID> &field_vec,
                                      LegionFileMode mode, bool check_privileges);
@@ -2020,19 +1856,18 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
+      virtual const char* get_logging_name(void);
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       PhysicalInstance create_instance(const Domain &dom,
-        const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
+                                       const std::vector<size_t> &field_sizes);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -2047,8 +1882,6 @@ namespace Legion {
       ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
-      std::set<RtEvent> map_applied_conditions;
-      InstanceManager *file_instance;
     };
 
     /**
@@ -2059,7 +1892,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
-      DetachOp(Runtime *rt);
+      DetachOp(Internal *rt);
       DetachOp(const DetachOp &rhs);
       virtual ~DetachOp(void);
     public:
@@ -2069,12 +1902,12 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
+      virtual const char* get_logging_name(void);
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
@@ -2101,7 +1934,7 @@ namespace Legion {
         NANOSECOND_MEASUREMENT,
       };
     public:
-      TimingOp(Runtime *rt);
+      TimingOp(Internal *rt);
       TimingOp(const TimingOp &rhs);
       virtual ~TimingOp(void);
     public:
@@ -2113,8 +1946,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -2126,7 +1959,7 @@ namespace Legion {
       Future result;
     };
 
-  }; //namespace Internal 
-}; // namespace Legion 
+  }; //namespace HighLevel
+}; // namespace LegionRuntime
 
 #endif // __LEGION_OPERATIONS_H__

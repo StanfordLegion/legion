@@ -35,10 +35,10 @@ namespace Realm {
 	     Event _before_event,
 	     Event _finish_event, int _priority)
     : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
-      args(_args, _arglen), before_event(_before_event), priority(_priority),
+      args(_args, _arglen), priority(_priority),
       executing_thread(0)
   {
-    log_task.info() << "task " << (void *)this << " created: func=" << func_id
+    log_task.info() << "task " << this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
 		    << " before=" << _before_event << " after=" << _finish_event;
   }
@@ -54,7 +54,7 @@ namespace Realm {
 
   bool Task::mark_ready(void)
   {
-    log_task.info() << "task " << (void *)this << " ready: func=" << func_id
+    log_task.info() << "task " << this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_ready();
@@ -62,7 +62,7 @@ namespace Realm {
 
   bool Task::mark_started(void)
   {
-    log_task.info() << "task " << (void *)this << " started: func=" << func_id
+    log_task.info() << "task " << this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     return Operation::mark_started();
@@ -70,7 +70,7 @@ namespace Realm {
 
   void Task::mark_completed(void)
   {
-    log_task.info() << "task " << (void *)this << " completed: func=" << func_id
+    log_task.info() << "task " << this << " completed: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
     Operation::mark_completed();

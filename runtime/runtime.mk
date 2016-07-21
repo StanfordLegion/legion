@@ -41,7 +41,6 @@ ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 SLIB_REALM      := librealm.a
 LEGION_LIBS     := -L. -llegion -lrealm
 else
-$(error Error: SHARED_LOWLEVEL=1 is no longer supported)
 SLIB_SHAREDLLR  := libsharedllr.a
 LEGION_LIBS     := -L. -llegion -lsharedllr
 endif
@@ -103,6 +102,19 @@ CONDUIT=aries
 GPU_ARCH=k20
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
+ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
+GCC=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+#MARCH=corei7-avx
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+# CUDA=${CUDATOOLKIT_HOME}
+CONDUIT=aries
+# GPU_ARCH=k20
+LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
 ifneq (${MARCH},)
@@ -172,7 +184,7 @@ CC_FLAGS        += -DUSE_CUDA
 NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include 
 ifeq ($(strip $(DEBUG)),1)
-NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
+NVCC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -g -O0
 #NVCC_FLAGS	+= -G
 else
 NVCC_FLAGS	+= -O2
@@ -263,7 +275,7 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_LD_FLAGS      += -lhdf5
 endif
 
-SKIP_MACHINES= titan% daint%
+SKIP_MACHINES= titan% daint% excalibur%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
@@ -280,7 +292,7 @@ endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
-CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
+CC_FLAGS	+= -DDEBUG_LOW_LEVEL -DDEBUG_HIGH_LEVEL -ggdb #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
@@ -347,13 +359,12 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
+# If you want to go back to using the shared mapper, comment out the next line
+# and uncomment the one after that
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
-		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
-		   $(LG_RT_DIR)/mappers/test_mapper.cc \
-		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
-		   $(LG_RT_DIR)/mappers/debug_mapper.cc
-
+		   $(LG_RT_DIR)/mappers/mapping_utilities.cc
+#MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
@@ -369,11 +380,9 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \
 		    $(LG_RT_DIR)/legion/legion_constraint.cc \
-		    $(LG_RT_DIR)/legion/legion_mapping.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
-		    $(LG_RT_DIR)/legion/garbage_collection.cc \
-		    $(LG_RT_DIR)/legion/mapper_manager.cc
+		    $(LG_RT_DIR)/legion/garbage_collection.cc
 
 # General shell commands
 SHELL	:= /bin/sh
