@@ -71,25 +71,15 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_accessor_array_t);
   NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
-  NEW_OPAQUE_TYPE(legion_inline_t);
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
   NEW_OPAQUE_TYPE(legion_machine_t);
-  NEW_OPAQUE_TYPE(legion_mapper_t);
-  NEW_OPAQUE_TYPE(legion_default_mapper_t);
   NEW_OPAQUE_TYPE(legion_processor_query_t);
   NEW_OPAQUE_TYPE(legion_memory_query_t);
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
   NEW_OPAQUE_TYPE(legion_execution_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_layout_constraint_set_t);
   NEW_OPAQUE_TYPE(legion_task_layout_constraint_set_t);
-  NEW_OPAQUE_TYPE(legion_slice_task_output_t);
-  NEW_OPAQUE_TYPE(legion_map_task_input_t);
-  NEW_OPAQUE_TYPE(legion_map_task_output_t);
-  NEW_OPAQUE_TYPE(legion_physical_instance_t);
-  NEW_OPAQUE_TYPE(legion_mapper_runtime_t);
-  NEW_OPAQUE_TYPE(legion_mapper_context_t);
-  NEW_OPAQUE_TYPE(legion_field_map_t);
 #undef NEW_OPAQUE_TYPE
 
   /**
@@ -99,7 +89,7 @@ extern "C" {
     long long int value;
   } legion_ptr_t;
 
-typedef long long int coord_t;
+typedef legion_lowlevel_coord_t coord_t;
 
 #define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
@@ -436,6 +426,7 @@ typedef long long int coord_t;
    */
   legion_domain_t
   legion_domain_from_index_space(legion_runtime_t runtime,
+                                 legion_context_t ctx,
                                  legion_index_space_t is);
 
   /**
@@ -779,6 +770,7 @@ typedef long long int coord_t;
    */
   legion_domain_t
   legion_index_space_get_domain(legion_runtime_t runtime,
+                                legion_context_t ctx,
                                 legion_index_space_t handle);
 
   /**
@@ -1051,6 +1043,7 @@ typedef long long int coord_t;
    */
   bool
   legion_index_partition_is_disjoint(legion_runtime_t runtime,
+                                     legion_context_t ctx,
                                      legion_index_partition_t handle);
 
   /**
@@ -1058,6 +1051,7 @@ typedef long long int coord_t;
    */
   bool
   legion_index_partition_is_complete(legion_runtime_t runtime,
+                                     legion_context_t ctx,
                                      legion_index_partition_t handle);
 
   /**
@@ -1067,6 +1061,7 @@ typedef long long int coord_t;
    */
   legion_index_space_t
   legion_index_partition_get_index_subspace(legion_runtime_t runtime,
+                                            legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
 
@@ -1078,6 +1073,7 @@ typedef long long int coord_t;
   legion_index_space_t
   legion_index_partition_get_index_subspace_domain_point(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_index_partition_t handle,
     legion_domain_point_t color);
 
@@ -1087,6 +1083,7 @@ typedef long long int coord_t;
   bool
   legion_index_partition_has_index_subspace_domain_point(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_index_partition_t handle,
     legion_domain_point_t color);
 
@@ -1095,6 +1092,7 @@ typedef long long int coord_t;
    */
   legion_domain_t
   legion_index_partition_get_color_space(legion_runtime_t runtime,
+                                         legion_context_t ctx,
                                          legion_index_partition_t handle);
 
   /**
@@ -1102,6 +1100,7 @@ typedef long long int coord_t;
    */
   legion_color_t
   legion_index_partition_get_color(legion_runtime_t runtime,
+                                   legion_context_t ctx,
                                    legion_index_partition_t handle);
 
   /**
@@ -1111,6 +1110,7 @@ typedef long long int coord_t;
    */
   legion_index_space_t
   legion_index_partition_get_parent_index_space(legion_runtime_t runtime,
+                                                legion_context_t ctx,
                                                 legion_index_partition_t handle);
 
   /**
@@ -1120,7 +1120,7 @@ typedef long long int coord_t;
    */
   void
   legion_index_partition_destroy(legion_runtime_t runtime,
-                                legion_context_t ctx,
+                                 legion_context_t ctx,
                                  legion_index_partition_t handle);
 
   /**
@@ -1229,6 +1229,7 @@ typedef long long int coord_t;
    */
   legion_color_t
   legion_logical_region_get_color(legion_runtime_t runtime,
+                                  legion_context_t ctx,
                                   legion_logical_region_t handle);
 
   /**
@@ -1237,6 +1238,7 @@ typedef long long int coord_t;
   bool
   legion_logical_region_has_parent_logical_partition(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_region_t handle);
 
   /**
@@ -1245,6 +1247,7 @@ typedef long long int coord_t;
   legion_logical_partition_t
   legion_logical_region_get_parent_logical_partition(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_region_t handle);
 
   /**
@@ -1309,6 +1312,7 @@ typedef long long int coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_index_space_t handle);
 
@@ -1320,6 +1324,7 @@ typedef long long int coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_color(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
 
@@ -1331,6 +1336,7 @@ typedef long long int coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_color_domain_point(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_domain_point_t c);
 
@@ -1340,6 +1346,7 @@ typedef long long int coord_t;
   bool
   legion_logical_partition_has_logical_subregion_by_color_domain_point(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_domain_point_t c);
 
@@ -1351,6 +1358,7 @@ typedef long long int coord_t;
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_tree(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_index_space_t handle,
     legion_field_space_t fspace,
     legion_region_tree_id_t tid);
@@ -1361,6 +1369,7 @@ typedef long long int coord_t;
   legion_logical_region_t
   legion_logical_partition_get_parent_logical_region(
     legion_runtime_t runtime,
+    legion_context_t ctx,
     legion_logical_partition_t handle);
 
   /**
@@ -2318,51 +2327,6 @@ typedef long long int coord_t;
     legion_predicate_t pred /* = legion_predicate_true() */);
 
   // -----------------------------------------------------------------------
-  // File Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @return Caller takes ownership of return value.
-   */
-  legion_field_map_t
-  legion_field_map_create();
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   */
-  void
-  legion_field_map_destroy(legion_field_map_t handle);
-
-  void
-  legion_field_map_insert(legion_field_map_t handle,
-                          legion_field_id_t key,
-                          const char *value);
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Runtime::attach_hdf5()
-   */
-  legion_physical_region_t
-  legion_runtime_attach_hdf5(
-    legion_runtime_t runtime,
-    legion_context_t ctx,
-    const char *filename,
-    legion_logical_region_t handle,
-    legion_logical_region_t parent,
-    legion_field_map_t field_map,
-    legion_file_mode_t mode);
-
-  /**
-   * @see Legion::Runtime::detach_hdf5()
-   */
-  void
-  legion_runtime_detach_hdf5(
-    legion_runtime_t runtime,
-    legion_context_t ctx,
-    legion_physical_region_t region);
-
-  // -----------------------------------------------------------------------
   // Copy Operations
   // -----------------------------------------------------------------------
 
@@ -3051,18 +3015,6 @@ typedef long long int coord_t;
   legion_task_get_name(legion_task_t task);
 
   // -----------------------------------------------------------------------
-  // Inline Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @return Caller does **NOT** take ownership of return value.
-   *
-   * @see Legion::Inline::requirement
-   */
-  legion_region_requirement_t
-  legion_inline_get_requirement(legion_inline_t inline_operation);
-
-  // -----------------------------------------------------------------------
   // Execution Constraints
   // -----------------------------------------------------------------------
 
@@ -3132,18 +3084,6 @@ typedef long long int coord_t;
     const size_t *values,
     int dims);
 
-  /**
-   * @see Legion::ExecutionConstraintSet::add_constraint(
-   *        Legion::ColocationConstraint)
-   */
-  void
-  legion_execution_constraint_set_add_colocation_constraint(
-    legion_execution_constraint_set_t handle,
-    const unsigned *indexes,
-    size_t num_indexes,
-    const legion_field_id_t *fields,
-    size_t num_fields);
-
   // -----------------------------------------------------------------------
   // Layout Constraints
   // -----------------------------------------------------------------------
@@ -3197,106 +3137,12 @@ typedef long long int coord_t;
 
   /**
    * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::SpecializedConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_specialized_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_specialized_constraint_t specialized,
-    legion_reduction_op_id_t redop);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
    *        Legion::MemoryConstraint)
    */
   void
   legion_layout_constraint_set_add_memory_constraint(
     legion_layout_constraint_set_t handle,
     legion_memory_kind_t kind);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::FieldConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_field_constraint(
-    legion_layout_constraint_set_t handle,
-    const legion_field_id_t *fields,
-    size_t num_fields,
-    bool contiguous,
-    bool inorder);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::OrderingConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_ordering_constraint(
-    legion_layout_constraint_set_t handle,
-    const legion_dimension_kind_t *dims,
-    size_t num_dims,
-    bool contiguous);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::SplittingConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_splitting_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_dimension_kind_t dim);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::SplittingConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_full_splitting_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_dimension_kind_t dim,
-    size_t value);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::DimensionConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_dimension_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_dimension_kind_t dim,
-    legion_equality_kind_t eq,
-    size_t value);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::AlignmentConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_alignment_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_field_id_t field,
-    legion_equality_kind_t eq,
-    size_t byte_boundary);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::OffsetConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_offset_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_field_id_t field,
-    size_t offset);
-
-  /**
-   * @see Legion::LayoutConstraintSet::add_constraint(
-   *        Legion::PointerConstraint)
-   */
-  void
-  legion_layout_constraint_set_add_pointer_constraint(
-    legion_layout_constraint_set_t handle,
-    legion_memory_t memory,
-    uintptr_t ptr);
 
   // -----------------------------------------------------------------------
   // Task Layout Constraints
@@ -3364,15 +3210,6 @@ typedef long long int coord_t;
   void
   legion_runtime_set_registration_callback(
     legion_registration_callback_pointer_t callback);
-
-  /**
-   * @see Legion::Runtime::replace_default_mapper()
-   */
-  void
-  legion_runtime_replace_default_mapper(
-    legion_runtime_t runtime,
-    legion_mapper_t mapper,
-    legion_processor_t proc);
 
   /**
    * @deprecated
@@ -3866,217 +3703,6 @@ typedef long long int coord_t;
    */
   legion_memory_t
   legion_memory_query_random(legion_memory_query_t query);
-
-  // -----------------------------------------------------------------------
-  // Physical Instance Operations
-  // -----------------------------------------------------------------------
-
-  /*
-   * @param instance Caller must have ownership of parameter `instance`.
-   *
-   * @see Legion::Mapping::PhysicalInstance
-   */
-  void
-  legion_physical_instance_destroy(legion_physical_instance_t instance);
-
-  // -----------------------------------------------------------------------
-  // Slice Task Output
-  // -----------------------------------------------------------------------
-
-  /**
-   * @see Legion::Mapping::Mapper::SliceTaskOutput:slices
-   */
-  void
-  legion_slice_task_output_slices_add(
-      legion_slice_task_output_t output,
-      legion_task_slice_t slice);
-
-  /**
-   * @see Legion::Mapping::Mapper::SliceTaskOutput:verify_correctness
-   */
-  void
-  legion_slice_task_output_verify_correctness_set(
-      legion_slice_task_output_t output,
-      bool verify_correctness);
-
-  // -----------------------------------------------------------------------
-  // Map Task Input/Output
-  // -----------------------------------------------------------------------
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
-   */
-  void
-  legion_map_task_output_chosen_instances_clear_all(
-      legion_map_task_output_t output);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
-   */
-  void
-  legion_map_task_output_chosen_instances_clear_each(
-      legion_map_task_output_t output,
-      size_t idx);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
-   */
-  void
-  legion_map_task_output_chosen_instances_add(
-      legion_map_task_output_t output,
-      legion_physical_instance_t *instances,
-      size_t instances_size);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:chosen_instances
-   */
-  void
-  legion_map_task_output_chosen_instances_set(
-      legion_map_task_output_t output,
-      size_t idx,
-      legion_physical_instance_t *instances,
-      size_t instances_size);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
-   */
-  void
-  legion_map_task_output_target_procs_clear(
-      legion_map_task_output_t output);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
-   */
-  void
-  legion_map_task_output_target_procs_add(
-      legion_map_task_output_t output,
-      legion_processor_t proc);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:target_procs
-   */
-  legion_processor_t
-  legion_map_task_output_target_procs_get(
-      legion_map_task_output_t output,
-      size_t idx);
-
-  /**
-   * @see Legion::Mapping::Mapper::MapTaskOutput:task_priority
-   */
-  void
-  legion_map_task_output_task_priority_set(
-      legion_map_task_output_t output,
-      legion_task_priority_t priority);
-
-  // -----------------------------------------------------------------------
-  // MapperRuntime Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::create_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_create_physical_instance_layout_constraint(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_set_t constraints,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool acquire,
-      legion_garbage_collection_priority_t priority);
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::create_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_create_physical_instance_layout_constraint_id(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_id_t layout_id,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool acquire,
-      legion_garbage_collection_priority_t priority);
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::find_or_create_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_find_or_create_physical_instance_layout_constraint(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_set_t constraints,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool *created,
-      bool acquire,
-      legion_garbage_collection_priority_t priority,
-      bool tight_region_bounds);
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::find_or_create_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_find_or_create_physical_instance_layout_constraint_id(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_id_t layout_id,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool *created,
-      bool acquire,
-      legion_garbage_collection_priority_t priority,
-      bool tight_region_bounds);
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::find_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_find_physical_instance_layout_constraint(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_set_t constraints,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool acquire,
-      bool tight_region_bounds);
-
-  /**
-   * @param result Caller takes ownership of handle pointed by `result`.
-   *
-   * @see Legion::Mapping::MapperRuntime::find_physical_instance()
-   */
-  bool
-  legion_mapper_runtime_find_physical_instance_layout_constraint_id(
-      legion_mapper_runtime_t runtime,
-      legion_mapper_context_t ctx,
-      legion_memory_t target_memory,
-      legion_layout_constraint_id_t layout_id,
-      const legion_logical_region_t *regions,
-      size_t regions_size,
-      legion_physical_instance_t *result,
-      bool acquire,
-      bool tight_region_bounds);
 
 #ifdef __cplusplus
 }

@@ -288,7 +288,7 @@ namespace LegionRuntime {
       // Make these constructors explicit so we know when
       // we are converting between things
       explicit ColorPoint(Color c)
-        : point(DomainPoint::from_point<1>(Point<1>((c)))), valid(true) { }
+        : point(DomainPoint::from_point<1>(Arrays::Point<1>((c)))), valid(true) { }
       explicit ColorPoint(const DomainPoint &p)
         : point(p), valid(true) { }
     public:

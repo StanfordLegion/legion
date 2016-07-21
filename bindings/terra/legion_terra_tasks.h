@@ -24,11 +24,6 @@ extern "C" {
 
 void set_lua_registration_callback_name(char*);
 
-legion_mapper_t create_mapper(const char*,
-                              legion_machine_t,
-                              legion_runtime_t,
-                              legion_processor_t);
-
 void lua_registration_callback_wrapper(legion_machine_t,
                                        legion_runtime_t,
                                        const legion_processor_t*,
@@ -46,26 +41,6 @@ legion_task_result_t lua_task_wrapper(legion_task_t,
                                       legion_context_t,
                                       legion_runtime_t);
 
-
-typedef
-  struct vector_legion_task_slice_t { void *impl; }
-vector_legion_task_slice_t;
-
-void
-vector_legion_task_slice_push_back(vector_legion_task_slice_t,
-                                     legion_task_slice_t);
-
-unsigned
-vector_legion_task_slice_size(vector_legion_task_slice_t);
-
-legion_task_slice_t
-vector_legion_task_slice_get(vector_legion_task_slice_t,
-                               unsigned);
-
-void decompose_index_space(legion_domain_t,
-                           legion_processor_t*,
-                           unsigned, unsigned,
-                           vector_legion_task_slice_t);
 
 #ifdef __cplusplus
 }

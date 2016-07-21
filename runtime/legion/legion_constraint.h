@@ -26,48 +26,14 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     // These are the constraint kinds for describing execution 
-    enum ExecutionConstraintKind {
-      ISA_CONSTRAINT, // instruction set architecture
-      PROCESSOR_CONSTRAINT, // processor kind constraint
-      RESOURCE_CONSTRAINT, // physical resources
-      LAUNCH_CONSTRAINT, // launch configuration
-      COLOCATION_CONSTRAINT, // region requirements in same instance
-    };
+    typedef legion_execution_constraint_t ExecutionConstraintKind;
 
     // These are the constraint kinds for describing data layout 
-    enum LayoutConstraintKind {
-      SPECIALIZED_CONSTRAINT, // normal or speicalized (e.g. reduction-fold)
-      MEMORY_CONSTRAINT, // constraint on the kind of memory
-      FIELD_CONSTRAINT, // ordering of fields
-      ORDERING_CONSTRAINT, // ordering of dimensions
-      SPLITTING_CONSTRAINT, // splitting of dimensions 
-      DIMENSION_CONSTRAINT, // dimension size constraint
-      ALIGNMENT_CONSTRAINT, // alignment of a field
-      OFFSET_CONSTRAINT, // offset of a field
-      POINTER_CONSTRAINT, // pointer of a field
-    };
+    typedef legion_layout_constraint_t LayoutConstraintKind;
 
-    enum EqualityKind {
-      LT_EK, // <
-      LE_EK, // <=
-      GT_EK, // >
-      GE_EK, // >=
-      EQ_EK, // ==
-      NE_EK, // !=
-    };
+    typedef legion_equality_kind_t EqualityKind;
 
-    enum DimensionKind {
-      DIM_X, // first logical index space dimension
-      DIM_Y, // second logical index space dimension
-      DIM_Z, // ...
-      DIM_F, // field dimension
-      INNER_DIM_X, // inner dimension for tiling X
-      OUTER_DIM_X, // outer dimension for tiling X
-      INNER_DIM_Y, // ...
-      OUTER_DIM_Y,
-      INNER_DIM_Z,
-      OUTER_DIM_Z,
-    };
+    typedef legion_dimension_kind_t DimensionKind;
 
     // Provide a base class for all constraint types that
     // relies on the CRTP for doing static polymorphism for
@@ -199,21 +165,7 @@ namespace LegionRuntime {
       static const ExecutionConstraintKind constraint_kind = 
                                             RESOURCE_CONSTRAINT;
     public:
-      enum ResourceKind {
-        L1_CACHE_SIZE,
-        L2_CACHE_SIZE,
-        L3_CACHE_SIZE,
-        L1_CACHE_ASSOCIATIVITY,
-        L2_CACHE_ASSOCIATIVITY,
-        L3_CACHE_ASSOCIATIVITY,
-        REGISTER_FILE_SIZE,
-        SHARED_MEMORY_SIZE,
-        TEXTURE_CACHE_SIZE,
-        CONSTANT_CACHE_SIZE,
-        NAMED_BARRIERS,
-        SM_COUNT, // total SMs on the device
-        MAX_OCCUPANCY, // max warps per SM
-      };
+      typedef legion_resource_constraint_t ResourceKind;
     public:
       ResourceConstraint(void);
       ResourceConstraint(ResourceKind resource_kind, 
@@ -243,14 +195,7 @@ namespace LegionRuntime {
       static const ExecutionConstraintKind constraint_kind = 
                                             LAUNCH_CONSTRAINT;
     public:
-      enum LaunchKind {
-        CTA_SHAPE,
-        GRID_SHAPE,
-        DYNAMIC_SHARED_MEMORY,
-        REGISTERS_PER_THREAD,
-        CTAS_PER_SM,
-        NAMED_BARRIERS_PER_CTA,
-      };
+      typedef legion_launch_constraint_t LaunchKind;
     public:
       LaunchConstraint(void);
       LaunchConstraint(LaunchKind kind, size_t value);
@@ -337,12 +282,7 @@ namespace LegionRuntime {
       static const LayoutConstraintKind constraint_kind = 
                                             SPECIALIZED_CONSTRAINT;
     public:
-      enum SpecializedKind {
-        NORMAL_SPECIALIZE,
-        REDUCTION_FOLD_SPECIALIZE,
-        REDUCTION_LIST_SPECIALIZE,
-        VIRTUAL_SPECIALIZE,
-      };
+      typedef legion_specialized_constraint_t SpecializedKind;
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE);
     public:

@@ -31,7 +31,8 @@
 // for fprintf
 #include <stdio.h>
 
-using namespace LegionRuntime::Arrays;
+// Elliott: Don't do this at top-level
+// using namespace LegionRuntime::Arrays;
 
 namespace Realm {
   class DomainPoint;
@@ -50,6 +51,8 @@ namespace LegionRuntime {
   };
 #endif
   namespace Accessor {
+
+    using namespace LegionRuntime::Arrays;
 
     class ByteOffset {
     public:

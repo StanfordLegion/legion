@@ -28,6 +28,8 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+#include "lowlevel_config.h"
+
 #ifdef __CUDACC__
 #define CUDAPREFIX __host__ __device__
 #else
@@ -40,7 +42,7 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
-    typedef ptrdiff_t coord_t;
+    typedef legion_lowlevel_coord_t coord_t;
 
     template <unsigned DIM>
     class Point {

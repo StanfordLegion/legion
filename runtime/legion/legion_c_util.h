@@ -24,14 +24,19 @@
 
 #include "legion.h"
 #include "legion_c.h"
-#include "legion_mapping.h"
+#include "legion_constraint.h"
 #include "mapping_utilities.h"
 
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
 
-namespace Legion {
+namespace LegionRuntime {
+  namespace HighLevel {
+
+    using Arrays::Point;
+    using Arrays::Rect;
+    using Arrays::Blockify;
 
     class CContext;
 
@@ -147,27 +152,16 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
-      NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
       NEW_OPAQUE_WRAPPER(legion_processor_query_t, Machine::ProcessorQuery *);
       NEW_OPAQUE_WRAPPER(legion_memory_query_t, Machine::MemoryQuery *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
-                         Mapping::Utilities::MachineQueryInterface *);
-      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper *);
+                         MappingUtilities::MachineQueryInterface *);
       NEW_OPAQUE_WRAPPER(legion_execution_constraint_set_t, ExecutionConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_layout_constraint_set_t, LayoutConstraintSet *);
       NEW_OPAQUE_WRAPPER(legion_task_layout_constraint_set_t, TaskLayoutConstraintSet *);
-      NEW_OPAQUE_WRAPPER(legion_map_task_input_t, Mapping::Mapper::MapTaskInput *);
-      NEW_OPAQUE_WRAPPER(legion_map_task_output_t, Mapping::Mapper::MapTaskOutput *);
-      NEW_OPAQUE_WRAPPER(legion_slice_task_output_t, Mapping::Mapper::SliceTaskOutput *);
-      NEW_OPAQUE_WRAPPER(legion_physical_instance_t, Mapping::PhysicalInstance *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_runtime_t, Mapping::MapperRuntime *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_context_t, Mapping::MapperContext);
-      typedef std::map<FieldID, const char *> FieldMap;
-      NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -509,26 +503,6 @@ namespace Legion {
         return static_cast<Memory::Kind>(options_);
       }
 
-      static legion_task_slice_t
-      wrap(Mapping::Mapper::TaskSlice task_slice) {
-        legion_task_slice_t task_slice_;
-        task_slice_.domain = wrap(task_slice.domain);
-        task_slice_.proc = wrap(task_slice.proc);
-        task_slice_.recurse = task_slice.recurse;
-        task_slice_.stealable = task_slice.stealable;
-        return task_slice_;
-      }
-
-      static Mapping::Mapper::TaskSlice
-      unwrap(legion_task_slice_t task_slice_) {
-        Mapping::Mapper::TaskSlice task_slice;
-            task_slice.domain = unwrap(task_slice_.domain);
-            task_slice.proc = unwrap(task_slice_.proc);
-            task_slice.recurse = task_slice_.recurse;
-            task_slice.stealable = task_slice_.stealable;
-        return task_slice;
-      }
-
       static legion_phase_barrier_t
       wrap(PhaseBarrier barrier) {
         legion_phase_barrier_t barrier_;
@@ -561,47 +535,6 @@ namespace Legion {
         collective.phase_barrier.timestamp = collective_.timestamp;
         collective.redop = collective_.redop;
         return collective;
-      }
-
-      static legion_task_options_t
-      wrap(Mapping::Mapper::TaskOptions& options) {
-        legion_task_options_t options_;
-        options_.initial_proc = CObjectWrapper::wrap(options.initial_proc);
-        options_.inline_task = options.inline_task;
-        options_.stealable = options.stealable;
-        options_.map_locally = options.map_locally;
-        return options_;
-      }
-
-      static Mapping::Mapper::TaskOptions
-      unwrap(legion_task_options_t& options_) {
-        Mapping::Mapper::TaskOptions options;
-        options.initial_proc = CObjectWrapper::unwrap(options_.initial_proc);
-        options.inline_task = options_.inline_task;
-        options.stealable = options_.stealable;
-        options.map_locally = options_.map_locally;
-        return options;
-      }
-
-      static legion_slice_task_input_t
-      wrap(Mapping::Mapper::SliceTaskInput& input) {
-        legion_slice_task_input_t input_;
-        input_.domain = CObjectWrapper::wrap(input.domain);
-        return input_;
-      }
-
-      static legion_slice_task_input_t
-      wrap_const(const Mapping::Mapper::SliceTaskInput& input) {
-        legion_slice_task_input_t input_;
-        input_.domain = CObjectWrapper::wrap(input.domain);
-        return input_;
-      }
-
-      static Mapping::Mapper::SliceTaskInput
-      unwrap(legion_slice_task_input_t& input_) {
-        Mapping::Mapper::SliceTaskInput input;
-        input.domain = CObjectWrapper::unwrap(input_.domain);
-        return input;
       }
     };
 
@@ -645,7 +578,7 @@ namespace Legion {
       Context ctx;
       std::vector<legion_physical_region_t> physical_regions;
     };
-
+  };
 };
 
 #endif // __LEGION_C_UTIL_H__

@@ -324,8 +324,8 @@ create_cross_product_structured(HighLevelRuntime *runtime,
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
     // Doesn't currently handle structured index spaces consisting of multiple
     // domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(lh_space);
+    assert(!runtime->has_multiple_domains(ctx, lh_space));
+    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
     // Verify that index space is indeed structured.
     assert(lh_domain.get_dim() > 0);
 
@@ -334,8 +334,8 @@ create_cross_product_structured(HighLevelRuntime *runtime,
       if (rhs_filter && !rhs_filter->count(rh_color)) continue;
 
       IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(rh_space);
+      assert(!runtime->has_multiple_domains(ctx, rh_space));
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
       assert(rh_domain.get_dim() > 0);
 
       // Take and store intersecton of the two rect domains.
@@ -830,13 +830,13 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
   for (size_t i = 0; i < lhs.size(); i++) {
     const IndexSpace &lh_space = lhs[i];
     // Doesn't currently handle structured index spaces with multiple domains.
-    assert(!runtime->has_multiple_domains(lh_space));
+    assert(!runtime->has_multiple_domains(ctx, lh_space));
     Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
     assert(lh_domain.get_dim() > 0); // Should be structured.
 
     for (size_t j = 0; j < rhs.size(); j++) {
       const IndexSpace &rh_space = rhs[j];
-      assert(!runtime->has_multiple_domains(rh_space));
+      assert(!runtime->has_multiple_domains(ctx, rh_space));
       Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
       assert(rh_domain.get_dim() > 0);
 
@@ -1303,8 +1303,8 @@ create_cross_product_complete_structured(
     IndexSpace lh_space = lhs[lhs_idx];
     // Doesn't currently handle structured index spaces consisting of multiple
     // domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(lh_space);
+    assert(!runtime->has_multiple_domains(ctx, lh_space));
+    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
     // Verify that index space is indeed structured.
     assert(lh_domain.get_dim() > 0);
 
@@ -1313,8 +1313,8 @@ create_cross_product_complete_structured(
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace rh_space = rh_spaces[rhs_idx];
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(rh_space);
+      assert(!runtime->has_multiple_domains(ctx, rh_space));
+      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
       assert(rh_domain.get_dim() > 0);
 
       coloring[rh_space][lh_color] = rh_domain.intersection(lh_domain);

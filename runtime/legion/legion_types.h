@@ -67,6 +67,10 @@ namespace LegionRuntime {
   
   namespace HighLevel {
 
+    using Arrays::Point;
+    using Arrays::Rect;
+    using Arrays::GenericPointInRectIterator;
+
     typedef ::legion_error_t LegionErrorType;
     typedef ::legion_privilege_mode_t PrivilegeMode;
     typedef ::legion_allocate_mode_t AllocateMode;
