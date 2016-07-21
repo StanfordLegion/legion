@@ -39,14 +39,6 @@
 
 #define AUTO_GENERATE_ID   UINT_MAX
 
-#define GC_MIN_PRIORITY    INT_MIN
-#define GC_MAX_PRIORITY    INT_MAX
-
-#define GC_FIRST_PRIORITY  GC_MAX_PRIORITY
-#define GC_DEFAULT_PRIORITY 0
-#define GC_LAST_PRIORITY   (GC_MIN_PRIORITY+1)
-#define GC_NEVER_PRIORITY  GC_MIN_PRIORITY
-
 #ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
 #endif
@@ -173,13 +165,8 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
-#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFUL
-#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFUL)
-#define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
-#define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
-
 // The following enums are all re-exported by
-// namespace Legion. These versions are here to facilitate the
+// LegionRuntime::HighLevel. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
 typedef enum legion_error_t {
@@ -533,7 +520,6 @@ typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
 typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
-typedef int legion_garbage_collection_priority_t;
 typedef unsigned int legion_color_t;
 typedef unsigned int legion_field_id_t;
 typedef unsigned int legion_trace_id_t;
