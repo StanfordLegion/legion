@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1"]]
 
 import "regent"
 
