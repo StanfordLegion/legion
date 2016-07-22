@@ -2798,6 +2798,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::release_tree_instances(RegionTreeID tree_id)
+    //--------------------------------------------------------------------------
+    {
+      // Take the manager lock and see if there are any managers
+      // we can release now
+      std::map<PhysicalManager*,bool> to_release;
+      {
+        AutoLock m_lock(manager_lock);
+        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
+        {
+          // If the region for the instance is not for the tree then
+          // we get to skip it
+          if (it->first->region_node->handle.get_tree_id() != tree_id)
+            continue;
+          // If it's already been deleted, then there is nothing to do
+          if (it->second.current_state == ACTIVE_COLLECTED_STATE)
+            continue;
+          // Add a resource reference for ourself
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          to_release[it->first] = 
+            (it->second.min_priority == GC_NEVER_PRIORITY);
+          it->second.mapper_priorities.clear();
+          it->second.min_priority = GC_MAX_PRIORITY;
+        }
+      }
+      for (std::map<PhysicalManager*,bool>::const_iterator it = 
+            to_release.begin(); it != to_release.end(); it++)
+      {
+        if (it->second)
+          it->first->remove_base_valid_ref(NEVER_GC_REF);
+        if (it->first->try_active_deletion())
+          record_deleted_instance(it->first);
+        // Now we can release our resource reference
+        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::set_garbage_collection_priority(
                                 PhysicalManager *manager, MapperID mapper_id, 
                                 Processor processor, GCPriority priority)
@@ -15945,6 +15985,20 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instance(constraints, regions, 
                                      result, acquire, tight_region_bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_tree_instances(RegionTreeID tree_id)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryManager*> copy_managers;
+      {
+        AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+        copy_managers = memory_managers;
+      }
+      for (std::map<Memory,MemoryManager*>::const_iterator it = 
+            copy_managers.begin(); it != copy_managers.end(); it++)
+        it->second->release_tree_instances(tree_id);
     }
 
     //--------------------------------------------------------------------------
