@@ -7655,6 +7655,14 @@ function codegen.top_task(cx, node)
     end
     task_setup:insertall(physical_region_actions)
 
+    -- Force inner tasks to unmap all regions
+    if task:get_config_options().inner then
+      local actions = quote
+        c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
+      end
+      task_setup:insertall(actions)
+    end
+
     if not cx:has_ispace(region_type:ispace()) then
       local bounds
       if not region_type:is_opaque() then
