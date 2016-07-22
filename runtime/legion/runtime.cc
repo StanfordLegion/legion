@@ -4182,6 +4182,9 @@ namespace Legion {
       // Since we're going to put this in the table add a reference
       if (is_owner)
         manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      // If we have a GC_NEVER_PRIORITY then we have to add the valid reference
+      if (priority == GC_NEVER_PRIORITY)
+        manager->add_base_valid_ref(NEVER_GC_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4257,9 +4260,7 @@ namespace Legion {
           manager->add_base_valid_ref(REMOTE_DID_REF);
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-      }
-      if (priority == NEVER_GC_REF)
-        manager->add_base_valid_ref(NEVER_GC_REF);
+      } 
       return manager;
     }
 
