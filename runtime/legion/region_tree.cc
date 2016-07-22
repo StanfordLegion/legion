@@ -4809,7 +4809,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(void)
-      : depth(0), color(ColorPoint()), context(NULL)
+      : depth(0), color(ColorPoint()), context(NULL), destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4817,7 +4817,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(ColorPoint c, unsigned d, 
                                  RegionTreeForest *ctx)
-      : depth(d), color(c), context(ctx), 
+      : depth(d), color(c), context(ctx), destroyed(false),
         node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -6089,15 +6089,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_index_space_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
-      for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
-            it != logical_nodes.end(); it++)
+      if (!destroyed)
       {
-        (*it)->destroy_node(source);
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+        for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
+              it != logical_nodes.end(); it++)
+        {
+          (*it)->destroy_node(source);
+        }
       }
     }
 
@@ -6544,12 +6562,9 @@ namespace Legion {
         // Also check to see if we need to go down
         if (down && child_creation.contains(target))
           down = false;
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           // Now we need to send a destruction
           context->runtime->send_index_space_destruction(handle, target);
-          destruction_set.add(target);
-        }
         // If we need to go down, make a copy of the valid children
         if (down)
           valid_copy = valid_map;
@@ -7488,15 +7503,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_index_partition_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
-      for (std::set<PartitionNode*>::const_iterator it = logical_nodes.begin();
-             it != logical_nodes.end(); it++)
+      if (!destroyed)
       {
-        (*it)->destroy_node(source);
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+        for (std::set<PartitionNode*>::const_iterator it = 
+              logical_nodes.begin(); it != logical_nodes.end(); it++)
+        {
+          (*it)->destroy_node(source);
+        }
       }
     }
 
@@ -8078,12 +8111,9 @@ namespace Legion {
         // See if we need to go down
         if (down && child_creation.contains(target))
           down = false;
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           // Send the deletion notification
           context->runtime->send_index_partition_destruction(handle, target);
-          destruction_set.add(target);
-        }
         if (down)
           valid_copy = valid_map;
       }
@@ -8263,7 +8293,8 @@ namespace Legion {
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), context(ctx)
+        owner(sp.id % ctx->runtime->runtime_stride), 
+        context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -8276,7 +8307,8 @@ namespace Legion {
                                    Deserializer &derez)
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), context(ctx)
+        owner(sp.id % ctx->runtime->runtime_stride), 
+        context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -9470,15 +9502,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_field_space_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       std::vector<LogicalRegion> to_check;
       {
         AutoLock n_lock(node_lock);
-        destruction_set.add(source);
-        to_check.insert(to_check.end(), 
-                        logical_trees.begin(), logical_trees.end());
+        if (!destroyed)
+        {
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_check.insert(to_check.end(), 
+                          logical_trees.begin(), logical_trees.end());
+        }
       }
       for (std::vector<LogicalRegion>::const_iterator it = 
             to_check.begin(); it != to_check.end(); it++)
@@ -9879,11 +9929,8 @@ namespace Legion {
         creation_set.add(target);
       }
       // Send any deletions if necessary
-      if (!destruction_set.contains(target))
-      {
+      if (destroyed)
         context->runtime->send_field_space_destruction(handle, target);
-        destruction_set.add(target);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -10083,7 +10130,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
-      : context(ctx), column_source(column_src)
+      : context(ctx), column_source(column_src), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation(); 
@@ -14663,11 +14710,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_logical_region_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
+      if (!destroyed)
+      {
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15150,11 +15215,8 @@ namespace Legion {
           continue_up = true;
           creation_set.add(target);
         }
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           send_deletion = true;
-          destruction_set.add(target);
-        }
       }
       if (continue_up)
       {
@@ -15199,9 +15261,7 @@ namespace Legion {
         }
       }
       if (send_deletion)
-      {
         context->runtime->send_logical_region_destruction(handle, target);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -16521,11 +16581,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PartitionNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_logical_partition_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
+      if (!destroyed)
+      {
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16849,11 +16927,8 @@ namespace Legion {
           continue_up = true;
           creation_set.add(target);
         }
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           send_deletion = true;
-          destruction_set.add(target);
-        }
       }
       if (continue_up)
       {
@@ -16879,9 +16954,7 @@ namespace Legion {
         }
       }
       if (send_deletion)
-      {
         context->runtime->send_logical_partition_destruction(handle, target);
-      }
     }
 
     //--------------------------------------------------------------------------

@@ -5766,8 +5766,8 @@ namespace Legion {
                           "on region requirement %d of task %s (ID %lld) "
                           "which has a relaxed coherence mode. Virtual "
                           "mappings are only permitted for exclusive "
-                          "coherence.", mapper->get_mapper_name(), idx,
-                          get_task_name(), get_unique_id());
+                          "coherence.", "map_task", mapper->get_mapper_name(),
+                          idx, get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
