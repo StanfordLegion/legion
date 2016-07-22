@@ -2142,7 +2142,7 @@ namespace Legion {
         if (bad_tree > 0)
         {
           log_run.error("Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper provided an instanced from "
+                        "on mapper %s. Mapper provided an instance from "
                         "region tree %d for use in satisfying region "
                         "requirement %d of task %s (ID %lld) whose region "
                         "is from region tree %d.", mapper->get_mapper_name(),
@@ -5759,6 +5759,20 @@ namespace Legion {
 #endif
             exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
           }
+          if (!IS_EXCLUSIVE(regions[idx]))
+          {
+            log_run.error("Invalid mapper output from invocation of '%s' on "
+                          "mapper %s. Illegal composite instance requested "
+                          "on region requirement %d of task %s (ID %lld) "
+                          "which has a relaxed coherence mode. Virtual "
+                          "mappings are only permitted for exclusive "
+                          "coherence.", mapper->get_mapper_name(), idx,
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
           virtual_mapped[idx] = true;
         } 
         if (Runtime::legion_spy_enabled)
@@ -6900,21 +6914,7 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       // Get the event to wait on unless we are 
       // doing the inner task optimization
-      bool do_inner_task_optimization = variant->is_inner();
-      if (do_inner_task_optimization)
-      {
-        // We can't do the inner task optimization if we can
-        // see side effects through our regions
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if ((regions[idx].prop != EXCLUSIVE) && 
-              (regions[idx].prop != ATOMIC))
-          {
-            do_inner_task_optimization = false;
-            break;
-          }
-        }
-      }
+      const bool do_inner_task_optimization = variant->is_inner();
       if (!do_inner_task_optimization)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
