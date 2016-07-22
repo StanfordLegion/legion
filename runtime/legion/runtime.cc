@@ -2824,6 +2824,8 @@ namespace Legion {
           to_release[it->first] = 
             (it->second.min_priority == GC_NEVER_PRIORITY);
 #ifdef DEBUG_LEGION
+          // We might have lost a race with adding NEVER_GC_REF
+          // after release the manager lock if we hit this assertion
           if (it->second.min_priority == GC_NEVER_PRIORITY)
             assert(it->second.current_state == VALID_STATE);
 #endif
