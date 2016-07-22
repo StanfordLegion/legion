@@ -54,6 +54,42 @@ if USE_FOREIGN then
                               "-DRADIUS=" .. tostring(RADIUS)})
 end
 
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
+  local realm_dir = runtime_dir .. "realm/"
+  local mapper_cc = root_dir .. "stencil_mapper.cc"
+  if os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "libstencil_mapper.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
+  end
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = "-O2 -Wall -Werror"
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 " -I " .. realm_dir .. " " .. mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir,
+                                                   "-I", mapper_dir, "-I", legion_dir,
+                                                   "-I", realm_dir})
+end
+
 local min = regentlib.fmin
 local max = regentlib.fmax
 
@@ -436,4 +472,4 @@ task main()
     check(private[i], interior[i], tsteps, init)
   end
 end
-regentlib.start(main)
+regentlib.start(main, cmapper.register_mappers)
