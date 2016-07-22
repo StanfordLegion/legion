@@ -1693,8 +1693,8 @@ local function get_quote_contents(cx, expr)
     return terralib.newlist({
       ast.specialized.stat.Expr {
         expr = value.expr,
-        annotations = node.annotations,
-        span = node.span,
+        annotations = value.annotations,
+        span = value.span,
       },
     })
   elseif value:is(ast.specialized.top.QuoteStat) then
