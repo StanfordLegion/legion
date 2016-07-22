@@ -221,9 +221,9 @@ bool StencilMapper::map_must_epoch(const std::vector<Task*> &tasks,
 
     Memory regmem;
     if (c.t2->regions[c.idx2].flags & NO_ACCESS_FLAG)
-      regmem = proc_sysmems[c.t1->target_proc]; // proc_regmems[c.t1->target_proc];
+      regmem = proc_regmems[c.t1->target_proc]; // proc_sysmems[c.t1->target_proc];
     else if (c.t1->regions[c.idx1].flags & NO_ACCESS_FLAG)
-      regmem = proc_sysmems[c.t2->target_proc]; // proc_regmems[c.t2->target_proc];
+      regmem = proc_regmems[c.t2->target_proc]; // proc_sysmems[c.t2->target_proc];
     else
       assert(0);
     c.t1->regions[c.idx1].target_ranking.clear();
