@@ -16,6 +16,8 @@
 
 import "regent"
 
+local common = require("stencil_common")
+
 local DTYPE = double
 local RADIUS = 2
 local USE_FOREIGN = true
@@ -446,10 +448,11 @@ where reads(private.{input, output}) do
 end
 
 task main()
-  var nbloated = int2d { 12, 12 } -- Grid size along each dimension, including border.
-  var nt = int2d { 4, 4 } -- Number of tiles to make in each dimension.
-  var tsteps : int64 = 10
-  var init : int64 = 1000
+  var conf = common.read_config()
+
+  var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
+  var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
+  var init : int64 = conf.init
 
   var radius : int64 = RADIUS
   var n = nbloated - { 2*radius, 2*radius } -- Grid size, minus the border.
@@ -483,16 +486,20 @@ task main()
   fill(ym.{input, output}, init)
   fill(yp.{input, output}, init)
 
+  var tsteps : int64 = conf.tsteps
+  var tprune : int64 = conf.tprune
+  regentlib.assert(tsteps > 2*tprune, "too few time steps")
+
   __demand(__spmd)
   do
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do
-        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == 0)
+        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
       end
       -- __demand(__parallel)
       for i = 0, nt2 do
-        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - 1)
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
       end
     end
 
