@@ -14723,16 +14723,26 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
-      AutoLock n_lock(node_lock);
-      if (!destroyed)
+      bool release_tree_instances = false;
       {
-        destroyed = true;
-        if (!creation_set.empty())
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
         {
-          DestructionFunctor functor(handle, context->runtime);
-          creation_set.map(functor);
+          destroyed = true;
+          // If we are the top of the region tree, tell the
+          // memories that they can remove any pinned references
+          // for any instances in this region tree
+          if (parent == NULL)
+            release_tree_instances = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
         }
       }
+      if (release_tree_instances)
+        context->runtime->release_tree_instances(handle.get_tree_id());
     }
 
     //--------------------------------------------------------------------------
