@@ -4494,7 +4494,7 @@ namespace Legion {
         size_t max_message_size, bool profile)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        observed_recent(false), profile_messages(profile)
+        observed_recent(true), profile_messages(profile)
     //--------------------------------------------------------------------------
     //
     {
@@ -4553,6 +4553,10 @@ namespace Legion {
                                 bool flush, Runtime *runtime, Processor target)
     //--------------------------------------------------------------------------
     {
+      // Any message that is not a shutdown message needs to be recorded
+      if (!observed_recent && (k != SEND_SHUTDOWN_NOTIFICATION) && 
+          (k != SEND_SHUTDOWN_RESPONSE))
+        observed_recent = true;
       // First check to see if the message fits in the current buffer    
       // including the overhead for the message: kind and size
       size_t buffer_size = rez.get_used_bytes();
