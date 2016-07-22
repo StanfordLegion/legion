@@ -2801,6 +2801,9 @@ namespace Legion {
     void MemoryManager::release_tree_instances(RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
+      // If we're not the owner, then there is nothing to do
+      if (!is_owner)
+        return;
       // Take the manager lock and see if there are any managers
       // we can release now
       std::map<PhysicalManager*,bool> to_release;
