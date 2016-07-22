@@ -3500,6 +3500,7 @@ class LogicalState(object):
 class Restriction(object):
     __slots__ = ['node', 'field', 'inst', 'acquires']
     def __init__(self, node, field, inst):
+        assert not inst.is_virtual()
         self.node = node
         self.field = field 
         self.inst = inst
@@ -3655,23 +3656,23 @@ class Acquisition(object):
         return False
 
     def add_restrict(self, node, field, inst):
-      if self.node.tree_id <> node.tree_id:
-          return False
-      if field is not self.field:
-          return False
-      if not self.node.dominates(node):
-          if self.node.intersects(node):
-              print "ERROR: Illegal partial restriction"
-              if self.node.state.assert_on_fail:
-                  assert False
-          return False
-      if self.restrictions:
-          for restrict in self.restrictions:
-              if restrict.add_restrict(node, field, inst):
-                  return True
-      else:
-          self.restrictions = list()
-      self.restrictions.append(Restriction(node, field, inst))
+        if self.node.tree_id <> node.tree_id:
+            return False
+        if field is not self.field:
+            return False
+        if not self.node.dominates(node):
+            if self.node.intersects(node):
+                print "ERROR: Illegal partial restriction"
+                if self.node.state.assert_on_fail:
+                    assert False
+            return False
+        if self.restrictions:
+            for restrict in self.restrictions:
+                if restrict.add_restrict(node, field, inst):
+                    return True
+        else:
+            self.restrictions = list()
+        self.restrictions.append(Restriction(node, field, inst))
 
     def remove_restrict(self, node, field):
         if self.node.tree_id <> node.tree_id:
@@ -5802,6 +5803,7 @@ class Task(object):
                     for field in req.fields:
                         assert field.fid in mapping 
                         inst = mapping[field.fid]
+                        # If they virtual mapped then there is no way
                         self.restrictions.append(
                             Restriction(req.logical_node, field, inst))
         # Iterate over all the operations in order and
@@ -5889,6 +5891,7 @@ class Task(object):
         for field in req.fields:
             assert field.fid in self.mapping
             inst = self.mapping[field.fid]
+            assert not inst.is_virtual()
             if not self.restrictions:
                 # Try to add it to any existing trees
                 success = False
