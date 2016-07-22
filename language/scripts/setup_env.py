@@ -88,7 +88,7 @@ if __name__ == '__main__':
     if 'LG_RT_DIR' in os.environ:
         raise Exception('Please unset LG_RT_DIR in your environment')
 
-    root_dir = os.path.dirname(os.path.realpath(__file__))
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
     thread_count = multiprocessing.cpu_count()
