@@ -2823,6 +2823,10 @@ namespace Legion {
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           to_release[it->first] = 
             (it->second.min_priority == GC_NEVER_PRIORITY);
+#ifdef DEBUG_LEGION
+          if (it->second.min_priority == GC_NEVER_PRIORITY)
+            assert(it->second.current_state == VALID_STATE);
+#endif
           it->second.mapper_priorities.clear();
           it->second.min_priority = GC_MAX_PRIORITY;
         }
@@ -2854,7 +2858,7 @@ namespace Legion {
         bool remove_never_gc_ref = false;
         std::pair<MapperID,Processor> key(mapper_id,processor);
         // Check to see if this is or is going to be a max priority instance
-        if (priority == NEVER_GC_REF)
+        if (priority == GC_NEVER_PRIORITY)
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
@@ -2876,7 +2880,7 @@ namespace Legion {
             current_instances.find(manager);
           if (finder != current_instances.end())
           {
-            if (finder->second.min_priority == NEVER_GC_REF)
+            if (finder->second.min_priority == GC_NEVER_PRIORITY)
             {
               finder->second.mapper_priorities.erase(key);
               if (finder->second.mapper_priorities.empty())
@@ -3099,7 +3103,7 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
-                bool min_priority = (priority == NEVER_GC_REF);
+                bool min_priority = (priority == GC_NEVER_PRIORITY);
                 rez.serialize<bool>(min_priority);
                 if (min_priority)
                 {
@@ -3148,7 +3152,7 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
-                bool min_priority = (priority == NEVER_GC_REF);
+                bool min_priority = (priority == GC_NEVER_PRIORITY);
                 rez.serialize<bool>(min_priority);
                 if (min_priority)
                 {
@@ -3204,7 +3208,7 @@ namespace Legion {
                 rez.serialize<bool>(created);
                 if (created)
                 {
-                  bool min_priority = (priority == NEVER_GC_REF);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -3263,7 +3267,7 @@ namespace Legion {
                 rez.serialize<bool>(created);
                 if (created)
                 {
-                  bool min_priority = (priority == NEVER_GC_REF);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -3424,11 +3428,11 @@ namespace Legion {
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == NEVER_GC_REF)
+            if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate_valid = true;
             else
-              info.min_priority = NEVER_GC_REF;
-            info.mapper_priorities[key] = NEVER_GC_REF;
+              info.min_priority = GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
         }
         if (remove_duplicate_valid && 
@@ -3460,11 +3464,11 @@ namespace Legion {
           if (min_priority)
           {
             InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == NEVER_GC_REF)
+            if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate_valid = true;
             else
-              info.min_priority = NEVER_GC_REF;
-            info.mapper_priorities[key] = NEVER_GC_REF;
+              info.min_priority = GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
         }
         if (remove_duplicate_valid && 
@@ -4182,9 +4186,6 @@ namespace Legion {
       // Since we're going to put this in the table add a reference
       if (is_owner)
         manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      // If we have a GC_NEVER_PRIORITY then we have to add the valid reference
-      if (priority == GC_NEVER_PRIORITY)
-        manager->add_base_valid_ref(NEVER_GC_REF);
       std::deque<PhysicalManager*> candidates;
       {
         AutoLock m_lock(manager_lock);
@@ -4261,6 +4262,9 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       } 
+      // If we have a GC_NEVER_PRIORITY then we have to add the valid reference
+      if (priority == GC_NEVER_PRIORITY)
+        manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
 
@@ -4361,7 +4365,7 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == NEVER_GC_REF)
+      if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
@@ -4404,7 +4408,7 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == NEVER_GC_REF)
+      if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
     }
 
