@@ -142,44 +142,71 @@ terra clamp(val : int64, lo : int64, hi : int64)
   return min(max(val, lo), hi)
 end
 
-task make_ghost_x_partition(points : region(ispace(int2d), point),
-                            tiles : ispace(int1d),
-                            n : int2d, nt : int2d, radius : int64, dir : int64)
-  var coloring = c.legion_domain_point_coloring_create()
-  for ix = 0, nt.x do
-    for iy = 0, nt.y do
-      var i = int1d(iy*nt.x + ix)
 
-      var lo = int2d { x = clamp((ix+dir)*radius, 0, nt.x*radius), y = iy*n.y/nt.y }
-      var hi = int2d { x = clamp((ix+1+dir)*radius - 1, -1, nt.x*radius - 1), y = (iy+1)*n.y/nt.y - 1 }
-      var rect = to_rect(lo, hi)
-      c.legion_domain_point_coloring_color_domain(
-        coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+function make_ghost_x_partition(is_complete)
+  local task ghost_x_partition(points : region(ispace(int2d), point),
+                               tiles : ispace(int1d),
+                               n : int2d, nt : int2d, radius : int64,
+                               dir : int64)
+    var coloring = c.legion_domain_point_coloring_create()
+    for ix = 0, nt.x do
+      for iy = 0, nt.y do
+        var i = int1d(iy*nt.x + ix)
+
+        var lo = int2d { x = clamp((ix+dir)*radius, 0, nt.x*radius), y = iy*n.y/nt.y }
+        var hi = int2d { x = clamp((ix+1+dir)*radius - 1, -1, nt.x*radius - 1), y = (iy+1)*n.y/nt.y - 1 }
+        var rect = to_rect(lo, hi)
+        c.legion_domain_point_coloring_color_domain(
+          coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+      end
     end
+    var p = [(
+        function()
+          if is_complete then
+            return rexpr partition(disjoint, points, coloring, tiles) end
+          else
+            -- Hack: Since the compiler does not track completeness as
+            -- a static property, mark incomplete partitions as aliased.
+            return rexpr partition(aliased, points, coloring, tiles) end
+          end
+        end)()]
+    c.legion_domain_point_coloring_destroy(coloring)
+    return p
   end
-  var p = partition(disjoint, points, coloring, tiles)
-  c.legion_domain_point_coloring_destroy(coloring)
-  return p
+  return ghost_x_partition
 end
 
-task make_ghost_y_partition(points : region(ispace(int2d), point),
-                            tiles : ispace(int1d),
-                            n : int2d, nt : int2d, radius : int64, dir : int64)
-  var coloring = c.legion_domain_point_coloring_create()
-  for ix = 0, nt.x do
-    for iy = 0, nt.y do
-      var i = int1d(iy*nt.x + ix)
+function make_ghost_y_partition(is_complete)
+  local task ghost_y_partition(points : region(ispace(int2d), point),
+                               tiles : ispace(int1d),
+                               n : int2d, nt : int2d, radius : int64,
+                               dir : int64)
+    var coloring = c.legion_domain_point_coloring_create()
+    for ix = 0, nt.x do
+      for iy = 0, nt.y do
+        var i = int1d(iy*nt.x + ix)
 
-      var lo = int2d { x = ix*n.x/nt.x, y = clamp((iy+dir)*radius, 0, nt.y*radius) }
-      var hi = int2d { x = (ix+1)*n.x/nt.x - 1, y = clamp((iy+1+dir)*radius - 1, -1, nt.y*radius - 1) }
-      var rect = to_rect(lo, hi)
-      c.legion_domain_point_coloring_color_domain(
-        coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+        var lo = int2d { x = ix*n.x/nt.x, y = clamp((iy+dir)*radius, 0, nt.y*radius) }
+        var hi = int2d { x = (ix+1)*n.x/nt.x - 1, y = clamp((iy+1+dir)*radius - 1, -1, nt.y*radius - 1) }
+        var rect = to_rect(lo, hi)
+        c.legion_domain_point_coloring_color_domain(
+          coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+      end
     end
+    var p = [(
+        function()
+          if is_complete then
+            return rexpr partition(disjoint, points, coloring, tiles) end
+          else
+            -- Hack: Since the compiler does not track completeness as
+            -- a static property, mark incomplete partitions as aliased.
+            return rexpr partition(aliased, points, coloring, tiles) end
+          end
+        end)()]
+    c.legion_domain_point_coloring_destroy(coloring)
+    return p
   end
-  var p = partition(disjoint, points, coloring, tiles)
-  c.legion_domain_point_coloring_destroy(coloring)
-  return p
+  return ghost_y_partition
 end
 
 local function off(i, x, y)
@@ -405,14 +432,14 @@ task main()
   var xp = region(ispace(int2d, { x = nt.x*radius, y = n.y }), point)
   var ym = region(ispace(int2d, { x = n.x, y = nt.y*radius }), point)
   var yp = region(ispace(int2d, { x = n.x, y = nt.y*radius }), point)
-  var pxm_in = make_ghost_x_partition(xm, tiles, n, nt, radius, -1)
-  var pxp_in = make_ghost_x_partition(xp, tiles, n, nt, radius,  1)
-  var pym_in = make_ghost_y_partition(ym, tiles, n, nt, radius, -1)
-  var pyp_in = make_ghost_y_partition(yp, tiles, n, nt, radius,  1)
-  var pxm_out = make_ghost_x_partition(xm, tiles, n, nt, radius, 0)
-  var pxp_out = make_ghost_x_partition(xp, tiles, n, nt, radius, 0)
-  var pym_out = make_ghost_y_partition(ym, tiles, n, nt, radius, 0)
-  var pyp_out = make_ghost_y_partition(yp, tiles, n, nt, radius, 0)
+  var pxm_in = [make_ghost_x_partition(false)](xm, tiles, n, nt, radius, -1)
+  var pxp_in = [make_ghost_x_partition(false)](xp, tiles, n, nt, radius,  1)
+  var pym_in = [make_ghost_y_partition(false)](ym, tiles, n, nt, radius, -1)
+  var pyp_in = [make_ghost_y_partition(false)](yp, tiles, n, nt, radius,  1)
+  var pxm_out = [make_ghost_x_partition(true)](xm, tiles, n, nt, radius, 0)
+  var pxp_out = [make_ghost_x_partition(true)](xp, tiles, n, nt, radius, 0)
+  var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
+  var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
