@@ -1727,6 +1727,23 @@ function codegen.expr_field_access(cx, node)
         bounds,
         expr_type),
       expr_type)
+  elseif std.is_ispace(value_type) and field_name == "volume" then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local expr_type = std.as_read(node.expr_type)
+
+    local volume = terralib.newsymbol(expr_type, "volume")
+    local actions = quote
+      [value.actions]
+      [emit_debuginfo(node)]
+
+      -- TODO(zhangwen): multiple domains?
+      var [volume] = c.legion_domain_get_volume(
+        c.legion_index_space_get_domain([cx.runtime], [value.value].impl))
+    end
+    return values.value(
+      node,
+      expr.just(actions, volume),
+      expr_type)
   elseif std.is_partition(value_type) and field_name == "colors" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
