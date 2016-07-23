@@ -4528,16 +4528,21 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
-    def get_physical_reachable(self, reachable, forward):
+    def get_physical_reachable(self, reachable, forward, origin = None):
+        if self is origin:
+            return True
         if self in reachable:
-            return 
+            return False
         reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
-                op.get_physical_reachable(reachable, True)
+                if op.get_physical_reachable(reachable, True, origin):
+                    return True
         else:
             for op in self.physical_incoming:
-                op.get_physical_reachable(reachable, False)
+                if op.get_physical_reachable(reachable, False, origin):
+                    return True
+        return False
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -7669,16 +7674,22 @@ class RealmBase(object):
         traverser.visit_event(self.start_event)
         return traverser.cycle
 
-    def get_physical_reachable(self, reachable, forward):
+    def get_physical_reachable(self, reachable, forward, origin = None):
+        # Check for cycles
+        if self is origin:
+            return True
         if self in reachable:
-            return 
+            return False 
         reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
-                op.get_physical_reachable(reachable, True)
+                if op.get_physical_reachable(reachable, True):
+                    return True
         else:
             for op in self.physical_incoming:
-                op.get_physical_reachable(reachable, False)
+                if op.get_physical_reachable(reachable, False):
+                    return True
+        return False
 
     def get_event_context(self):
         if self.event_context is not None:
@@ -9196,11 +9207,16 @@ class State(object):
         print "Simplifying event graph..."
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        if need_cycle_check and self.perform_cycle_checks(print_result=False):
-            print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
-            print "  This usually indicates a runtime bug and should be reported."
-            print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
-            return
+        #
+        # This cycle check is slow so we're doing an improvised version that
+        # below that checks for cycles on individual operations instead
+        # of the full event graph
+        #
+        #if need_cycle_check and self.perform_cycle_checks(print_result=False):
+        #    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
+        #    print "  This usually indicates a runtime bug and should be reported."
+        #    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+        #    return
         def traverse_node(node, traverser):
             if node not in traverser.order:
                 traverser.order.append(node)
@@ -9234,7 +9250,11 @@ class State(object):
                 if not next_vert in actual_out:
                     continue
                 reachable = set()
-                next_vert.get_physical_reachable(reachable, True)
+                if next_vert.get_physical_reachable(reachable, True, next_vert):
+                    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
+                    print "  This usually indicates a runtime bug and should be reported."
+                    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+                    return       
                 # See which edges we can remove
                 to_remove = list()
                 for other in actual_out:
