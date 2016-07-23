@@ -508,4 +508,10 @@ task main()
     end
   end
 end
-regentlib.start(main, cmapper.register_mappers)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+else
+  regentlib.start(main, cmapper.register_mappers)
+end
