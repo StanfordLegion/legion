@@ -4724,7 +4724,6 @@ namespace Legion {
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
                                    root, composite_info, 
-                                   RtUserEvent::NO_RT_USER_EVENT, 
                                    true/*register now*/);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
@@ -5802,8 +5801,8 @@ namespace Legion {
     VersionNumber::VersionNumber(VersionID vid, Runtime *rt, DistributedID id,
                                  AddressSpace own_sp, AddressSpaceID local_sp,
                                  bool register_now)
-      : DistributedCollectable(rt, id, own_sp, local_sp, 
-          RtUserEvent::NO_RT_USER_EVENT, register_now), version_number(vid)
+      : DistributedCollectable(rt, id, own_sp, local_sp, register_now), 
+        version_number(vid)
     //--------------------------------------------------------------------------
     {
     }
@@ -5854,12 +5853,9 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      // If we are not the owner, add a valid and resource reference
+      // If we are not the owner, add a valid reference
       if (!is_owner())
-      {
         add_base_valid_ref(REMOTE_DID_REF);
-        add_base_resource_ref(REMOTE_DID_REF);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5880,21 +5876,14 @@ namespace Legion {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(!currently_valid);
 #endif 
-      // If we are the owner, then remote resource 
-      // references on our remote instances 
-      if (is_owner())
-      {
-        // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL); 
-        map_over_remote_instances(functor);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);

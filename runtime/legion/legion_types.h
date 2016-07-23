@@ -283,10 +283,8 @@ namespace Legion {
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
       HLR_REMOTE_VIEW_CREATION_TASK_ID,
-      HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
-      HLR_SHUTDOWN_ATTEMPT_TASK_ID,
-      HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
-      HLR_SHUTDOWN_RESPONSE_TASK_ID,
+      HLR_MESSAGE_ID, // These two must be the last two
+      HLR_RETRY_SHUTDOWN_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -355,9 +353,7 @@ namespace Legion {
         "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
         "Remote Message",                                         \
-        "Shutdown Attempt",                                       \
-        "Shutdown Notification",                                  \
-        "Shutdown Response",                                      \
+        "Retry Shutdown",                                         \
       };
 
     enum MappingCallKind {
@@ -518,6 +514,7 @@ namespace Legion {
       DISTRIBUTED_RESOURCE_UPDATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
+      DISTRIBUTED_UNREGISTER,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_MATERIALIZED_VIEW,
@@ -627,6 +624,7 @@ namespace Legion {
         "Distributed Resource Update",                                \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
+        "Distributed Unregister",                                     \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Materialized View",                                     \
@@ -1073,7 +1071,9 @@ namespace Legion {
     class MPILegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
+    class VirtualChannel;
     class MessageManager;
+    class ShutdownManager;
     class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;

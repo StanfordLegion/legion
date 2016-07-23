@@ -6960,7 +6960,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), runtime->address_space,
-            runtime->address_space, RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, this));
       collective = dc;
       return future;
     }
@@ -7933,6 +7933,7 @@ namespace Legion {
       }
       dependences.clear();
       single_task_map.clear();
+      mapping_dependences.clear();
       input.tasks.clear();
       input.constraints.clear();
       output.task_processors.clear();
@@ -8040,6 +8041,7 @@ namespace Legion {
         // Iterate over all the recorded dependences
         std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
         constraints.resize(dependences.size());
+        mapping_dependences.resize(single_tasks.size());
         // Clear the dependence map now, we'll fill it in again
         // with a different set of points
         dependence_map.clear();
@@ -8053,6 +8055,7 @@ namespace Legion {
           assert((*it)->op_indexes.size() == (*it)->req_indexes.size());
 #endif
           // Add constraints for all the different elements
+          std::set<unsigned> single_indexes;
           for (unsigned idx = 0; idx < (*it)->op_indexes.size(); idx++)
           {
             unsigned req_index = (*it)->req_indexes[idx];
@@ -8069,6 +8072,17 @@ namespace Legion {
               // Update the dependence map
               std::pair<unsigned,unsigned> key(single_task_map[*sit],req_index);
               dependence_map[key] = constraint_idx;
+              single_indexes.insert(key.first);
+            }
+          }
+          // Record the mapping dependences
+          for (std::set<unsigned>::const_iterator it1 = 
+                single_indexes.begin(); it1 != single_indexes.end(); it1++)
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  single_indexes.begin(); it2 != it1; it2++)
+            {
+              mapping_dependences[*it1].insert(*it2);
             }
           }
         }
@@ -8139,10 +8153,10 @@ namespace Legion {
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
-        if (!mapper.map_tasks(single_tasks))
+        if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
+        mapping_dependences.clear();
       }
-
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       std::set<RtEvent> tasks_all_mapped;
@@ -8681,25 +8695,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks)
+    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
+                            const std::vector<std::set<unsigned> > &dependences)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> wait_events;   
+#ifdef DEBUG_LEGION
+      assert(single_tasks.size() == dependences.size());
+#endif
       MustEpochMapArgs args;
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
-      for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
-            it != single_tasks.end(); it++)
+      // For correctness we still have to abide by the mapping dependences
+      // computed on the individual tasks while we are mapping them
+      std::vector<RtEvent> mapped_events(single_tasks.size());
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
-        args.task = *it;
-        RtEvent wait = 
-          owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                                  HLR_MUST_MAP_ID, 
-                                                  HLR_THROUGHPUT_PRIORITY,
-                                                  owner);
-        if (wait.exists())
-          wait_events.insert(wait);
+        // Figure out our preconditions
+        std::set<RtEvent> preconditions;
+        for (std::set<unsigned>::const_iterator it = 
+              dependences[idx].begin(); it != dependences[idx].end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it) < idx);
+#endif
+          preconditions.insert(mapped_events[*it]);          
+        }
+        args.task = single_tasks[idx];
+        if (!preconditions.empty())
+        {
+          RtEvent precondition = Runtime::merge_events(preconditions);
+          mapped_events[idx] = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                    HLR_MUST_MAP_ID,
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner, precondition); 
+        }
+        else
+          mapped_events[idx] = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                    HLR_MUST_MAP_ID,
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner);
       }
+      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
@@ -10951,8 +10989,7 @@ namespace Legion {
       precondition = pre; 
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 
@@ -10964,8 +11001,7 @@ namespace Legion {
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 
@@ -10977,8 +11013,7 @@ namespace Legion {
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 

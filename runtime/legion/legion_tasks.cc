@@ -2076,7 +2076,7 @@ namespace Legion {
         if (bad_tree > 0)
         {
           log_run.error("Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper provided an instanced from "
+                        "on mapper %s. Mapper provided an instance from "
                         "region tree %d for use in satisfying region "
                         "requirement %d of task %s (ID %lld) whose region "
                         "is from region tree %d.", mapper->get_mapper_name(),
@@ -5693,6 +5693,20 @@ namespace Legion {
 #endif
             exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
           }
+          if (!IS_EXCLUSIVE(regions[idx]))
+          {
+            log_run.error("Invalid mapper output from invocation of '%s' on "
+                          "mapper %s. Illegal composite instance requested "
+                          "on region requirement %d of task %s (ID %lld) "
+                          "which has a relaxed coherence mode. Virtual "
+                          "mappings are only permitted for exclusive "
+                          "coherence.", "map_task", mapper->get_mapper_name(),
+                          idx, get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
           virtual_mapped[idx] = true;
         } 
         if (Runtime::legion_spy_enabled)
@@ -6834,7 +6848,8 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       // Get the event to wait on unless we are 
       // doing the inner task optimization
-      if (!variant->is_inner())
+      const bool do_inner_task_optimization = variant->is_inner();
+      if (!do_inner_task_optimization)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
@@ -6889,7 +6904,7 @@ namespace Legion {
             // mapped it which means we will map in the parent's
             // context
           }
-          else if (variant->is_inner())
+          else if (do_inner_task_optimization)
           {
             // If this is an inner task then we don't map
             // the region with a physical region, but instead
@@ -6987,7 +7002,7 @@ namespace Legion {
           // all sub-users should be chained.
           initialize_region_tree_contexts(clone_requirements,
                                           unmap_events, wait_on_events);
-          if (!variant->is_inner())
+          if (!do_inner_task_optimization)
           {
             for (unsigned idx = 0; idx < physical_regions.size(); idx++)
             {
@@ -8060,8 +8075,7 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       update_no_access_regions();
       if (Runtime::legion_spy_enabled)
@@ -8113,8 +8127,7 @@ namespace Legion {
       initialize_paths();
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       update_no_access_regions();
       if (Runtime::legion_spy_enabled)
@@ -10576,8 +10589,7 @@ namespace Legion {
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime,
             true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
@@ -10707,8 +10719,7 @@ namespace Legion {
       annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime, 
             true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, 
-            RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {

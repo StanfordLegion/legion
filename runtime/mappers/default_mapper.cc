@@ -175,7 +175,7 @@ namespace Legion {
           assert(false);
         }
       }
-      total_nodes = remote_cpus.size() + 1;
+      total_nodes = remote_cpus.size();
       if (!local_gpus.empty()) {
         for (unsigned idx = 0; idx < remote_gpus.size(); idx++) {
 	  if (idx == node_id) continue;  // ignore our own node
@@ -1129,41 +1129,56 @@ namespace Legion {
       // We don't even both caching these since they are so simple
       if (chosen.is_inner)
       {
-        std::vector<unsigned> reduction_indexes;
+        // Check to see if we have any relaxed coherence modes in which
+        // case we can no longer do virtual mappings so we'll fall through
+        bool has_relaxed_coherence = false;
         for (unsigned idx = 0; idx < task.regions.size(); idx++)
         {
-          // As long as this isn't a reduction-only region requirement
-          // we will do a virtual mapping, for reduction-only instances
-          // we will actually make a physical instance because the runtime
-          // doesn't allow virtual mappings for reduction-only privileges
-          if (task.regions[idx].privilege == REDUCE)
-            reduction_indexes.push_back(idx);
-          else
-            output.chosen_instances[idx].push_back(
-                PhysicalInstance::get_virtual_instance());
-        }
-        if (!reduction_indexes.empty())
-        {
-          const TaskLayoutConstraintSet &layout_constraints =
-              runtime->find_task_layout_constraints(ctx,
-                                    task.task_id, output.chosen_variant);
-          Memory target_memory = default_policy_select_target_memory(ctx, 
-                                                       task.target_proc);
-          for (std::vector<unsigned>::const_iterator it = 
-                reduction_indexes.begin(); it != reduction_indexes.end(); it++)
+          if (task.regions[idx].prop != EXCLUSIVE)
           {
-            std::set<FieldID> copy = task.regions[*it].privilege_fields;
-            if (!default_create_custom_instances(ctx, task.target_proc,
-                target_memory, task.regions[*it], *it, copy, 
-                layout_constraints, false/*needs constraint check*/, 
-                output.chosen_instances[*it]))
-            {
-              default_report_failed_instance_creation(task, *it, 
-                                          task.target_proc, target_memory);
-            }
+            has_relaxed_coherence = true;
+            break;
           }
         }
-        return;
+        if (!has_relaxed_coherence)
+        {
+          std::vector<unsigned> reduction_indexes;
+          for (unsigned idx = 0; idx < task.regions.size(); idx++)
+          {
+            // As long as this isn't a reduction-only region requirement
+            // we will do a virtual mapping, for reduction-only instances
+            // we will actually make a physical instance because the runtime
+            // doesn't allow virtual mappings for reduction-only privileges
+            if (task.regions[idx].privilege == REDUCE)
+              reduction_indexes.push_back(idx);
+            else
+              output.chosen_instances[idx].push_back(
+                  PhysicalInstance::get_virtual_instance());
+          }
+          if (!reduction_indexes.empty())
+          {
+            const TaskLayoutConstraintSet &layout_constraints =
+                runtime->find_task_layout_constraints(ctx,
+                                      task.task_id, output.chosen_variant);
+            Memory target_memory = default_policy_select_target_memory(ctx, 
+                                                         task.target_proc);
+            for (std::vector<unsigned>::const_iterator it = 
+                  reduction_indexes.begin(); it != 
+                  reduction_indexes.end(); it++)
+            {
+              std::set<FieldID> copy = task.regions[*it].privilege_fields;
+              if (!default_create_custom_instances(ctx, task.target_proc,
+                  target_memory, task.regions[*it], *it, copy, 
+                  layout_constraints, false/*needs constraint check*/, 
+                  output.chosen_instances[*it]))
+              {
+                default_report_failed_instance_creation(task, *it, 
+                                            task.target_proc, target_memory);
+              }
+            }
+          }
+          return;
+        }
       }
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);

@@ -255,7 +255,6 @@ typedef long long int coord_t;
   typedef struct legion_phase_barrier_t {
     // From Realm::Event
     legion_lowlevel_id_t id;
-    legion_lowlevel_event_gen_t gen;
     // From Realm::Barrier
     legion_lowlevel_barrier_timestamp_t timestamp;
   } legion_phase_barrier_t;
@@ -267,7 +266,6 @@ typedef long long int coord_t;
     // From Legion::PhaseBarrier
     //   From Realm::Event
     legion_lowlevel_id_t id;
-    legion_lowlevel_event_gen_t gen;
     //   From Realm::Barrier
     legion_lowlevel_barrier_timestamp_t timestamp;
     // From Legion::DynamicCollective

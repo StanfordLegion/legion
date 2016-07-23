@@ -13,12 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_parallel.rg:23: option __demand(__parallel) is not permitted
--- task f() end
+-- invalid_bounds3.rg:28: type mismatch: write expected an lvalue but got rect1d
+--   r.bounds = new_bounds
 --    ^
 
 import "regent"
 
-__demand(__parallel)
-task f() end
-f:compile()
+local c = regentlib.c
+
+task main()
+  var is = ispace(int1d, 10)
+  var r = region(is, int)
+  var new_bounds = rect1d { lo = 0, hi = 10 }
+  r.bounds = new_bounds
+end

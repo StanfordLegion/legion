@@ -1658,7 +1658,7 @@ end
 -- ## Types
 -- #################
 
-local metamethod_combinators = {
+local arithmetic_combinators = {
   ["__add"] = function(a, b) return `([a] + [b]) end,
   ["__sub"] = function(a, b) return `([a] - [b]) end,
   ["__mul"] = function(a, b) return `([a] * [b]) end,
@@ -1667,7 +1667,7 @@ local metamethod_combinators = {
 }
 
 local function generate_arithmetic_metamethod_body(ty, method, e1, e2)
-  local combinator = metamethod_combinators[method]
+  local combinator = arithmetic_combinators[method]
   if ty:isprimitive() then
     return combinator(e1, e2)
   elseif ty:isstruct() then
@@ -1702,8 +1702,77 @@ end
 
 function std.generate_arithmetic_metamethods(ty)
   local methods = {}
-  for method, _ in pairs(metamethod_combinators) do
+  for method, _ in pairs(arithmetic_combinators) do
     methods[method] = std.generate_arithmetic_metamethod(ty, method)
+  end
+  return methods
+end
+
+local and_combinator = function(a, b) return `(([a]) and ([b])) end
+local or_combinator = function(a, b) return `(([a]) and ([b])) end
+local conditional_combinators = {
+  ["__eq"] = { elem_comb = function(a, b) return `([a] == [b]) end,
+               res_comb = and_combinator, },
+  ["__ne"] = { elem_comb = function(a, b) return `([a] ~= [b]) end,
+               res_comb = or_combinator, },
+  ["__le"] = { elem_comb = function(a, b) return `([a] <= [b]) end,
+               res_comb = and_combinator, },
+  ["__lt"] = { elem_comb = function(a, b) return `([a] < [b]) end,
+               res_comb = and_combinator, },
+  ["__ge"] = { elem_comb = function(a, b) return `([a] >= [b]) end,
+               res_comb = and_combinator, },
+  ["__gt"] = { elem_comb = function(a, b) return `([a] > [b]) end,
+               res_comb = and_combinator, },
+}
+
+local function generate_conditional_metamethod_body(ty, method, e1, e2)
+  local combinators = conditional_combinators[method]
+  if ty:isprimitive() then
+    return combinators.elem_comb(e1, e2)
+  elseif ty:isstruct() then
+    local res
+    local entries = ty:getentries():map(function(entry)
+      local entry =
+        generate_conditional_metamethod_body(entry.type, method,
+                                            `(e1.[entry.field]),
+                                            `(e2.[entry.field]))
+      if not res then res = entry
+      else res = combinators.res_comb(res, entry) end
+    end)
+    return res
+  elseif ty:isarray() then
+    local entries = terralib.newlist()
+    local res
+    for idx = 0, ty.N - 1 do
+      local entry =
+        generate_conditional_metamethod_body(ty.type, method,
+                                            `(e1[ [idx] ]),
+                                            `(e2[ [idx] ]))
+      if not res then res = entry
+      else res = combinators.res_comb(res, entry) end
+    end
+    return res
+  end
+  assert(false)
+end
+
+function std.generate_conditional_metamethod(ty, method)
+  return macro(function(a, b)
+    if a:gettype() == b:gettype() then
+      return generate_conditional_metamethod_body(ty, method, a, b)
+    else
+      local combinators = conditional_combinators[method]
+      local lhs = generate_conditional_metamethod_body(ty, method, `([b].lo), a)
+      local rhs = generate_conditional_metamethod_body(ty, method, a, `([b].hi))
+      return combinators.res_comb(lhs, rhs)
+    end
+  end)
+end
+
+function std.generate_conditional_metamethods(ty)
+  local methods = {}
+  for method, _ in pairs(conditional_combinators) do
+    methods[method] = std.generate_conditional_metamethod(ty, method)
   end
   return methods
 end
@@ -1831,9 +1900,13 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  for method, _ in pairs(metamethod_combinators) do
+  for method, _ in pairs(arithmetic_combinators) do
     st.metamethods[method] =
       std.generate_arithmetic_metamethod(st.index_type, method)
+  end
+  for method, _ in pairs(conditional_combinators) do
+    st.metamethods[method] =
+      std.generate_conditional_metamethod(st.index_type, method)
   end
 
   terra st:to_point()
@@ -1919,9 +1992,8 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
-std.rect_type = terralib.memoize(function(index_type, displayname)
-  local st = terralib.types.newstruct(displayname or
-                                      "rect(" .. tostring(index_type) ..")")
+std.rect_type = terralib.memoize(function(index_type)
+  local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
   assert(not index_type:is_opaque())
   st.entries = terralib.newlist({
       { "lo", index_type },
@@ -2065,6 +2137,9 @@ function std.index_type(base_type, displayname)
   for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
     st.metamethods[method_name] = method
   end
+  for method_name, method in pairs(std.generate_conditional_metamethods(st)) do
+    st.metamethods[method_name] = method
+  end
   if not st:is_opaque() then
     st.metamethods.__mod = terralib.overloadedfunction(
       "__mod", {
@@ -2085,9 +2160,9 @@ std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
-std.rect1d = std.rect_type(std.int1d, "rect1d")
-std.rect2d = std.rect_type(std.int2d, "rect2d")
-std.rect3d = std.rect_type(std.int3d, "rect3d")
+std.rect1d = std.rect_type(std.int1d)
+std.rect2d = std.rect_type(std.int2d)
+std.rect3d = std.rect_type(std.int3d)
 
 local next_ispace_id = 1
 function std.ispace(index_type)

@@ -1541,6 +1541,7 @@ namespace Legion {
                unsigned/*dependence index*/> dependence_map;
       std::vector<DependenceRecord*> dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
+      std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     };
 
     /**
@@ -1602,7 +1603,8 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks);
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
+            const std::vector<std::set<unsigned> > &dependences);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);

@@ -28,20 +28,27 @@ task f(y : int)
     var y = 200
     regentlib.assert(y == 200, "test failed")
 
-    if true then
+    if y == 200 then
       var y = 2000
       regentlib.assert(y == 2000, "test failed")
+    else
+      regentlib.assert(false, "test failed")
     end
     regentlib.assert(y == 200, "test failed")
 
-    while true do
-      var y = 2000
-      regentlib.assert(y == 2000, "test failed")
-      break
+    do
+      var z = false
+      while y == 200 do
+        var y = 2000
+        regentlib.assert(y == 2000, "test failed")
+        z = true
+        break
+      end
+      regentlib.assert(z, "test failed")
     end
     regentlib.assert(y == 200, "test failed")
 
-    for y = 2000, 2001 do
+    for y = y*10, y*10 + 1 do
       regentlib.assert(y == 2000, "test failed")
       var y = 20000
       regentlib.assert(y == 20000, "test failed")
@@ -51,7 +58,7 @@ task f(y : int)
     repeat
       var y = 2000
       regentlib.assert(y == 2000, "test failed")
-    until true
+    until y == 2000
     regentlib.assert(y == 200, "test failed")
 
   end

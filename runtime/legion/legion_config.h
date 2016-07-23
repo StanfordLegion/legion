@@ -151,6 +151,12 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the broadcast tree
+// when attempting to shutdown the runtime
+#ifndef LEGION_SHUTDOWN_RADIX
+#define LEGION_SHUTDOWN_RADIX             8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -379,7 +385,7 @@ typedef enum legion_region_flags_t {
   NO_ACCESS_FLAG  = 0x00000002,
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
-} legion_region_flags_T;
+} legion_region_flags_t;
 
 typedef enum legion_index_space_kind_t {
   UNSTRUCTURED_KIND,

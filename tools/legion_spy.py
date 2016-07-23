@@ -3500,6 +3500,7 @@ class LogicalState(object):
 class Restriction(object):
     __slots__ = ['node', 'field', 'inst', 'acquires']
     def __init__(self, node, field, inst):
+        assert not inst.is_virtual()
         self.node = node
         self.field = field 
         self.inst = inst
@@ -3655,23 +3656,23 @@ class Acquisition(object):
         return False
 
     def add_restrict(self, node, field, inst):
-      if self.node.tree_id <> node.tree_id:
-          return False
-      if field is not self.field:
-          return False
-      if not self.node.dominates(node):
-          if self.node.intersects(node):
-              print "ERROR: Illegal partial restriction"
-              if self.node.state.assert_on_fail:
-                  assert False
-          return False
-      if self.restrictions:
-          for restrict in self.restrictions:
-              if restrict.add_restrict(node, field, inst):
-                  return True
-      else:
-          self.restrictions = list()
-      self.restrictions.append(Restriction(node, field, inst))
+        if self.node.tree_id <> node.tree_id:
+            return False
+        if field is not self.field:
+            return False
+        if not self.node.dominates(node):
+            if self.node.intersects(node):
+                print "ERROR: Illegal partial restriction"
+                if self.node.state.assert_on_fail:
+                    assert False
+            return False
+        if self.restrictions:
+            for restrict in self.restrictions:
+                if restrict.add_restrict(node, field, inst):
+                    return True
+        else:
+            self.restrictions = list()
+        self.restrictions.append(Restriction(node, field, inst))
 
     def remove_restrict(self, node, field):
         if self.node.tree_id <> node.tree_id:
@@ -4527,16 +4528,21 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
-    def get_physical_reachable(self, reachable, forward):
+    def get_physical_reachable(self, reachable, forward, origin = None):
+        if self is origin:
+            return True
         if self in reachable:
-            return 
+            return False
         reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
-                op.get_physical_reachable(reachable, True)
+                if op.get_physical_reachable(reachable, True, origin):
+                    return True
         else:
             for op in self.physical_incoming:
-                op.get_physical_reachable(reachable, False)
+                if op.get_physical_reachable(reachable, False, origin):
+                    return True
+        return False
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -5397,6 +5403,11 @@ class Operation(object):
                 prefix += '  '
             print prefix+'-------------------------------------------------'
             print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
+
+            if self.kind == SINGLE_TASK_KIND and self.task is not None:
+                self.task.print_task_mapping_decisions()
+                print prefix+'  Task Mapped to ' + str(self.task.processor)
+
             for index,mappings in self.mappings.iteritems():
                 assert index in self.reqs
                 req = self.reqs[index]
@@ -5797,6 +5808,7 @@ class Task(object):
                     for field in req.fields:
                         assert field.fid in mapping 
                         inst = mapping[field.fid]
+                        # If they virtual mapped then there is no way
                         self.restrictions.append(
                             Restriction(req.logical_node, field, inst))
         # Iterate over all the operations in order and
@@ -5884,6 +5896,7 @@ class Task(object):
         for field in req.fields:
             assert field.fid in self.mapping
             inst = self.mapping[field.fid]
+            assert not inst.is_virtual()
             if not self.restrictions:
                 # Try to add it to any existing trees
                 success = False
@@ -7661,16 +7674,22 @@ class RealmBase(object):
         traverser.visit_event(self.start_event)
         return traverser.cycle
 
-    def get_physical_reachable(self, reachable, forward):
+    def get_physical_reachable(self, reachable, forward, origin = None):
+        # Check for cycles
+        if self is origin:
+            return True
         if self in reachable:
-            return 
+            return False 
         reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
-                op.get_physical_reachable(reachable, True)
+                if op.get_physical_reachable(reachable, True):
+                    return True
         else:
             for op in self.physical_incoming:
-                op.get_physical_reachable(reachable, False)
+                if op.get_physical_reachable(reachable, False):
+                    return True
+        return False
 
     def get_event_context(self):
         if self.event_context is not None:
@@ -9188,11 +9207,16 @@ class State(object):
         print "Simplifying event graph..."
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        if need_cycle_check and self.perform_cycle_checks(print_result=False):
-            print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
-            print "  This usually indicates a runtime bug and should be reported."
-            print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
-            return
+        #
+        # This cycle check is slow so we're doing an improvised version that
+        # below that checks for cycles on individual operations instead
+        # of the full event graph
+        #
+        #if need_cycle_check and self.perform_cycle_checks(print_result=False):
+        #    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
+        #    print "  This usually indicates a runtime bug and should be reported."
+        #    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+        #    return
         def traverse_node(node, traverser):
             if node not in traverser.order:
                 traverser.order.append(node)
@@ -9226,7 +9250,11 @@ class State(object):
                 if not next_vert in actual_out:
                     continue
                 reachable = set()
-                next_vert.get_physical_reachable(reachable, True)
+                if next_vert.get_physical_reachable(reachable, True, next_vert):
+                    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
+                    print "  This usually indicates a runtime bug and should be reported."
+                    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+                    return       
                 # See which edges we can remove
                 to_remove = list()
                 for other in actual_out:
@@ -9253,6 +9281,7 @@ class State(object):
         # Now merge the tasks and delete the other task
         p1.merge(p2)
         del self.tasks[p2.op]
+        return p1
 
     def perform_logical_analysis(self, perform_checks, sanity_checks):
         # Run the full analysis first, this will confirm that

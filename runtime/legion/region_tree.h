@@ -703,7 +703,7 @@ namespace Legion {
     public:
       NodeSet creation_set;
       NodeSet child_creation;
-      NodeSet destruction_set;
+      bool destroyed;
     protected:
       Reservation node_lock;
     protected:
@@ -731,6 +731,16 @@ namespace Legion {
         IndexSpaceNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
+      };
+      class DestructionFunctor {
+      public:
+        DestructionFunctor(IndexSpace h, Runtime *rt)
+          : handle(h), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const IndexSpace handle;
+        Runtime *const runtime;
       };
     public:
       IndexSpaceNode(IndexSpace handle, const Domain &d, 
@@ -898,6 +908,16 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
+      class DestructionFunctor {
+      public:
+        DestructionFunctor(IndexPartition h, Runtime *rt)
+          : handle(h), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const IndexPartition handle;
+        Runtime *const runtime;
+      };
     public:
       IndexPartNode(IndexPartition p, IndexSpaceNode *par,
                     ColorPoint c, Domain color_space, 
@@ -1063,6 +1083,16 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
+      class DestructionFunctor {
+      public:
+        DestructionFunctor(FieldSpace h, Runtime *rt)
+          : handle(h), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const FieldSpace handle;
+        Runtime *const runtime;
+      };
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
@@ -1193,7 +1223,7 @@ namespace Legion {
       RegionTreeForest *const context;
     public:
       NodeSet creation_set;
-      NodeSet destruction_set;
+      bool destroyed;
     private:
       Reservation node_lock;
       // Top nodes in the trees for which this field space is used
@@ -1595,7 +1625,7 @@ namespace Legion {
       FieldSpaceNode *const column_source;
     public:
       NodeSet creation_set;
-      NodeSet destruction_set;
+      bool destroyed;
     protected:
       DynamicTable<CurrentStateAllocator> current_states;
     protected:
@@ -1624,6 +1654,16 @@ namespace Legion {
         RegionNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
+      };
+      class DestructionFunctor {
+      public:
+        DestructionFunctor(LogicalRegion h, Runtime *rt)
+          : handle(h), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const LogicalRegion handle;
+        Runtime *const runtime;
       };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
@@ -1805,6 +1845,16 @@ namespace Legion {
         PartitionNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
+      };
+      class DestructionFunctor {
+      public:
+        DestructionFunctor(LogicalPartition h, Runtime *rt)
+          : handle(h), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const LogicalPartition handle;
+        Runtime *const runtime;
       };
     public:
       PartitionNode(LogicalPartition p, RegionNode *par, 
