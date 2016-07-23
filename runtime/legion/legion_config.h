@@ -151,6 +151,12 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the broadcast tree
+// when attempting to shutdown the runtime
+#ifndef LEGION_SHUTDOWN_RADIX
+#define LEGION_SHUTDOWN_RADIX             8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number

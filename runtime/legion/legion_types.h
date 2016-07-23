@@ -278,10 +278,8 @@ namespace Legion {
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
       HLR_REMOTE_VIEW_CREATION_TASK_ID,
-      HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
-      HLR_SHUTDOWN_ATTEMPT_TASK_ID,
-      HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
-      HLR_SHUTDOWN_RESPONSE_TASK_ID,
+      HLR_MESSAGE_ID, // These two must be the last two
+      HLR_RETRY_SHUTDOWN_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
     };
 
@@ -349,9 +347,7 @@ namespace Legion {
         "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
         "Remote Message",                                         \
-        "Shutdown Attempt",                                       \
-        "Shutdown Notification",                                  \
-        "Shutdown Response",                                      \
+        "Retry Shutdown",                                         \
       };
 
     enum MappingCallKind {
@@ -1073,7 +1069,9 @@ namespace Legion {
     class MPILegionHandshakeImpl;
     class ProcessorManager;
     class MemoryManager;
+    class VirtualChannel;
     class MessageManager;
+    class ShutdownManager;
     class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;

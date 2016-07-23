@@ -782,6 +782,7 @@ namespace Legion {
                            Runtime *runtime, Processor target);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
+      void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
       void send_message(bool complete, Runtime *runtime, Processor target);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
@@ -789,10 +790,6 @@ namespace Legion {
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
                            const void *args, size_t arglen);
-    public:
-      RtEvent notify_pending_shutdown(void);
-      bool has_recent_messages(void) const;
-      void clear_recent_messages(void);
     private:
       Reservation send_lock;
       char *const sending_buffer;
@@ -842,14 +839,12 @@ namespace Legion {
     public:
       MessageManager& operator=(const MessageManager &rhs);
     public:
-      RtEvent notify_pending_shutdown(void);
-      bool has_recent_messages(void) const;
-      void clear_recent_messages(void);
-    public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush);
 
       void receive_message(const void *args, size_t arglen);
+      void confirm_shutdown(ShutdownManager *shutdown_manager,
+                            bool phase_one);
     public:
       const AddressSpaceID remote_address_space;
     private:
@@ -866,41 +861,36 @@ namespace Legion {
      */
     class ShutdownManager {
     public:
-      struct NotificationArgs {
-      public:
-        HLRTaskID hlr_id;
-        MessageManager *manager;
-      };
-      struct ResponseArgs {
-      public:
-        HLRTaskID hlr_id;
-        MessageManager *target;
-        bool result;
-      };
-    public:
-      ShutdownManager(Runtime *rt, AddressSpaceID source, MessageManager *man);
+      ShutdownManager(bool phase_one, Runtime *rt, AddressSpaceID source,
+                      unsigned radix, ShutdownManager *owner = NULL);
       ShutdownManager(const ShutdownManager &rhs);
       ~ShutdownManager(void);
     public:
       ShutdownManager& operator=(const ShutdownManager &rhs);
     public:
-      bool has_managers(void) const;
-      void add_manager(AddressSpaceID target, MessageManager *manager);
-    public:
-      void send_notifications(void);
-      void send_response(void);
-      bool handle_response(AddressSpaceID sender, bool result);
-      void record_outstanding_tasks(void);
-      void record_outstanding_profiling_requests(void);
+      bool attempt_shutdown(void);
+      bool handle_response(bool success, const std::set<RtEvent> &to_add);
+    protected:
       void finalize(void);
     public:
+      static void handle_shutdown_notification(Deserializer &derez, 
+                          Runtime *runtime, AddressSpaceID source);
+      static void handle_shutdown_response(Deserializer &derez);
+    public:
+      void record_outstanding_tasks(void);
+      void record_outstanding_profiling_requests(void);
+      void record_recent_message(void);
+      void record_pending_message(RtEvent pending_event);
+    public:
+      const bool phase_one;
       Runtime *const runtime;
       const AddressSpaceID source; 
-      MessageManager *const source_manager;
+      const unsigned radix;
+      ShutdownManager *const owner;
     protected:
       Reservation shutdown_lock;
-      std::map<AddressSpaceID,MessageManager*> managers;
-      unsigned observed_responses;
+      unsigned needed_responses;
+      std::set<RtEvent> wait_for;
       bool result;
     };
 
@@ -1982,6 +1972,8 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
+      void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
+      void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -2133,8 +2125,9 @@ namespace Legion {
       void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
-      void handle_shutdown_notification(AddressSpaceID source);
-      void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
+      void handle_shutdown_notification(Deserializer &derez, 
+                                        AddressSpaceID source);
+      void handle_shutdown_response(Deserializer &derez);
     public: // Calls to handle mapper requests
       bool create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
@@ -2235,7 +2228,10 @@ namespace Legion {
     public:
       void issue_runtime_shutdown_attempt(void);
       void attempt_runtime_shutdown(void);
-      void initiate_runtime_shutdown(AddressSpaceID source);
+      void initiate_runtime_shutdown(AddressSpaceID source,
+                                     bool phase_one);
+      void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
+                                    bool phase_one);
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
@@ -2429,6 +2425,7 @@ namespace Legion {
       // The machine object for this runtime
       const Machine machine;
       const AddressSpaceID address_space; 
+      const unsigned total_address_spaces;
       const unsigned runtime_stride; // stride for uniqueness
       LegionProfiler *profiler;
       RegionTreeForest *const forest;
@@ -2441,8 +2438,6 @@ namespace Legion {
 #endif
       unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
-      ShutdownManager *shutdown_manager;
-      Reservation shutdown_lock;
 #ifdef DEBUG_SHUTDOWN_HANG
     public:
       std::vector<int> outstanding_counts;
