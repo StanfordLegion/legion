@@ -175,7 +175,7 @@ namespace Legion {
           assert(false);
         }
       }
-      total_nodes = remote_cpus.size() + 1;
+      total_nodes = remote_cpus.size();
       if (!local_gpus.empty()) {
         for (unsigned idx = 0; idx < remote_gpus.size(); idx++) {
 	  if (idx == node_id) continue;  // ignore our own node
