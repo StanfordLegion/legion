@@ -2645,8 +2645,7 @@ typedef legion_lowlevel_coord_t coord_t;
    * @see Legion::Runtime::get_executing_processor()
    */
   legion_processor_t
-  legion_runtime_get_executing_processor(legion_runtime_t runtime,
-                                         legion_context_t ctx);
+  legion_runtime_get_executing_processor(void);
 
   // -----------------------------------------------------------------------
   // Physical Data Operations

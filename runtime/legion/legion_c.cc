@@ -3740,13 +3740,10 @@ legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
 // -----------------------------------------------------------------------
 
 legion_processor_t
-legion_runtime_get_executing_processor(legion_runtime_t runtime_,
-                                       legion_context_t ctx_)
+legion_runtime_get_executing_processor(void)
 {
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-
-  Processor proc = runtime->get_executing_processor(ctx);
+  Processor proc = Processor::get_executing_processor();
+  // runtime->get_executing_processor(ctx); // Prefer not to require a runtime/context
   return CObjectWrapper::wrap(proc);
 }
 
