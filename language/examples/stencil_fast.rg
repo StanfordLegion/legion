@@ -449,7 +449,9 @@ end
 
 task fill_(r : region(ispace(int2d), point), v : DTYPE)
 where reads writes(r.{input, output}) do
-  fill(r.{input, output}, v)
+  -- fill(r.{input, output}, v)
+  for x in r do x.input = v end
+  for x in r do x.output = v end
 end
 
 task main()
