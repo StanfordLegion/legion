@@ -85,11 +85,27 @@ local function get_ghost_rect_body(res, sz, r, s, f)
   end
 end
 
+local function bounds_checks(res, root, f)
+  local checks = quote end
+  if std.config["debug"] then
+    local function acc(expr) return expr end
+    if f then acc = function(expr) return `([expr].[f]) end end
+    checks = quote
+      std.assert(
+        [acc(`([root].lo.__ptr))] <= [acc(`([res].lo.__ptr))] and
+        [acc(`([root].hi.__ptr))] >= [acc(`([res].lo.__ptr))],
+        "invalid size for a ghost region. the serial code has an out-of-bounds access")
+    end
+  end
+  return checks
+end
+
 local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
     [get_ghost_rect_body(diff_rect, sz, r, s)]
+    [bounds_checks(diff_rect, root)]
     return diff_rect
   end,
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
@@ -97,6 +113,8 @@ local get_ghost_rect = {
     var diff_rect : std.rect2d
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    [bounds_checks(diff_rect, root, "x")]
+    [bounds_checks(diff_rect, root, "y")]
     return diff_rect
   end,
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
@@ -105,6 +123,9 @@ local get_ghost_rect = {
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    [bounds_checks(diff_rect, root, "x")]
+    [bounds_checks(diff_rect, root, "y")]
+    [bounds_checks(diff_rect, root, "z")]
     return diff_rect
   end
 }
