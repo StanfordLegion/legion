@@ -347,7 +347,7 @@ local function make_stencil(radius)
     reads writes(private.{input, output}),
     reads(xm.input, xp.input, ym.input, yp.input)
   do
-    if print_ts then c.printf("t: %llu %ld\n", c.legion_runtime_get_executing_processor().id, c.legion_get_current_time_in_micros()) end
+    if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
     var interior_rect = get_rect(interior.ispace)
     var interior_lo = int2d { x = interior_rect.lo.x[0], y = interior_rect.lo.x[1] }
@@ -419,7 +419,7 @@ where reads writes(private.input, xm.input, xp.input, ym.input, yp.input) do
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
-  if print_ts then c.printf("t: %llu %ld\n", c.legion_runtime_get_executing_processor().id, c.legion_get_current_time_in_micros()) end
+  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 end
 
 task check(private : region(ispace(int2d), point),
