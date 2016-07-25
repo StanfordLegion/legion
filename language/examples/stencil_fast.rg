@@ -447,6 +447,11 @@ where reads(private.{input, output}) do
   c.printf("check completed successfully\n")
 end
 
+task fill_(r : region(ispace(int2d), point), v : DTYPE)
+where reads writes(r.{input, output}) do
+  fill(r.{input, output}, v)
+end
+
 task main()
   var conf = common.read_config()
 
@@ -480,7 +485,7 @@ task main()
   var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
-  fill(points.{input, output}, init)
+  -- fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
   fill(xp.{input, output}, init)
   fill(ym.{input, output}, init)
@@ -492,6 +497,10 @@ task main()
 
   __demand(__spmd)
   do
+    for i = 0, nt2 do
+      fill_(private[i], init)
+    end
+
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do
