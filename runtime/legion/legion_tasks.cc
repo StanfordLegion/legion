@@ -8195,13 +8195,11 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     version_infos[idx],
                                                      restrict_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
@@ -8220,12 +8218,7 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               rerun.begin(); it != rerun.end(); it++)
         {
-          // Clear out the version infos so we get new data
-          VersionInfo &version_info = version_infos[*it];
-          version_info.release();
-          version_info.clear();
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
-                                                       version_info,
                                                        restrict_infos[*it],
                                                        projection_info,
                                                        privilege_paths[*it]);
@@ -10850,13 +10843,11 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         ProjectionInfo projection_info(runtime, regions[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     version_infos[idx],
                                                      restrict_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
@@ -10875,13 +10866,8 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               rerun.begin(); it != rerun.end(); it++)
         {
-          // Clear out the version infos so we get new data
-          VersionInfo &version_info = version_infos[*it];
-          version_info.release();
-          version_info.clear();
           ProjectionInfo projection_info(runtime, regions[*it], index_domain);
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
-                                                       version_info,
                                                        restrict_infos[*it],
                                                        projection_info,
                                                        privilege_paths[*it]);

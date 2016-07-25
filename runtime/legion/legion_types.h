@@ -279,7 +279,6 @@ namespace Legion {
       HLR_DEFER_COMPOSITE_NODE_TASK_ID,
       HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
       HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
-      HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID,
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
       HLR_REMOTE_VIEW_CREATION_TASK_ID,
@@ -348,7 +347,6 @@ namespace Legion {
         "Deferred Composite View Creation",                       \
         "Deferred Mapper Message",                                \
         "Update View References for Version State",               \
-        "Deferred Remove Version Number Valid Ref",               \
         "Deferred Remove Version State Valid Ref",                \
         "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
@@ -829,8 +827,6 @@ namespace Legion {
       REGION_NODE_CLOSE_STATE_CALL,
       CURRENT_STATE_RECORD_VERSION_NUMBERS_CALL,
       CURRENT_STATE_ADVANCE_VERSION_NUMBERS_CALL,
-      LOGICAL_CLOSER_RECORD_VERSION_NUMBERS_CALL,
-      LOGICAL_CLOSER_RECORD_TOP_VERSION_NUMBERS_CALL,
       PHYSICAL_STATE_CAPTURE_STATE_CALL,
       PHYSICAL_STATE_APPLY_PATH_ONLY_CALL,
       PHYSICAL_STATE_APPLY_STATE_CALL,
@@ -1010,8 +1006,6 @@ namespace Legion {
       "Region Node Close State",                                      \
       "Current State Record Verison Numbers",                         \
       "Current State Advance Version Numbers",                        \
-      "Logical Closer Record Version Numbers",                        \
-      "Logical Closer Record Top Version Numbers",                    \
       "Physical State Capture State",                                 \
       "Physical State Apply Path Only",                               \
       "Physical State Apply State",                                   \
@@ -1090,6 +1084,7 @@ namespace Legion {
     class FenceOp;
     class FrameOp;
     class DeletionOp;
+    class OpenOp;
     class CloseOp;
     class TraceCloseOp;
     class InterCloseOp;
@@ -1139,7 +1134,6 @@ namespace Legion {
     class RegionTreeNode;
     class RegionNode;
     class PartitionNode;
-    class AbstractTreeNode;
 
     class RegionTreeContext;
     class RegionTreePath;
@@ -1151,9 +1145,7 @@ namespace Legion {
 
     class CurrentState;
     class PhysicalState;
-    class VersionNumber;
     class VersionState;
-    class AggregateVersion;
     class VersionInfo;
     class RestrictInfo;
     class Restriction;

@@ -1997,7 +1997,7 @@ namespace Legion {
       args.hlr_id = HLR_TRIGGER_OP_ID;
       args.manager = this;
       args.op = op;
-      RtEvent precondition = op->invoke_state_analysis();
+      RtEvent precondition = op->invoke_versioning_analysis();
       // Only do executing throttling if we don't have an event to wait on
       if (precondition.has_triggered())
       {
@@ -2185,7 +2185,7 @@ namespace Legion {
           if (send_remotely)
             task->set_target_proc(finder->second);
           else // if we're not sending it somewhere, invoke the state analysis
-            wait_on = task->invoke_state_analysis();
+            wait_on = task->invoke_versioning_analysis();
           task->deactivate_outstanding_task();
           // We give a slight priority to triggering the execution
           // of tasks relative to other runtime operations because
@@ -7357,6 +7357,7 @@ namespace Legion {
         fence_op_lock(Reservation::create_reservation()),
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
+        open_op_lock(Reservation::create_reservation()),
         inter_close_op_lock(Reservation::create_reservation()), 
         read_close_op_lock(Reservation::create_reservation()),
         post_close_op_lock(Reservation::create_reservation()),
@@ -7620,6 +7621,15 @@ namespace Legion {
       available_deletion_ops.clear();
       deletion_op_lock.destroy_reservation();
       deletion_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<OpenOp*>::const_iterator it = 
+            available_open_ops.begin(); it !=
+            available_open_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_open_ops.clear();
+      open_op_lock.destroy_reservation();
+      open_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<InterCloseOp*>::const_iterator it = 
             available_inter_close_ops.begin(); it !=
             available_inter_close_ops.end(); it++)
@@ -17349,6 +17359,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    OpenOp* Runtime::get_available_open_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<OpenOp*, &Runtime::get_available_open_op>
+          continuation(this, open_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(open_op_lock, available_open_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     InterCloseOp* Runtime::get_available_inter_close_op(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
@@ -17843,6 +17869,14 @@ namespace Legion {
     {
       AutoLock d_lock(deletion_op_lock);
       available_deletion_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_open_op(OpenOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(open_op_lock);
+      available_open_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -18612,6 +18646,8 @@ namespace Legion {
           return "Frame Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
+        case OPEN_OP_ALLOC:
+          return "Open Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:
@@ -20753,9 +20789,9 @@ namespace Legion {
             VersionState::process_view_references(args);
             break;
           }
-        case HLR_REMOVE_VERSION_NUMBER_REF_TASK_ID:
+        case HLR_REMOVE_VERSION_STATE_REF_TASK_ID:
           {
-            VersionNumber::process_remove_version_number_ref(args);
+            VersionState::process_remove_version_state_ref(args);
             break;
           }
         case HLR_DEFER_RESTRICTED_MANAGER_TASK_ID:

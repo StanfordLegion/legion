@@ -358,7 +358,6 @@ typedef enum legion_privilege_mode_t {
   WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
   WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
   REDUCE          = 0x00000004,
-  PROMOTED        = 0x00001000, // Internal use only
 } legion_privilege_mode_t;
 
 typedef enum legion_allocate_mode_t {
@@ -411,7 +410,6 @@ typedef enum legion_dependence_type_t {
   ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
   ATOMIC_DEPENDENCE = 3,
   SIMULTANEOUS_DEPENDENCE = 4,
-  PROMOTED_DEPENDENCE = 5,
 } legion_dependence_type_t;
 
 enum {

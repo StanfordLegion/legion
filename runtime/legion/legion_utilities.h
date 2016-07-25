@@ -57,7 +57,6 @@ namespace Legion {
 #define IS_WRITE(req) ((req).privilege & WRITE_DISCARD)
 #define IS_WRITE_ONLY(req) (((req).privilege & READ_WRITE) == WRITE_DISCARD)
 #define IS_REDUCE(req) (((req).privilege & READ_WRITE) == REDUCE)
-#define IS_PROMOTED(req) ((req).privilege & PROMOTED)
 #define IS_EXCLUSIVE(req) ((req).prop == EXCLUSIVE)
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
 #define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
@@ -121,17 +120,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    static inline DependenceType check_for_promotion(const RegionUsage &u1, 
-                                                     DependenceType actual)
-    //--------------------------------------------------------------------------
-    {
-      if (IS_PROMOTED(u1))
-        return PROMOTED_DEPENDENCE;
-      else
-        return actual;
-    }
-
-    //--------------------------------------------------------------------------
     static inline DependenceType check_dependence_type(const RegionUsage &u1,
                                                        const RegionUsage &u2)
     //--------------------------------------------------------------------------
@@ -139,14 +127,14 @@ namespace Legion {
       // Two readers are never a dependence
       if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
       {
-        return check_for_promotion(u1, NO_DEPENDENCE);
+        return NO_DEPENDENCE;
       }
       else if (IS_REDUCE(u1) && IS_REDUCE(u2))
       {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
-          return check_for_promotion(u1, NO_DEPENDENCE);
+          return NO_DEPENDENCE;
         else
           return TRUE_DEPENDENCE;
       }
@@ -176,7 +164,7 @@ namespace Legion {
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return check_for_promotion(u1, SIMULTANEOUS_DEPENDENCE);
+            return SIMULTANEOUS_DEPENDENCE;
           }
           // Everything else is a dependence
           return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);

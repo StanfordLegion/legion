@@ -1027,7 +1027,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent Operation::invoke_state_analysis(void)
+    RtEvent Operation::invoke_versioning_analysis(void)
     //--------------------------------------------------------------------------
     {
       // First check to see if the parent context has remote state
@@ -1937,7 +1937,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -3038,7 +3037,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
-                                                     src_versions[idx],
                                                      src_restrict_infos[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx]);
@@ -3052,7 +3050,6 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
-                                                     dst_versions[idx],
                                                      dst_restrict_infos[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx]);
@@ -4527,7 +4524,6 @@ namespace Legion {
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, req);
         runtime->forest->perform_deletion_analysis(this, idx, req, 
-                                                   version_info,
                                                    restrict_info,
                                                    privilege_path);
         version_info.release();
@@ -4591,6 +4587,78 @@ namespace Legion {
       assert(idx < parent_req_indexes.size());
 #endif
       return parent_req_indexes[idx];
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Open Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OpenOp::OpenOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OpenOp::OpenOp(const OpenOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    OpenOp::~OpenOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OpenOp& OpenOp::operator=(const OpenOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void OpenOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void OpenOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      privilege_path.clear();
+      version_info.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    const char* OpenOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[OPEN_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    size_t OpenOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind OpenOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return OPEN_OP_KIND;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4781,7 +4849,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TraceCloseOp::initialize_trace_close_op(SingleTask *ctx, 
                                                  const RegionRequirement &req,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                                  LegionTrace *trace, int close, 
                                                  const FieldMask &close_m,
                                                  Operation *create)
@@ -4798,7 +4865,6 @@ namespace Legion {
         set_trace(trace, create->is_tracing());
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
-      target_children = targets;
       close_idx = close;
       close_mask = close_m;
       create_op = create;
@@ -4899,19 +4965,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                  LegionTrace *trace, int close, 
-                                  const VersionInfo &close_info,
-                                  const VersionInfo &ver_info,
-                                  const FieldMask &close_m, Operation *create)
+    void* InterCloseOp::operator new(size_t count)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, targets,
-                                trace, close, close_m, create);
-      // Merge in the two different version informations
-      version_info.merge(close_info, close_m);
-      version_info.merge(ver_info, close_m);
+      return legion_alloc_aligned<InterCloseOp,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
+                  const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
+                                  LegionTrace *trace, int close, 
+                                  const FieldMask &close_m, 
+                                  const FieldMask &leave_m, Operation *create)
+    //--------------------------------------------------------------------------
+    {
+      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
+      close_nodes = to_close;
+      leave_open_mask = leave_m;
       parent_req_index = create->find_parent_index(close_idx);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
@@ -4943,6 +5020,8 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
+      close_nodes.clear();
+      leave_open_mask.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
@@ -5308,14 +5387,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void* ReadCloseOp::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<ReadCloseOp,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReadCloseOp::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
     void ReadCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                  LegionTrace *trace, int close,
                                  const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, targets, 
-                                trace, close, close_m, create);
+      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
       parent_req_index = create->find_parent_index(close_idx);
       if (Runtime::legion_spy_enabled)
       {
@@ -5474,15 +5565,13 @@ namespace Legion {
       if (requirement.privilege == REDUCE)
       {
         runtime->forest->perform_reduction_close_analysis(this, 0/*idx*/,
-                                                          requirement,
-                                                          version_info);
+                                                          requirement);
       }
       else
       {
         ProjectionInfo projection_info;
         runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                      requirement,
-                                                     version_info,
                                                      restrict_info,
                                                      projection_info,
                                                      privilege_path);
@@ -5736,7 +5825,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -5965,7 +6053,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -6502,7 +6589,6 @@ namespace Legion {
       // Register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -9297,7 +9383,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -9782,7 +9867,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);
@@ -10411,7 +10495,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   version_info,
                                                    restrict_info, 
                                                    projection_info,
                                                    privilege_path);
@@ -10834,7 +10917,6 @@ namespace Legion {
       parent_ctx->remove_restriction(this, requirement);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
-                                                   version_info,
                                                    restrict_info,
                                                    projection_info,
                                                    privilege_path);

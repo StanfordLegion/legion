@@ -45,6 +45,7 @@ namespace Legion {
         FENCE_OP_KIND,
         FRAME_OP_KIND,
         DELETION_OP_KIND,
+        OPEN_OP_KIND,
         INTER_CLOSE_OP_KIND,
         READ_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
@@ -75,6 +76,7 @@ namespace Legion {
         "Fence",                    \
         "Frame",                    \
         "Deletion",                 \
+        "Open",                     \
         "Inter Close",              \
         "Read Close",               \
         "Post Close",               \
@@ -224,13 +226,16 @@ namespace Legion {
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      // The following two calls may be implemented
+      // The following three calls may be implemented
       // differently depending on the operation, but we
       // provide base versions of them so that operations
       // only have to overload the stages that they care
       // about modifying.
       // The function to call for depence analysis
       virtual void trigger_dependence_analysis(void);
+      // Trigger the version numbering analysis for the given
+      // operation to determine the version numbers for all state
+      //virtual void trigger_versioning_analysis(void);
       // The function to call when the operation is ready to map 
       // In general put this on the ready queue so the runtime
       // can invoke the trigger mapping call.
@@ -378,7 +383,7 @@ namespace Legion {
       void add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
       // Ask the operation to perform the state analysis
-      RtEvent invoke_state_analysis(void);
+      RtEvent invoke_versioning_analysis(void);
     public:
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
@@ -878,6 +883,39 @@ namespace Legion {
     }; 
 
     /**
+     * \class OpenOp
+     * Open operatoins are only visible internally inside
+     * the runtime and are issued to open a region tree
+     * down to the level immediately above the one being
+     * accessed by a given operation. Opn operations
+     * record whether they are advancing the version
+     * number information at a given level or not.
+     */
+    class OpenOp : public Operation {
+    public:
+      static const AllocationType alloc_type = OPEN_OP_ALLOC;
+    public:
+      OpenOp(Runtime *rt);
+      OpenOp(const OpenOp &rhs);
+      virtual ~OpenOp(void);
+    public:
+      OpenOp& operator=(const OpenOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
+      virtual bool trigger_execution(void);
+      virtual void trigger_commit(void);
+    protected:
+      RegionTreePath privilege_path;
+      VersionInfo    version_info;
+    };
+
+    /**
      * \class CloseOp
      * Close operations are only visible internally inside
      * the runtime and are issued to help close up the 
@@ -940,7 +978,6 @@ namespace Legion {
     public:
       void initialize_trace_close_op(SingleTask *ctx, 
                                      const RegionRequirement &req,
-                 const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      LegionTrace *trace, int close_idx,
                                      const FieldMask &close_mask,
                                      Operation *create_op);
@@ -988,13 +1025,14 @@ namespace Legion {
       virtual ~InterCloseOp(void);
     public:
       InterCloseOp& operator=(const InterCloseOp &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+          const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
                       LegionTrace *trace, int close_idx, 
-                      const VersionInfo &close_info,
-                      const VersionInfo &version_info,
-                      const FieldMask &close_mask, Operation *create_op);
+                      const FieldMask &close_mask, 
+                      const FieldMask &leave_open, Operation *create_op);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1016,6 +1054,9 @@ namespace Legion {
       int invoke_mapper(const InstanceSet &valid_instances,
                               InstanceSet &chosen_instances);
       void report_profiling_results(void);
+    protected:
+      LegionMap<RegionTreeNode*,FieldMask>::aligned close_nodes;
+      FieldMask leave_open_mask;
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
@@ -1045,9 +1086,10 @@ namespace Legion {
       virtual ~ReadCloseOp(void);
     public:
       ReadCloseOp& operator=(const ReadCloseOp &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                       LegionTrace *trace, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:

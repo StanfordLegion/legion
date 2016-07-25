@@ -238,18 +238,15 @@ namespace Legion {
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
-                                       VersionInfo &version_info,
                                        RestrictInfo &restrict_info,
                                        ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_reduction_close_analysis(Operation *op, unsigned idx,
-                                       RegionRequirement &req,
-                                       VersionInfo &version_info);
+                                       RegionRequirement &req);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
-                                     VersionInfo &version_info,
                                      RestrictInfo &restrict_info,
                                      RegionTreePath &path);
     public:
@@ -1289,7 +1286,6 @@ namespace Legion {
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
-                                 VersionInfo &version_info,
                                  const TraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
                                  const bool report_uninitialized = false);
@@ -1299,12 +1295,10 @@ namespace Legion {
       void open_logical_node(ContextID ctx,
                              const LogicalUser &user,
                              RegionTreePath &path,
-                             VersionInfo &version_info,
                              const TraceInfo &trace_info,
                              const ProjectionInfo &projection_info);
       void close_reduction_analysis(ContextID ctx,
-                                    const LogicalUser &user,
-                                    VersionInfo &version_info);
+                                    const LogicalUser &user);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open,
@@ -1341,11 +1335,6 @@ namespace Legion {
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &output_mask); 
-      void close_abstract_tree(LogicalCloser &closer,
-                               const FieldMask &closing_mask,
-                               FieldState &closing_state,
-                               bool read_only_close,
-                               bool record_close_operations);
       void merge_new_field_state(CurrentState &state, 
                                  const FieldState &new_state);
       void merge_new_field_states(CurrentState &state, 
@@ -1366,7 +1355,6 @@ namespace Legion {
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
-                                     VersionInfo &version_info,
                                      RestrictInfo &restrict_info,
                                      const TraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
@@ -1552,7 +1540,6 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
-      virtual AbstractTreeNode *get_abstract_subtree(void) = 0;
     public:
       // Interfaces to Realm
       virtual ApEvent issue_copy(Operation *op,
@@ -1576,16 +1563,6 @@ namespace Legion {
       virtual bool dominates(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
-      virtual InterCloseOp* create_close_op(Operation *creator, 
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const VersionInfo &close_info,
-                                            const VersionInfo &version_info,
-                                            const TraceInfo &trace_info) = 0;
-      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const TraceInfo &trace_info) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual InstanceView* find_context_view(PhysicalManager *manager, 
                                               SingleTask *context) = 0;
@@ -1614,7 +1591,7 @@ namespace Legion {
           bool validates_regions, Operation *to_skip = NULL, 
           GenerationID skip_gen = 0);
       template<AllocationType ALLOC>
-      static void perform_closing_checks(LogicalCloser &closer,
+      static void perform_closing_checks(LogicalCloser &closer, bool read_only,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask);
     public:
@@ -1711,7 +1688,6 @@ namespace Legion {
 #endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
-      virtual AbstractTreeNode *get_abstract_subtree(void);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
@@ -1721,16 +1697,6 @@ namespace Legion {
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
-      virtual InterCloseOp* create_close_op(Operation *creator, 
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const VersionInfo &close_info,
-                                            const VersionInfo &version_info,
-                                            const TraceInfo &trace_info);
-      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const TraceInfo &trace_info);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -1904,7 +1870,6 @@ namespace Legion {
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalPartition handle, 
                                             Runtime *runtime);
-      virtual AbstractTreeNode *get_abstract_subtree(void);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual const Domain& get_domain_blocking(void) const;
@@ -1914,16 +1879,6 @@ namespace Legion {
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
-      virtual InterCloseOp* create_close_op(Operation *creator, 
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const VersionInfo &close_info,
-                                            const VersionInfo &version_info,
-                                            const TraceInfo &trace_info);
-      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
-                                            const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                            const TraceInfo &trace_info);
       virtual void send_node(AddressSpaceID target);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,
@@ -1977,28 +1932,6 @@ namespace Legion {
       std::map<ColorPoint,RegionNode*> color_map;
       std::map<ColorPoint,RegionNode*> valid_map;
     }; 
-
-    /**
-     * \class AbstractTreeNode
-     * An abstract node is a region tree node that is an abstraction
-     * of the region tree at a certain depth from some parent node
-     */
-    class AbstractTreeNode {
-    public:
-      AbstractTreeNode(RegionTreeNode *owner, unsigned depth,
-                       RegionTreeForest *ctx);
-      AbstractTreeNode(const AbstractTreeNode &rhs);
-      ~AbstractTreeNode(void);
-    public:
-      AbstractTreeNode& operator=(const AbstractTreeNode &rhs);
-    public:
-      const unsigned depth; // relative depth from owner
-      RegionTreeNode *const owner; // root of abstract tree
-      RegionTreeForest *const context;
-    protected:
-      AbstractTreeNode *child;
-      std::set<RegionTreeNode*> instances;
-    };
 
     // some inline implementations
 #ifndef DEBUG_LEGION

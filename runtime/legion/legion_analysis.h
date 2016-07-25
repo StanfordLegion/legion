@@ -88,48 +88,26 @@ namespace Legion {
     };
 
     /**
-     * \struct VersionNumbers 
-     * A small helper class for tracking collections of 
-     * version number objects and their sets of fields
-     */
-    struct VersionNumbers {
-    public:
-      VersionNumbers(void)
-        : single(true) { versions.single_version = NULL; }
-#ifdef DEBUG_LEGION
-      ~VersionNumbers(void)
-      { if (!single) assert(versions.multi_versions == NULL); }
-#endif
-    public:
-      FieldMask valid_fields;
-      union {
-        VersionNumber *single_version;
-        LegionMap<VersionNumber*,FieldMask>::aligned *multi_versions;
-      } versions;
-      bool single;
-    };
-
-    /**
-     * \struct VersionStateInfo
+     * \struct VersionStates
      * A small helper class for tracking collections of 
      * version state objects and their sets of fields
      * This is the same as the above class, but specialized
      * for VersionState objects explicitly
      */
-    struct VersionStateInfo {
+    struct VersionStates {
     public:
-      VersionStateInfo(void)
-        : single(true) { states.single_state = NULL; }
+      VersionStates(void)
+        : single(true) { versions.single_version = NULL; }
 #ifdef DEBUG_LEGION
-      ~VersionStateInfo(void)
-      { if (!single) assert(states.multi_states == NULL); }
+      ~VersionStates(void)
+      { if (!single) assert(versions.multi_versions == NULL); }
 #endif
     public:
       FieldMask valid_fields;
       union {
-        VersionState *single_state;
-        LegionMap<VersionState*,FieldMask>::aligned *multi_states;
-      } states;
+        VersionState *single_version;
+        LegionMap<VersionState*,FieldMask>::aligned *multi_versions;
+      } versions;
       bool single;
     };
 
@@ -161,11 +139,11 @@ namespace Legion {
         inline bool leave_open(void) const { return (0x10 & level_mask); }
         inline bool split_node(void) const { return (0x20 & level_mask); }
       public:
-        void add_current_version(VersionNumber *version, const FieldMask &mask);
-        void add_advance_version(VersionNumber *version, const FieldMask &mask);
+        void add_current_version(VersionState *version, const FieldMask &mask);
+        void add_advance_version(VersionState *version, const FieldMask &mask);
       public:
-        VersionNumbers current_versions;
-        VersionNumbers advance_versions;
+        VersionStates current_versions;
+        VersionStates advance_versions;
         FieldMask advance_mask;
         unsigned level_mask;
       };
@@ -554,6 +532,7 @@ namespace Legion {
                             const InstanceSet &targets,
                             SingleTask *context, unsigned init_index,
                             const std::vector<LogicalView*> &corresponding);
+    private:
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
@@ -579,8 +558,8 @@ namespace Legion {
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
     public:
-      LegionMap<VersionID,VersionNumbers>::aligned current_version_infos;
-      LegionMap<VersionID,VersionNumbers>::aligned previous_version_infos;
+      LegionMap<VersionID,VersionStates>::aligned current_version_infos;
+      LegionMap<VersionID,VersionStates>::aligned previous_version_infos;
     public:
       // Fields for which we have outstanding local reductions
       FieldMask outstanding_reduction_fields;
@@ -588,8 +567,6 @@ namespace Legion {
     public:
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
-      // Fields that have already undergone at least a partial close
-      FieldMask partially_closed;
     protected:
       Reservation state_lock; 
     };
@@ -604,78 +581,25 @@ namespace Legion {
      */
     class LogicalCloser {
     public:
-      struct ClosingInfo {
-      public:
-        ClosingInfo(void) { }
-        ClosingInfo(const FieldMask &m,
-                    const LegionDeque<LogicalUser>::aligned &users)
-          : child_fields(m) 
-        { child_users.insert(child_users.end(), users.begin(), users.end()); }
-      public:
-        FieldMask child_fields;
-        FieldMask leave_open_mask;
-        LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned child_users;
-      };
-      struct ClosingSet {
-      public:
-        ClosingSet(void) { }
-        ClosingSet(const FieldMask &m)
-          : closing_mask(m) { }
-      public:
-        inline void add_child(const ColorPoint &key, const FieldMask &open)
-        {
-          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-            children.find(key);
-          if (finder != children.end())
-          {
-            if (!!open)
-              finder->second |= open;
-          }
-          else
-          {
-            if (!!open)
-              children[key] = open;
-            else
-              children[key] = FieldMask();
-          }
-        }
-        inline void filter_children(void)
-        {
-          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-                children.begin(); it != children.end(); it++)
-          {
-            it->second &= closing_mask;
-          }
-        }
-      public:
-        FieldMask closing_mask;
-        // leave open may over-approximate so filter before
-        // building the close operations!
-        LegionMap<ColorPoint,FieldMask/*leave open*/>::aligned children;
-      };
-    public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
-                    bool validates, bool captures);
+                    RegionTreeNode *root, bool validates, bool captures);
       LogicalCloser(const LogicalCloser &rhs);
       ~LogicalCloser(void);
     public:
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
       inline bool has_close_operations(void) const 
-        { return (!closed_children.empty() || 
-                  !read_only_children.empty() || !!flush_only_fields); }
-      inline bool has_closed_fields(void) const { return !!closed_mask; }
-      inline const FieldMask& get_closed_fields(void) const 
-        { return closed_mask; }
-      void record_closed_child(const ColorPoint &child, const FieldMask &mask,
-                               bool leave_open, bool read_only_close);
-      void record_partial_fields(const FieldMask &skipped_fields);
-      void record_flush_only_fields(const FieldMask &flush_only);
+        { return (!!normal_close_mask) || (!!read_only_close_mask) ||
+                  (!!flush_only_close_mask); }
+      void record_close_operation(RegionTreeNode *root, const FieldMask &mask, 
+                            bool leave_open, bool read_only, bool flush_only);
+      void record_closed_child(RegionTreeNode *node, const FieldMask &mask,
+                               bool read_only_close);
+      void record_closed_user(const LogicalUser &user, 
+                              const FieldMask &mask, bool read_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
-                                       const VersionInfo &version_info,
                                        const TraceInfo &trace_info);
-      void add_next_child(const ColorPoint &next_child);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
@@ -683,47 +607,37 @@ namespace Legion {
       void update_state(CurrentState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
-      void record_version_numbers(RegionTreeNode *node, CurrentState &state,
-                                  const FieldMask &local_mask, bool leave_open);
-      void record_top_version_numbers(RegionTreeNode *node, CurrentState &state);
-      void merge_version_info(VersionInfo &target, const FieldMask &merge_mask);
     protected:
-      static void compute_close_sets(
-                     const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
-                     LegionList<ClosingSet>::aligned &close_sets);
-      void create_normal_close_operations(RegionTreeNode *target, 
-                          Operation *creator, const VersionInfo &local_info,
-                          const VersionInfo &version_info,
-                          const TraceInfo &trace_info,
-                          LegionList<ClosingSet>::aligned &close_sets);
-      void create_read_only_close_operations(RegionTreeNode *target, 
-                          Operation *creator, const TraceInfo &trace_info,
-                          const LegionList<ClosingSet>::aligned &close_sets);
-      void register_dependences(const LogicalUser &current, 
+      void register_dependences(TraceCloseOp *close_op, 
+                                const LogicalUser &close_user,
+                                const LogicalUser &current, 
                                 const FieldMask &open_below,
-             LegionMap<TraceCloseOp*,LogicalUser>::aligned &closes,
-             LegionMap<ColorPoint,ClosingInfo>::aligned &children,
+             LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned &husers,
              LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &ausers,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
     public:
       ContextID ctx;
       const LogicalUser &user;
+      RegionTreeNode *const root_node;
       const bool validates;
       const bool capture_users;
-      LegionDeque<LogicalUser>::aligned closed_users;
+      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
+                                                      normal_closed_users;
+      LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned 
+                                                      read_only_closed_users;
     protected:
-      FieldMask closed_mask, partial_mask;
-      LegionMap<ColorPoint,ClosingInfo>::aligned closed_children;
-      LegionMap<ColorPoint,ClosingInfo>::aligned read_only_children;
+      FieldMask normal_close_mask;
+      FieldMask leave_open_mask;
+      FieldMask read_only_close_mask;
+      FieldMask flush_only_close_mask;
+      // Normal closed child nodes
+      LegionMap<RegionTreeNode*,FieldMask>::aligned closed_nodes;
     protected:
-      // Use the base TraceCloseOp class so we can call the same
-      // register_dependences method on all of them
-      LegionMap<TraceCloseOp*,LogicalUser>::aligned normal_closes;
-      LegionMap<TraceCloseOp*,LogicalUser>::aligned read_only_closes;
-    protected:
-      VersionInfo closed_version_info;
-      FieldMask flush_only_fields;
+      // At most we will ever generate three close operations at a node
+      InterCloseOp *normal_close_op;
+      ReadCloseOp *read_only_close_op;
+      InterCloseOp *flush_only_close_op;
     }; 
 
     /**
@@ -802,39 +716,8 @@ namespace Legion {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     public:
-      LegionMap<VersionID,VersionStateInfo>::aligned version_states;
-      LegionMap<VersionID,VersionStateInfo>::aligned advance_states;
-    };
-
-    /**
-     * \class VersionNumber 
-     * This is a class which is the base class for two different
-     * kinds of version state objects: either normal VersionState
-     * objects or AggregateVersion State objects. Importantly, 
-     * this class provides a virtual method for getting access
-     * to the actual VersionState object for a given region.
-     */
-    class VersionNumber : public DistributedCollectable {
-    public:
-      struct RemoveVersionNumberRefArgs {
-      public:
-        HLRTaskID hlr_id;
-        VersionNumber *proxy_this;
-        ReferenceSource ref_kind;
-      };
-    public:
-      VersionNumber(VersionID version_number, Runtime *rt, 
-                    DistributedID did, AddressSpaceID owner_space, 
-                    AddressSpaceID local_space, bool register_now);
-      virtual ~VersionNumber(void);
-    public:
-      virtual VersionState* get_version_state(RegionTreeNode *node) = 0;
-    public:
-      void remove_version_number_ref(ReferenceSource ref_kind, 
-                                     RtEvent done_event);
-      static void process_remove_version_number_ref(const void *args);
-    public:
-      const VersionID version_number;
+      LegionMap<VersionID,VersionStates>::aligned version_states;
+      LegionMap<VersionID,VersionStates>::aligned advance_states;
     };
 
     /**
@@ -843,7 +726,7 @@ namespace Legion {
      * for a particular version number from the persepective
      * of a given logical region.
      */
-    class VersionState : public VersionNumber {
+    class VersionState : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
@@ -875,6 +758,12 @@ namespace Legion {
         DistributedID did;
         LogicalView *view;
       }; 
+      struct RemoveVersionStateRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *proxy_this;
+        ReferenceSource ref_kind;
+      };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
@@ -922,7 +811,7 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
-      virtual VersionState* get_version_state(RegionTreeNode *node);
+      VersionState* get_version_state(RegionTreeNode *node);
     public:
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);
@@ -959,6 +848,10 @@ namespace Legion {
       void handle_version_state_response(AddressSpaceID source,
           RtUserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
+      void remove_version_state_ref(ReferenceSource ref_kind, 
+                                     RtEvent done_event);
+      static void process_remove_version_state_ref(const void *args);
+    public:
       static void process_view_references(const void *args);
     public:
       static void process_version_state_path_only(Runtime *rt,
@@ -970,6 +863,7 @@ namespace Legion {
       static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source); 
     public:
+      const VersionID version_number;
       RegionTreeNode *const logical_node;
     protected:
       Reservation state_lock;
@@ -1004,28 +898,6 @@ namespace Legion {
       LegionMap<AddressSpaceID,FieldMask>::aligned path_only_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
       LegionMap<AddressSpaceID,FieldMask>::aligned final_nodes;
-    };
-
-    /**
-     * \class AggregateVersion
-     * This class is used for representing a bunch of different
-     * version state objects at a specific level of the region tree
-     */
-    class AggregateVersion : public VersionNumber {
-    public:
-      static const AllocationType alloc_type = AGGREGATE_VERSION_ALLOC;
-    public:
-      AggregateVersion(VersionID vid, unsigned depth, Runtime *rt, 
-                       DistributedID did, AddressSpaceID owner_space, 
-                       AddressSpaceID local_space, bool register_now);
-      AggregateVersion(const AggregateVersion &rhs);
-      virtual ~AggregateVersion(void);
-    public:
-      AggregateVersion& operator=(const AggregateVersion &rhs);
-    public:
-      virtual VersionState* get_version_state(RegionTreeNode *node);
-    public:
-      const unsigned depth;
     };
 
     /**
