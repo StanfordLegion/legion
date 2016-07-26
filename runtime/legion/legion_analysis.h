@@ -233,10 +233,6 @@ namespace Legion {
       void pack_version_numbers(Serializer &rez);
       void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
     public:
-      void make_local(std::set<RtEvent> &preconditions,
-                      Operation *owner_op, RegionTreeForest *forest);
-      void clone_version_info(RegionTreeForest *forest, LogicalRegion handle,
-                              const VersionInfo &rhs, bool check_below);
       void clone_version_numbers(const VersionInfo &rhs, 
                                  const CompositeCloser &closer);
     public:
@@ -694,8 +690,6 @@ namespace Legion {
       PhysicalState* clone(bool clone_state, bool need_advance) const;
       PhysicalState* clone(const FieldMask &clone_mask, 
                            bool clone_state, bool need_advance) const;
-      void make_local(std::set<RtEvent> &preconditions, 
-                      bool needs_final, bool needs_advance); 
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,

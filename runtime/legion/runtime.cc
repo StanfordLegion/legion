@@ -1997,31 +1997,21 @@ namespace Legion {
       args.hlr_id = HLR_TRIGGER_OP_ID;
       args.manager = this;
       args.op = op;
-      RtEvent precondition = op->invoke_versioning_analysis();
-      // Only do executing throttling if we don't have an event to wait on
-      if (precondition.has_triggered())
+      if (!prev_failure)
       {
-        if (!prev_failure)
-        {
-          AutoLock l_lock(local_queue_lock); 
-          RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                        HLR_TRIGGER_OP_ID, 
-                                                        HLR_THROUGHPUT_PRIORITY,
-                          op, local_scheduler_preconditions[next_local_index]);
-          local_scheduler_preconditions[next_local_index++] = next;
-          if (next_local_index == superscalar_width)
-            next_local_index = 0;
-        }
-        else
-          runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                           HLR_TRIGGER_OP_ID, 
-                                           HLR_THROUGHPUT_PRIORITY, op);
+        AutoLock l_lock(local_queue_lock); 
+        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                      HLR_TRIGGER_OP_ID, 
+                                                      HLR_THROUGHPUT_PRIORITY,
+                        op, local_scheduler_preconditions[next_local_index]);
+        local_scheduler_preconditions[next_local_index++] = next;
+        if (next_local_index == superscalar_width)
+          next_local_index = 0;
       }
       else
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
+        runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                          HLR_TRIGGER_OP_ID, 
-                                         HLR_THROUGHPUT_PRIORITY, 
-                                         op, precondition);
+                                         HLR_THROUGHPUT_PRIORITY, op);
     }
 
     //--------------------------------------------------------------------------
@@ -2180,12 +2170,9 @@ namespace Legion {
           // Update the target processor for this task if necessary
           std::map<const Task*,Processor>::const_iterator finder = 
             output.relocate_tasks.find(*vis_it);
-          RtEvent wait_on;
           const bool send_remotely = (finder != output.relocate_tasks.end());
           if (send_remotely)
             task->set_target_proc(finder->second);
-          else // if we're not sending it somewhere, invoke the state analysis
-            wait_on = task->invoke_versioning_analysis();
           task->deactivate_outstanding_task();
           // We give a slight priority to triggering the execution
           // of tasks relative to other runtime operations because
@@ -2196,8 +2183,7 @@ namespace Legion {
           args.op = task;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
                                            HLR_TRIGGER_TASK_ID, 
-                                           HLR_THROUGHPUT_PRIORITY,
-                                           task, wait_on);
+                                           HLR_THROUGHPUT_PRIORITY, task);
         }
       }
 
@@ -20349,6 +20335,13 @@ namespace Legion {
                                 post_end_args->result_size, true/*owned*/);
             break;
           }
+        case HLR_DEFERRED_READY_TRIGGER_ID:
+          {
+            const Operation::DeferredReadyArgs *deferred_ready_args = 
+              (const Operation::DeferredReadyArgs*)args;
+            deferred_ready_args->proxy_this->trigger_ready();
+            break;
+          }
         case HLR_DEFERRED_MAPPING_TRIGGER_ID:
           {
             const Operation::DeferredMappingArgs *deferred_mapping_args = 
@@ -20361,13 +20354,6 @@ namespace Legion {
             const Operation::DeferredResolutionArgs *deferred_resolution_args =
               (const Operation::DeferredResolutionArgs*)args;
             deferred_resolution_args->proxy_this->trigger_resolution();
-            break;
-          }
-        case HLR_DEFERRED_EXECUTION_TRIGGER_ID:
-          {
-            const Operation::DeferredExecuteArgs *deferred_execute_args = 
-              (const Operation::DeferredExecuteArgs*)args;
-            deferred_execute_args->proxy_this->deferred_execute();
             break;
           }
         case HLR_DEFERRED_COMMIT_TRIGGER_ID:
@@ -20383,6 +20369,13 @@ namespace Legion {
             const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
               (const SingleTask::DeferredPostMappedArgs*)args;
             post_mapped_args->task->handle_post_mapped();
+            break;
+          }
+        case HLR_DEFERRED_EXECUTION_TRIGGER_ID:
+          {
+            const Operation::DeferredMappingArgs *deferred_mapping_args = 
+              (const Operation::DeferredMappingArgs*)args;
+            deferred_mapping_args->proxy_this->deferred_execute();
             break;
           }
         case HLR_DEFERRED_EXECUTE_ID:
@@ -20448,7 +20441,7 @@ namespace Legion {
             const ProcessorManager::TriggerOpArgs *trigger_args = 
                             (const ProcessorManager::TriggerOpArgs*)args;
             Operation *op = trigger_args->op;
-            bool mapped = op->trigger_execution();
+            bool mapped = op->trigger_mapping();
             if (!mapped)
             {
               ProcessorManager *manager = trigger_args->manager;
@@ -20462,7 +20455,7 @@ namespace Legion {
             const ProcessorManager::TriggerTaskArgs *trigger_args = 
                           (const ProcessorManager::TriggerTaskArgs*)args;
             TaskOp *op = trigger_args->op; 
-            bool mapped = op->trigger_execution();
+            bool mapped = op->trigger_mapping();
             if (!mapped)
             {
               ProcessorManager *manager = trigger_args->manager;
@@ -20571,13 +20564,6 @@ namespace Legion {
         case HLR_CONTRIBUTE_COLLECTIVE_ID:
           {
             FutureImpl::handle_contribute_to_collective(args);
-            break;
-          }
-        case HLR_STATE_ANALYSIS_ID:
-          {
-            Operation::StateAnalysisArgs *sargs = 
-              (Operation::StateAnalysisArgs*)args;
-            sargs->proxy_op->trigger_remote_state_analysis(sargs->ready_event);
             break;
           }
         case HLR_MAPPER_TASK_ID:
@@ -20753,6 +20739,13 @@ namespace Legion {
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               legion_delete(tunable_args->result);
+            break;
+          }
+        case HLR_DEFERRED_ENQUEUE_OP_ID:
+          {
+            const Operation::DeferredEnqueueArgs *deferred_enqueue_args = 
+              (const Operation::DeferredEnqueueArgs*)args;
+            deferred_enqueue_args->proxy_this->enqueue_ready_operation();
             break;
           }
         case HLR_DEFERRED_ENQUEUE_TASK_ID:

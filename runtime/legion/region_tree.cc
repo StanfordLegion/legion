@@ -10286,7 +10286,7 @@ namespace Legion {
         register_local_user(state, user, trace_info);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
-        if (user.usage.redop > 0)
+        if ((user.usage.redop > 0) && !proj_info.is_projecting())
           record_logical_reduction(state, user.usage.redop, user.field_mask);
       }
       else 
@@ -10339,7 +10339,7 @@ namespace Legion {
         register_local_user(state, user, trace_info);
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
-        if (user.usage.redop > 0)
+        if ((user.usage.redop > 0) && !proj_info.is_projecting())
           record_logical_reduction(state, user.usage.redop, user.field_mask);
       }
       else

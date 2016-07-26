@@ -250,6 +250,12 @@ namespace Legion {
                                      RestrictInfo &restrict_info,
                                      RegionTreePath &path);
     public:
+      void perform_versioning_analysis(Operation *op, unsigned idx,
+                                       const RegionRequirement &req,
+                                       const RegionTreePath &path,
+                                       VersionInfo &version_info,
+                                       std::set<RtEvent> &preconditions);
+    public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
                     ApEvent term_event, SingleTask *context, unsigned index,

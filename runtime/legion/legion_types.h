@@ -225,9 +225,10 @@ namespace Legion {
     enum HLRTaskID {
       HLR_SCHEDULER_ID,
       HLR_POST_END_ID,
+      HLR_DEFERRED_READY_TRIGGER_ID,
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
-      HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+      HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_COMMIT_TRIGGER_ID,
       HLR_DEFERRED_POST_MAPPED_ID,
       HLR_DEFERRED_EXECUTE_ID,
@@ -251,7 +252,6 @@ namespace Legion {
       HLR_RESOLVE_FUTURE_PRED_ID,
       HLR_MPI_RANK_ID,
       HLR_CONTRIBUTE_COLLECTIVE_ID,
-      HLR_STATE_ANALYSIS_ID,
       HLR_MAPPER_TASK_ID,
       HLR_DISJOINTNESS_TASK_ID,
       HLR_PART_INDEPENDENCE_TASK_ID,
@@ -273,6 +273,7 @@ namespace Legion {
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_SELECT_TUNABLE_TASK_ID,
+      HLR_DEFERRED_ENQUEUE_OP_ID,
       HLR_DEFERRED_ENQUEUE_TASK_ID,
       HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
       HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
@@ -293,9 +294,10 @@ namespace Legion {
       const char *name[HLR_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Post-Task Execution",                                    \
+        "Deferred Ready Trigger",                                 \
         "Deferred Mapping Trigger",                               \
-        "Deferred Resolution Trigger",                            \
         "Deferred Execution Trigger",                             \
+        "Deferred Resolution Trigger",                            \
         "Deferred Commit Trigger",                                \
         "Deferred Post Mapped",                                   \
         "Deferred Execute",                                       \
@@ -319,7 +321,6 @@ namespace Legion {
         "Resolve Future Predicate",                               \
         "Update MPI Rank Info",                                   \
         "Contribute Collective",                                  \
-        "State Analaysis",                                        \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
@@ -341,7 +342,8 @@ namespace Legion {
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Select Tunable",                                         \
-        "Deferred Task Enqueue",                                  \
+        "Deferred Enqueue Op",                                    \
+        "Deferred Enqueue Task",                                  \
         "Deferred Composite Handle",                              \
         "Deferred Composite Node Ref",                            \
         "Deferred Composite View Creation",                       \
@@ -727,7 +729,6 @@ namespace Legion {
       UNPACK_MULTI_CALL,
       ACTIVATE_INDIVIDUAL_CALL,
       DEACTIVATE_INDIVIDUAL_CALL,
-      INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL,
       INDIVIDUAL_PERFORM_MAPPING_CALL,
       INDIVIDUAL_RETURN_VIRTUAL_CALL,
       INDIVIDUAL_TRIGGER_COMPLETE_CALL,
@@ -749,7 +750,6 @@ namespace Legion {
       REMOTE_UNPACK_CONTEXT_CALL,
       INDEX_ACTIVATE_CALL,
       INDEX_DEACTIVATE_CALL,
-      INDEX_REMOTE_STATE_ANALYSIS_CALL,
       INDEX_COMPUTE_FAT_PATH_CALL,
       INDEX_EARLY_MAP_TASK_CALL,
       INDEX_DISTRIBUTE_CALL,
@@ -764,7 +764,6 @@ namespace Legion {
       INDEX_RETURN_SLICE_COMMIT_CALL,
       SLICE_ACTIVATE_CALL,
       SLICE_DEACTIVATE_CALL,
-      SLICE_REMOTE_STATE_ANALYSIS_CALL,
       SLICE_PREWALK_CALL,
       SLICE_APPLY_VERSION_INFO_CALL,
       SLICE_DISTRIBUTE_CALL,
@@ -906,7 +905,6 @@ namespace Legion {
       "Unpack Multi",                                                 \
       "Activate Individual",                                          \
       "Deactivate Individual",                                        \
-      "Individual Remote State Analysis",                             \
       "Individual Perform Mapping",                                   \
       "Individual Return Virtual",                                    \
       "Individual Trigger Complete",                                  \
@@ -928,7 +926,6 @@ namespace Legion {
       "Remote Unpack Context",                                        \
       "Index Activate",                                               \
       "Index Deactivate",                                             \
-      "Index Remote State Analysis",                                  \
       "Index Compute Fat Path",                                       \
       "Index Early Map Task",                                         \
       "Index Distribute",                                             \
@@ -943,7 +940,6 @@ namespace Legion {
       "Index Return Slice Commit",                                    \
       "Slice Activate",                                               \
       "Slice Deactivate",                                             \
-      "Slice Remote State Analysis",                                  \
       "Slice Prewalk",                                                \
       "Slice Apply Version Info",                                     \
       "Slice Distribute",                                             \

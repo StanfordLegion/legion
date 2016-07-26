@@ -131,6 +131,8 @@ namespace Legion {
     public:
       RegionTreeContext get_parent_context(unsigned idx);
     protected:
+      void enqueue_ready_task(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+    protected:
       void pack_version_infos(Serializer &rez,
                               std::vector<VersionInfo> &infos,
                               const std::vector<bool> &full_version_info);
@@ -622,7 +624,7 @@ namespace Legion {
       virtual SingleTask* find_parent_context(void);
     public:
       // Override these methods from operation class
-      virtual bool trigger_execution(void); 
+      virtual bool trigger_mapping(void); 
     protected:
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
@@ -776,7 +778,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
     public:
-      virtual bool trigger_execution(void);
+      virtual bool trigger_mapping(void);
     protected:
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
@@ -853,7 +855,6 @@ namespace Legion {
       void set_top_level(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -1261,7 +1262,6 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
@@ -1366,7 +1366,6 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
     public:
       virtual void resolve_false(void);
       virtual bool early_map_task(void);

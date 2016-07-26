@@ -590,8 +590,8 @@ namespace Legion {
     void TaskOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
-      // Put this on the ready queue
-      runtime->add_to_ready_queue(current_proc, this, false/*prev fail*/);
+      // Tasks always go on the task ready queue
+      enqueue_ready_task();
     }
 
     //--------------------------------------------------------------------------
@@ -778,6 +778,14 @@ namespace Legion {
       }
       // This is remote, so just return the context of the remote parent
       return parent_ctx->get_context(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::enqueue_ready_task(RtEvent wait_on /*=RtEvent::NO_RT_EVENT*/)
+    //--------------------------------------------------------------------------
+    {
+      Processor p = parent_ctx->get_executing_processor();
+      runtime->add_to_ready_queue(p, this, false/*previous fail*/, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -5264,7 +5272,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::trigger_execution(void)
+    bool SingleTask::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, TRIGGER_SINGLE_CALL);
@@ -7630,7 +7638,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MultiTask::trigger_execution(void)
+    bool MultiTask::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MULTI_TRIGGER_EXECUTION_CALL);
@@ -8237,64 +8245,6 @@ namespace Legion {
         }
       }
       end_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL);
-#ifdef DEBUG_LEGION
-      assert(version_infos.size() == virtual_mapped.size());
-#endif
-      std::set<RtEvent> preconditions; 
-      if (is_remote())
-      {
-        if (is_locally_mapped())
-        {
-          // See if we have any to unpack and make local
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            if (version_infos[idx].is_packed())
-              version_infos[idx].make_local(preconditions,this,runtime->forest);
-          }
-        }
-        else
-        {
-          // Otherwise request state for anything 
-          // that was not early mapped or was virtually mapped 
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            if (early_mapped_regions.find(idx) == early_mapped_regions.end()) 
-              version_infos[idx].make_local(preconditions,this,runtime->forest);
-          }
-        }
-      }
-      else
-      {
-        // We're still local, see if we are locally mapped or not
-        if (is_locally_mapped())
-        {
-          // If we're locally mapping, we need everything now
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            version_infos[idx].make_local(preconditions, this, runtime->forest);
-        }
-        else
-        {
-          // We only early map restricted regions for individual tasks
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          {
-            if (!regions[idx].is_restricted())
-              continue;
-            version_infos[idx].make_local(preconditions, this, runtime->forest);
-          }
-        }
-      }
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -10889,37 +10839,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDEX_REMOTE_STATE_ANALYSIS_CALL);
-      std::set<RtEvent> preconditions;
-      if (is_locally_mapped())
-      {
-        // If we're locally mapped, request everyone's state
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, this, runtime->forest);
-      }
-      else
-      {
-        // Otherwise we only need to request state for early mapped regions
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        {
-          const RegionRequirement &req = regions[idx];
-          // We need to request state for any early mapped regions, either
-          // because they are restricted or we actually need to early map them
-          if (req.is_restricted() || req.must_premap())
-            version_infos[idx].make_local(preconditions, this, runtime->forest);
-        }
-      }
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::report_interfering_requirements(unsigned idx1,unsigned idx2)
     //--------------------------------------------------------------------------
     {
@@ -11132,7 +11051,7 @@ namespace Legion {
       for (std::list<SliceTask*>::iterator it = slices.begin();
             it != slices.end(); /*nothing*/)
       {
-        bool slice_success = (*it)->trigger_execution();
+        bool slice_success = (*it)->trigger_mapping();
         if (!slice_success)
         {
           // Didn't succeed, leave it on the list for next time
@@ -11775,38 +11694,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SLICE_REMOTE_STATE_ANALYSIS_CALL);
-      std::set<RtEvent> preconditions;
-      if (is_locally_mapped())
-      {
-        // See if we have any version infos that still need to be unpacked
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        {
-          if (version_infos[idx].is_packed())
-            version_infos[idx].make_local(preconditions, this, runtime->forest);
-        }
-      }
-      else
-      {
-        // Otherwise we just need to request state for 
-        // any non-eary mapped regions
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) == early_mapped_regions.end())
-            version_infos[idx].make_local(preconditions, this, runtime->forest);
-        }
-      }
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::resolve_false(void)
     //--------------------------------------------------------------------------
     {
@@ -11932,7 +11819,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           bool slice_success = 
 #endif
-            (*it)->trigger_execution();
+            (*it)->trigger_mapping();
 #ifdef DEBUG_LEGION
           assert(slice_success);
 #endif
@@ -12808,7 +12695,7 @@ namespace Legion {
     void DeferredSlicer::perform_slice(SliceTask *slice)
     //--------------------------------------------------------------------------
     {
-      if (!slice->trigger_execution())
+      if (!slice->trigger_mapping())
       {
         AutoLock s_lock(slice_lock);
         failed_slices.insert(slice);

@@ -288,24 +288,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::trigger_mapping(void)
+    void Operation::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      enqueue_ready_operation();
+#if 0
       // Then put this thing on the ready queue
       runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
                                   this, false/*prev fail*/);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void Operation::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      // We have nothing to check for so just trigger the event
-      Runtime::trigger_event(ready_event);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Operation::trigger_execution(void)
+    bool Operation::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Mark that we finished mapping
@@ -524,6 +519,27 @@ namespace Legion {
       {
         LegionSpy::log_temporary_instance(unique_op_id, index, 
                                           *it, result->instance.id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/)
+    //--------------------------------------------------------------------------
+    {
+      if (wait_on.exists() && !wait_on.has_triggered())
+      {
+        DeferredEnqueueArgs args;
+        args.hlr_id = HLR_DEFERRED_ENQUEUE_OP_ID;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_ENQUEUE_OP_ID,
+                                         HLR_LATENCY_PRIORITY, 
+                                         this, wait_on);
+      }
+      else
+      {
+        Processor p = parent_ctx->get_executing_processor();
+        runtime->add_to_local_queue(p, this, false/*previous failure*/);
       }
     }
 
@@ -1027,31 +1043,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent Operation::invoke_versioning_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // First check to see if the parent context has remote state
-      if ((parent_ctx != NULL) && parent_ctx->has_remote_state())
-      {
-        // This can be an expensive operation so defer it, but give it
-        // a slight priority boost because we know that it will likely
-        // involve some inter-node communication and we want to get 
-        // that in flight quickly to help hide latency.
-        RtUserEvent ready_event = Runtime::create_rt_user_event();
-        StateAnalysisArgs args;
-        args.hlr_id = HLR_STATE_ANALYSIS_ID;
-        args.proxy_op = this;
-        args.ready_event = ready_event;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_STATE_ANALYSIS_ID, 
-                                         HLR_LATENCY_PRIORITY, this);
-        return ready_event;
-      }
-      else
-        return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     void Operation::record_logical_dependence(const LogicalUser &user)
     //--------------------------------------------------------------------------
     {
@@ -1185,28 +1176,24 @@ namespace Legion {
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
     {
-      bool map_now = true;
       bool resolve_now = true;
+      RtEvent map_precondition;
       if (!mapping_dependences.empty())
+        map_precondition = Runtime::merge_events(mapping_dependences);
+      if (must_epoch == NULL)
       {
-        RtEvent map_precondition = Runtime::merge_events(mapping_dependences);
-        if (!map_precondition.has_triggered())
-        {
-          if (must_epoch == NULL)
-          {
-            DeferredMappingArgs args;
-            args.hlr_id = HLR_DEFERRED_MAPPING_TRIGGER_ID;
-            args.proxy_this = op;
-            runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                             HLR_DEFERRED_MAPPING_TRIGGER_ID,
-                                             HLR_LATENCY_PRIORITY,
-                                             op, map_precondition);
-          }
-          else
-            must_epoch->add_mapping_dependence(map_precondition);  
-          map_now = false;
-        }
+        // We always launch the task to avoid expensive recursive calls
+        DeferredReadyArgs args;
+        args.hlr_id = HLR_DEFERRED_READY_TRIGGER_ID;
+        args.proxy_this = op;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_READY_TRIGGER_ID,
+                                         HLR_LATENCY_PRIORITY,
+                                         op, map_precondition);
       }
+      else if (!map_precondition.has_triggered())
+        must_epoch->add_mapping_dependence(map_precondition);
+
       if (!resolution_dependences.empty())
       {
         RtEvent resolve_precondition = 
@@ -1223,8 +1210,6 @@ namespace Legion {
           resolve_now = false;
         }
       }
-      if (map_now && (must_epoch == NULL))
-        op->trigger_mapping();
       if (resolve_now)
         op->trigger_resolution();
     }
@@ -1490,7 +1475,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::trigger_mapping(void)
+    void SpeculativeOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Quick out
@@ -1944,20 +1929,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::trigger_remote_state_analysis(RtUserEvent ready_event)
+    void MapOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
+      // Compute the version numbers for this mapping operation
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement, 
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
-    bool MapOp::trigger_execution(void)
+    bool MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -3061,28 +3050,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      for (unsigned idx = 0; idx < src_versions.size(); idx++)
-        src_versions[idx].make_local(preconditions, this, runtime->forest); 
-      for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-        dst_versions[idx].make_local(preconditions, this, runtime->forest); 
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     void CopyOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
-      // Put this on the queue of stuff to do
-      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
-                                  this, false/*prev fail*/);
+      // Do our versioning analysis and then add it to the ready queue
+      std::set<RtEvent> preconditions;
+      src_versions.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        runtime->forest->perform_versioning_analysis(this, idx,
+                                                     src_requirements[idx],
+                                                     src_privilege_paths[idx],
+                                                     src_versions[idx],
+                                                     preconditions);
+      dst_versions.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        runtime->forest->perform_versioning_analysis(this, idx,
+                                                     dst_requirements[idx],
+                                                     dst_privilege_paths[idx],
+                                                     dst_versions[idx],
+                                                     preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -3118,7 +3108,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CopyOp::trigger_execution(void)
+    bool CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
@@ -4063,7 +4053,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FenceOp::trigger_execution(void)
+    bool FenceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       switch (fence_kind)
@@ -4221,7 +4211,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FrameOp::trigger_execution(void)
+    bool FrameOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Increment the number of mapped frames
@@ -4532,7 +4522,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DeletionOp::trigger_execution(void)
+    bool DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -4809,16 +4799,19 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
+    void CloseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -5041,7 +5034,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InterCloseOp::trigger_execution(void)
+    bool InterCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5580,7 +5573,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PostCloseOp::trigger_execution(void)
+    bool PostCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5832,7 +5825,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool VirtualCloseOp::trigger_execution(void)
+    bool VirtualCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -6062,25 +6055,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     void AcquireOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
-      // Put this on the queue of stuff to do
-      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
-                                  this, false/*prev fail*/);
+      std::set<RtEvent> preconditions;  
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -6114,7 +6101,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireOp::trigger_execution(void)
+    bool AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -6596,25 +6583,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
     void ReleaseOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
-      // Put this on the queue of stuff to do
-      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
-                                  this, false/*prev fail*/);
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -6648,7 +6629,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseOp::trigger_execution(void)
+    bool ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -7083,7 +7064,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DynamicCollectiveOp::trigger_execution(void)
+    bool DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
@@ -7240,7 +7221,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::trigger_mapping(void)
+    void FuturePredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // See if we have a value
@@ -7367,7 +7348,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::trigger_mapping(void)
+    void NotPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       if (pred_op != NULL)
@@ -7529,7 +7510,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::trigger_mapping(void)
+    void AndPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Hold the lock when doing this to prevent 
@@ -7750,7 +7731,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::trigger_mapping(void)
+    void OrPredOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Hold the lock when doing this to prevent 
@@ -8077,28 +8058,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-      {
-        RtUserEvent indiv_event = Runtime::create_rt_user_event();
-        indiv_tasks[idx]->trigger_remote_state_analysis(indiv_event);
-        preconditions.insert(indiv_event);
-      }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        RtUserEvent index_event = Runtime::create_rt_user_event();
-        index_tasks[idx]->trigger_remote_state_analysis(index_event);
-        preconditions.insert(index_event);
-      }
-      Runtime::trigger_event(ready_event,
-                             Runtime::merge_events(preconditions));
-    }
-
-    //--------------------------------------------------------------------------
-    bool MustEpochOp::trigger_execution(void)
+    bool MustEpochOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // First mark that each of the tasks will be locally mapped
@@ -8711,7 +8671,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_individual(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
-      if (!task->trigger_execution())
+      if (!task->trigger_mapping())
       {
         AutoLock t_lock(trigger_lock);
         failed_individual_tasks.insert(task);
@@ -8722,7 +8682,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_index(IndexTask *task)
     //--------------------------------------------------------------------------
     {
-      if (!task->trigger_execution())
+      if (!task->trigger_mapping())
       {
         AutoLock t_lock(trigger_lock);
         failed_index_tasks.insert(task);
@@ -9190,7 +9150,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PendingPartitionOp::trigger_execution(void)
+    bool PendingPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
@@ -9390,21 +9350,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::trigger_remote_state_analysis(
-                                                        RtUserEvent ready_event)
+    void DependentPartitionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
-    bool DependentPartitionOp::trigger_execution(void)
+    bool DependentPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -9874,25 +9836,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::trigger_remote_state_analysis(RtUserEvent ready_event)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
-      else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
-    }
-    
-    //--------------------------------------------------------------------------
     void FillOp::resolve_true(void)
     //--------------------------------------------------------------------------
     {
-      // Put this on the queue of stuff to do
-      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
-                                  this, false/*prev fail*/);
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -9916,7 +9872,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillOp::trigger_execution(void)
+    bool FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -10521,20 +10477,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
+    void AttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
-    bool AttachOp::trigger_execution(void)
+    bool AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -10842,7 +10801,7 @@ namespace Legion {
       // able to attach in the first place anyway.
       requirement = region.impl->get_requirement();
       initialize_privilege_path(privilege_path, requirement);
-      // Delay getting a reference until trigger_execution().  This means we
+      // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
       this->region = region;
       if (Runtime::legion_spy_enabled)
@@ -10924,20 +10883,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::trigger_remote_state_analysis(RtUserEvent ready_event)
+    void DetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;  
-      version_info.make_local(preconditions, this, runtime->forest);
-      if (preconditions.empty())
-        Runtime::trigger_event(ready_event);
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement, 
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
-        Runtime::trigger_event(ready_event,
-                               Runtime::merge_events(preconditions));
+        enqueue_ready_operation();
     }
-    
+
     //--------------------------------------------------------------------------
-    bool DetachOp::trigger_execution(void)
+    bool DetachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Actual unmap of an inline mapped region was deferred to here
@@ -11142,7 +11104,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TimingOp::trigger_execution(void)
+    bool TimingOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       complete_mapping();
