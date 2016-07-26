@@ -487,97 +487,104 @@ function check_parallelizable.top_task(node)
   --    e +/- c or (e +/- c) % r.bounds where r is the primary region
 end
 
-local Stencil = {}
+local Lambda
 
-local stencil_meta = {}
+do
+  local lambda = {}
 
-stencil_meta.__index = stencil_meta
+  lambda.__index = lambda
 
-function stencil_meta.__call(self, arg)
-  local expr = self:expr()
-  if Stencil.is_stencil(expr) then
-    local hole = expr:hole()
-    expr = Stencil {
-      expr = expr:expr(),
-      hole = self:hole(),
-    }
-    return Stencil {
-      expr = expr(arg),
-      hole = hole,
-    }
-  else
-    if std.is_symbol(arg) then
-      return rewrite_symbol(expr, self:hole(), arg)
+  function lambda.__call(self, arg)
+    local expr = self:expr()
+    if Lambda.is_lambda(expr) then
+      local binder = expr:binder()
+      expr = Lambda {
+        expr = expr:expr(),
+        binder = self:binder(),
+      }
+      return Lambda {
+        expr = expr(arg),
+        binder = binder,
+      }
     else
-      return rewrite_expr_id(expr, self:hole(), arg)
+      if std.is_symbol(arg) then
+        return rewrite_symbol(expr, self:binder(), arg)
+      else
+        return rewrite_expr_id(expr, self:binder(), arg)
+      end
     end
   end
-end
 
-function stencil_meta:expr()
-  return self.__expr
-end
+  function lambda:expr()
+    return self.__expr
+  end
 
-function stencil_meta:hole()
-  return self.__hole
-end
+  function lambda:binder()
+    return self.__binder
+  end
 
-function stencil_meta:field_path()
-  if Stencil.is_stencil(self:expr()) then
-    return self:expr():field_path()
-  else
-    if self:expr():is(ast.typed.expr.FieldAccess) then
-      return self:expr().expr_type.field_path
+  function lambda:field_path()
+    if Lambda.is_lambda(self:expr()) then
+      return self:expr():field_path()
     else
-      return data.newtuple()
+      if self:expr():is(ast.typed.expr.FieldAccess) then
+        return self:expr().expr_type.field_path
+      else
+        return data.newtuple()
+      end
     end
   end
-end
 
-function stencil_meta:fmap(fn)
-  local expr = self:expr()
-  if Stencil.is_stencil(expr) then
-    return Stencil {
-      expr = expr:fmap(fn),
-      hole = self:hole(),
-    }
-  else
-    return Stencil {
-      expr = fn(expr),
-      hole = self:hole(),
-    }
+  function lambda:fmap(fn)
+    local expr = self:expr()
+    if Lambda.is_lambda(expr) then
+      return Lambda {
+        expr = expr:fmap(fn),
+        binder = self:binder(),
+      }
+    else
+      return Lambda {
+        expr = fn(expr),
+        binder = self:binder(),
+      }
+    end
   end
-end
 
-function stencil_meta:__tostring()
-  local hole_str = tostring(self:hole())
-  local expr_str
-  if Stencil.is_stencil(self:expr()) then
-    expr_str = tostring(self:expr())
-  else
-    expr_str = render(self:expr())
+  function lambda:__tostring()
+    local binder_str = tostring(self:binder())
+    local expr_str
+    if Lambda.is_lambda(self:expr()) then
+      expr_str = tostring(self:expr())
+    else
+      expr_str = render(self:expr())
+    end
+    return "\\" .. binder_str .. "." .. expr_str
   end
-  return "\\" .. hole_str .. "." .. expr_str
+
+  local lambda_factory = {}
+
+  lambda_factory.__index = lambda_factory
+
+  function lambda_factory.__call(self, args)
+    assert(args.expr)
+    assert(args.binder or args.binders and not (args.binder and args.binders))
+    local binders = args.binders or { args.binder }
+    local expr = args.expr
+    for idx = #binders, 1, -1 do
+      expr = setmetatable({
+        __expr = expr,
+        __binder = binders[idx],
+      }, lambda)
+    end
+    return expr
+  end
+
+  function lambda_factory.is_lambda(e)
+    return getmetatable(e) == lambda
+  end
+
+  Lambda = setmetatable({}, lambda_factory)
 end
-
-local stencil_ctor = {}
-
-stencil_ctor.__index = stencil_ctor
-
-function stencil_ctor.__call(self, args)
-  assert(args.expr)
-  assert(args.hole)
-  return setmetatable({
-    __expr = args.expr,
-    __hole = args.hole,
-  }, stencil_meta)
-end
-
-function stencil_ctor.is_stencil(e)
-  return getmetatable(e) == stencil_meta
-end
-
-Stencil = setmetatable(Stencil, stencil_ctor)
 
 local context = {}
 context.__index = context
@@ -1207,8 +1214,8 @@ function stencil_analysis.top(cx)
   for access, access_info in pairs(cx.field_accesses) do
     access_info.stencils:insertall(
       stencil_analysis.expr(cx, access):map(function(expr)
-        return Stencil {
-          hole = access_info.loop_symbol,
+        return Lambda {
+          binder = access_info.loop_symbol,
           expr = expr,
         }
       end))
@@ -1218,13 +1225,13 @@ function stencil_analysis.top(cx)
     for i = 1, #access_info.stencils do
       access_info.ghost_indices:insert(-1)
       for j = 1, #cx.stencils do
-        local hole = cx.stencils[j]:hole()
-        local s1 = access_info.stencils[i](hole)
+        local binder = cx.stencils[j]:binder()
+        local s1 = access_info.stencils[i](binder)
         local s2 = cx.stencils[j]:expr()
         local joined_stencil = stencil_analysis.join_stencil(cx, s1, s2)
         if joined_stencil then
-          cx.stencils[j] = Stencil {
-            hole = hole,
+          cx.stencils[j] = Lambda {
+            binder = binder,
             expr = joined_stencil,
           }
           access_info.ghost_indices[i] = j
@@ -1241,7 +1248,7 @@ function stencil_analysis.top(cx)
   -- TODO: Stencil objects should be also used in the previous steps
   --       to compare between stencils from two different loops
   local function eta_expansion(stencil)
-   local hole = stencil:hole()
+   local binder = stencil:binder()
    local expr = stencil:expr()
    local primary_region_type = std.rawref(&cx.primary_region:gettype())
    local region_binder = get_new_tmp_var(primary_region_type)
@@ -1254,15 +1261,9 @@ function stencil_analysis.top(cx)
        return node { value = node.value { value = region_binder } }
      end)
    expr = rewrite_symbol(expr, cx.primary_region, root_region_binder)
-   local stencil = Stencil {
-     hole = root_region_binder,
-     expr = Stencil {
-       hole = region_binder,
-       expr = Stencil {
-         hole = hole,
-         expr = expr,
-       },
-     },
+   local stencil = Lambda {
+     binders = { root_region_binder, region_binder, binder },
+     expr = expr,
    }
    return stencil
   end
@@ -1339,7 +1340,7 @@ function parallelize_tasks.stat_for_list(cx, node)
           return rewrite_expr(node,
             function(node) return node:is(ast.typed.expr.IndexAccess) and
                                   node.value:is(ast.typed.expr.ID) and
-                                  node.value.value == value_stencil:hole() end,
+                                  node.value.value == value_stencil:binder() end,
             function(node) return node { index = point_symbol_expr } end)
         end)
         local case_split_if
