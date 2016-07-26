@@ -488,30 +488,30 @@ task main()
   var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
   -- fill(points.{input, output}, init)
-  -- fill(xm.{input, output}, init)
-  -- fill(xp.{input, output}, init)
-  -- fill(ym.{input, output}, init)
-  -- fill(yp.{input, output}, init)
+  fill(xm.{input, output}, init)
+  fill(xp.{input, output}, init)
+  fill(ym.{input, output}, init)
+  fill(yp.{input, output}, init)
 
   var tsteps : int64 = conf.tsteps
   var tprune : int64 = conf.tprune
   regentlib.assert(tsteps > 2*tprune, "too few time steps")
 
-  __demand(__spmd)
-  do
-    for i = 0, nt2 do
-      fill_(pxm_out[i], init)
-    end
-    for i = 0, nt2 do
-      fill_(pxp_out[i], init)
-    end
-    for i = 0, nt2 do
-      fill_(pym_out[i], init)
-    end
-    for i = 0, nt2 do
-      fill_(pyp_out[i], init)
-    end
-  end
+  -- __demand(__spmd)
+  -- do
+  --   for i = 0, nt2 do
+  --     fill_(pxm_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pxp_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pym_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pyp_out[i], init)
+  --   end
+  -- end
 
   __demand(__spmd)
   do
