@@ -51,10 +51,11 @@ def test(root_dir, debug, spy, env):
         ['time', './install.py', '-j', '2', '--rdir=auto'] + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
-    subprocess.check_call(
-        ['time', './test.py', '-q', '-j', '2'] + (['--debug'] if debug else []),
-        env = env,
-        cwd = root_dir)
+    if not spy:
+        subprocess.check_call(
+            ['time', './test.py', '-q', '-j', '2'] + (['--debug'] if debug else []),
+            env = env,
+            cwd = root_dir)
     if spy:
         subprocess.check_call(
             ['time', './test.py', '-q', '-j', '2', '--spy'],
