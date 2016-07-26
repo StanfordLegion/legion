@@ -7344,6 +7344,7 @@ namespace Legion {
         frame_op_lock(Reservation::create_reservation()),
         deletion_op_lock(Reservation::create_reservation()), 
         open_op_lock(Reservation::create_reservation()),
+        advance_op_lock(Reservation::create_reservation()),
         inter_close_op_lock(Reservation::create_reservation()), 
         read_close_op_lock(Reservation::create_reservation()),
         post_close_op_lock(Reservation::create_reservation()),
@@ -7616,6 +7617,15 @@ namespace Legion {
       available_open_ops.clear();
       open_op_lock.destroy_reservation();
       open_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<AdvanceOp*>::const_iterator it = 
+            available_advance_ops.begin(); it !=
+            available_advance_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_advance_ops.clear();
+      advance_op_lock.destroy_reservation();
+      advance_op_lock = Reservation::NO_RESERVATION;
       for (std::deque<InterCloseOp*>::const_iterator it = 
             available_inter_close_ops.begin(); it !=
             available_inter_close_ops.end(); it++)
@@ -17361,6 +17371,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AdvanceOp* Runtime::get_available_advance_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<AdvanceOp*, 
+                      &Runtime::get_available_advance_op>
+                        continuation(this, advance_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(advance_op_lock, available_advance_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     InterCloseOp* Runtime::get_available_inter_close_op(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
@@ -17863,6 +17890,14 @@ namespace Legion {
     {
       AutoLock o_lock(open_op_lock);
       available_open_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_advance_op(AdvanceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(advance_op_lock);
+      available_advance_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -18634,6 +18669,8 @@ namespace Legion {
           return "Deletion Op";
         case OPEN_OP_ALLOC:
           return "Open Op";
+        case ADVANCE_OP_ALLOC:
+          return "Advance Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:

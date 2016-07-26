@@ -46,6 +46,7 @@ namespace Legion {
         FRAME_OP_KIND,
         DELETION_OP_KIND,
         OPEN_OP_KIND,
+        ADVANCE_OP_KIND,
         INTER_CLOSE_OP_KIND,
         READ_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
@@ -77,6 +78,7 @@ namespace Legion {
         "Frame",                    \
         "Deletion",                 \
         "Open",                     \
+        "Advance",                  \
         "Inter Close",              \
         "Read Close",               \
         "Post Close",               \
@@ -888,7 +890,7 @@ namespace Legion {
      * Open operatoins are only visible internally inside
      * the runtime and are issued to open a region tree
      * down to the level immediately above the one being
-     * accessed by a given operation. Opn operations
+     * accessed by a given operation. Open operations
      * record whether they are advancing the version
      * number information at a given level or not.
      */
@@ -912,8 +914,41 @@ namespace Legion {
       virtual bool trigger_mapping(void);
       virtual void trigger_commit(void);
     protected:
-      RegionTreePath privilege_path;
-      VersionInfo    version_info;
+      RegionRequirement requirement;
+      RegionTreePath    privilege_path;
+      VersionInfo       version_info;
+    };
+
+    /**
+     * \class AdvanceOp
+     * Advance operations are only visible internally inside
+     * the runtime and are issued to advance version numbers
+     * on intermediate nodes in the region tree when data
+     * is being written to a subregion.
+     */
+    class AdvanceOp : public Operation {
+    public:
+      static const AllocationType alloc_type = ADVANCE_OP_ALLOC;
+    public:
+      AdvanceOp(Runtime *rt);
+      AdvanceOp(const AdvanceOp &rhs);
+      virtual ~AdvanceOp(void);
+    public:
+      AdvanceOp& operator=(const AdvanceOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual OpKind get_operation_kind(void) const;
+    public:
+      virtual void trigger_ready(void);
+      virtual bool trigger_mapping(void);
+      virtual void trigger_commit(void);
+    protected:
+      RegionRequirement requirement;
+      RegionTreePath    privilege_path;
+      VersionInfo       version_info;
     };
 
     /**

@@ -1081,6 +1081,7 @@ namespace Legion {
     class FrameOp;
     class DeletionOp;
     class OpenOp;
+    class AdvanceOp;
     class CloseOp;
     class TraceCloseOp;
     class InterCloseOp;
