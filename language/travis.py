@@ -47,10 +47,6 @@ def install_dependencies():
     return env
 
 def test(root_dir, debug, spy, env):
-    subprocess.check_call(['pwd'], cwd = root_dir)
-    subprocess.check_call(['ls', '-la'], cwd = root_dir)
-    subprocess.check_call(['/usr/bin/env', 'time'], cwd = root_dir)
-    subprocess.check_call(['/usr/bin/env', 'python'], cwd = root_dir)
     subprocess.check_call(
         ['time', './install.py', '-j', '2', '--rdir=auto'] + (['--debug'] if debug else []),
         env = env,
