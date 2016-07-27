@@ -1,4 +1,5 @@
 before_script:
+  - uname -a
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       apt-get install software-properties-common
