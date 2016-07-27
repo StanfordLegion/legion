@@ -13,3 +13,7 @@ RUN apt-get update -qq && \
     apt-get update -qq && \
     apt-get install -qq build-essential git time wget g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev libncurses5-dev zlib1g-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy && \
     apt-get clean
+
+RUN git clone https://github.com/zdevito/terra.git && cd terra && make
+COPY . /usr/local/terra
+ENV TERRA_DIR /usr/local/terra
