@@ -1,18 +1,6 @@
 before_script:
   - uname -a
-  - |
-    if [[ "$(uname)" = "Linux" ]]; then
-      apt-get install software-properties-common
-      add-apt-repository ppa:ubuntu-toolchain-r/test -y
-      add-apt-repository ppa:pypy/ppa -y
-      apt-get update -qq
-      apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy
-    fi
-  - |
-    if [[ "$(uname)" = "Darwin" ]]; then
-      brew update
-      brew install pypy openmpi
-    fi
+  - export CXX=g++
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
   - if [[ "$(uname)" = "Linux" ]]; then export LLVM_CONFIG="llvm-config-3.5"; fi
