@@ -2,7 +2,6 @@ before_script:
   - uname -a
   - |
     if [[ "$(uname)" = "Linux" ]]; then
-      apt-get install software-properties-common
       add-apt-repository ppa:ubuntu-toolchain-r/test -y
       add-apt-repository ppa:pypy/ppa -y
       apt-get update -qq
@@ -27,10 +26,14 @@ before_script:
       make -j2
       popd
     fi
+.settings: &settings
+  image: ubuntu:14.04
 regent:
+  <<: *settings
   script:
     - ./language/travis.py
 legion:
+  <<: *settings
   script:
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
@@ -61,6 +64,7 @@ legion:
       make -s -C examples/full_ghost LG_RT_DIR=../../runtime
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
 realm:
+  <<: *settings
   script:
     - |
       if [[ "$DEBUG" -eq 0 ]]; then
