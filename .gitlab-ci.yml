@@ -67,64 +67,64 @@ before_script:
 # Define the list of jobs to run.
 # - GCC
 gcc_cxx98_release:
-  variables:
-    CXX: g++-4.9
-    DEBUG: 0
-    CC_FLAGS: "-std=c++98"
   <<: *image
   <<: *tests
+  variables:
+    CXX: "g++-4.9"
+    DEBUG: "0"
+    CC_FLAGS: "-std=c++98"
 gcc_cxx98_debug_checks:
+  <<: *image
+  <<: *tests
   variables:
-    CXX: g++-4.9
-    DEBUG: 1
+    CXX: "g++-4.9"
+    DEBUG: "1"
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  <<: *image
-  <<: *tests
 gcc_cxx98_debug_spy:
-  variables:
-    CXX: g++-4.9
-    DEBUG: 1
-    CC_FLAGS: "-std=c++98"
-    TEST_SPY: 1
   <<: *image
   <<: *tests
+  variables:
+    CXX: "g++-4.9"
+    DEBUG: "1"
+    CC_FLAGS: "-std=c++98"
+    TEST_SPY: "1"
 gcc_cxx11_release:
   variables:
-    CXX: g++-4.9
-    DEBUG: 0
+    CXX: "g++-4.9"
+    DEBUG: "0"
     CC_FLAGS: "-std=c++11"
-    TEST_SPY: 1
+    TEST_SPY: "1"
   <<: *image
   <<: *tests
 
 # - Clang
 clang_cxx98_release:
-  variables:
-    CXX: clang++-3.5
-    DEBUG: 0
-    CC_FLAGS: "-std=c++98"
   <<: *image
   <<: *tests
+  variables:
+    CXX: "clang++-3.5"
+    DEBUG: "0"
+    CC_FLAGS: "-std=c++98"
 clang_cxx98_debug_checks:
+  <<: *image
+  <<: *tests
   variables:
-    CXX: clang++-3.5
-    DEBUG: 1
+    CXX: "clang++-3.5"
+    DEBUG: "1"
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  <<: *image
-  <<: *tests
 clang_cxx98_debug_spy:
+  <<: *image
+  <<: *tests
   variables:
-    CXX: clang++-3.5
-    DEBUG: 1
+    CXX: "clang++-3.5"
+    DEBUG: "1"
     CC_FLAGS: "-std=c++98"
-    TEST_SPY: 1
-  <<: *image
-  <<: *tests
+    TEST_SPY: "1"
 clang_cxx11_release:
-  variables:
-    CXX: clang++-3.5
-    DEBUG: 0
-    CC_FLAGS: "-std=c++11"
-    TEST_SPY: 1
   <<: *image
   <<: *tests
+  variables:
+    CXX: "clang++-3.5"
+    DEBUG: "0"
+    CC_FLAGS: "-std=c++11"
+    TEST_SPY: "1"
