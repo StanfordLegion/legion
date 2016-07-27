@@ -1,6 +1,21 @@
-# Global variables (defined for all jobs):
+# Variables:
+#  - Global:
 variables:
   LLVM_CONFIG: llvm-config-3.5
+
+#  - Local:
+.gcc49: &gcc49
+  variables:
+    CXX: "g++-4.9"
+.clang35: &clang35
+  variables:
+    CXX: "clang++-3.5"
+.debug: &debug
+  variables:
+    DEBUG: "1"
+.release: &release
+  variables:
+    DEBUG: "0"
 
 # This set of commands will run before each job.
 before_script:
@@ -67,66 +82,40 @@ before_script:
       fi
 
 # Define the list of jobs to run.
-# - GCC
+#  - GCC
 gcc_cxx98_release:
-  <<: *image
-  <<: *tests
+  <<: [*gcc49, *release, *image, *tests]
   variables:
-    CXX: "g++-4.9"
-    DEBUG: "0"
     CC_FLAGS: "-std=c++98"
 gcc_cxx98_debug_checks:
-  <<: *image
-  <<: *tests
+  <<: [*gcc49, *debug, *image, *tests]
   variables:
-    CXX: "g++-4.9"
-    DEBUG: "1"
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 gcc_cxx98_debug_spy:
-  <<: *image
-  <<: *tests
+  <<: [*gcc49, *debug, *image, *tests]
   variables:
-    CXX: "g++-4.9"
-    DEBUG: "1"
-    CC_FLAGS: "-std=c++98"
+    CC_FLAGS: "-std=c++98 -DLEGION_SPY"
     TEST_SPY: "1"
 gcc_cxx11_release:
+  <<: [*gcc49, *release, *image, *tests]
   variables:
-    CXX: "g++-4.9"
-    DEBUG: "0"
     CC_FLAGS: "-std=c++11"
-    TEST_SPY: "1"
-  <<: *image
-  <<: *tests
 
 # - Clang
 clang_cxx98_release:
-  <<: *image
-  <<: *tests
+  <<: [*clang35, *release, *image, *tests]
   variables:
-    CXX: "clang++-3.5"
-    DEBUG: "0"
     CC_FLAGS: "-std=c++98"
 clang_cxx98_debug_checks:
-  <<: *image
-  <<: *tests
+  <<: [*clang35, *debug, *image, *tests]
   variables:
-    CXX: "clang++-3.5"
-    DEBUG: "1"
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 clang_cxx98_debug_spy:
-  <<: *image
-  <<: *tests
+  <<: [*clang35, *debug, *image, *tests]
   variables:
-    CXX: "clang++-3.5"
-    DEBUG: "1"
-    CC_FLAGS: "-std=c++98"
+    CC_FLAGS: "-std=c++98 -DLEGION_SPY"
     TEST_SPY: "1"
 clang_cxx11_release:
-  <<: *image
-  <<: *tests
+  <<: [*clang35, *release, *image, *tests]
   variables:
-    CXX: "clang++-3.5"
-    DEBUG: "0"
     CC_FLAGS: "-std=c++11"
-    TEST_SPY: "1"
