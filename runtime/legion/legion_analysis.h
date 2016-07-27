@@ -604,7 +604,7 @@ namespace Legion {
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
     protected:
-      void register_dependences(TraceCloseOp *close_op, 
+      void register_dependences(CloseOp *close_op, 
                                 const LogicalUser &close_user,
                                 const LogicalUser &current, 
                                 const FieldMask &open_below,

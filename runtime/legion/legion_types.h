@@ -805,7 +805,6 @@ namespace Legion {
       REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
       REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
       REGION_NODE_REGISTER_LOGICAL_USER_CALL,
-      REGION_NODE_OPEN_LOGICAL_NODE_CALL,
       REGION_NODE_CLOSE_LOGICAL_NODE_CALL,
       REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
       REGION_NODE_SIPHON_LOGICAL_PROJECTION_CALL,
@@ -981,7 +980,6 @@ namespace Legion {
       "Region Tree Physical Attach File",                             \
       "Region Tree Physical Detach File",                             \
       "Region Node Register Logical User",                            \
-      "Region Node Open Logical Node",                                \
       "Region Node Close Logical Node",                               \
       "Region Node Siphon Logical Children",                          \
       "Region Node Siphon Logical Projection",                        \
@@ -1080,10 +1078,10 @@ namespace Legion {
     class FenceOp;
     class FrameOp;
     class DeletionOp;
+    class InternalOp;
     class OpenOp;
     class AdvanceOp;
     class CloseOp;
-    class TraceCloseOp;
     class InterCloseOp;
     class ReadCloseOp;
     class PostCloseOp;
@@ -1223,8 +1221,9 @@ namespace Legion {
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
     friend class Internal::DeletionOp;                      \
+    friend class Internal::OpenOp;                          \
+    friend class Internal::AdvanceOp;                       \
     friend class Internal::CloseOp;                         \
-    friend class Internal::TraceCloseOp;                    \
     friend class Internal::InterCloseOp;                    \
     friend class Internal::ReadCloseOp;                     \
     friend class Internal::PostCloseOp;                     \

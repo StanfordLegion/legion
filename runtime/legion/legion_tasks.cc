@@ -8283,7 +8283,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::report_interfering_close_requirement(unsigned idx)
+    void IndividualTask::report_interfering_internal_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
       rerun_analysis_requirements.insert(idx);
@@ -10864,7 +10864,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::report_interfering_close_requirement(unsigned idx)
+    void IndexTask::report_interfering_internal_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
       rerun_analysis_requirements.insert(idx);

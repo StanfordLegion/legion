@@ -369,7 +369,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_interfering_close_requirement(unsigned idx)
+    void Operation::report_interfering_internal_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
       // should only be called if overridden
@@ -3414,7 +3414,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::report_interfering_close_requirement(unsigned idx)
+    void CopyOp::report_interfering_internal_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
       // Nothing to do here, we can skip these since it won't impact anything
@@ -4580,19 +4580,99 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Open Operation 
+    // Internal Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OpenOp::OpenOp(Runtime *rt)
+    InternalOp::InternalOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
+    InternalOp::~InternalOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void InternalOp::initialize_internal(Operation *creator, int intern_idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(creator != NULL);
+#endif
+      // We never track internal operations
+      initialize_operation(creator->get_parent(), false/*track*/);
+#ifdef DEBUG_LEGION
+      assert(creator_req_idx == -1);
+      assert(create_op == NULL);
+#endif
+      create_op = creator;
+      create_gen = creator->get_generation();
+      creator_req_idx = intern_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void InternalOp::activate_internal(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+      creator_req_idx = -1;
+      create_op = NULL;
+      create_gen = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void InternalOp::deactivate_internal(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void InternalOp::record_trace_dependence(Operation *target, 
+                                             GenerationID target_gen,
+                                             int target_idx,
+                                             int source_idx, 
+                                             DependenceType dtype,
+                                             const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(creator_req_idx >= 0);
+#endif
+      // Check to see if the target is also our creator
+      // in which case we can skip it
+      if ((target == create_op) && (target_gen == create_gen))
+        return;
+      // Check to see if the source is our source
+      if (source_idx != creator_req_idx)
+        return;
+      FieldMask overlap = get_internal_mask() & dependent_mask;
+      // If the fields also don't overlap then we are done
+      if (!overlap)
+        return;
+      // Otherwise do the registration
+      register_region_dependence(0/*idx*/, target, target_gen,
+                               target_idx, dtype, false/*validates*/, overlap);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Open Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OpenOp::OpenOp(Runtime *rt)
+      : InternalOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     OpenOp::OpenOp(const OpenOp &rhs)
-      : Operation(NULL)
+      : InternalOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4615,19 +4695,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OpenOp::initialize(const FieldMask &mask, RegionTreeNode *start, 
+                    const RegionTreePath &path, Operation *creator, int req_idx)
+    //--------------------------------------------------------------------------
+    {
+      initialize_internal(creator, req_idx);
+#ifdef DEBUG_LEGION
+      assert(start_node == NULL);
+#endif
+      start_node = start;
+      open_path = path;
+      open_mask = mask;
+    }
+
+    //--------------------------------------------------------------------------
     void OpenOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      activate_internal();
+      start_node = NULL;
     }
 
     //--------------------------------------------------------------------------
     void OpenOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
-      privilege_path.clear();
-      version_info.clear();
+      deactivate_internal();
+      open_path.clear();
+      open_mask.clear();
       runtime->free_open_op(this);
     }
 
@@ -4639,17 +4734,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t OpenOp::get_region_count(void) const
-    //--------------------------------------------------------------------------
-    {
-      return 1;
-    }
-
-    //--------------------------------------------------------------------------
     Operation::OpKind OpenOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return OPEN_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& OpenOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return open_mask;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4658,14 +4753,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AdvanceOp::AdvanceOp(Runtime *rt)
-      : Operation(rt)
+      : InternalOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AdvanceOp::AdvanceOp(const AdvanceOp &rhs)
-      : Operation(NULL)
+      : InternalOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4688,19 +4783,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AdvanceOp::initialize(RegionTreeNode *parent, const FieldMask &advance,
+                               Operation *creator, int req_idx)
+    //--------------------------------------------------------------------------
+    {
+      initialize_internal(creator, req_idx);
+#ifdef DEBUG_LEGION
+      assert(parent_node == NULL);
+#endif
+      parent_node = parent;
+      advance_mask = advance;
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvanceOp::set_child_node(RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child_node == NULL);
+#endif
+      child_node = child;
+    }
+
+    //--------------------------------------------------------------------------
     void AdvanceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      activate_internal();
+      parent_node = NULL;
+      child_node = NULL;
     }
 
     //--------------------------------------------------------------------------
     void AdvanceOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
-      privilege_path.clear();
-      version_info.clear();
+      deactivate_internal();
+      advance_mask.clear();
       runtime->free_advance_op(this);
     }
 
@@ -4712,17 +4831,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t AdvanceOp::get_region_count(void) const
-    //--------------------------------------------------------------------------
-    {
-      return 1;
-    }
-
-    //--------------------------------------------------------------------------
     Operation::OpKind AdvanceOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return ADVANCE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& AdvanceOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return advance_mask;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4731,14 +4850,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CloseOp::CloseOp(Runtime *rt)
-      : Operation(rt)
+      : InternalOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CloseOp::CloseOp(const CloseOp &rhs)
-      : Operation(NULL)
+      : InternalOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4789,6 +4908,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const FieldMask& CloseOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should only be called by inherited classes
+      assert(false);
+      return *(new FieldMask());
+    }
+
+    //--------------------------------------------------------------------------
     void CloseOp::initialize_close(SingleTask *ctx,
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
@@ -4796,26 +4924,26 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
+      // Only initialize the operation here, this is not a trace-able op
       initialize_operation(ctx, track);
-      if (!track)
-        context_index = ctx->register_new_close_operation(this);
+      // Never track this so don't get the close index
       parent_task = ctx;
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::initialize_close(SingleTask *ctx, unsigned idx, bool track)
+    void CloseOp::initialize_close(Operation *creator, unsigned idx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
-      initialize_operation(ctx, track);
-      if (!track)
-        context_index = ctx->register_new_close_operation(this);
-      parent_task = ctx;
-      ctx->clone_requirement(idx, requirement);
+      initialize_internal(creator, idx);
+      // We always track this so get the close index
+      context_index = parent_ctx->register_new_close_operation(this);
+      parent_task = parent_ctx;
+      parent_ctx->clone_requirement(idx, requirement);
       initialize_privilege_path(privilege_path, requirement);
     }
 
@@ -4856,7 +4984,7 @@ namespace Legion {
     void CloseOp::activate_close(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      activate_internal();
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
@@ -4866,7 +4994,7 @@ namespace Legion {
     void CloseOp::deactivate_close(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      deactivate_internal();
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
@@ -4897,119 +5025,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Trace Close Operation 
+    // Inter Close Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCloseOp::TraceCloseOp(Runtime *runtime)
+    InterCloseOp::InterCloseOp(Runtime *runtime)
       : CloseOp(runtime)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TraceCloseOp::~TraceCloseOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceCloseOp::initialize_trace_close_op(SingleTask *ctx, 
-                                                 const RegionRequirement &req,
-                                                 LegionTrace *trace, int close, 
-                                                 const FieldMask &close_m,
-                                                 Operation *create)
-    //--------------------------------------------------------------------------
-    {
-      // Don't track these kinds of closes
-      // We don't want to be stalling in the analysis pipeline
-      // because we ran out of slots to issue
-      initialize_close(ctx, req, false/*track*/);
-      // Since we didn't register with our parent, we need to set
-      // any trace that we might have explicitly. Get whether we
-      // are tracing from the creation operation.
-      if (trace != NULL)
-        set_trace(trace, create->is_tracing());
-      requirement = req;
-      initialize_privilege_path(privilege_path, requirement);
-      close_idx = close;
-      close_mask = close_m;
-      create_op = create;
-      create_gen = create_op->get_generation(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceCloseOp::activate_trace_close(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_close();
-      close_idx = -1;
-      create_op = NULL;
-      create_gen = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceCloseOp::deactivate_trace_close(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_close();
-      target_children.clear();
-      next_children.clear();
-      close_mask.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceCloseOp::record_trace_dependence(Operation *target, 
-                                               GenerationID target_gen,
-                                               int target_idx,
-                                               int source_idx, 
-                                               DependenceType dtype,
-                                               const FieldMask &dependent_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(close_idx >= 0);
-#endif
-      // Check to see if the target is also our creator
-      // in which case we can skip it
-      if ((target == create_op) && (target_gen == create_gen))
-        return;
-      // Check to see if the source is our source
-      if (source_idx != close_idx)
-        return;
-      FieldMask overlap = close_mask & dependent_mask;
-      // If the fields also don't overlap then we are done
-      if (!overlap)
-        return;
-      // Otherwise do the registration
-      register_region_dependence(0/*idx*/, target, target_gen,
-                               target_idx, dtype, false/*validates*/, overlap);
-    }
-
-    //--------------------------------------------------------------------------
-    void TraceCloseOp::add_next_child(const ColorPoint &next_child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(next_child.is_valid());
-#endif
-      next_children.insert(next_child);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Inter Close Operation 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    InterCloseOp::InterCloseOp(Runtime *runtime)
-      : TraceCloseOp(runtime)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     InterCloseOp::InterCloseOp(const InterCloseOp &rhs)
-      : TraceCloseOp(NULL)
+      : CloseOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5048,22 +5076,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
                   const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
-                                  LegionTrace *trace, int close, 
+                                  LegionTrace *trace, int close_idx, 
                                   const FieldMask &close_m, 
-                                  const FieldMask &leave_m, Operation *create)
+                                  const FieldMask &leave_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
+      initialize_close(creator, close_idx);
       close_nodes = to_close;
+      close_mask = close_m;
       leave_open_mask = leave_m;
-      parent_req_index = create->find_parent_index(close_idx);
+      parent_req_index = creator->find_parent_index(close_idx);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)
       {
         perform_logging(true/*is intermediate close op*/, false/*read only*/);
         LegionSpy::log_close_op_creator(unique_op_id,
-                                        create->get_unique_op_id(),
+                                        creator->get_unique_op_id(),
                                         close_idx);
       }
     } 
@@ -5072,7 +5101,7 @@ namespace Legion {
     void InterCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_trace_close();  
+      activate_close();  
       mapper = NULL;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
@@ -5081,13 +5110,14 @@ namespace Legion {
     void InterCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_trace_close();
+      deactivate_close();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
       close_nodes.clear();
+      close_mask.clear();
       leave_open_mask.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
@@ -5105,6 +5135,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return INTER_CLOSE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& InterCloseOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return close_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5139,6 +5176,7 @@ namespace Legion {
       else
         chosen_instances = restrict_info.get_instances();
       // Now we can perform our close operation
+      // TODO: delete target children and next children
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/, 
@@ -5191,7 +5229,7 @@ namespace Legion {
       assert(idx == 0);
       assert(create_op != NULL);
 #endif
-      return create_op->find_parent_index(close_idx);
+      return create_op->find_parent_index(creator_req_idx);
     }
 
     //--------------------------------------------------------------------------
@@ -5424,14 +5462,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReadCloseOp::ReadCloseOp(Runtime *rt)
-      : TraceCloseOp(rt)
+      : CloseOp(rt)
     //--------------------------------------------------------------------------
     {
     }
     
     //--------------------------------------------------------------------------
     ReadCloseOp::ReadCloseOp(const ReadCloseOp &rhs)
-      : TraceCloseOp(NULL)
+      : CloseOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5469,17 +5507,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReadCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                 LegionTrace *trace, int close,
-                                 const FieldMask &close_m, Operation *create)
+                                 LegionTrace *trace, int close_idx,
+                                 const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
-      initialize_trace_close_op(ctx, req, trace, close, close_m, create);
-      parent_req_index = create->find_parent_index(close_idx);
+      initialize_close(creator, close_idx);
+      close_mask = close_m;
+      parent_req_index = creator->find_parent_index(close_idx);
       if (Runtime::legion_spy_enabled)
       {
         perform_logging(true/*is intermediate close op*/, true/*read only*/);
         LegionSpy::log_close_op_creator(unique_op_id,
-                                        create->get_unique_op_id(),
+                                        creator->get_unique_op_id(),
                                         close_idx);
       }
     }
@@ -5488,14 +5527,15 @@ namespace Legion {
     void ReadCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_trace_close();
+      activate_close();
     }
     
     //--------------------------------------------------------------------------
     void ReadCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_trace_close();
+      deactivate_close();
+      close_mask.clear();
       runtime->free_read_close_op(this);
     }
 
@@ -5511,6 +5551,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return READ_CLOSE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    const FieldMask& ReadCloseOp::get_internal_mask(void) const
+    //--------------------------------------------------------------------------
+    {
+      return close_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5562,7 +5609,7 @@ namespace Legion {
     void PostCloseOp::initialize(SingleTask *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, idx, true/*track*/);
+      initialize_close(ctx, ctx->regions[idx], true/*track*/);
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)
@@ -5839,7 +5886,7 @@ namespace Legion {
     void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index)
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, index, true/*track*/);
+      initialize_close(ctx, ctx->regions[index], true/*track*/);
       // Make this read-write to pick up the earlier changes
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;

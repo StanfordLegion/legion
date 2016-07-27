@@ -1294,15 +1294,28 @@ namespace Legion {
                                  RegionTreePath &path,
                                  const TraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
-                                 const bool report_uninitialized = false);
+                                 const FieldMask &local_open_mask,
+                                 FieldMask &unopened_field_mask,
+                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
+      void create_logical_open(CurrentState &state,
+                               const FieldMask &open_mask,
+                               const LogicalUser &creator,
+                               const RegionTreePath &path);
+      void create_logical_advance(CurrentState &state,
+                                  const FieldMask &advance_mask,
+                                  const LogicalUser &creator,
+                    LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
       void register_local_user(CurrentState &state,
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
-      void open_logical_node(ContextID ctx,
-                             const LogicalUser &user,
-                             RegionTreePath &path,
-                             const TraceInfo &trace_info,
-                             const ProjectionInfo &projection_info);
+      void add_open_field_state(CurrentState &state, bool arrived,
+                                const ProjectionInfo &projection_info,
+                                const LogicalUser &user,
+                                const FieldMask &open_mask,
+                                const ColorPoint &next_child);
+      void perform_advance_analysis(CurrentState &state, 
+                                    const LogicalUser &advance_user,
+                                    const LogicalUser &create_user);
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user);
       void close_logical_node(LogicalCloser &closer,

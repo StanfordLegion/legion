@@ -1510,9 +1510,14 @@ namespace Legion {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_user(ctx.get_id(), user, path, 
-                                         trace_info, projection_info,
-                                         true/*report uninitialized*/);
+      {
+        FieldMask empty_local;
+        FieldMask unopened = user_mask;
+        LegionMap<AdvanceOp*,LogicalUser>::aligned advances;
+        parent_node->register_logical_user(ctx.get_id(), user, path, 
+                                           trace_info, projection_info,
+                                           empty_local, unopened, advances);
+      }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -10188,7 +10193,9 @@ namespace Legion {
                                                RegionTreePath &path,
                                                const TraceInfo &trace_info,
                                                const ProjectionInfo &proj_info,
-                                               const bool report_uninitialized)
+                                               const FieldMask &local_open_mask,
+                                               FieldMask &unopened_field_mask,
+                           LegionMap<AdvanceOp*,LogicalUser>::aligned &advances)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -10203,23 +10210,22 @@ namespace Legion {
       ColorPoint next_child;
       if (!arrived)
         next_child = path.get_child(depth);
-      // If we've arrived and we're doing analysis for a projection 
-      // requirement then we skip the closes for now as we will end up
-      // doing them later. We can also skip the close operations for 
-      // any operations which have arrived and have read-write privileges
-      // because they will be doing their own close operations.
+      // If we have any open operations to perform, we can do them now
+      if (!!local_open_mask)
+        create_logical_open(state, local_open_mask, user, path);
+      // Now check to see if we need to do any close operations
+      if (!!unopened_field_mask)
       {
-        // Now check to see if we need to do any close operations
         // Close up any children which we may have dependences on below
         const bool captures_closes = true;
         LogicalCloser closer(ctx, user, this, 
                              arrived/*validates*/, captures_closes);
         // Special siphon operation for arrived projecting functions
         if (arrived && proj_info.is_projecting())
-          siphon_logical_projection(closer, state, user.field_mask,
+          siphon_logical_projection(closer, state, unopened_field_mask,
                                     proj_info, captures_closes, open_below);
         else
-          siphon_logical_children(closer, state, user.field_mask,
+          siphon_logical_children(closer, state, unopened_field_mask,
                                   captures_closes, next_child, open_below);
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
@@ -10244,10 +10250,52 @@ namespace Legion {
           // Now we can add the close operations to the current epoch
           closer.register_close_operations(state.curr_epoch_users);
         }
+        // See if we have any open_only fields to merge
+        FieldMask open_only = user.field_mask - unopened_field_mask;
+        if (!!open_only)
+          add_open_field_state(state, arrived, proj_info, 
+                               user, open_only, next_child);
+      }
+      else
+      {
+        // Everything is open-only so make a state and merge it in
+        add_open_field_state(state, arrived, proj_info, 
+                             user, user.field_mask, next_child);
+      }
+      // Perform dependence analysis for any of our advance operations
+      // since we know we will depend on them so anything they depend
+      // on then we will also automatically depend on us as well
+      if (!advances.empty())
+      {
+        for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it = 
+              advances.begin(); it != advances.end(); it++)
+          perform_advance_analysis(state, it->second, user);
+      }
+      // See if we need to perform any advance operations
+      // because we're going to be writing below this level
+      if (HAS_WRITE(user.usage) && (!arrived || proj_info.is_projecting()))
+      {
+        FieldMask advance_mask = user.field_mask - state.dirty_below; 
+        if (!!advance_mask)
+        {
+          // These fields are now dirty below
+          state.dirty_below |= advance_mask;
+          // Now see which ones are handled from advances from above
+          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                advances.begin(); it != advances.end(); it++)
+          {
+            advance_mask -= it->second.field_mask;
+            if (!advance_mask)
+              break;
+          }
+          // If we still have fields, then we have to make a new advance
+          if (!!advance_mask)
+            create_logical_advance(state, advance_mask, user, advances);
+        }
       }
       // We also always do our dependence analysis even if we have
       // already traced because we need to pick up dependences on 
-      // any dynamic close operations that we need to do
+      // any dynamic open, advance, or close operations that we need to do
       // Now that we registered any close operation, do our analysis
       FieldMask dominator_mask = 
              perform_dependence_checks<CURR_LOGICAL_ALLOC,
@@ -10288,16 +10336,96 @@ namespace Legion {
         // reduction at this node in the region tree
         if ((user.usage.redop > 0) && !proj_info.is_projecting())
           record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // Finish dependence analysis for any advance operations
+        if (!advances.empty())
+        {
+          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                advances.begin(); it != advances.end(); it++)
+          {
+            // Set our final node depending on whether we have a
+            // projection function and if so what its depth is
+            if (proj_info.is_projecting() && 
+                (proj_info.projection->depth > 0))
+              it->first->set_child_node(this);
+            else
+              it->first->set_child_node(get_parent());
+            // Now we can mark that the dependence analysis is done
+            it->first->end_dependence_analysis();
+          }
+        }
       }
       else 
       {
         // Haven't arrived, yet, so keep going down the tree
         RegionTreeNode *child = get_tree_child(next_child);
-        if (!open_below)
-          child->open_logical_node(ctx, user, path, trace_info, proj_info);
-        else
-          child->register_logical_user(ctx, user, path, trace_info,proj_info);
+        // Get our set of fields which are being opened for
+        // the first time at the next level
+        FieldMask open_next = unopened_field_mask - open_below;
+        // Update our unopened children mask
+        // to reflect any fields which are still open below
+        unopened_field_mask &= open_below;
+        child->register_logical_user(ctx, user, path, trace_info, proj_info, 
+                                     open_next, unopened_field_mask, advances);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::create_logical_open(CurrentState &state,
+                                             const FieldMask &open_mask,
+                                             const LogicalUser &creator,
+                                             const RegionTreePath &path)
+    //--------------------------------------------------------------------------
+    {
+      OpenOp *open = context->runtime->get_available_open_op(false); 
+      open->initialize(open_mask, this, path, creator.op, creator.idx);
+      // Add it to the list of current users
+      LogicalUser open_user(open, 0/*idx*/,
+            RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), open_mask);
+      open->add_mapping_reference(open_user.gen);
+      state.curr_epoch_users.push_back(open_user);
+      // Register dependences against anything else that the creator 
+      // operation has_dependences on 
+      open->begin_dependence_analysis();
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users =
+        creator.op->get_logical_records();
+      perform_dependence_checks<LOGICAL_REC_ALLOC,
+            false/*record*/, false/*has skip*/, false/*track dom*/>(
+                open_user, above_users, open_mask, 
+                open_mask/*doesn't matter*/, false/*validates*/);
+      open->end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::create_logical_advance(CurrentState &state,
+                                                const FieldMask &advance_mask,
+                                                const LogicalUser &creator,
+                           LegionMap<AdvanceOp*,LogicalUser>::aligned &advances) 
+    //--------------------------------------------------------------------------
+    {
+      // These are the fields for which we have to issue an advance op
+      AdvanceOp *advance = 
+        context->runtime->get_available_advance_op(false); 
+      advance->initialize(this, advance_mask, creator.op, creator.idx);
+      LogicalUser advance_user(advance, 0/*idx*/, 
+          RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), advance_mask);
+      // Add it to the list of current epoch users even if we're tracing 
+      advance->add_mapping_reference(advance_user.gen);
+      state.curr_epoch_users.push_back(advance_user);
+      // Start our dependence analysis, we'll finish it when we
+      // reach our destination
+      advance->begin_dependence_analysis();
+      // Perform analysis against everything the creating operation had
+      // dependences on as well
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
+        creator.op->get_logical_records();
+      perform_dependence_checks<LOGICAL_REC_ALLOC,
+        false/*record*/, false/*has skip*/, false/*track dom*/>(
+            advance_user, above_users, advance_mask,
+            advance_mask/*doesn't matter*/, false/*validates*/);
+      // Now perform our local dependence analysis for this advance
+      perform_advance_analysis(state, advance_user, creator);
+      // Update our list of advance operations
+      advances[advance] = advance_user;
     }
 
     //--------------------------------------------------------------------------
@@ -10319,44 +10447,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::open_logical_node(ContextID ctx,
-                                           const LogicalUser &user,
-                                           RegionTreePath &path,
-                                           const TraceInfo &trace_info,
-                                           const ProjectionInfo &proj_info)
+    void RegionTreeNode::add_open_field_state(CurrentState &state, bool arrived,
+                                              const ProjectionInfo &proj_info,
+                                              const LogicalUser &user,
+                                              const FieldMask &open_mask,
+                                              const ColorPoint &next_child)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_OPEN_LOGICAL_NODE_CALL);
-      CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
-      const unsigned depth = get_depth(); 
-      const bool arrived = !path.has_child(depth);
-      if (arrived)
+      if (arrived && proj_info.is_projecting())
       {
-        // Do the local registration of this user
-        register_local_user(state, user, trace_info);
-        // If this is a reduction, record that we have an outstanding 
-        // reduction at this node in the region tree
-        if ((user.usage.redop > 0) && !proj_info.is_projecting())
-          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        FieldState new_state(user, open_mask, proj_info.projection,
+             proj_info.projection_domain, are_all_children_disjoint());
+        merge_new_field_state(state, new_state);
       }
-      else
+      else if (next_child.is_valid())
       {
+        FieldState new_state(user, open_mask, next_child);
+        merge_new_field_state(state, new_state);
+      }
 #ifdef DEBUG_LEGION
-        assert(user.field_mask * state.dirty_below);
+      sanity_check_logical_state(state);
 #endif
-        const ColorPoint &next_child = path.get_child(depth);
-        // Update our field states
-        merge_new_field_state(state, 
-                              FieldState(user, user.field_mask, next_child));
-#ifdef DEBUG_LEGION
-        sanity_check_logical_state(state);
-#endif
-        // Then continue the traversal
-        RegionTreeNode *child_node = get_tree_child(next_child);
-        child_node->open_logical_node(ctx, user, path, trace_info, proj_info);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::perform_advance_analysis(CurrentState &state,
+                                                const LogicalUser &advance_user,
+                                                const LogicalUser &create_user)
+    //--------------------------------------------------------------------------
+    {
+      // We know we are dominating from above, so we don't care about
+      // open below fields for advance analysis
+      FieldMask empty_below;
+      FieldMask dominator_mask = 
+            perform_dependence_checks<CURR_LOGICAL_ALLOC,
+                    false/*record*/, true/*has skip*/, true/*track dom*/>(
+              advance_user, state.curr_epoch_users, advance_user.field_mask,
+              empty_below, false/*validates*/, create_user.op, create_user.gen);
+      FieldMask non_dominated_mask = advance_user.field_mask - dominator_mask;
+      if (!!non_dominated_mask)
+      {
+        perform_dependence_checks<PREV_LOGICAL_ALLOC,
+                    false/*record*/, true/*has skip*/, false/*track dom*/>(
+              advance_user, state.prev_epoch_users, non_dominated_mask,
+              empty_below, false/*validates*/, create_user.op, create_user.gen);
+      }
+      // We dominate from above so we can always safely filter operations
+      if (!!dominator_mask)
+      {
+        filter_prev_epoch_users(state, dominator_mask);
+        filter_curr_epoch_users(state, dominator_mask);
       }
     }
 
@@ -13999,7 +14142,7 @@ namespace Legion {
     // This function is a little out of place to make sure we get the 
     // templates instantiated properly
     //--------------------------------------------------------------------------
-    void LogicalCloser::register_dependences(TraceCloseOp *close_op,
+    void LogicalCloser::register_dependences(CloseOp *close_op,
                                              const LogicalUser &close_user,
                                              const LogicalUser &current,
                                              const FieldMask &open_below,
@@ -14095,7 +14238,7 @@ namespace Legion {
         if ((it->op == closer.user.op) && (it->gen == closer.user.gen))
         {
           // Report the interfering close operation
-          it->op->report_interfering_close_requirement(it->idx);
+          it->op->report_interfering_internal_requirement(it->idx);
           it->field_mask -= overlap; 
           if (!it->field_mask)
           {

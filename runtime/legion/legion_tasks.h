@@ -856,7 +856,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void report_interfering_close_requirement(unsigned idx);
+      virtual void report_interfering_internal_requirement(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
@@ -1263,7 +1263,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void report_interfering_close_requirement(unsigned idx);
+      virtual void report_interfering_internal_requirement(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void resolve_false(void);

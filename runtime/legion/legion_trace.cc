@@ -79,7 +79,7 @@ namespace Legion {
 #endif
       operations.clear();
       op_map.clear();
-      close_dependences.clear();
+      internal_dependences.clear();
       tracing = false;
 #ifdef LEGION_SPY
       current_uids.clear();
@@ -128,7 +128,7 @@ namespace Legion {
       if (tracing)
       {
         // This is the normal case
-        if (!op->is_close_op())
+        if (!op->is_internal_op())
         {
           operations.push_back(key);
           op_map[key] = index;
@@ -138,12 +138,17 @@ namespace Legion {
           // it is being replayed correctly
           op_info.push_back(OperationInfo(op));
         }
-        else // Otherwise, track close operations separately
-          close_dependences[key] = LegionVector<DependenceRecord>::aligned();
+        else // Otherwise, track internal operations separately
+        {
+          std::pair<InternalOp*,GenerationID> 
+            local_key(static_cast<InternalOp*>(op),gen);
+          internal_dependences[local_key] = 
+            LegionVector<DependenceRecord>::aligned();
+        }
       }
       else
       {
-        if (!op->is_close_op())
+        if (!op->is_internal_op())
         {
           // Check for exceeding the trace size
           if (index >= dependences.size())
@@ -246,23 +251,23 @@ namespace Legion {
 #endif
           const LegionVector<DependenceRecord>::aligned &deps = 
                                                         dependences[index-1];
-          // Special case for close operations
-          // Close operations need to register transitive dependences
+          // Special case for internal operations
+          // Internal operations need to register transitive dependences
           // on all the other operations with which it interferes.
           // We can get this from the set of operations on which the
           // operation we are currently performing dependence analysis
           // has dependences.
-          TraceCloseOp *close_op = static_cast<TraceCloseOp*>(op);
+          InternalOp *internal_op = static_cast<InternalOp*>(op);
 #ifdef DEBUG_LEGION
-          assert(close_op == dynamic_cast<TraceCloseOp*>(op));
+          assert(internal_op == dynamic_cast<InternalOp*>(op));
 #endif
-          int closing_index = close_op->get_close_index();
+          int internal_index = internal_op->get_internal_index();
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
-            // We only record dependences for this close operation on
-            // the indexes for which this close operation is being done
-            if (closing_index != it->next_idx)
+            // We only record dependences for this internal operation on
+            // the indexes for which this internal operation is being done
+            if (internal_index != it->next_idx)
               continue;
 #ifdef DEBUG_LEGION
             assert((it->operation_idx >= 0) &&
@@ -273,7 +278,7 @@ namespace Legion {
             // If this is the case we can do the normal registration
             if ((it->prev_idx == -1) || (it->next_idx == -1))
             {
-              close_op->register_dependence(target.first, target.second);
+              internal_op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_parent()->get_unique_op_id(),
@@ -285,14 +290,14 @@ namespace Legion {
             }
             else
             {
-              close_op->record_trace_dependence(target.first, target.second,
-                                                it->prev_idx, it->next_idx,
-                                                it->dtype, it->dependent_mask);
+              internal_op->record_trace_dependence(target.first, target.second,
+                                                 it->prev_idx, it->next_idx,
+                                                 it->dtype, it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  close_op->get_parent()->get_unique_op_id(),
+                  internal_op->get_parent()->get_unique_op_id(),
                   current_uids[it->operation_idx], it->prev_idx,
-                  close_op->get_unique_op_id(), 0, it->dtype);
+                  internal_op->get_unique_op_id(), 0, it->dtype);
 #endif
             }
           }
@@ -303,12 +308,12 @@ namespace Legion {
           if (finder != alias_reqs.end())
           {
             Operation *create_op = operations.back().first;
-            unsigned close_idx = close_op->get_close_index();
+            unsigned internal_idx = internal_op->get_internal_index();
             for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
                   it = finder->second.begin(); it != finder->second.end(); it++)
             {
-              if (it->second == close_idx)
-                create_op->report_interfering_close_requirement(it->first);
+              if (it->second == internal_idx)
+                create_op->report_interfering_internal_requirement(it->first);
             }
           }
         }
@@ -322,7 +327,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tracing);
-      if (!source->is_close_op())
+      if (!source->is_internal_op())
       {
         assert(operations.back().first == source);
         assert(operations.back().second == src_gen);
@@ -335,46 +340,50 @@ namespace Legion {
       if (finder != op_map.end())
       {
         // Two cases here
-        if (!source->is_close_op())
+        if (!source->is_internal_op())
         {
           // Normal case
           dependences.back().push_back(DependenceRecord(finder->second));
         }
         else
         {
-          // Otherwise this is a close op so record it special
+          // Otherwise this is an internal op so record it special
           // Don't record dependences on our creator
           if (target_key != operations.back())
           {
-            std::pair<Operation*,GenerationID> src_key(source, src_gen);
+            std::pair<InternalOp*,GenerationID> 
+              src_key(static_cast<InternalOp*>(source), src_gen);
 #ifdef DEBUG_LEGION
-            assert(close_dependences.find(src_key) != close_dependences.end());
+            assert(internal_dependences.find(src_key) != 
+                   internal_dependences.end());
 #endif
-            close_dependences[src_key].push_back(
+            internal_dependences[src_key].push_back(
                 DependenceRecord(finder->second));
           }
         }
       }
-      else if (target->is_close_op())
+      else if (target->is_internal_op())
       {
-        // They shouldn't both be close operations, if they are, then
+        // They shouldn't both be internal operations, if they are, then
         // they should be going through the other path that tracks
         // dependences based on specific region requirements
 #ifdef DEBUG_LEGION
-        assert(!source->is_close_op());
+        assert(!source->is_internal_op());
 #endif
-        // First check to see if the close op is one of ours
-        std::map<std::pair<Operation*,GenerationID>,
+        // First check to see if the internal op is one of ours
+        std::pair<InternalOp*,GenerationID> 
+          local_key(static_cast<InternalOp*>(target),tar_gen);
+        std::map<std::pair<InternalOp*,GenerationID>,
                 LegionVector<DependenceRecord>::aligned>::const_iterator
-          close_finder = close_dependences.find(target_key);
-        if (close_finder != close_dependences.end())
+          internal_finder = internal_dependences.find(local_key);
+        if (internal_finder != internal_dependences.end())
         {
           LegionVector<DependenceRecord>::aligned &target_deps = 
                                                         dependences.back();
-          const LegionVector<DependenceRecord>::aligned &close_deps = 
-                                                        close_finder->second;
+          const LegionVector<DependenceRecord>::aligned &internal_deps = 
+                                                        internal_finder->second;
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
-                close_deps.begin(); it != close_deps.end(); it++)
+                internal_deps.begin(); it != internal_deps.end(); it++)
           {
             target_deps.push_back(DependenceRecord(it->operation_idx)); 
           }
@@ -396,7 +405,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tracing);
-      if (!source->is_close_op())
+      if (!source->is_internal_op())
       {
         assert(operations.back().first == source);
         assert(operations.back().second == src_gen);
@@ -409,7 +418,7 @@ namespace Legion {
       if (finder != op_map.end())
       {
         // Two cases here, 
-        if (!source->is_close_op())
+        if (!source->is_internal_op())
         {
           // Normal case
           dependences.back().push_back(
@@ -418,36 +427,40 @@ namespace Legion {
         }
         else
         {
-          // Otherwise this is a close op so record it special
+          // Otherwise this is a internal op so record it special
           // Don't record dependences on our creator
           if (target_key != operations.back())
           { 
-            std::pair<Operation*,GenerationID> src_key(source, src_gen);
+            std::pair<InternalOp*,GenerationID> 
+              src_key(static_cast<InternalOp*>(source), src_gen);
 #ifdef DEBUG_LEGION
-            assert(close_dependences.find(src_key) != close_dependences.end());
+            assert(internal_dependences.find(src_key) != 
+                   internal_dependences.end());
 #endif
-            close_dependences[src_key].push_back(
+            internal_dependences[src_key].push_back(
                 DependenceRecord(finder->second, target_idx, source_idx,
                                  validates, dtype, dep_mask));
           }
         }
       }
-      else if (target->is_close_op())
+      else if (target->is_internal_op())
       {
-        // First check to see if the close op is one of ours
-        std::map<std::pair<Operation*,GenerationID>,
+        // First check to see if the internal op is one of ours
+        std::pair<InternalOp*,GenerationID> 
+          local_key(static_cast<InternalOp*>(target), tar_gen);
+        std::map<std::pair<InternalOp*,GenerationID>,
                  LegionVector<DependenceRecord>::aligned>::const_iterator
-          close_finder = close_dependences.find(target_key);
-        if (close_finder != close_dependences.end())
+          internal_finder = internal_dependences.find(local_key);
+        if (internal_finder != internal_dependences.end())
         {
           // It is one of ours, so two cases
-          if (!source->is_close_op())
+          if (!source->is_internal_op())
           {
-            // Iterate over the close operation dependences and 
+            // Iterate over the internal operation dependences and 
             // translate them to our dependences
             for (LegionVector<DependenceRecord>::aligned::const_iterator
-                  it = close_finder->second.begin(); 
-                  it != close_finder->second.end(); it++)
+                  it = internal_finder->second.begin(); 
+                  it != internal_finder->second.end(); it++)
             {
               FieldMask overlap = it->dependent_mask & dep_mask;
               if (!overlap)
@@ -459,22 +472,24 @@ namespace Legion {
           }
           else
           {
-            // Iterate over the close operation dependences
+            // Iterate over the internal operation dependences
             // and translate them to our dependences
-            std::pair<Operation*,GenerationID> src_key(source, src_gen);
+            std::pair<InternalOp*,GenerationID> 
+              src_key(static_cast<InternalOp*>(source), src_gen);
 #ifdef DEBUG_LEGION
-            assert(close_dependences.find(src_key) != close_dependences.end());
+            assert(internal_dependences.find(src_key) != 
+                   internal_dependences.end());
 #endif
-            LegionVector<DependenceRecord>::aligned &close_deps = 
-                                                    close_dependences[src_key];
+            LegionVector<DependenceRecord>::aligned &internal_deps = 
+                                              internal_dependences[src_key];
             for (LegionVector<DependenceRecord>::aligned::const_iterator
-                  it = close_finder->second.begin(); 
-                  it != close_finder->second.end(); it++)
+                  it = internal_finder->second.begin(); 
+                  it != internal_finder->second.end(); it++)
             {
               FieldMask overlap = it->dependent_mask & dep_mask;
               if (!overlap)
                 continue;
-              close_deps.push_back(
+              internal_deps.push_back(
                   DependenceRecord(it->operation_idx, it->prev_idx,
                     source_idx, it->validates, it->dtype, overlap));
             }
