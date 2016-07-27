@@ -24,6 +24,8 @@ before_script:
 # Define tests to run.
 .tests: &tests
   script:
+    - pwd
+    - cd legion
     - ./language/travis.py
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
