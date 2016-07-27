@@ -19,7 +19,9 @@ variables:
 
 # This set of commands will run before each job.
 before_script:
+  - echo before
   - uname -a
+  - env
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
@@ -39,8 +41,8 @@ before_script:
 # Define tests to run.
 .tests: &tests
   script:
-    - pwd
-    - ls -la
+    - echo test
+    - env
     - ./language/travis.py
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
