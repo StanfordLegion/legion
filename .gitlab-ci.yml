@@ -16,7 +16,6 @@ variables:
 # This set of commands will run before each job.
 before_script:
   - uname -a
-  - env
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
