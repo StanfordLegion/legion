@@ -1037,6 +1037,10 @@ void PennantMapper::select_task_options(Task *task)
   if (!task->regions.empty()) {
     if (task->regions[0].handle_type == SINGULAR) {
       Color index = get_logical_region_color(task->regions[0].region);
+#define NO_SPMD 0
+#if NO_SPMD
+        task->target_proc = procs_list[index % procs_list.size()];
+#else
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[task->target_proc]];
       if (local_procs.size() > 1) {
@@ -1044,6 +1048,7 @@ void PennantMapper::select_task_options(Task *task)
       } else {
         task->target_proc = local_procs[0];
       }
+#endif
     }
   }
 }
