@@ -3839,6 +3839,9 @@ function codegen.expr_list_slice_partition(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_slice_partition")
@@ -3853,6 +3856,9 @@ function codegen.expr_list_slice_partition(cx, node)
         [cx.runtime], [cx.context], [partition.value].impl, color)
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_slice_partition %e\n", stop - start)
   end
 
   return values.value(
@@ -3889,6 +3895,9 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
@@ -3926,6 +3935,9 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_duplicate_partition %e\n", stop - start)
   end
 
   return values.value(
@@ -4009,6 +4021,8 @@ function codegen.expr_list_cross_product(cx, node)
   actions = quote
     [actions]
 
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+
     var lhs_list : c.legion_terra_index_space_list_t
     lhs_list.space.tid = 0
     lhs_list.space.id = 0
@@ -4090,6 +4104,9 @@ function codegen.expr_list_cross_product(cx, node)
     c.legion_terra_index_space_list_list_destroy(product)
     c.free(lhs_list.subspaces)
     c.free(rhs_list.subspaces)
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_cross_product %e\n", stop - start)
   end
 
   return values.value(
@@ -4125,6 +4142,8 @@ function codegen.expr_list_cross_product_complete(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
 
     regentlib.assert([product.value].__size == [lhs.value].__size,
                      "size mismatch in list_cross_product 1")
@@ -4206,6 +4225,9 @@ function codegen.expr_list_cross_product_complete(cx, node)
     c.legion_terra_index_space_list_list_destroy(complete_product)
     c.free(lhs_list.subspaces)
     -- c.free(rhs_list.subspaces)
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_cross_product_complete %e\n", stop - start)
   end
 
   return values.value(
@@ -4227,6 +4249,8 @@ function codegen.expr_list_phase_barriers(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
 
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [product.value].__size)
@@ -4255,6 +4279,9 @@ function codegen.expr_list_phase_barriers(cx, node)
           }
       end
     end
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_phase_barriers %e\n", stop - start)
   end
 
   return values.value(
@@ -4282,6 +4309,8 @@ function codegen.expr_list_invert(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
 
     -- 1. Compute an index from colors to rhs index.
     -- 2. Compute sublist sizes.
@@ -4421,6 +4450,9 @@ function codegen.expr_list_invert(cx, node)
       c.free(subslots)
       c.free(color_to_index)
     end
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_invert %e\n", stop - start)
   end
 
   return values.value(
