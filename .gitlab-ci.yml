@@ -28,7 +28,7 @@ before_script:
       popd
     fi
 .settings: &settings
-  image: ubuntu:14.04
+  image: stanfordlegion/gitlab-ci
 regent:
   <<: *settings
   script:
