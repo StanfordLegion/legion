@@ -1,9 +1,10 @@
+# Global variables (defined for all jobs):
+variables:
+  LLVM_CONFIG: llvm-config-3.5
+
+# This set of commands will run before each job.
 before_script:
   - uname -a
-  - export CXX=g++
-  - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
-  - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
-  - if [[ "$(uname)" = "Linux" ]]; then export LLVM_CONFIG="llvm-config-3.5"; fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
@@ -15,15 +16,15 @@ before_script:
       make -j2
       popd
     fi
-.settings: &settings
-  image: stanfordlegion/gitlab-ci
-regent:
-  <<: *settings
+
+# Define Docker image to use.
+.image: &image
+  image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+
+# Define tests to run.
+.tests: &tests
   script:
     - ./language/travis.py
-legion:
-  <<: *settings
-  script:
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
@@ -52,9 +53,6 @@ legion:
       examples/full_circuit/ckt_sim -logfile out_%.log
       make -s -C examples/full_ghost LG_RT_DIR=../../runtime
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
-realm:
-  <<: *settings
-  script:
     - |
       if [[ "$DEBUG" -eq 0 ]]; then
         make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
@@ -65,3 +63,68 @@ realm:
         make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
         make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
       fi
+
+# Define the list of jobs to run.
+# - GCC
+gcc_cxx98_release:
+  variables:
+    CXX: g++-4.9
+    DEBUG: 0
+    CC_FLAGS: "-std=c++98"
+  <<: *image
+  <<: *tests
+gcc_cxx98_debug_checks:
+  variables:
+    CXX: g++-4.9
+    DEBUG: 1
+    CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+  <<: *image
+  <<: *tests
+gcc_cxx98_debug_spy:
+  variables:
+    CXX: g++-4.9
+    DEBUG: 1
+    CC_FLAGS: "-std=c++98"
+    TEST_SPY: 1
+  <<: *image
+  <<: *tests
+gcc_cxx11_release:
+  variables:
+    CXX: g++-4.9
+    DEBUG: 0
+    CC_FLAGS: "-std=c++11"
+    TEST_SPY: 1
+  <<: *image
+  <<: *tests
+
+# - Clang
+clang_cxx98_release:
+  variables:
+    CXX: clang++-3.5
+    DEBUG: 0
+    CC_FLAGS: "-std=c++98"
+  <<: *image
+  <<: *tests
+clang_cxx98_debug_checks:
+  variables:
+    CXX: clang++-3.5
+    DEBUG: 1
+    CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+  <<: *image
+  <<: *tests
+clang_cxx98_debug_spy:
+  variables:
+    CXX: clang++-3.5
+    DEBUG: 1
+    CC_FLAGS: "-std=c++98"
+    TEST_SPY: 1
+  <<: *image
+  <<: *tests
+clang_cxx11_release:
+  variables:
+    CXX: clang++-3.5
+    DEBUG: 0
+    CC_FLAGS: "-std=c++11"
+    TEST_SPY: 1
+  <<: *image
+  <<: *tests
