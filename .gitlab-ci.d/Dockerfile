@@ -11,5 +11,5 @@ RUN apt-get update -qq && \
     add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
-    apt-get install -qq build-essential git wget g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy && \
+    apt-get install -qq build-essential git time wget g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy && \
     apt-get clean
