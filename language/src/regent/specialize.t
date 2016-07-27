@@ -774,7 +774,7 @@ function specialize.expr_call(cx, node, allow_lists)
   elseif terralib.types.istype(fn.value) then
     return ast.specialized.expr.Cast {
       fn = fn,
-      args = specialize_expr_list(node.args),
+      args = specialize_expr_list(cx, node.args),
       annotations = node.annotations,
       span = node.span,
     }
