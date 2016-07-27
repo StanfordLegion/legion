@@ -47,8 +47,11 @@ def install_dependencies():
     return env
 
 def test(root_dir, debug, spy, env):
+    terra_flags = []
+    if 'TERRA_DIR' in env:
+        terra_flags = ['--with-terra', env['TERRA_DIR']]
     subprocess.check_call(
-        ['time', './install.py', '-j', '2', '--rdir=auto'] + (['--debug'] if debug else []),
+        ['time', './install.py', '-j', '2', '--rdir=auto'] + terra_flags + (['--debug'] if debug else []),
         env = env,
         cwd = root_dir)
     if not spy:
