@@ -1,6 +1,7 @@
 before_script:
   - |
     if [[ "$(uname)" = "Linux" ]]; then
+      apt-get install software-properties-common
       add-apt-repository ppa:ubuntu-toolchain-r/test -y
       add-apt-repository ppa:pypy/ppa -y
       apt-get update -qq
