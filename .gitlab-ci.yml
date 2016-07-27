@@ -5,21 +5,16 @@ variables:
 
 #  - Local:
 .gcc49: &gcc49
-  variables:
-    CXX: "g++-4.9"
+  CXX: "g++-4.9"
 .clang35: &clang35
-  variables:
-    CXX: "clang++-3.5"
+  CXX: "clang++-3.5"
 .debug: &debug
-  variables:
-    DEBUG: "1"
+  DEBUG: "1"
 .release: &release
-  variables:
-    DEBUG: "0"
+  DEBUG: "0"
 
 # This set of commands will run before each job.
 before_script:
-  - echo before
   - uname -a
   - env
   - |
@@ -41,8 +36,6 @@ before_script:
 # Define tests to run.
 .tests: &tests
   script:
-    - echo test
-    - env
     - ./language/travis.py
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
@@ -86,38 +79,46 @@ before_script:
 # Define the list of jobs to run.
 #  - GCC
 gcc_cxx98_release:
-  <<: [*gcc49, *release, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*gcc49, *release]
     CC_FLAGS: "-std=c++98"
 gcc_cxx98_debug_checks:
-  <<: [*gcc49, *debug, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*gcc49, *debug]
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 gcc_cxx98_debug_spy:
-  <<: [*gcc49, *debug, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*gcc49, *debug]
     CC_FLAGS: "-std=c++98 -DLEGION_SPY"
     TEST_SPY: "1"
 gcc_cxx11_release:
-  <<: [*gcc49, *release, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*gcc49, *release]
     CC_FLAGS: "-std=c++11"
 
 # - Clang
 clang_cxx98_release:
-  <<: [*clang35, *release, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*clang35, *release]
     CC_FLAGS: "-std=c++98"
 clang_cxx98_debug_checks:
-  <<: [*clang35, *debug, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*clang35, *debug]
     CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 clang_cxx98_debug_spy:
-  <<: [*clang35, *debug, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*clang35, *debug]
     CC_FLAGS: "-std=c++98 -DLEGION_SPY"
     TEST_SPY: "1"
 clang_cxx11_release:
-  <<: [*clang35, *release, *image, *tests]
+  <<: [*image, *tests]
   variables:
+    <<: [*clang35, *release]
     CC_FLAGS: "-std=c++11"
