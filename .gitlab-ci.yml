@@ -108,11 +108,11 @@ gcc_cxx11_release:
 clang_cxx98_release:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *release, cxx98_normal]
+    <<: [*clang35, *release, *cxx98_normal]
 clang_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *debug, cxx98_checks]
+    <<: [*clang35, *debug, *cxx98_checks]
 clang_cxx98_debug_spy:
   <<: [*image, *tests]
   variables:
