@@ -47,18 +47,22 @@ def install_dependencies():
     return env
 
 def test(root_dir, debug, spy, env):
+    threads = ['-j', '2'] if 'TRAVIS' in env else []
+    terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
+    debug_flag = ['--debug'] if debug else []
+
     subprocess.check_call(
-        ['time', './install.py', '-j', '2', '--rdir=auto'] + (['--debug'] if debug else []),
+        ['time', './install.py', '--rdir=auto'] + threads + terra + debug_flag,
         env = env,
         cwd = root_dir)
     if not spy:
         subprocess.check_call(
-            ['time', './test.py', '-q', '-j', '2'] + (['--debug'] if debug else []),
+            ['time', './test.py', '-q'] + threads + debug_flag,
             env = env,
             cwd = root_dir)
     if spy:
         subprocess.check_call(
-            ['time', './test.py', '-q', '-j', '2', '--spy'],
+            ['time', './test.py', '-q', '--spy'] + threads,
             env = env,
             cwd = root_dir)
 
