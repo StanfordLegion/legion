@@ -130,6 +130,46 @@ local get_ghost_rect = {
   end
 }
 
+local min_points
+local max_points
+
+do
+  local function min(a, b) return `terralib.select(a < b, a, b) end
+  local function max(a, b) return `terralib.select(a > b, a, b) end
+  local function gen(f)
+    return {
+      [std.int1d] = terra(p1 : std.int1d, p2 : std.int1d) : std.int1d
+        var p : std.int1d
+        p.__ptr = [f(`(p1.__ptr), `(p2.__ptr))]
+      end,
+      [std.int2d] = terra(p1 : std.int2d, p2 : std.int2d) : std.int2d
+        var p : std.int2d
+        p.__ptr.x = [f(`(p1.__ptr.x), `(p2.__ptr.x))]
+        p.__ptr.y = [f(`(p1.__ptr.y), `(p2.__ptr.y))]
+        return p
+      end,
+      [std.int3d] = terra(p1 : std.int3d, p2 : std.int3d) : std.int3d
+        var p : std.int3d
+        p.__ptr.x = [f(`(p1.__ptr.x), `(p2.__ptr.x))]
+        p.__ptr.y = [f(`(p1.__ptr.y), `(p2.__ptr.y))]
+        p.__ptr.z = [f(`(p1.__ptr.z), `(p2.__ptr.z))]
+        return p
+      end,
+    }
+  end
+  min_points = gen(min)
+  max_points = gen(max)
+end
+
+local function get_intersection(rect_type)
+  return terra(r1 : rect_type, r2 : rect_type) : rect_type
+    var r : std.rect2d
+    r.lo = [ max_points[rect_type.index_type] ](r1.lo, r2.lo)
+    r.hi = [ min_points[rect_type.index_type] ](r1.hi, r2.hi)
+    return r
+  end
+end
+
 local function render(expr)
   if not expr then return "nil" end
   if expr:is(ast.typed.expr) then
@@ -854,9 +894,9 @@ local function create_image_partition(pr, pp, stencil)
   local pp_color_type =
     pp_color_space_type.index_type(std.newsymbol(pp_color_space_type))
 
-  -- TODO: partition can be aliased
   local gp_color_space_type = pp_color_space_type
-  local gp_type = std.partition(std.disjoint, pr, gp_color_space_type)
+  -- TODO: disjointness check
+  local gp_type = std.partition(std.aliased, pr, gp_color_space_type)
   local gp_symbol = get_new_tmp_var(gp_type)
   local stats = terralib.newlist()
 
@@ -891,7 +931,8 @@ local function create_image_partition(pr, pp, stencil)
   --                                           sr_bounds_expr)))
   --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
   --                                           ghost_rect_expr)))
-  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf, mk_expr_constant("\n", rawstring))))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf,
+  --                                           mk_expr_constant("\n", rawstring))))
   loop_body:insert(mk_stat_expr(
     mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
@@ -909,6 +950,75 @@ local function create_image_partition(pr, pp, stencil)
                                          coloring_expr)))
 
   return gp_symbol, stats
+end
+
+-- makes a loop as follows to create a coloring object:
+--
+--   for c in primary_partition.colors do
+--     legion_domain_point_coloring_color_domain(coloring,
+--       c, get_intersection(subregion.bounds,
+--                           primary_partition[c].bounds)
+--   var subset_partition = partition(aliased, subregion, coloring)
+--
+local function create_subset_partition(sr, pp)
+  local sr_type = std.as_read(sr:gettype())
+  local sr_index_type = sr_type:ispace().index_type
+  local sr_rect_type = std.rect_type(sr_index_type)
+
+  local pp_color_space_type = pp:gettype():colors()
+  local pp_color_type =
+    pp_color_space_type.index_type(std.newsymbol(pp_color_space_type))
+
+  local sp_color_space_type = pp_color_space_type
+  local sp_type = std.partition(std.aliased, sr, sp_color_space_type)
+  local sp_symbol = get_new_tmp_var(sp_type)
+  local stats = terralib.newlist()
+
+  local color_symbol = get_new_tmp_var(pp_color_type)
+  local color_expr = mk_expr_id(color_symbol)
+
+  local coloring_symbol = get_new_tmp_var(c.legion_domain_point_coloring_t)
+  local coloring_expr = mk_expr_id(coloring_symbol)
+  stats:insert(mk_stat_var(coloring_symbol, nil,
+                           mk_expr_call(c.legion_domain_point_coloring_create)))
+
+  local loop_body = terralib.newlist()
+  local sr_expr = mk_expr_id(sr)
+  local pp_expr = mk_expr_id(pp)
+  local srpp_expr =
+    mk_expr_index_access(pp_expr, color_expr,
+      copy_region_type(pp:gettype():parent_region()))
+  local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
+  local srpp_bounds_expr = mk_expr_bounds_access(srpp_expr)
+  local intersect_expr =
+    mk_expr_call(get_intersection(sr_rect_type),
+                 terralib.newlist { sr_bounds_expr,
+                                    srpp_bounds_expr })
+  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[sr_rect_type],
+  --                                           sr_bounds_expr)))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[sr_rect_type],
+  --                                           srpp_bounds_expr)))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[sr_rect_type],
+  --                                           intersect_expr)))
+  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf,
+  --                                           mk_expr_constant("\n", rawstring))))
+  loop_body:insert(mk_stat_expr(
+    mk_expr_call(c.legion_domain_point_coloring_color_domain,
+                 terralib.newlist { coloring_expr,
+                                    color_expr,
+                                    intersect_expr })))
+
+  local pp_colors_expr =
+    mk_expr_field_access(pp_expr, "colors", pp_color_space_type)
+  stats:insert(mk_stat_for_list(color_symbol, pp_colors_expr, mk_block(loop_body)))
+  stats:insert(
+    mk_stat_var(sp_symbol, nil,
+                mk_expr_partition(sp_type, pp_colors_expr, coloring_expr)))
+
+  stats:insert(mk_stat_expr(mk_expr_call(c.legion_domain_point_coloring_destroy,
+                                         coloring_expr)))
+
+  return sp_symbol, stats
 end
 
 local function create_indexspace_launch(local_cx, task_cx, call_expr, mapping,
@@ -1014,10 +1124,36 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
   local stats = terralib.newlist()
   local ghost_partition_symbols = terralib.newlist()
 
+  local constraints = parallel_task:get_constraints()
+  for param, region_symbol in pairs(param_arg_mapping) do
+    -- If a region doesn't have a primary partition,
+    -- try to check if its parent region has a primary partition
+    if not local_cx.primary_partitions[region_symbol] then
+      local primary_region
+      for idx = 1, #constraints do
+        local op = constraints[idx].op
+        local lhs = constraints[idx].lhs
+        local rhs = constraints[idx].rhs
+        if op == "<=" and lhs == param and
+           local_cx.primary_partitions[param_arg_mapping[rhs]] then
+          primary_region = param_arg_mapping[rhs]
+        end
+      end
+      if primary_region then
+        local primary_partition = local_cx.primary_partitions[primary_region]
+        local subset_partition_symbol, subset_partition_stats =
+          create_subset_partition(region_symbol, primary_partition)
+        local_cx.primary_partitions[region_symbol] = subset_partition_symbol
+        stats:insertall(subset_partition_stats)
+      end
+    end
+  end
+
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]
     local region_symbol = param_arg_mapping[stencil:region()]
-    local partition_symbol = local_cx.primary_partitions[region_symbol]
+    local range_symbol = param_arg_mapping[stencil:range()]
+    local partition_symbol = local_cx.primary_partitions[range_symbol]
     -- TODO: handle the case where no primary partition exists
     assert(partition_symbol)
     stencil = stencil:index(param_arg_mapping)
