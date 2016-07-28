@@ -139,6 +139,14 @@ local function render(expr)
   end
 end
 
+local function shallow_copy(tbl)
+  local new_tbl = {}
+  for k, v in pairs(tbl) do
+    new_tbl[k] = v
+  end
+  return new_tbl
+end
+
 -- utility functions for AST node construction
 local tmp_var_id = 0
 
@@ -415,12 +423,17 @@ local function extract_expr(node, pred, fn)
   end, node)
 end
 
-local function extract_index_expr(node)
-  local index_expr
+local function extract_index_access_expr(node)
+  local index_access
   extract_expr(node,
     function(node) return node:is(ast.typed.expr.IndexAccess) end,
-    function(node) index_expr = node.index end)
-  return index_expr
+    function(node) index_access = node end)
+  return index_access
+end
+
+local function extract_index_expr(node)
+  local index_access = extract_index_access_expr(node)
+  return index_access.index
 end
 
 local function extract_ctor(node)
@@ -437,6 +450,18 @@ local function extract_symbol(pred, node)
     function(node) return node:is(ast.typed.expr.ID) and pred(node) end,
     function(node) sym = node.value end)
   return sym
+end
+
+local function always(node) return true end
+
+local function extract_symbols(pred, node)
+  local symbol_set = {}
+  extract_expr(node,
+    function(node) return node:is(ast.typed.expr.ID) and pred(node) end,
+    function(node) symbol_set[node.value] = true end)
+  local symbols = terralib.newlist()
+  for sym, _ in pairs(symbol_set) do symbols:insert(sym) end
+  return symbols
 end
 
 local function rewrite_expr(node, pred, fn)
@@ -484,7 +509,7 @@ function check_parallelizable.top_task(node)
   -- 6. loops should be vectorizable, but scalar reductions are allowed
   -- 7. only math function calls are allowed (through std.*)
   -- 8. uncentered accesses should have indices of form either
-  --    e +/- c or (e +/- c) % r.bounds where r is the primary region
+  --    e +/- c or (e +/- c) % r.bounds where r is a region
 end
 
 local Lambda
@@ -521,6 +546,16 @@ do
 
   function lambda:binder()
     return self.__binder
+  end
+
+  function lambda:all_binders(l)
+    l = l or terralib.newlist()
+    l:insert(self.__binder)
+    if Lambda.is_lambda(self:expr()) then
+      return lambda:all_binders(l)
+    else
+      return l
+    end
   end
 
   function lambda:field_path()
@@ -586,12 +621,161 @@ do
   Lambda = setmetatable({}, lambda_factory)
 end
 
+local Stencil
+
+do
+  local stencil = {}
+  stencil.__index = stencil
+
+  function stencil:region()
+    return self.__region
+  end
+
+  function stencil:index(mapping)
+    local index = self.__index_expr
+    if mapping then
+      local symbols = extract_symbols(always, index)
+      index = Lambda {
+        binders = symbols,
+        expr = index,
+      }
+      local unbound = terralib.newlist()
+      for idx = 1, #symbols do
+        if mapping[symbols[idx]] then
+          index = index(mapping[symbols[idx]])
+        else
+          index = index(symbols[idx])
+          unbound:insert(symbols[idx])
+        end
+      end
+      if #unbound > 0 then
+        index = Lambda {
+          binders = unbound,
+          expr = index,
+        }
+      end
+    end
+    return index
+  end
+
+  function stencil:range()
+    return self.__range
+  end
+
+  function stencil:fields()
+    local fields = terralib.newlist()
+    for _, field in pairs(self.__fields) do
+      fields:insert(field)
+    end
+    return fields
+  end
+
+  function stencil:has_field(field)
+    return self.__fields[field:hash()] ~= nil
+  end
+
+  function stencil:add_field(field)
+    if not self:has_field(field) then
+      self.__fields[field:hash()] = field
+    end
+  end
+
+  function stencil:add_fields(fields)
+    fields:map(function(field) self:add_field(field) end)
+  end
+
+  function stencil:replace_index(index)
+    return Stencil {
+      region = self:region(),
+      index = index,
+      range = self:range(),
+      fields = shallow_copy(self:fields()),
+    }
+  end
+
+  function stencil:to_expr()
+    assert(Stencil.is_singleton(self))
+    local region = self:region()
+    local expr = self:index()
+    expr = mk_expr_index_access(
+      mk_expr_id(region, std.rawref(&region:gettype())),
+      expr, std.ref(region, region:fspace()))
+  end
+
+  --function stencil:eta_expand_index()
+  --  local index_expr = self:index()
+  --  local cx = self:context()
+  --  local symbols_set = extract_symbols(always, index_expr)
+  --  local symbols = terralib.newlist()
+  --  symbols:sort(function(a, b)
+  --    local idx_a = cx.region_params[a] or math.huge
+  --    local idx_b = cx.region_params[b] or math.huge
+  --    return idx_a < idx_b
+  --  end)
+  --  return self:replace_index(Lambda {
+  --    expr = index_expr,
+  --    binders = symbols,
+  --  })
+  --end
+
+  function stencil:__tostring()
+    local fields = self:fields()
+    local field_str = fields[1]:mkstring("", ".")
+    for idx = 2, #fields do
+      field_str = field_str .. ", " .. fields[idx]:mkstring("", ".")
+    end
+    if #fields > 1 then field_str = "{" .. field_str .. "}" end
+    local index_str = tostring(self:index())
+    if not Lambda.is_lambda(self:index()) then
+      index_str = render(self:index())
+    end
+    return tostring(self:region()) .. "[" ..  index_str .. "]." ..
+           field_str .. " (range: " ..  tostring(self:range()) .. ")"
+  end
+
+  local stencil_factory = {}
+  stencil_factory.__index = stencil_factory
+
+  function stencil_factory.__call(self, args)
+    assert(args.region)
+    assert(args.index)
+    assert(args.range)
+    assert(args.fields)
+    return setmetatable({
+      __region = args.region,
+      __index_expr = args.index,
+      __range = args.range,
+      __fields = args.fields,
+    }, stencil)
+  end
+
+  function stencil_factory.is_stencil(s)
+    return getmetatable(e) == stencil
+  end
+
+  function stencil_factory.is_singleton(s)
+    local cnt = 0
+    for field, _ in pairs(s.__fields) do
+      cnt = cnt + 1
+      if cnt > 1 then return false end
+    end
+    return true
+  end
+
+  Stencil = setmetatable({}, stencil_factory)
+end
+
+
 local context = {}
 context.__index = context
 
-function context.new_task_scope(primary_region)
+function context.new_task_scope(region_params)
   local cx = {}
-  cx.primary_region = primary_region
+  cx.region_params = region_params
+  cx.region_param_mapping = {}
+  for idx, tbl in pairs(region_params) do
+    cx.region_param_mapping[tbl.orig] = tbl.copy
+  end
   cx.field_accesses = {}
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
@@ -599,13 +783,57 @@ function context.new_task_scope(primary_region)
   return setmetatable(cx, context)
 end
 
-function context:add_field_accesses(accesses, loop_symbol)
+function context:is_region_param(idx)
+  return self.region_params[idx] ~= nil
+end
+
+function context:make_param_arg_mapping(args)
+  local mapping = {}
+  for idx = 1, #args do
+    if self:is_region_param(idx) then
+      assert(args[idx]:is(ast.typed.expr.ID))
+      mapping[self.region_params[idx].orig] = args[idx].value
+    end
+  end
+  return mapping
+end
+
+function context:access_requires_stencil_analysis(access)
+  return self.field_accesses[access] ~= nil
+end
+
+function context:record_stat_requires_case_split(stat)
+  self.field_access_stats[stat] = true
+end
+
+function context:stat_requires_case_split(stat)
+  return self.field_access_stats[stat]
+end
+
+function context:add_accesses(accesses, loop_var)
   for access, _ in pairs(accesses) do
-    self.field_accesses[access] = {
-      loop_symbol = loop_symbol,
-      ghost_indices = terralib.newlist(),
-      stencils = terralib.newlist(),
-    }
+    assert(std.is_ref(access.expr_type))
+    local index_access = extract_index_access_expr(access)
+    assert(index_access.value:is(ast.typed.expr.ID))
+    local index_expr = index_access.index
+    if not (index_expr:is(ast.typed.expr.ID) and
+            index_expr.value == loop_var) then
+      local region_symbol = index_access.value.value
+      assert(#loop_var:gettype().bounds_symbols == 1)
+      local field_path = access.expr_type.field_path
+
+      local stencil = Stencil {
+        region = region_symbol,
+        index = index_expr,
+        range = loop_var:gettype().bounds_symbols[1],
+        fields = { [field_path:hash()] = field_path },
+      }
+      self.field_accesses[access] = {
+        stencil = stencil,
+        ghost_indices = terralib.newlist(),
+        exploded_stencils = terralib.newlist(),
+      }
+    end
   end
 end
 
@@ -683,26 +911,80 @@ local function create_image_partition(pr, pp, stencil)
   return gp_symbol, stats
 end
 
-local function create_indexspace_launch(task_cx, pr, pp, gps, task, lhs)
-  local pp_expr = mk_expr_id(pp)
-  local pr_type = std.as_read(pr:gettype())
+local function create_indexspace_launch(local_cx, task_cx, call_expr, mapping,
+                                        gps, task, lhs)
+  -- Find the first region-typed argument and use its primary partition
+  -- to choose the launch domain.
+  local pp
+  local pp_color_space_type
+  for idx = 1, #call_expr.args do
+    if task_cx:is_region_param(idx) then
+      local region_symbol = call_expr.args[idx].value
+      local partition_symbol = local_cx.primary_partitions[region_symbol]
+      assert(partition_symbol)
+      pp = partition_symbol
+      break
+    end
+  end
+  assert(pp)
   local pp_color_space_type = pp:gettype():colors()
   local pp_color_type =
     pp_color_space_type.index_type(std.newsymbol(pp_color_space_type))
   local color_symbol = get_new_tmp_var(pp_color_type)
   local color_expr = mk_expr_id(color_symbol)
+  local pp_expr = mk_expr_id(pp)
   local pp_colors_expr =
     mk_expr_field_access(pp_expr, "colors", pp_color_space_type)
+  local launch_bounds_expr =
+    mk_expr_field_access(pp_colors_expr, "bounds",
+      std.rect_type(pp_color_space_type.index_type))
 
   local args = terralib.newlist()
-  args:insert(
-    mk_expr_index_access(pp_expr, color_expr, copy_region_type(pr_type)))
+  local stats = terralib.newlist()
+  -- Find all primary partitions for region-typed arguments and
+  -- replace them with sub-region accesses.
+  -- Also, create code to check if their color spaces have the same bounds.
+  for idx = 1, #call_expr.args do
+    if task_cx:is_region_param(idx) then
+      assert(call_expr.args[idx]:is(ast.typed.expr.ID))
+      local region_symbol = call_expr.args[idx].value
+      local partition_symbol = local_cx.primary_partitions[region_symbol]
+      local partition_expr = mk_expr_id(partition_symbol)
+      assert(partition_symbol)
+      args:insert(
+        mk_expr_index_access(partition_expr, color_expr,
+          copy_region_type(region_symbol:gettype())))
+      if std.config["debug"] and partition_symbol ~= pp then
+        local color_space_type = partition_symbol:gettype():colors()
+        local colors_expr =
+          mk_expr_field_access(partition_expr, "colors", color_space_type)
+        local bounds_expr =
+          mk_expr_field_access(colors_expr, "bounds",
+            std.rect_type(color_space_type.index_type))
+        stats:insert(mk_stat_expr(
+         mk_expr_call(std.assert, terralib.newlist {
+           mk_expr_binary("==", launch_bounds_expr, bounds_expr),
+           mk_expr_constant("launch domain mismathces", rawstring),
+         })))
+      end
+    else
+      args:insert(call_expr.args[idx])
+    end
+  end
+  -- Now push subregions of ghost partitions
   for idx = 1, #gps do
+    local pr_type = gps[idx]:gettype().parent_region_symbol:gettype()
     args:insert(
       mk_expr_index_access(mk_expr_id(gps[idx]), color_expr,
                            copy_region_type(pr_type)))
   end
-  args:insert(mk_expr_id(pr))
+  -- Append the original region-typed arguments at the end
+  for idx = 1, #call_expr.args do
+    if task_cx:is_region_param(idx) then
+      args:insert(call_expr.args[idx])
+    end
+  end
+
   local call_expr = mk_expr_call(task, args)
   local call_stat
   if lhs then
@@ -710,7 +992,10 @@ local function create_indexspace_launch(task_cx, pr, pp, gps, task, lhs)
   else
     call_stat = mk_stat_expr(call_expr)
   end
-  return mk_stat_for_list(color_symbol, pp_colors_expr, mk_block(call_stat))
+  stats:insert(
+    mk_stat_for_list(color_symbol, pp_colors_expr, mk_block(call_stat)))
+
+  return stats
 end
 
 local parallelize_task_calls = {}
@@ -723,45 +1008,30 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
   local task_cx = info.cx
   assert(not lhs or task_cx.reduction_info)
 
-  local args = terralib.newlist()
-  args:insertall(call_expr.args)
-  local region_idx
-  for idx = 1, #args do
-    if std.is_region(std.as_read(args[idx].expr_type)) then
-      region_idx = idx
-      break
-    end
-  end
-  assert(region_idx)
-  assert(args[region_idx]:is(ast.typed.expr.ID))
-  local primary_region_symbol = args[region_idx].value
-  local primary_partition_symbol = local_cx.primary_partitions[primary_region_symbol]
-
-  -- TODO: handle the case where no primary partition exists
-  assert(primary_partition_symbol)
+  local param_arg_mapping = task_cx:make_param_arg_mapping(call_expr.args)
 
   -- create ghost partitions
   local stats = terralib.newlist()
   local ghost_partition_symbols = terralib.newlist()
 
   for idx = 1, #task_cx.stencils do
-    local stencil = task_cx.stencils[idx](primary_region_symbol)
-    stencil = stencil:fmap(extract_index_expr):expr()
+    local stencil = task_cx.stencils[idx]
+    local region_symbol = param_arg_mapping[stencil:region()]
+    local partition_symbol = local_cx.primary_partitions[region_symbol]
+    -- TODO: handle the case where no primary partition exists
+    assert(partition_symbol)
+    stencil = stencil:index(param_arg_mapping)
     local ghost_partition_symbol, ghost_partition_stats =
-      create_image_partition(primary_region_symbol,
-                             primary_partition_symbol,
-                             stencil)
+      create_image_partition(region_symbol, partition_symbol, stencil)
     ghost_partition_symbols:insert(ghost_partition_symbol)
     stats:insertall(ghost_partition_stats)
   end
 
   -- create an indexspace launch
-  local stat = create_indexspace_launch(task_cx, primary_region_symbol,
-                                        primary_partition_symbol,
-                                        ghost_partition_symbols,
-                                        parallel_task,
-                                        lhs)
-  stats:insert(stat)
+  stats:insertall(create_indexspace_launch(local_cx, task_cx, call_expr,
+                                           param_arg_mapping,
+                                           ghost_partition_symbols,
+                                           parallel_task, lhs))
   return mk_stat_block(mk_block(stats))
 end
 
@@ -892,6 +1162,9 @@ function normalize_accesses.stat_for_list(cx, node)
   local rewrites = {}
   local field_reads = {}
   local field_writes = {}
+  local field_reduces = {}
+
+  -- Find all region accesses and reserve temporary variables
   local function find_field_access(node, continuation)
     if node:is(ast.typed.expr.FieldAccess) or
        node:is(ast.typed.expr.IndexAccess) or
@@ -901,50 +1174,56 @@ function normalize_accesses.stat_for_list(cx, node)
       field_reads[normalize_accesses.expr(cx, node)] = rewrites[node]
     elseif node:is(ast.typed.stat.Assignment) or
            node:is(ast.typed.stat.Reduce) then
-      node.lhs:map(function(node)
-        if node:is(ast.typed.expr.FieldAccess) or
-           node:is(ast.typed.expr.IndexAccess) or
-           node:is(ast.typed.expr.Deref) then
-          rewrites[node] = normalize_accesses.expr(cx, node)
-          field_writes[rewrites[node]] = true
+      node.lhs:map(function(lh)
+        if lh:is(ast.typed.expr.FieldAccess) or
+           lh:is(ast.typed.expr.IndexAccess) or
+           lh:is(ast.typed.expr.Deref) then
+          rewrites[lh] = normalize_accesses.expr(cx, lh)
+          if node:is(ast.typed.stat.Assignment) then
+            field_writes[rewrites[lh]] = true
+          else
+            assert(node:is(ast.typed.stat.Reduce))
+            field_reduces[rewrites[lh]] = node.op
+          end
         end
       end)
-      continuation(node.rhs, true)
+      continuation(node.rhs)
     else
       continuation(node, true)
     end
   end
-  local function rewrite_field_access(node, continuation)
-    if rewrites[node] then return rewrites[node]
-    else return continuation(node, true) end
-  end
   ast.traverse_node_continuation(find_field_access, node)
-  local stats = terralib.newlist()
   table.sort(field_reads)
-  for field_access, id_expr in pairs(field_reads) do
-    local stat = mk_stat_var(id_expr.value, id_expr.expr_type, field_access)
-    cx.field_access_stats[stat] = true
+  -- Record only region accesses that require stencil analysis
+  cx:add_accesses(field_reads, node.symbol)
+
+  -- Extract region accesses out to be their own statements
+  local stats = terralib.newlist()
+  for access, id_expr in pairs(field_reads) do
+    local stat = mk_stat_var(id_expr.value, id_expr.expr_type, access)
     stats:insert(stat)
+    -- If an access requires stencil analysis, the hoisted statement
+    -- later needs to be case splitted
+    if cx:access_requires_stencil_analysis(access) then
+      cx:record_stat_requires_case_split(stat)
+    end
   end
-  stats:insertall(node.block.stats:map(function(node)
-    return ast.map_node_continuation(rewrite_field_access, node)
-  end))
-  local loop = node {
-    block = node.block {
-      stats = stats,
-    },
-  }
-  cx:add_field_accesses(field_reads, node.symbol)
-  cx:add_field_accesses(field_writes, node.symbol)
-  return loop
+
+  -- Replace region accesses with temporary variables
+  stats:insertall(rewrite_expr(node.block.stats,
+    function(node) return rewrites[node] end,
+    function(node) return rewrites[node] end))
+
+  --cx:add_field_accesses(field_writes, node.symbol)
+  --cx:add_field_accesses(field_reduces, node.symbol)
+
+  return node { block = node.block { stats = stats } }
 end
 
 function normalize_accesses.top_task_body(cx, node)
   return node {
     stats = node.stats:map(function(node)
-      if node:is(ast.typed.stat.ForList) and
-         node.value:is(ast.typed.expr.ID) and
-         node.value.value == cx.primary_region then
+      if node:is(ast.typed.stat.ForList) then
         return normalize_accesses.stat_for_list(cx, node)
       else
         return node
@@ -989,7 +1268,7 @@ function reduction_analysis.top_task(cx, node)
   end, node)
 
   assert(init_expr)
-  -- TODO: task might pass through a scalar value
+  -- TODO: Task might pass through a scalar value
   assert(reduction_op)
   cx.reduction_info = {
     op = reduction_op,
@@ -1025,27 +1304,14 @@ end
 -- (a, b, c) -->  (a, 0, 0), (0, b, 0), (0, 0, c),
 --                (a, b, 0), (0, b, c), (a, 0, c),
 --                (a, b, c)
-function stencil_analysis.expr(cx, expr)
-  if expr:is(ast.typed.expr.FieldAccess) then
-    return stencil_analysis.expr(cx, expr.value):map(function(value)
-      return expr { value = value }
-    end)
-  elseif expr:is(ast.typed.expr.IndexAccess) then
-    if not expr.index:is(ast.typed.expr.Binary) then
-      return terralib.newlist()
-    else
-      return stencil_analysis.expr(cx, expr.index):map(function(index)
-        return expr { index = index }
-      end)
-    end
-  -- index should be either e +/- c or (e +/- c) % r.bounds
-  -- where e is for-list loop symbol and r is primary region
-  elseif expr:is(ast.typed.expr.Binary) then
+function stencil_analysis.explode_expr(cx, expr)
+  -- Index should be either e +/- c or (e +/- c) % r.bounds
+  -- where e is for-list loop symbol and r is a region
+  if expr:is(ast.typed.expr.Binary) then
     if expr.op == "%" then
       assert(expr.rhs:is(ast.typed.expr.FieldAccess) and
-             expr.rhs.value.value == cx.primary_region and
              expr.rhs.field_name == "bounds")
-      return stencil_analysis.expr(cx, expr.lhs):map(function(lhs)
+      return stencil_analysis.explode_expr(cx, expr.lhs):map(function(lhs)
         return expr { lhs = lhs }
       end)
     elseif expr.op == "+" or expr.op == "-" then
@@ -1063,7 +1329,7 @@ function stencil_analysis.expr(cx, expr)
             end
           end
         end
-        return stencil_analysis.expr(cx, expr.rhs):map(function(rhs)
+        return stencil_analysis.explode_expr(cx, expr.rhs):map(function(rhs)
           return expr {
             op = "+",
             rhs = rhs { fields = rhs.fields:map(convert) },
@@ -1123,25 +1389,16 @@ local function arg_join(v, n1, n2, field)
   else return n1 { [field] = v } end
 end
 
--- find the lub of two stencils (stencils are partially ordered)
+-- Find the lub of two stencils (stencils are partially ordered)
 -- returns 1) s1 |_| s2 if s1 and s2 has lub
 --         2) nil if s1 <> s2
 function stencil_analysis.join_stencil(cx, s1, s2)
   if s1 and s2 and s1:is(s2:type()) then
-    if s1:is(ast.typed.expr.FieldAccess) then
-      -- TODO: handle multiple fields for a stencil
-      if s1.field_name ~= s2.field_name then
-        return nil
-      else
-        return arg_join(stencil_analysis.join_stencil(cx, s1.value, s2.value),
-                        s1, s2, "value")
-      end
-    elseif s1:is(ast.typed.expr.IndexAccess) then
-      assert(s1.value:is(ast.typed.expr.ID) and
-             s2.value:is(ast.typed.expr.ID) and
-             s1.value.value == s2.value.value)
-      return arg_join(stencil_analysis.join_stencil(cx, s1.index, s2.index),
-                      s1, s2, "index")
+    if s1:is(ast.typed.expr.ID) then
+      return (s1.lhs.value == s2.lhs.value) and s1
+    elseif s1:is(ast.typed.expr.FieldAccess) then
+      return stencil_analysis.join_stencil(cx, s1, s2) and
+             s1.field_name == "bounds" and s1
     elseif s1:is(ast.typed.expr.Binary) then
       if s1.op == "%" -- TODO: and stencil_analysis.equiv(s1.rhs, s2.rhs)
       then
@@ -1211,94 +1468,47 @@ function stencil_analysis.join_stencil(cx, s1, s2)
 end
 
 function stencil_analysis.top(cx)
-  for access, access_info in pairs(cx.field_accesses) do
-    access_info.stencils:insertall(
-      stencil_analysis.expr(cx, access):map(function(expr)
-        return Lambda {
-          binder = access_info.loop_symbol,
-          expr = expr,
-        }
-      end))
-  end
-
   for _, access_info in pairs(cx.field_accesses) do
-    for i = 1, #access_info.stencils do
+    local stencil = access_info.stencil
+    access_info.exploded_stencils:insertall(
+      stencil_analysis.explode_expr(cx, stencil:index()):map(function(expr)
+        return stencil:replace_index(expr)
+      end))
+
+    for i = 1, #access_info.exploded_stencils do
       access_info.ghost_indices:insert(-1)
       for j = 1, #cx.stencils do
-        local binder = cx.stencils[j]:binder()
-        local s1 = access_info.stencils[i](binder)
-        local s2 = cx.stencils[j]:expr()
+        local s1 = access_info.exploded_stencils[i]:index()
+        local s2 = cx.stencils[j]:index()
         local joined_stencil = stencil_analysis.join_stencil(cx, s1, s2)
         if joined_stencil then
-          cx.stencils[j] = Lambda {
-            binder = binder,
-            expr = joined_stencil,
-          }
+          cx.stencils[j] = cx.stencils[j]:replace_index(joined_stencil)
+          cx.stencils[j]:add_fields(access_info.exploded_stencils[i]:fields())
           access_info.ghost_indices[i] = j
           break
         end
       end
       if access_info.ghost_indices[i] == -1 then
-        cx.stencils:insert(access_info.stencils[i])
+        cx.stencils:insert(access_info.exploded_stencils[i])
         access_info.ghost_indices[i] = #cx.stencils
       end
     end
   end
-
-  -- TODO: Stencil objects should be also used in the previous steps
-  --       to compare between stencils from two different loops
-  local function eta_expansion(stencil)
-   local binder = stencil:binder()
-   local expr = stencil:expr()
-   local primary_region_type = std.rawref(&cx.primary_region:gettype())
-   local region_binder = get_new_tmp_var(primary_region_type)
-   local root_region_binder = get_new_tmp_var(primary_region_type)
-   expr = rewrite_expr(expr,
-     function(node) return node:is(ast.typed.expr.IndexAccess) and
-                           node.value:is(ast.typed.expr.ID) and
-                           node.value.value == cx.primary_region end,
-     function(node)
-       return node { value = node.value { value = region_binder } }
-     end)
-   expr = rewrite_symbol(expr, cx.primary_region, root_region_binder)
-   local stencil = Lambda {
-     binders = { root_region_binder, region_binder, binder },
-     expr = expr,
-   }
-   return stencil
-  end
-  for access, access_info in pairs(cx.field_accesses) do
-    access_info.stencils = access_info.stencils:map(eta_expansion)
-  end
-  cx.stencils = cx.stencils:map(eta_expansion)
 end
 
 local parallelize_tasks = {}
 
-local function fixup_ref_type(expr)
-  if expr:is(ast.typed.expr.FieldAccess) then
-    local value = fixup_ref_type(expr.value)
-    if value ~= expr.value then
-      return expr { value = value }
-    else
-      return expr
-    end
-  elseif expr:is(ast.typed.expr.IndexAccess) then
-    assert(expr.value:is(ast.typed.expr.ID))
-    local ref_type = expr.expr_type
-    if ref_type.region_symbol ~= expr.value.value then
-      local pointer_type = ref_type.pointer_type
-      local index_type = pointer_type.index_type
-      return expr {
-        expr_type = std.ref(index_type(pointer_type.points_to_type,
-                                       expr.value.value)),
-      }
-    else
-      return expr
-    end
-  else
-    return expr
+local function make_new_region_access(region_expr, index_expr, field)
+  local region_symbol = region_expr.value
+  local region_type = std.as_read(region_expr.expr_type)
+  local expr = mk_expr_index_access(region_expr, index_expr,
+    std.ref(index_expr.expr_type(region_type:fspace(), region_symbol)))
+  for idx = 1, #field do
+    local new_field = expr.expr_type.field_path .. data.newtuple(field[idx])
+    expr = mk_expr_field_access(expr, field[idx],
+      std.ref(expr.expr_type, unpack(new_field)))
   end
+  return expr
 end
 
 function parallelize_tasks.stat_for_list(cx, node)
@@ -1306,77 +1516,76 @@ function parallelize_tasks.stat_for_list(cx, node)
   local stats = terralib.newlist()
   for idx = 1, #node.block.stats do
     local stat = node.block.stats[idx]
-    if cx.field_access_stats[stat] then
+    if cx:stat_requires_case_split(stat) then
       assert(stat:is(ast.typed.stat.Var) and
              #stat.symbols == 1 and #stat.types == 1 and
              #stat.values == 1 and
              (stat.values[1]:is(ast.typed.expr.FieldAccess) or
               stat.values[1]:is(ast.typed.expr.Deref) or
               stat.values[1]:is(ast.typed.expr.IndexAccess)))
-      if cx.field_accesses[stat.values[1]] and
-         #cx.field_accesses[stat.values[1]].stencils > 0 then
-        -- case split for each field access:
-        -- var x = r[f(e)] =>
-        --   var x; var p = f(e)
-        --   do
-        --     if p <= ghost1.bounds then x = ghost1[p]
-        --     elseif p <= ghost2.bounds then x = ghost2[p]
-        --     ...
-        --     else x = r[p]
-        local stencil_info = cx.field_accesses[stat.values[1]]
-        local result_symbol = stat.symbols[1]
-        local result_expr =
-          mk_expr_id(result_symbol, std.rawref(&result_symbol:gettype()))
-        local ty = stat.types[1]
-        -- stencil has a form of \(root region).\(region).\(loop var).(body)
-        local stencil = stencil_info.stencils[#stencil_info.stencils]
-        local value_stencil = stencil(cx.root_region)
-        local point_expr = value_stencil:expr():fmap(extract_index_expr)(loop_var)
-        local point_symbol = get_new_tmp_var(loop_var:gettype().index_type)
-        local point_symbol_expr = mk_expr_id(point_symbol)
-        stats:insert(stat { values = terralib.newlist() })
-        stats:insert(mk_stat_var(point_symbol, point_symbol:gettype(), point_expr))
-        value_stencil = value_stencil:fmap(function(node)
-          return rewrite_expr(node,
-            function(node) return node:is(ast.typed.expr.IndexAccess) and
-                                  node.value:is(ast.typed.expr.ID) and
-                                  node.value.value == value_stencil:binder() end,
-            function(node) return node { index = point_symbol_expr } end)
-        end)
-        local case_split_if
-        local elseif_blocks
-        for idx = 0, #stencil_info.ghost_indices do
-          local region_symbol
-          if idx == 0 then region_symbol = cx.primary_region
-          else region_symbol = cx.ghost_symbols[stencil_info.ghost_indices[idx]] end
-          local region_type = std.rawref(&region_symbol:gettype())
-          local region_id_expr = mk_expr_id(region_symbol, region_type)
-          local bounds_expr = mk_expr_bounds_access(region_id_expr)
-          local cond = mk_expr_binary("<=", point_symbol_expr, bounds_expr)
-          local region_access =
-            fixup_ref_type(value_stencil(region_symbol)(loop_var))
-          local result_assignment = mk_stat_assignment(result_expr, region_access)
-          if idx == 0 then
-            case_split_if = mk_stat_if(cond, result_assignment)
-            elseif_blocks = case_split_if.elseif_blocks
-          else
-            elseif_blocks:insert(mk_stat_elseif(cond, result_assignment))
-          end
+      -- Case split for each region access:
+      -- var x = r[f(e)] =>
+      --   var x; var p = f(e)
+      --   do
+      --     if x <= r.bounds then x = r[p]
+      --     elseif p <= ghost1.bounds then x = ghost1[p]
+      --     elseif p <= ghost2.bounds then x = ghost2[p]
+      --     ...
+
+      -- Remove RHS of a variable declaration as it depends on case analysis
+      stats:insert(stat { values = terralib.newlist() })
+      -- Cache index calculation for several comparisions later
+      local access_info = cx.field_accesses[stat.values[1]]
+      local index_expr =
+        access_info.stencil:index(cx.region_param_mapping)(loop_var)
+      local index_symbol = get_new_tmp_var(loop_var:gettype().index_type)
+      local index_symbol_expr = mk_expr_id(index_symbol)
+      stats:insert(mk_stat_var(index_symbol, nil, index_expr))
+      -- Populate body of case analysis
+      local result_symbol = stat.symbols[1]
+      local result_expr =
+        mk_expr_id(result_symbol, std.rawref(&result_symbol:gettype()))
+      local case_split_if
+      local elseif_blocks
+      for idx = 0, #access_info.ghost_indices do
+        local region_symbol
+        local field
+        if idx == 0 then
+          region_symbol = access_info.stencil:region()
+          assert(Stencil.is_singleton(access_info.stencil))
+          field = access_info.stencil:fields()[1]
+        else
+          region_symbol = cx.ghost_symbols[access_info.ghost_indices[idx]]
+          assert(Stencil.is_singleton(access_info.exploded_stencils[idx]))
+          field = access_info.exploded_stencils[idx]:fields()[1]
         end
-        assert(case_split_if)
-        if std.config["debug"] then
-          case_split_if.else_block.stats:insertall(terralib.newlist {
-            mk_stat_expr(mk_expr_call(std.assert,
-                         terralib.newlist {
-                           mk_expr_constant(false, bool),
-                           mk_expr_constant("unreachable", rawstring)
-                         })),
-          })
+
+        local region_type = std.rawref(&region_symbol:gettype())
+        local region_id_expr = mk_expr_id(region_symbol, region_type)
+        local bounds_expr = mk_expr_bounds_access(region_id_expr)
+        local cond = mk_expr_binary("<=", index_symbol_expr, bounds_expr)
+
+        local region_access =
+          make_new_region_access(region_id_expr, index_symbol_expr, field)
+        local result_assignment = mk_stat_assignment(result_expr, region_access)
+        if idx == 0 then
+          case_split_if = mk_stat_if(cond, result_assignment)
+          elseif_blocks = case_split_if.elseif_blocks
+        else
+          elseif_blocks:insert(mk_stat_elseif(cond, result_assignment))
         end
-        stats:insert(case_split_if)
-      else
-        stats:insert(stat)
       end
+      assert(case_split_if)
+      if std.config["debug"] then
+        case_split_if.else_block.stats:insertall(terralib.newlist {
+          mk_stat_expr(mk_expr_call(std.assert,
+                       terralib.newlist {
+                         mk_expr_constant(false, bool),
+                         mk_expr_constant("unreachable", rawstring)
+                       })),
+        })
+      end
+      stats:insert(case_split_if)
     else
       stats:insert(stat)
     end
@@ -1418,45 +1627,46 @@ function parallelize_tasks.top_task_body(cx, node)
 end
 
 function parallelize_tasks.top_task(node)
-  local primary_region
+  -- Replicate all region-typed parameters to refer to the original values
+  local region_params = {}
   for idx = 1, #node.params do
     if std.is_region(node.params[idx].param_type) then
-      primary_region = node.params[idx].symbol
-      break
+      local symbol = node.params[idx].symbol
+      region_params[idx] = {
+        orig = symbol,
+        copy = copy_region_symbol(symbol, "__" .. symbol:getname())
+      }
     end
   end
 
-  -- auto-parallelization procedure
-  -- 1. field accesses are normalized; a = @b => t = @b; a = t
-  -- 2. find stencil sizes for all field accesses
-  -- 3. merge stencil sizes
-  -- 4. calculate # of necessary ghost regions and number them
-  -- 5. for each field access normalized in 1,
-  --    find the right ghost region and rewrite the access
-  -- 6. create a new task with the modified task signature
-
-  local cx = context.new_task_scope(primary_region)
+  -- Analyze loops in the task
+  local cx = context.new_task_scope(region_params)
   local normalized = normalize_accesses.top_task_body(cx, node.body)
   reduction_analysis.top_task(cx, node)
   stencil_analysis.top(cx)
 
-  for idx = 1, #cx.stencils do
-    local ghost_symbol =
-      copy_region_symbol(primary_region, "__ghost" .. tostring(idx))
-    cx.ghost_symbols:insert(ghost_symbol)
-  end
-  cx.root_region = copy_region_symbol(primary_region, "__root")
-  local parallelized = parallelize_tasks.top_task_body(cx, normalized)
-
-  -- make a new task AST node
+  -- Now make a new task AST node
   local task_name = node.name .. data.newtuple("parallelized")
   local prototype = std.newtask(task_name)
   local params = terralib.newlist()
+  -- Existing region-typed parameters will now refer to the subregions
+  -- passed by indexspace launch. this will avoid rewriting types in AST nodes
   params:insertall(node.params)
-  for idx = 1, #cx.ghost_symbols do
+  -- each stencil corresponds to one ghost region
+  for idx = 1, #cx.stencils do
+    local ghost_symbol =
+      copy_region_symbol(cx.stencils[idx]:region(),
+                         "__ghost" .. tostring(idx))
+    cx.ghost_symbols:insert(ghost_symbol)
     params:insert(mk_task_param(cx.ghost_symbols[idx]))
   end
-  params:insert(mk_task_param(cx.root_region))
+  -- append replicated parameters at the end
+  for idx = 1, #node.params do
+    if region_params[idx] then
+      params:insert(mk_task_param(region_params[idx].copy))
+    end
+  end
+
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), node.return_type, false)
   prototype:settype(task_type)
@@ -1477,15 +1687,16 @@ function parallelize_tasks.top_task(node)
   end
   for idx = 1, #cx.stencils do
 		local region = cx.ghost_symbols[idx]
-		local field_path = cx.stencils[idx]:field_path()
+		local fields = cx.stencils[idx]:fields()
     -- TODO: handle reductions on ghost regions
-    privileges:insert(terralib.newlist {
-      data.map_from_table {
+    privileges:insertall(fields:map(function(field)
+      return terralib.newlist { data.map_from_table {
         node_type = "privilege",
         region = region,
-        field_path = field_path,
+        field_path = field,
         privilege = std.reads,
-      }})
+      }}
+    end))
     --coherence_modes[region][field_path] = std.exclusive
     region_universe[region:gettype()] = true
   end
@@ -1497,6 +1708,7 @@ function parallelize_tasks.top_task(node)
   prototype:set_constraints(node.constraints)
   prototype:set_region_universe(region_universe)
 
+  local parallelized = parallelize_tasks.top_task_body(cx, normalized)
   local task_ast = ast.typed.top.Task {
     name = task_name,
     params = params,

@@ -2004,6 +2004,14 @@ std.rect_type = terralib.memoize(function(index_type)
   st.index_type = index_type
   st.dim = index_type.dim
 
+  st.metamethods.__eq = macro(function(a, b)
+    return `([a].lo == [b].lo and [a].hi == [b].hi)
+  end)
+
+  st.metamethods.__ne = macro(function(a, b)
+    return `([a].lo ~= [b].lo and [a].hi ~= [b].hi)
+  end)
+
   function st.metamethods.__cast(from, to, expr)
     if std.is_rect_type(from) then
       if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
