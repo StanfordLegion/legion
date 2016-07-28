@@ -36,10 +36,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
                              AddressSpaceID own_addr, AddressSpace loc_space,
-                             RegionTreeNode *node, RtUserEvent destroy_event,
-                             bool register_now)
+                             RegionTreeNode *node, bool register_now)
       : DistributedCollectable(ctx->runtime, did, own_addr, loc_space, 
-                               destroy_event, register_now), 
+                               register_now), 
         context(ctx), logical_node(node), 
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -50,6 +49,8 @@ namespace Legion {
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(VIEW_VIRTUAL_CHANNEL);
       view_lock.destroy_reservation();
       view_lock = Reservation::NO_RESERVATION;
     }
@@ -128,10 +129,9 @@ namespace Legion {
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
                                AddressSpaceID log_own, RegionTreeNode *node, 
-                               UniqueID own_ctx, RtUserEvent destroy_event,
-                               bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, destroy_event,
-          register_now), owner_context(own_ctx), logical_owner(log_own)
+                               UniqueID own_ctx, bool register_now)
+      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now), 
+        owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
     }
@@ -236,10 +236,9 @@ namespace Legion {
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                AddressSpaceID log_own, RegionTreeNode *node, 
                                InstanceManager *man, MaterializedView *par, 
-                               UniqueID own_ctx, RtUserEvent destroy_event,
-                               bool register_now)
+                               UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-         loc_addr, log_own, node, own_ctx, destroy_event, register_now), 
+         loc_addr, log_own, node, own_ctx, register_now), 
         manager(man), parent(par), 
         disjoint_children(node->are_all_children_disjoint())
     //--------------------------------------------------------------------------
@@ -254,23 +253,17 @@ namespace Legion {
       if (parent != NULL)
         add_nested_resource_ref(parent->did);
       else 
-      {
         manager->add_nested_resource_ref(did);
-        // If we are the root and remote add a resource reference from
-        // the owner node
-        if (!is_owner())
-          add_base_resource_ref(REMOTE_DID_REF);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %ld %d %ld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, manager->did); 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          LEGION_DISTRIBUTED_ID_FILTER(manager->did)); 
 #endif
     }
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, 
-          RtUserEvent::NO_RT_USER_EVENT, false),
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, false),
         manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
     {
@@ -284,26 +277,14 @@ namespace Legion {
     {
       // Always unregister ourselves with the region tree node
       logical_node->unregister_instance_view(manager, owner_context);
-      // Remove our resource references on our children
-      // Capture their recycle events in the process
       for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        recycle_events.insert(it->second->get_destruction_event());
         if (it->second->remove_nested_resource_ref(did))
           legion_delete(it->second);
       }
-      if (parent == NULL)
-      {
-        if (manager->remove_nested_resource_ref(did))
-          delete manager;
-        if (is_owner())
-        {
-          UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-            functor(this, NULL);
-          map_over_remote_instances(functor);
-        }
-      }
+      if ((parent == NULL) && manager->remove_nested_resource_ref(did))
+        delete manager;
       if (!atomic_reservations.empty())
       {
         // If this is the owner view, delete any atomic reservations
@@ -414,7 +395,6 @@ namespace Legion {
                                               owner_space, local_space,
                                               logical_owner, child_node, 
                                               manager, this, owner_context,
-                                              RtUserEvent::NO_RT_USER_EVENT,
                                               true/*reg now*/);
             children[c] = child_view;
           }
@@ -1321,7 +1301,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1344,10 +1323,9 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
-        rez.serialize(destroy_event);
       }
       runtime->send_materialized_view(target, rez);
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -2749,8 +2727,6 @@ namespace Legion {
       derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
       RtEvent man_ready;
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
@@ -2782,14 +2758,12 @@ namespace Legion {
                                               logical_owner, 
                                               target_node, inst_manager,
                                               parent, context_uid,
-                                              destroy_event,
                                               false/*register now*/);
       else
         view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
                                      runtime->address_space, logical_owner,
                                      target_node, inst_manager, parent, 
-                                     context_uid, destroy_event,
-                                     false/*register now*/);
+                                     context_uid, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -3449,10 +3423,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
-                               RegionTreeNode *node, RtUserEvent destroy_event,
-                               bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, 
-                    destroy_event, register_now)
+                               RegionTreeNode *node, bool register_now)
+      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now)
     //--------------------------------------------------------------------------
     {
     }
@@ -3471,22 +3443,84 @@ namespace Legion {
     {
       // Find the destination preconditions first 
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   copy_mask, info.version_info, 
-                                   info.op->get_unique_op_id(),
-                                   info.index, local_space, 
-                                   preconditions, info.map_applied_events);
-      LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, 
-                            preconditions, postconditions);
-      // Register the resulting events as users of the destination
-      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-            postconditions.begin(); it != postconditions.end(); it++)
+      // First check to make sure that it is sound that we can issue
+      // copies directly to this instance, if not we're going to need
+      // to make a temporary instance to target
+      bool already_valid = true;
+      if (need_temporary_instance(dst, copy_mask, already_valid))
       {
-        dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
-                           info.op->get_unique_op_id(), info.index,
-                           it->second, false/*reading*/, local_space, 
-                           info.map_applied_events);
+#ifdef DEBUG_LEGION
+        assert(!already_valid); 
+#endif
+        // Make a temporary instance and issue copies to it
+        // then copy from the temporary instance to the target
+        MaterializedView *temporary_dst = 
+          info.op->create_temporary_instance(dst->manager,info.index,copy_mask);
+        // Get the corresponding sub_view to the destination
+        if (temporary_dst->logical_node != dst->logical_node)
+        {
+          std::vector<ColorPoint> colors;
+          RegionTreeNode *dst_node = dst->logical_node;
+          do 
+          {
+#ifdef DEBUG_LEGION
+            assert(dst_node->get_depth() > 
+                    temporary_dst->logical_node->get_depth());
+#endif
+            colors.push_back(dst_node->get_color());
+            dst_node = dst_node->get_parent();
+          } 
+          while (dst_node != temporary_dst->logical_node);
+#ifdef DEBUG_LEGION
+          assert(!colors.empty());
+#endif
+          while (!colors.empty())
+          {
+            temporary_dst = 
+              temporary_dst->get_materialized_subview(colors.back());
+            colors.pop_back();
+          }
+#ifdef DEBUG_LEGION
+          assert(temporary_dst->logical_node == dst->logical_node);
+#endif
+        }
+        // Guaranteed to be no preconditions
+        LegionMap<ApEvent,FieldMask>::aligned postconditions;
+        issue_deferred_copies(info, temporary_dst, copy_mask, 
+                              preconditions, postconditions);
+        // Register the resulting events as users of the destination
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+              postconditions.begin(); it != postconditions.end(); it++)
+        {
+          dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+                             info.op->get_unique_op_id(), info.index,
+                             it->second, false/*reading*/, local_space, 
+                             info.map_applied_events);
+        }
+        // Now issue the update copies to the original instance
+        LegionMap<LogicalView*,FieldMask>::aligned temp_valid;
+        temp_valid[temporary_dst] = copy_mask;
+        dst->logical_node->issue_update_copies(info, dst, copy_mask,temp_valid);
+      }
+      else if (!already_valid)
+      {
+        dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                     copy_mask, info.version_info, 
+                                     info.op->get_unique_op_id(),
+                                     info.index, local_space, 
+                                     preconditions, info.map_applied_events);
+        LegionMap<ApEvent,FieldMask>::aligned postconditions;
+        issue_deferred_copies(info, dst, copy_mask, 
+                              preconditions, postconditions);
+        // Register the resulting events as users of the destination
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+              postconditions.begin(); it != postconditions.end(); it++)
+        {
+          dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+                             info.op->get_unique_op_id(), info.index,
+                             it->second, false/*reading*/, local_space, 
+                             info.map_applied_events);
+        }
       }
     }
 
@@ -3594,16 +3628,12 @@ namespace Legion {
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, CompositeNode *r,
-                              CompositeVersionInfo *info, 
-                              RtUserEvent destroy_event, bool register_now)
+                              CompositeVersionInfo *info, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
-             node, destroy_event, register_now), root(r), version_info(info)
+                     node, register_now), root(r), version_info(info)
     {
       version_info->add_reference();
       root->set_owner_did(did);
-      // Do remote registration if necessary
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3612,7 +3642,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, RtUserEvent::NO_RT_USER_EVENT, false),
+      : DeferredView(NULL, 0, 0, 0, NULL, false),
         root(NULL), version_info(NULL)
     //--------------------------------------------------------------------------
     {
@@ -3624,12 +3654,6 @@ namespace Legion {
     CompositeView::~CompositeView(void)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-      {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
       // Delete our root
       legion_delete(root);
       // See if we can delete our version info
@@ -3701,7 +3725,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't take the lock, it's alright to have duplicate sends
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -3713,13 +3736,12 @@ namespace Legion {
           rez.serialize(logical_node->as_region_node()->handle);
         else
           rez.serialize(logical_node->as_partition_node()->handle);
-        rez.serialize(destroy_event);
         VersionInfo &info = version_info->get_version_info();
         info.pack_version_numbers(rez);
         root->pack_composite_tree(rez, target);
       }
       runtime->send_composite_view(target, rez);
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -3749,13 +3771,26 @@ namespace Legion {
         return legion_new<CompositeView>(context, new_did, 
             context->runtime->address_space, logical_node, 
             context->runtime->address_space, new_root, 
-            version_info, RtUserEvent::NO_RT_USER_EVENT, true/*register now*/);
+            version_info, true/*register now*/);
       }
       else // didn't change so we can delete the new root and return ourself
       {
         legion_delete(new_root);
         return this;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CompositeView::need_temporary_instance(MaterializedView *dst,
+                                                const FieldMask &copy_mask,
+                                                bool &already_valid)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we have any valid data at this node that would
+      // be over-written by an intermediate-level
+      bool partially_valid = false;
+      return root->need_temporary_instance(dst, copy_mask, 
+                                           already_valid, partially_valid);  
     }
 
     //--------------------------------------------------------------------------
@@ -3830,8 +3865,6 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
       CompositeVersionInfo *version_info = new CompositeVersionInfo();
       VersionInfo &info = version_info->get_version_info();
       info.unpack_version_numbers(derez, runtime->forest);
@@ -3874,7 +3907,6 @@ namespace Legion {
           args.target_node = target_node;
           args.root = root;
           args.version_info = version_info;
-          args.destroy_event = destroy_event;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
               HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID, HLR_LATENCY_PRIORITY,
               NULL/*op*/, wait_on);
@@ -3889,13 +3921,12 @@ namespace Legion {
         view = legion_new_in_place<CompositeView>(location, runtime->forest, 
                                            did, owner, target_node, 
                                            runtime->address_space,
-                                           root, version_info, destroy_event,
+                                           root, version_info,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
                            target_node, runtime->address_space, root, 
-                           version_info, destroy_event, 
-                           false/*register now*/);
+                           version_info, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -3922,13 +3953,12 @@ namespace Legion {
         view = legion_new_in_place<CompositeView>(location, rt->forest,
                            vargs->did, vargs->owner, vargs->target_node,
                            rt->address_space, vargs->root, vargs->version_info,
-                           vargs->destroy_event, false/*register now*/);
+                           false/*register now*/);
       else
         view = legion_new<CompositeView>(rt->forest, vargs->did,
                            vargs->owner, vargs->target_node, 
                            rt->address_space, vargs->root,
-                           vargs->version_info, vargs->destroy_event,
-                           false/*register now*/);
+                           vargs->version_info, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -4273,9 +4303,117 @@ namespace Legion {
       // Now do our capture and update the closer
       if (new_node->capture_instances(closer, capture_mask, &valid_views))
         changed = true;
-      new_node->capture_reductions(capture_mask, &reduction_views);
+      if (changed)
+        new_node->capture_reductions(capture_mask, &reduction_views);
       closer.update_capture_mask(logical_node, capture_mask);
       return changed;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CompositeNode::need_temporary_instance(MaterializedView *dst,
+                                                const FieldMask &copy_mask,
+                                                bool &fully_valid,
+                                                bool &partially_valid,
+                                                bool check_root) const
+    //--------------------------------------------------------------------------
+    {
+      // If we have any reduction instances we can never be fully valid
+      if (!(reduction_mask * copy_mask))
+        fully_valid = false; 
+      // See if we are at the root of the copy yet
+      if (check_root)
+      {
+        CompositeNode *child = find_next_root(dst->logical_node, copy_mask);
+        if (child != NULL)
+          return child->need_temporary_instance(dst, copy_mask, 
+                                                fully_valid, partially_valid);
+      }
+      // Otherwise we have to do the check here, see if we have any dirty
+      // data for which we don't have an instance in the children
+      FieldMask dirty_overlap = dirty_mask & copy_mask;
+      if (!!dirty_overlap)
+      {
+        // Check to see if the target instance is already valid
+        // Views may be different levels of the region tree so we have
+        // to do this by looking at the actual instances
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          if (it->first->is_deferred_view())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first->is_materialized_view());
+#endif
+          MaterializedView *dirty_view = it->first->as_materialized_view();
+          if (dirty_view->manager != dst->manager)
+            continue;
+          if (!(dirty_overlap * it->second))
+          {
+            // If we overlap for any fields at this level we are
+            // at least partially valid
+            partially_valid = true;
+            dirty_overlap -= it->second;
+          }
+          // We found the common view so we can break out now
+          break;
+        }
+        // If we still have dirty fields, we need to check the children
+        // to see if we are going to stomp on anyone
+        if (!!dirty_overlap)
+        {
+          // If we ever get here, we are no longer fully valid
+          fully_valid = false;
+          // Check to see if we have any composite views that will be problematic
+          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            if (!it->first->is_composite_view())
+              continue;
+            // Only need to check against the dirty mask here
+            FieldMask overlap = it->second & dirty_mask;
+            if (!overlap)
+              continue;
+            bool local_full = false;
+            if (it->first->as_composite_view()->need_temporary_instance(dst, 
+                                                        overlap, local_full))
+              return true;
+          }
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
+                it = children.begin(); it != children.end(); it++)
+          {
+            // Use the copy_mask here, this could result in false
+            // positives but it will still be sound, it also means
+            // that we only ever need to traverse any node in the tree once
+            FieldMask overlap = it->second & copy_mask;
+            if (!overlap)
+              continue;
+            bool local_partial = false;
+            if (it->first->need_temporary_instance(dst, overlap, fully_valid,
+                                                   local_partial,false/*root*/))
+              return true;
+            // If we have local partial then there is dirty data below
+            // in this instance that we can't stomp on so we need a 
+            // temporary instance
+            if (local_partial)
+              return true;
+          }
+          // We've already traversed the children so there is no need
+          // to go any further
+          return false;
+        }
+      }
+      // Now check all the children
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        FieldMask overlap = it->second & copy_mask;
+        if (!overlap)
+          continue;
+        if (it->first->need_temporary_instance(dst, overlap, fully_valid,
+                                               partially_valid, false/*root*/))
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4300,7 +4438,7 @@ namespace Legion {
       bool traverse_children = true;
       if (check_root)
       {
-        CompositeNode *child = find_next_root(dst->logical_node);
+        CompositeNode *child = find_next_root(dst->logical_node, copy_mask);
         if (child != NULL)
         {
           // If we have another child, we can continue the traversal
@@ -4491,7 +4629,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CompositeNode* CompositeNode::find_next_root(RegionTreeNode *target) const
+    CompositeNode* CompositeNode::find_next_root(RegionTreeNode *target,
+                                                 const FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
       if (children.empty())
@@ -4499,41 +4638,69 @@ namespace Legion {
       if (children.size() == 1)
       {
         CompositeNode *child = children.begin()->first;
-        if (child->logical_node->dominates(target))
+        if (child->are_domination_tests_sound(mask) && 
+            child->logical_node->dominates(target))
           return child;
       }
-      else if (logical_node->are_all_children_disjoint())
+      // If all the children are disjoint and we can find one that dominates
+      // then we know that none of the other ones are interfering
+      if (logical_node->are_all_children_disjoint())
       {
         for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
               children.begin(); it != children.end(); it++)
         {
-          if (it->first->logical_node->dominates(target))
+          if (it->first->are_domination_tests_sound(mask) &&
+              it->first->logical_node->dominates(target))
             return it->first;
         }
       }
-      else
+      CompositeNode *child = NULL;
+      // Check to see if we have one child that dominates and none
+      // that intersect
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+            children.begin(); it != children.end(); it++)
       {
-        CompositeNode *child = NULL;
-        // Check to see if we have one child that dominates and none
-        // that intersect
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
+        // If anyone fails a sound domination test, then punt
+        if (it->first->logical_node->dominates(target))
         {
-          if (it->first->logical_node->dominates(target))
+          // Having multiple dominating children is not allowed
+          if (child != NULL)
+            return NULL;
+          // Before we can count it as actually dominating, it has
+          // to pass a sound domination test
+          if (it->first->are_domination_tests_sound(mask))
           {
-            // Having multiple dominating children is not allowed
-            if (child != NULL)
-              return NULL;
             child = it->first;
             continue;
           }
-          // If it doesn't dominate, but it does intersect that is not allowed
-          if (it->first->logical_node->intersects_with(target))
-            return NULL;
+          else
+            return NULL; // otherwise intersections are bad
         }
-        return child;
+        // If it doesn't dominate, but it does intersect that is not allowed
+        if (it->first->logical_node->intersects_with(target))
+          return NULL;
       }
-      return NULL;
+      return child;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CompositeNode::are_domination_tests_sound(const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      // Region domination tests are always sound
+      if (logical_node->is_region())
+        return true;
+      // Partition domination tests are only sound if have all the
+      // children for all the fields
+      if (logical_node->get_num_children() != children.size())
+        return false;
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (!!(it->second - mask))
+          return false;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4915,17 +5082,15 @@ namespace Legion {
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, FillViewValue *val, 
-                       RtUserEvent destroy_event, bool register_now)
+                       bool register_now)
       : DeferredView(ctx, encode_fill_did(did), owner_proc, local_proc, 
-                     node, destroy_event, register_now), value(val)
+                     node, register_now), value(val)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(value != NULL);
 #endif
       value->add_reference();
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Fill View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -4934,8 +5099,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, RtUserEvent::NO_RT_USER_EVENT, false),
-        value(NULL)
+      : DeferredView(NULL, 0, 0, 0, NULL, false), value(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4948,12 +5112,6 @@ namespace Legion {
     {
       if (value->remove_reference())
         delete value;
-      if (is_owner())
-      {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5015,7 +5173,6 @@ namespace Legion {
       assert(is_owner());
       assert(logical_node->is_region());
 #endif
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -5024,11 +5181,10 @@ namespace Legion {
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(value->value_size);
         rez.serialize(value->value, value->value_size);
-        rez.serialize(destroy_event);
       }
       runtime->send_fill_view(target, rez);
       // We've now done the send so record it
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -5038,6 +5194,18 @@ namespace Legion {
     {
       // Fill views simplify easily
       return this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool FillView::need_temporary_instance(MaterializedView *dst,
+                                           const FieldMask &copy_mask,
+                                           bool &already_valid)
+    //--------------------------------------------------------------------------
+    {
+      // Not already valid
+      already_valid = false;
+      // Never need a temporary view for copying from a fill view
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -5090,8 +5258,6 @@ namespace Legion {
       derez.deserialize(value_size);
       void *value = malloc(value_size);
       derez.deserialize(value, value_size);
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
       
       RegionNode *target_node = runtime->forest->get_node(handle);
       FillView::FillViewValue *fill_value = 
@@ -5101,13 +5267,12 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<FillView>(location, runtime->forest, did,
                                       owner_space, runtime->address_space,
-                                      target_node, fill_value, destroy_event,
+                                      target_node, fill_value,
                                       false/*register now*/);
       else
         view = legion_new<FillView>(runtime->forest, did, owner_space,
                                     runtime->address_space, target_node, 
-                                    fill_value, destroy_event, 
-                                    false/*register now*/);
+                                    fill_value, false/*register now*/);
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
@@ -5120,9 +5285,9 @@ namespace Legion {
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  AddressSpaceID log_own, RegionTreeNode *node, 
                                  ReductionManager *man, UniqueID own_ctx, 
-                                 RtUserEvent destroy_event, bool register_now)
+                                 bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), own_sp, loc_sp, log_own, 
-          node, own_ctx, destroy_event, register_now), 
+          node, own_ctx, register_now), 
         manager(man), remote_request_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -5131,18 +5296,16 @@ namespace Legion {
 #endif
       logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Reduction View %ld %d %ld", did, local_space,
+      log_garbage.info("GC Reduction View %ld %d %ld", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
     }
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, 
-          RtUserEvent::NO_RT_USER_EVENT, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5155,13 +5318,6 @@ namespace Legion {
     {
       // Always unregister ourselves with the region tree node
       logical_node->unregister_instance_view(manager, owner_context);
-      if (is_owner())
-      {
-        // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -5994,7 +6150,6 @@ namespace Legion {
       assert(is_owner());
       assert(logical_node->is_region()); // Always regions at the top
 #endif
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
       {
@@ -6005,10 +6160,9 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
-        rez.serialize(destroy_event);
       }
       runtime->send_reduction_view(target, rez);
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -6043,8 +6197,6 @@ namespace Legion {
       derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
       RtEvent man_ready;
@@ -6064,13 +6216,12 @@ namespace Legion {
                                            runtime->address_space,
                                            logical_owner,
                                            target_node, red_manager,
-                                           context_uid, destroy_event,
-                                           false/*register now*/);
+                                           context_uid, false/*register now*/);
       else
         view = legion_new<ReductionView>(runtime->forest, did, owner_space,
                                   runtime->address_space, logical_owner,
                                   target_node, red_manager, context_uid,
-                                  destroy_event, false/*register now*/);
+                                  false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }

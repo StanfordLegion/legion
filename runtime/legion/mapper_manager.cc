@@ -256,6 +256,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_task_create_temporary(TaskOp *task,
+                                      Mapper::CreateTaskTemporaryInput *input,
+                                      Mapper::CreateTaskTemporaryOutput *output,
+                                      bool first_invocation,
+                                      MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(TASK_CREATE_TEMPORARY_CALL,
+                             task, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::CreateTaskTemporaryInput,
+            Mapper::CreateTaskTemporaryOutput, 
+            &MapperManager::invoke_task_create_temporary>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->create_task_temporary_instance(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_task_speculate(TaskOp *task,
                                               Mapper::SpeculativeOutput *output,
                                               bool first_invocation,
@@ -360,6 +387,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_inline_create_temporary(MapOp *op,
+                                    Mapper::CreateInlineTemporaryInput *input,
+                                    Mapper::CreateInlineTemporaryOutput *output,
+                                    bool first_invocation, 
+                                    MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(INLINE_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MapOp, Mapper::CreateInlineTemporaryInput,
+                              Mapper::CreateInlineTemporaryOutput, 
+                              &MapperManager::invoke_inline_create_temporary>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_inline_temporary_instance(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
                                      Mapper::InlineProfilingInfo *input,
                                      bool first_invocation,
@@ -434,6 +488,33 @@ namespace Legion {
         }
       }
       mapper->select_copy_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_copy_create_temporary(CopyOp *op,
+                                    Mapper::CreateCopyTemporaryInput *input,
+                                    Mapper::CreateCopyTemporaryOutput *output,
+                                    bool first_invocation,
+                                    MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(COPY_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CopyOp, Mapper::CreateCopyTemporaryInput,
+            Mapper::CreateCopyTemporaryOutput, 
+            &MapperManager::invoke_copy_create_temporary>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_copy_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -537,6 +618,33 @@ namespace Legion {
         }
       }
       mapper->select_close_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_close_create_temporary(CloseOp *op,
+                                    Mapper::CreateCloseTemporaryInput *input,
+                                    Mapper::CreateCloseTemporaryOutput *output,
+                                    bool first_invocation, 
+                                    MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(CLOSE_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CloseOp, Mapper::CreateCloseTemporaryInput,
+            Mapper::CreateCloseTemporaryOutput, 
+            &MapperManager::invoke_close_create_temporary>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_close_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -691,6 +799,32 @@ namespace Legion {
         }
       }
       mapper->select_release_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_release_create_temporary(ReleaseOp *op,
+                                  Mapper::CreateReleaseTemporaryInput *input,
+                                  Mapper::CreateReleaseTemporaryOutput *output,
+                                  bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(RELEASE_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<ReleaseOp, Mapper::CreateReleaseTemporaryInput,
+                              Mapper::CreateReleaseTemporaryOutput, 
+                              &MapperManager::invoke_release_create_temporary>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_release_temporary_instance(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -997,23 +1131,47 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::send_message(MappingCallInfo *ctx, Processor target,
-                                     const void *message, size_t message_size)
+                const void *message, size_t message_size, unsigned message_kind)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_message(target, mapper_id, processor,
-                                      message, message_size);
+                                      message, message_size, message_kind);
       resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::broadcast(MappingCallInfo *ctx, const void *message,
-                                  size_t message_size, int radix)
+                          size_t message_size, unsigned message_kind, int radix)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
-                                        message_size, radix, 0/*index*/);
+                        message_size, message_kind, radix, 0/*index*/);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::pack_physical_instance(MappingCallInfo *ctx,
+                                      Serializer &rez, MappingInstance instance)
+    //--------------------------------------------------------------------------
+    {
+      // No need to even pause the mapper call here
+      rez.serialize(instance.impl->did);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::unpack_physical_instance(MappingCallInfo *ctx,
+                                 Deserializer &derez, MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      instance.impl = runtime->find_or_request_physical_manager(did, ready);
+      if (ready.exists())
+        ready.wait();
       resume_mapper_call(ctx);
     }
 
@@ -2338,6 +2496,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_logical_partition_by_color(
+              MappingCallInfo *ctx, LogicalRegion par, const DomainPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LogicalPartition result = 
+        runtime->get_logical_partition_by_color(par, color);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition_by_tree(
                                                         MappingCallInfo *ctx,
                                                         IndexPartition part,
@@ -2367,6 +2537,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_color(
                         MappingCallInfo *ctx, LogicalPartition par, Color color)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_logical_subregion_by_color(
+           MappingCallInfo *ctx, LogicalPartition par, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
@@ -2444,87 +2625,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
         bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(task_id, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(task_id, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
         bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         IndexPartition handle, SemanticTag tag, const void *&result, 
         size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         FieldSpace handle, SemanticTag tag, const void *&result,
         size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result,
         size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, fid, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, fid,
+					     tag, result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         LogicalRegion handle, SemanticTag tag, const void *&result,
         size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+    bool MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
         LogicalPartition handle, SemanticTag tag, const void *&result,
         size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      runtime->retrieve_semantic_information(handle, tag, result, size,
+      bool ok = runtime->retrieve_semantic_information(handle, tag,
+					     result, size,
                                              can_fail, wait_until_ready);
       resume_mapper_call(ctx);
+      return ok;
     }
 
     //--------------------------------------------------------------------------

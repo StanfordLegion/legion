@@ -815,7 +815,7 @@ task toplevel()
   --var rp_duplicate = partition(aliased, all_nodes, duplicate_coloring)
   --c.legion_coloring_destroy(duplicate_coloring)
 
-  ----__demand(__spmd, __block)
+  ----__demand(__spmd)
   --for j = 0, 1 do
   --  __demand(__parallel)
   --  for i = 0, num_pieces do
@@ -834,7 +834,7 @@ task toplevel()
 
   --var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
 
-  __demand(__spmd, __block)
+  __demand(__spmd)
   for j = 0, 1 do
     for i = 0, num_pieces do
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
@@ -855,7 +855,7 @@ task toplevel()
   var simulation_success = true
   var steps = conf.steps
   var num_loops = conf.num_loops
-  __demand(__spmd, __block)
+  __demand(__spmd)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
@@ -918,19 +918,8 @@ end
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
-    local main, names = regentlib.setup(main_task, extra_setup_thunk)
-    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
-
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra"})
-    else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra"})
-    end
-  end
-
-  saveobj(toplevel, "circuit", "executable", ccircuit.register_mappers)
+  local link_flags = {"-L" .. root_dir, "-lcircuit"}
+  regentlib.saveobj(toplevel, "circuit", "executable", ccircuit.register_mappers, link_flags)
 else
-  ccircuit.register_mappers()
-  regentlib.start(toplevel)
+  regentlib.start(toplevel, ccircuit.register_mappers)
 end

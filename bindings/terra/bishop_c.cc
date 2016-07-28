@@ -21,44 +21,50 @@
 
 #include <vector>
 #include <set>
+#include <map>
 #include <cstdlib>
 
 using namespace std;
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::MappingUtilities ;
+using namespace Legion;
+using namespace Legion::Mapping;
+using namespace Legion::Mapping::Utilities;
 
-static vector<bishop_task_rule_t> task_rules;
-static vector<bishop_region_rule_t> region_rules;
+static vector<bishop_mapper_impl_t> mapper_impls;
+static vector<bishop_transition_fn_t> transitions;
 static bishop_mapper_state_init_fn_t mapper_init;
 
-extern Logger::Category log_bishop;
+namespace Legion {
+  namespace Mapping {
+    extern LegionRuntime::Logger::Category log_bishop;
+  }
+}
 
 static void
 bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
                               			const set<Processor> &local_procs)
 {
+  MapperRuntime* rt = runtime->get_mapper_runtime();
   for (set<Processor>::const_iterator it = local_procs.begin();
        it != local_procs.end(); it++)
   {
-    runtime->replace_default_mapper(new BishopMapper(task_rules, region_rules,
-                                                     mapper_init,
-                                                     machine, runtime, *it),
-                                    *it);
+    BishopMapper* mapper =
+      new BishopMapper(mapper_impls, transitions, mapper_init, rt, machine,
+                       *it);
+    runtime->replace_default_mapper(mapper, *it);
   }
 }
 
 void
-register_bishop_mappers(bishop_task_rule_t* _task_rules,
-                        unsigned _num_task_rules,
-                        bishop_region_rule_t* _region_rules,
-                        unsigned _num_region_rules,
+register_bishop_mappers(bishop_mapper_impl_t* _mapper_impls,
+                        unsigned _num_mapper_impls,
+                        bishop_transition_fn_t* _transitions,
+                        unsigned _num_transitions,
                         bishop_mapper_state_init_fn_t _mapper_init)
 {
-  for (unsigned i = 0; i < _num_task_rules; ++i)
-    task_rules.push_back(_task_rules[i]);
-  for (unsigned i = 0; i < _num_region_rules; ++i)
-    region_rules.push_back(_region_rules[i]);
+  for (unsigned i = 0; i < _num_mapper_impls; ++i)
+    mapper_impls.push_back(_mapper_impls[i]);
+  for (unsigned i = 0; i < _num_transitions; ++i)
+    transitions.push_back(_transitions[i]);
   mapper_init = _mapper_init;
 
   HighLevelRuntime::set_registration_callback(
@@ -120,10 +126,18 @@ bishop_all_memories()
   return mems_;
 }
 
+legion_processor_t NO_PROC = CObjectWrapper::wrap(Processor::NO_PROC);
+
 legion_processor_t
 bishop_get_no_processor()
 {
-  return CObjectWrapper::wrap(Processor::NO_PROC);
+  return NO_PROC;
+}
+
+legion_memory_t
+bishop_get_no_memory()
+{
+  return CObjectWrapper::wrap(Memory::NO_MEMORY);
 }
 
 bishop_processor_list_t
@@ -146,6 +160,10 @@ bishop_filter_processors_by_isa(bishop_processor_list_t source,
       case CUDA_ISA:
         {
           if (proc.kind() == Processor::TOC_PROC) result.push_back(proc_);
+          break;
+        }
+      default:
+        {
           break;
         }
     }
@@ -193,56 +211,6 @@ bishop_filter_memories_by_kind(bishop_memory_list_t source,
   for (unsigned i = 0; i < result.size(); ++i)
     result_.list[i] = result[i];
   return result_;
-}
-
-bool
-bishop_task_set_target_processor(legion_task_t task_, legion_processor_t proc_)
-{
-  Task* task = CObjectWrapper::unwrap(task_);
-  task->target_proc = CObjectWrapper::unwrap(proc_);
-  return true;
-}
-
-bool
-bishop_task_set_target_processor_list(legion_task_t task_,
-                                      bishop_processor_list_t list_)
-{
-  if (list_.size > 0)
-  {
-    Task* task = CObjectWrapper::unwrap(task_);
-    task->target_proc = CObjectWrapper::unwrap(list_.list[0]);
-    for (unsigned i = 1; i < list_.size; ++i)
-      task->additional_procs.insert(CObjectWrapper::unwrap(list_.list[i]));
-    return true;
-  }
-  else
-    return false;
-}
-
-bool
-bishop_region_set_target_memory(legion_region_requirement_t req_,
-                                legion_memory_t memory_)
-{
-  RegionRequirement& req = *CObjectWrapper::unwrap(req_);
-  req.target_ranking.clear();
-  req.target_ranking.push_back(CObjectWrapper::unwrap(memory_));
-  return true;
-}
-
-bool
-bishop_region_set_target_memory_list(legion_region_requirement_t req_,
-                                     bishop_memory_list_t list_)
-{
-  if (list_.size > 0)
-  {
-    RegionRequirement& req = *CObjectWrapper::unwrap(req_);
-    req.target_ranking.clear();
-    for (unsigned i = 0; i < list_.size; ++i)
-      req.target_ranking.push_back(CObjectWrapper::unwrap(list_.list[i]));
-    return true;
-  }
-  else
-    return false;
 }
 
 bishop_isa_t

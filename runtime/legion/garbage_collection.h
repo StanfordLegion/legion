@@ -48,13 +48,13 @@ namespace Legion {
       MEMORY_MANAGER_REF = 9,
       COMPOSITE_NODE_REF = 10,
       COMPOSITE_HANDLE_REF = 11,
-      PERSISTENCE_REF = 12,
-      REMOTE_CREATE_REF = 13,
-      INSTANCE_MAPPER_REF = 14,
-      APPLICATION_REF = 15,
-      MAPPING_ACQUIRE_REF = 16,
-      NEVER_GC_REF = 17,
-      CONTEXT_REF = 18,
+      REMOTE_CREATE_REF = 12,
+      INSTANCE_MAPPER_REF = 13,
+      APPLICATION_REF = 14,
+      MAPPING_ACQUIRE_REF = 15,
+      NEVER_GC_REF = 16,
+      CONTEXT_REF = 17,
+      RESTRICTED_REF = 18,
       LAST_SOURCE_REF = 19,
     };
 
@@ -78,13 +78,13 @@ namespace Legion {
       "Memory Manager Reference",                   \
       "Composite Node Reference",                   \
       "Composite Handle Reference",                 \
-      "Persistent Reference",                       \
       "Remote Creation Reference",                  \
       "Instance Mapper Reference",                  \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Never GC Reference",                         \
       "Context Reference",                          \
+      "Restricted Reference",                       \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;
@@ -232,12 +232,23 @@ namespace Legion {
         ReferenceMutator *const mutator;
         unsigned count;
       };
+      class UnregisterFunctor {
+      public:
+        UnregisterFunctor(Runtime *rt, const DistributedID d,
+                          VirtualChannelKind v, std::set<RtEvent> &done)
+          : runtime(rt), did(d), vc(v), done_events(done) { }
+      public:
+        void apply(AddressSpaceID target);
+      protected:
+        Runtime *const runtime;
+        const DistributedID did;
+        const VirtualChannelKind vc;
+        std::set<RtEvent> &done_events;
+      };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              AddressSpaceID local_space,
-                             RtUserEvent dest_event 
-                              = RtUserEvent::NO_RT_USER_EVENT,
                              bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:
@@ -323,8 +334,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       inline bool is_owner(void) const { return (owner_space == local_space); }
-      inline RtEvent get_destruction_event(void) const 
-        { return destruction_event; }
+      inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
     public:
@@ -332,9 +342,14 @@ namespace Legion {
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
-      void register_remote_instance(AddressSpaceID source, 
-                                    RtEvent destroy_event);
       void register_with_runtime(ReferenceMutator *mutator);
+      void unregister_with_runtime(VirtualChannelKind vc) const;
+      RtEvent send_unregister_messages(VirtualChannelKind vc) const;
+    public:
+      // This for remote nodes only
+      void unregister_collectable(void);
+      static void handle_unregister_collectable(Runtime *runtime,
+                                                Deserializer &derez);
     public:
       virtual void send_remote_registration(ReferenceMutator *mutator);
       void send_remote_valid_update(AddressSpaceID target, 
@@ -408,13 +423,7 @@ namespace Legion {
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;
     protected:
-      // Only valid on owner
-      std::set<RtEvent>        recycle_events;
-    protected:
-      // Only matter on remote nodes
-      RtUserEvent destruction_event;
-    protected:
-      bool registered_with_runtime;
+      mutable bool registered_with_runtime;
     };
 
     //--------------------------------------------------------------------------
@@ -811,7 +820,7 @@ namespace Legion {
       bool result = try_add_valid_reference_internal(source, mutator, 
                                                      must_be_valid, cnt);
 #else
-      bool result = try_add_valid_reference(must_be_valid, cnt);
+      bool result = try_add_valid_reference(mutator, must_be_valid, cnt);
 #endif
       if (result)
         log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);

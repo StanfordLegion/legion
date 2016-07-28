@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "4", "-fflow-spmd", "1"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -88,7 +88,7 @@ task main()
   var inc_by_ca = 300
 
   __demand(__spmd)
-  for t = 0, 10 do
+  for t = 0, 3 do
     for i = start, stop do
       inc_ab(p[i], inc_by_ab)
     end
@@ -101,9 +101,10 @@ task main()
   end
 
   for x in r do
-    regentlib.assert(x.a == 33010, "test failed")
-    regentlib.assert(x.b == 50210, "test failed")
-    regentlib.assert(x.c == 73200, "test failed")
+    regentlib.c.printf("%d %d %d\n", x.a, x.b, x.c)
+    regentlib.assert(x.a == 30903, "test failed")
+    regentlib.assert(x.b == 50063, "test failed")
+    regentlib.assert(x.c == 70960, "test failed")
   end
 end
 regentlib.start(main)

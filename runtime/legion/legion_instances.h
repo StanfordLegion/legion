@@ -113,7 +113,7 @@ namespace Legion {
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, const Domain &intance_domain,
-                      bool own_domain, RtUserEvent dest, bool register_now);
+                      bool own_domain, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -122,6 +122,9 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
+    public:
+      void log_instance_creation(UniqueID creator_id, Processor proc,
+                     const std::vector<LogicalRegion> &regions) const;
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_instance_manager(void) const;
@@ -229,20 +232,13 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
-      enum InstanceFlag {
-        NO_INSTANCE_FLAG = 0x00000000,
-        ATTACH_FILE_FLAG = 0x00000001,
-      };
-    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       MemoryManager *memory, PhysicalInstance inst, 
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      RtUserEvent destruction_event,
-                      bool register_now, ApEvent use_event, 
-                      InstanceFlag flag = NO_INSTANCE_FLAG);
+                      bool register_now, ApEvent use_event); 
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -292,13 +288,6 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event;
-    protected:
-      // This is monotonic variable that once it becomes true
-      // will remain true for the duration of the instance lifetime.
-      // If set to true, it should prevent the instance from ever
-      // being collected before the context in which it was created
-      // is destroyed.
-      InstanceFlag instance_flags;
     };
 
     /**
@@ -314,8 +303,7 @@ namespace Legion {
                        const PointerConstraint &constraint,
                        const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op, RtUserEvent destruction_event,
-                       bool register_now);
+                       const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -375,7 +363,7 @@ namespace Legion {
                            const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
-                           RtUserEvent dest_event, bool register_now);
+                           bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -421,7 +409,7 @@ namespace Legion {
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, ApEvent use_event,
-                           RtUserEvent dest_event, bool register_now);
+                           bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:

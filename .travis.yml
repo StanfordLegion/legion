@@ -10,6 +10,7 @@ compiler:
 env:
   global:
   - WARN_AS_ERROR=1
+  - REALM_SYNTHETIC_CORE_MAP=""
   matrix:
   - CC_FLAGS= DEBUG=0
   - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
@@ -26,11 +27,13 @@ branches:
     - stable
     - master
 before_install:
+  - export THREADS=2
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+      sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
@@ -48,37 +51,45 @@ before_install:
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
-      make -j2
+      make -j$THREADS
       popd
     fi
 script:
+  # Regent
   - ./language/travis.py
+
+  # Legion tutorials
   - |
-    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime clean
-    make -s -C examples/00_hello_world LG_RT_DIR=../../runtime -j2
-    examples/00_hello_world/hello_world
-    make -s -C examples/01_tasks_and_futures LG_RT_DIR=../../runtime
-    examples/01_tasks_and_futures/tasks_and_futures
-    make -s -C examples/02_index_tasks LG_RT_DIR=../../runtime
-    examples/02_index_tasks/index_tasks
-    make -s -C examples/03_global_vars LG_RT_DIR=../../runtime
-    examples/03_global_vars/global_vars
-    make -s -C examples/04_logical_regions LG_RT_DIR=../../runtime
-    examples/04_logical_regions/logical_regions
-    make -s -C examples/05_physical_regions LG_RT_DIR=../../runtime
-    examples/05_physical_regions/physical_regions
-    make -s -C examples/06_privileges LG_RT_DIR=../../runtime
-    examples/06_privileges/privileges
-    make -s -C examples/07_partitioning LG_RT_DIR=../../runtime
-    examples/07_partitioning/partitioning
-    make -s -C examples/08_multiple_partitions LG_RT_DIR=../../runtime
-    examples/08_multiple_partitions/multiple_partitions
-    make -s -C examples/09_custom_mapper LG_RT_DIR=../../runtime
-    examples/09_custom_mapper/custom_mapper
+    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
+    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j$THREADS
+    tutorial/00_hello_world/hello_world -logfile out_%.log
+    make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
+    tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
+    make -s -C tutorial/02_index_tasks LG_RT_DIR=../../runtime
+    tutorial/02_index_tasks/index_tasks -logfile out_%.log
+    make -s -C tutorial/03_global_vars LG_RT_DIR=../../runtime
+    tutorial/03_global_vars/global_vars -logfile out_%.log
+    make -s -C tutorial/04_logical_regions LG_RT_DIR=../../runtime
+    tutorial/04_logical_regions/logical_regions -logfile out_%.log
+    make -s -C tutorial/05_physical_regions LG_RT_DIR=../../runtime
+    tutorial/05_physical_regions/physical_regions -logfile out_%.log
+    make -s -C tutorial/06_privileges LG_RT_DIR=../../runtime
+    tutorial/06_privileges/privileges -logfile out_%.log
+    make -s -C tutorial/07_partitioning LG_RT_DIR=../../runtime
+    tutorial/07_partitioning/partitioning -logfile out_%.log
+    make -s -C tutorial/08_multiple_partitions LG_RT_DIR=../../runtime
+    tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
+    make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
+    tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
+
+  # Legion examples
+  - |
     make -s -C examples/full_circuit LG_RT_DIR=../../runtime
-    examples/full_circuit/ckt_sim
+    examples/full_circuit/ckt_sim -logfile out_%.log
     make -s -C examples/full_ghost LG_RT_DIR=../../runtime
-    examples/full_ghost/ghost -ll:cpu 4
+    examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+
+  # Realm
   - |
     if [[ "$DEBUG" -eq 0 ]]; then
       make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean

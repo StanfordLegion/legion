@@ -1602,7 +1602,7 @@ namespace Legion {
     public:
       AcquireLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1615,6 +1615,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1635,7 +1636,7 @@ namespace Legion {
     public:
       ReleaseLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1648,6 +1649,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1753,7 +1755,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Mappable(void);
     public:
+      // Return a globally unique ID for this operation
       virtual UniqueID get_unique_id(void) const = 0;
+      // Return the number of operations that came before
+      // this operation in the same context (close operations
+      // return number of previous close operations)
+      virtual unsigned get_context_index(void) const = 0;
+      // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
       MapperID                                  map_id;
@@ -1859,7 +1867,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1882,7 +1889,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1980,6 +1986,7 @@ namespace Legion {
      */
     class ProjectionFunctor {
     public:
+      ProjectionFunctor(void);
       ProjectionFunctor(Runtime *rt);
       virtual ~ProjectionFunctor(void);
     public:
@@ -2011,8 +2018,20 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point) = 0;
+      /**
+       * Indicate whether calls to this projection functor
+       * must be serialized or can be performed in parallel.
+       * Usually they must be exclusive if this functor contains
+       * state for memoizing results.
+       */
+      virtual bool is_exclusive(void) const { return false; }
+    private:
+      friend class Internal::Runtime;
+      // For pre-registered projection functors the runtime will
+      // use this to initialize the runtime pointer
+      inline void set_runtime(Runtime *rt) { runtime = rt; }
     protected:
-      Runtime *const runtime;
+      Runtime *runtime;
     };
 
     /**
@@ -2028,6 +2047,15 @@ namespace Legion {
      * for initializing the runtime during start-up callback.
      * The final section of calls are static methods that are
      * used to configure the runtime prior to starting it up.
+     *
+     * A note on context free functions: context free functions 
+     * have equivalent functionality to their non-context-free 
+     * couterparts. However, context free functions can be 
+     * safely used in a leaf task while any runtime function 
+     * that requires a context cannot be used in a leaf task. 
+     * If your task variant only uses context free functions
+     * as part of its implementation then it is safe for you 
+     * to annotate it as a leaf task variant.
      */
     class Runtime {
     protected:
@@ -4425,11 +4453,25 @@ namespace Legion {
        * zero is the identity projection. Unlike mappers which
        * require a separate instance per processor, only
        * one of these must be registered per projection ID.
+       * The runtime takes ownership for deleting the projection 
+       * functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
-       * @param functor the object to register for handle projections
+       * @param functor the object to register for handling projections
        */
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *functor);
+
+      /**
+       * Register a projection functor before the runtime has started only.
+       * The runtime will update the projection functor so that it has 
+       * contains a valid runtime pointer prior to the projection functor
+       * ever being invoked. The runtime takes ownership for deleting the
+       * projection functor after the application has finished executing.
+       * @param pid the projection ID to use for the registration
+       * @param functor the objecto register for handling projections
+       */
+      static void preregister_projection_functor(ProjectionID pid,
+                                                 ProjectionFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
@@ -4657,8 +4699,7 @@ namespace Legion {
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
        * task execution.  The projection ID zero is reserved for runtime
-       * use. The user can pass in AUTO_GENERATE_ID to
-       * have the runtime automatically generate an ID.
+       * use.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -4671,8 +4712,6 @@ namespace Legion {
        * map from an upper bound of a logical partition down to a specific
        * logical sub-region for a given domain point during index task
        * execution.  The projection ID zero is reserved for runtime use.
-       * The user can pass in AUTO_GENERATE_ID to have the runtime
-       * automatically generate an ID.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -5113,11 +5152,6 @@ namespace Legion {
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
-    private:
-      static ProjectionID register_region_projection_function(
-                                    ProjectionID handle, void *func_ptr);
-      static ProjectionID register_partition_projection_function(
-                                    ProjectionID handle, void *func_ptr);
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,

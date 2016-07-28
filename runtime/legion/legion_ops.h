@@ -169,8 +169,8 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
-      virtual const char* get_logging_name(void) = 0;
-      virtual OpKind get_operation_kind(void) = 0;
+      virtual const char* get_logging_name(void) const = 0;
+      virtual OpKind get_operation_kind(void) const  = 0;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
@@ -293,6 +293,21 @@ namespace Legion {
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
+      // Help for creating temporary instances
+      MaterializedView* create_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager* dst,
+                              unsigned index, const FieldMask &needed_fields);
+      void validate_temporary_instance(PhysicalManager *result,
+                              std::set<PhysicalManager*> &previous_managers,
+         const std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
+                              const FieldMask &needed_fields, 
+                              LogicalRegion needed_region,
+                              MapperManager *mapper,
+                              const char *mapper_call_name) const;
+      void log_temporary_instance(PhysicalManager *result, unsigned index,
+                                  const FieldMask &needed_fields) const;
+    public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
       //
@@ -399,6 +414,7 @@ namespace Legion {
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
+      unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
       // Operations which depend on this operation
@@ -602,8 +618,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -620,8 +636,11 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -636,6 +655,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
+      RestrictInfo restrict_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
@@ -669,8 +689,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -691,8 +711,11 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
@@ -712,6 +735,8 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
+      std::vector<RestrictInfo>   src_restrict_infos;
+      std::vector<RestrictInfo>   dst_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -755,8 +780,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -788,8 +813,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
@@ -840,8 +865,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -876,6 +901,7 @@ namespace Legion {
       CloseOp& operator=(const CloseOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       void activate_close(void);
@@ -889,8 +915,8 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual const char* get_logging_name(void) = 0;
-      virtual OpKind get_operation_kind(void) = 0;
+      virtual const char* get_logging_name(void) const = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
       virtual bool is_close_op(void) const { return true; }
     public:
@@ -914,8 +940,8 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
-      virtual const char* get_logging_name(void) = 0;
-      virtual OpKind get_operation_kind(void) = 0;
+      virtual const char* get_logging_name(void) const = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
     public:
       void initialize_trace_close_op(SingleTask *ctx, 
                                      const RegionRequirement &req,
@@ -973,13 +999,12 @@ namespace Legion {
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
-                      const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual bool trigger_execution(void);
       virtual void trigger_commit(void);
@@ -990,6 +1015,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
     protected:
       int invoke_mapper(const InstanceSet &valid_instances,
                               InstanceSet &chosen_instances);
@@ -1031,8 +1058,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
     protected:
@@ -1058,8 +1085,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -1071,6 +1098,8 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
     protected:
       void report_profiling_results(void);
     protected:
@@ -1103,8 +1132,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
@@ -1136,8 +1165,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void); 
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const; 
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -1154,6 +1183,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1166,6 +1196,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1197,8 +1228,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -1216,8 +1247,11 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
+                              unsigned index, const FieldMask &needed_fields);
     public:
       virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1230,6 +1264,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1261,8 +1296,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual bool trigger_execution(void);
       virtual void deferred_execute(void);
@@ -1296,8 +1331,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      const char* get_logging_name(void);
-      OpKind get_operation_kind(void);
+      const char* get_logging_name(void) const;
+      OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1323,8 +1358,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1352,8 +1387,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1387,8 +1422,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -1439,9 +1474,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
+      virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void);
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
@@ -1511,6 +1546,7 @@ namespace Legion {
                unsigned/*dependence index*/> dependence_map;
       std::vector<DependenceRecord*> dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
+      std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     };
 
     /**
@@ -1572,7 +1608,8 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks);
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
+            const std::vector<std::set<unsigned> > &dependences);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);
@@ -1805,8 +1842,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     protected:
       ApUserEvent handle_ready;
       PendingPartitionThunk *thunk;
@@ -1858,8 +1895,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -1918,9 +1955,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
+      virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void);
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
@@ -1985,9 +2022,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
+      virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void);
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
@@ -2013,6 +2050,7 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
+      InstanceManager *file_instance;
     };
 
     /**
@@ -2033,9 +2071,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
+      virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
-      virtual OpKind get_operation_kind(void);
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_remote_state_analysis(RtUserEvent ready_event);
@@ -2077,8 +2115,8 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);

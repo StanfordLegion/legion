@@ -47,22 +47,6 @@ fspace grid_parts(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d))
   { main, xm, xp, ym, yp, zm, zp } : partition(disjoint, grid, pspace)
 }
 
-function get_region_bounds(r)
-  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __raw(r.ispace))) end
-end
-
-function get_ispace_bounds(is)
-  return rexpr c.legion_domain_get_rect_3d(c.legion_domain_from_index_space(__runtime(), __raw(is))) end
-end
-
-__demand(__inline)
-task get_rect_size(r : c.legion_rect_3d_t) : int3d
-  return [int3d]{ x = (r.hi.x[0] - r.lo.x[0] + 1),
-                  y = (r.hi.x[1] - r.lo.x[1] + 1),
-                  z = (r.hi.x[2] - r.lo.x[2] + 1),
-                  }
-end
-
 terra add_colored_rect(coloring : c.legion_domain_point_coloring_t,
                        color : int3d, lo : int3d, hi : int3d)
   var rect = c.legion_rect_3d_t { lo = lo:to_point(), hi = hi:to_point() }
@@ -79,19 +63,19 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
   var coloring_zm = c.legion_domain_point_coloring_create()
   var coloring_zp = c.legion_domain_point_coloring_create()
 
-  var gbounds = [ get_region_bounds(grid) ]
-  var pbounds = [ get_ispace_bounds(pspace) ]
+  var gbounds = grid.bounds
+  var pbounds = pspace.bounds
 
-  var gsize = get_rect_size(gbounds)
-  var psize = get_rect_size(pbounds)
+  var gsize = gbounds:size()
+  var psize = pbounds:size()
 
   for p in pspace do
-    var xlo : int32 = gbounds.lo.x[0] + ((p.x - pbounds.lo.x[0]) * gsize.x / psize.x)
-    var xhi : int32 = gbounds.lo.x[0] + ((p.x - pbounds.lo.x[0] + 1) * gsize.x / psize.x) - 1
-    var ylo : int32 = gbounds.lo.x[1] + ((p.y - pbounds.lo.x[1]) * gsize.y / psize.y)
-    var yhi : int32 = gbounds.lo.x[1] + ((p.y - pbounds.lo.x[1] + 1) * gsize.y / psize.y) - 1
-    var zlo : int32 = gbounds.lo.x[2] + ((p.z - pbounds.lo.x[2]) * gsize.z / psize.z)
-    var zhi : int32 = gbounds.lo.x[2] + ((p.z - pbounds.lo.x[2] + 1) * gsize.z / psize.z) - 1
+    var xlo : int32 = gbounds.lo.x + ((p.x - pbounds.lo.x) * gsize.x / psize.x)
+    var xhi : int32 = gbounds.lo.x + ((p.x - pbounds.lo.x + 1) * gsize.x / psize.x) - 1
+    var ylo : int32 = gbounds.lo.y + ((p.y - pbounds.lo.y) * gsize.y / psize.y)
+    var yhi : int32 = gbounds.lo.y + ((p.y - pbounds.lo.y + 1) * gsize.y / psize.y) - 1
+    var zlo : int32 = gbounds.lo.z + ((p.z - pbounds.lo.z) * gsize.z / psize.z)
+    var zhi : int32 = gbounds.lo.z + ((p.z - pbounds.lo.z + 1) * gsize.z / psize.z) - 1
     add_colored_rect(coloring_main, p, { x = xlo, y = ylo, z = zlo }, { x = xhi, y = yhi, z = zhi })
     --c.printf("p=(%d,%d,%d), lo=(%d,%d,%d), hi=(%d,%d,%d)\n", p.x,p.y,p.z,xlo,ylo,zlo,xhi,yhi,zhi)
 
@@ -102,7 +86,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        xmlo max= gbounds.lo.x[0]
+        xmlo max= gbounds.lo.x
       end
       add_colored_rect(coloring_xm, p, { x = xmlo, y = ylo, z = zlo }, { x = xmhi, y = yhi, z = zhi })
     end
@@ -114,7 +98,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        xphi min= gbounds.hi.x[0]
+        xphi min= gbounds.hi.x
       end
       add_colored_rect(coloring_xp, p, { x = xplo, y = ylo, z = zlo }, { x = xphi, y = yhi, z = zhi })
     end
@@ -126,7 +110,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        ymlo max= gbounds.lo.x[1]
+        ymlo max= gbounds.lo.y
       end
       add_colored_rect(coloring_ym, p, { x = xlo, y = ymlo, z = zlo }, { x = xhi, y = ymhi, z = zhi })
     end
@@ -138,7 +122,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        yphi min= gbounds.hi.x[1]
+        yphi min= gbounds.hi.y
       end
       add_colored_rect(coloring_yp, p, { x = xlo, y = yplo, z = zlo }, { x = xhi, y = yphi, z = zhi })
     end
@@ -150,7 +134,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        zmlo max= gbounds.lo.x[2]
+        zmlo max= gbounds.lo.z
       end
       add_colored_rect(coloring_zm, p, { x = xlo, y = ylo, z = zmlo }, { x = xhi, y = yhi, z = zmhi })
     end
@@ -162,7 +146,7 @@ task partition_grid(grid : region(ispace(int3d), fs_grid), pspace : ispace(int3d
       if wrap then
         -- todo
       else
-        zphi min= gbounds.hi.x[2]
+        zphi min= gbounds.hi.z
       end
       add_colored_rect(coloring_zp, p, { x = xlo, y = ylo, z = zplo }, { x = xhi, y = yhi, z = zphi })
     end
@@ -192,8 +176,8 @@ end
 task print_charge(grid : region(ispace(int3d), fs_grid))
 where reads(grid.charge)
 do
-  var b = [ get_region_bounds(grid) ]
-  c.printf("print_charge: (%d,%d,%d) -> (%d,%d,%d)\n", b.lo.x[0], b.lo.x[1], b.lo.x[2], b.hi.x[0], b.hi.x[1], b.hi.x[2])
+  var b = grid.bounds
+  c.printf("print_charge: (%d,%d,%d) -> (%d,%d,%d)\n", b.lo.x, b.lo.y, b.lo.z, b.hi.x, b.hi.y, b.hi.z)
   for i in grid do
      if (grid[i].charge ~= 0) then c.printf("charge @ (%d,%d,%d) = %g\n", i.x, i.y, i.z, grid[i].charge) end
   end
@@ -250,7 +234,7 @@ task splat_charge(grid : region(ispace(int3d), fs_grid),
 where reads(particles.{charge,px,py,pz}), reduces +(grid.charge)
 do
   -- get the bounds of our part of the grid - we'll only contribute charge to pieces we own
-  var gbounds = [ get_region_bounds(grid) ]
+  var gbounds = grid.bounds
 
   for p in particles do
     var cx = min(max((particles[p].px - ginfo.xmin) / ginfo.dx, 0), ginfo.cells.x - 1)
@@ -268,41 +252,41 @@ do
     var zhi = min(zlo + 1, ginfo.cells.z - 1)
     var zfrac = cz - zlo
 
-    if (xlo >= gbounds.lo.x[0]) and (xlo <= gbounds.hi.x[0]) then
-      if (ylo >= gbounds.lo.x[1]) and (ylo <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+    if (xlo >= gbounds.lo.x) and (xlo <= gbounds.hi.x) then
+      if (ylo >= gbounds.lo.y) and (ylo <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
           grid[ { x = xlo, y = ylo, z = zlo } ].charge += particles[p].charge * (1 - xfrac) * (1 - yfrac) * (1 - zfrac)
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
           grid[ { x = xlo, y = ylo, z = zhi } ].charge += particles[p].charge * (1 - xfrac) * (1 - yfrac) * (    zfrac)
         end
       end
 
-      if (yhi >= gbounds.lo.x[1]) and (yhi <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+      if (yhi >= gbounds.lo.y) and (yhi <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
           grid[ { x = xlo, y = yhi, z = zlo } ].charge += particles[p].charge * (1 - xfrac) * (    yfrac) * (1 - zfrac)
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
           grid[ { x = xlo, y = yhi, z = zhi } ].charge += particles[p].charge * (1 - xfrac) * (    yfrac) * (    zfrac)
         end
       end
     end
 
-    if (xhi >= gbounds.lo.x[0]) and (xhi <= gbounds.hi.x[0]) then
-      if (ylo >= gbounds.lo.x[1]) and (ylo <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+    if (xhi >= gbounds.lo.x) and (xhi <= gbounds.hi.x) then
+      if (ylo >= gbounds.lo.y) and (ylo <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
           grid[ { x = xhi, y = ylo, z = zlo } ].charge += particles[p].charge * (    xfrac) * (1 - yfrac) * (1 - zfrac)
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
           grid[ { x = xhi, y = ylo, z = zhi } ].charge += particles[p].charge * (    xfrac) * (1 - yfrac) * (    zfrac)
         end
       end
 
-      if (yhi >= gbounds.lo.x[1]) and (yhi <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+      if (yhi >= gbounds.lo.y) and (yhi <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
           grid[ { x = xhi, y = yhi, z = zlo } ].charge += particles[p].charge * (    xfrac) * (    yfrac) * (1 - zfrac)
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
           grid[ { x = xhi, y = yhi, z = zhi } ].charge += particles[p].charge * (    xfrac) * (    yfrac) * (    zfrac)
         end
       end
@@ -316,7 +300,7 @@ task interpolate_field(grid : region(ispace(int3d), fs_grid),
 where reads(grid.{ex,ey,ez}), reads(particles.{px,py,pz}), reduces +(particles.{ex,ey,ez})
 do
   -- get the bounds of our part of the grid - we'll only contribute charge to pieces we own
-  var gbounds = [ get_region_bounds(grid) ]
+  var gbounds = grid.bounds
 
   for p in particles do
     var cx = min(max((particles[p].px - ginfo.xmin) / ginfo.dx, 0), ginfo.cells.x - 1)
@@ -334,16 +318,16 @@ do
     var zhi = min(zlo + 1, ginfo.cells.z - 1)
     var zfrac = cz - zlo
 
-    if (xlo >= gbounds.lo.x[0]) and (xlo <= gbounds.hi.x[0]) then
-      if (ylo >= gbounds.lo.x[1]) and (ylo <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+    if (xlo >= gbounds.lo.x) and (xlo <= gbounds.hi.x) then
+      if (ylo >= gbounds.lo.y) and (ylo <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
 	  var pt : int3d = { x = xlo, y = ylo, z = xlo }
           var wt : double = (1 - xfrac) * (1 - yfrac) * (1 - zfrac)
 	  particles[p].ex += wt * grid[pt].ex
 	  particles[p].ey += wt * grid[pt].ey
 	  particles[p].ez += wt * grid[pt].ez
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
 	  var pt : int3d = { x = xlo, y = ylo, z = xhi }
           var wt : double = (1 - xfrac) * (1 - yfrac) * (    zfrac)
 	  particles[p].ex += wt * grid[pt].ex
@@ -352,15 +336,15 @@ do
         end
       end
 
-      if (yhi >= gbounds.lo.x[1]) and (yhi <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+      if (yhi >= gbounds.lo.y) and (yhi <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
 	  var pt : int3d = { x = xlo, y = yhi, z = xlo }
           var wt : double = (1 - xfrac) * (    yfrac) * (1 - zfrac)
 	  particles[p].ex += wt * grid[pt].ex
 	  particles[p].ey += wt * grid[pt].ey
 	  particles[p].ez += wt * grid[pt].ez
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
 	  var pt : int3d = { x = xlo, y = yhi, z = xhi }
           var wt : double = (1 - xfrac) * (    yfrac) * (    zfrac)
 	  particles[p].ex += wt * grid[pt].ex
@@ -370,16 +354,16 @@ do
       end
     end
 
-    if (xhi >= gbounds.lo.x[0]) and (xhi <= gbounds.hi.x[0]) then
-      if (ylo >= gbounds.lo.x[1]) and (ylo <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+    if (xhi >= gbounds.lo.x) and (xhi <= gbounds.hi.x) then
+      if (ylo >= gbounds.lo.y) and (ylo <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
 	  var pt : int3d = { x = xhi, y = ylo, z = xlo }
           var wt : double = (    xfrac) * (1 - yfrac) * (1 - zfrac)
 	  particles[p].ex += wt * grid[pt].ex
 	  particles[p].ey += wt * grid[pt].ey
 	  particles[p].ez += wt * grid[pt].ez
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
 	  var pt : int3d = { x = xhi, y = ylo, z = xhi }
           var wt : double = (    xfrac) * (1 - yfrac) * (    zfrac)
 	  particles[p].ex += wt * grid[pt].ex
@@ -388,15 +372,15 @@ do
         end
       end
 
-      if (yhi >= gbounds.lo.x[1]) and (yhi <= gbounds.hi.x[1]) then
-        if (zlo >= gbounds.lo.x[2]) and (zlo <= gbounds.hi.x[2]) then
+      if (yhi >= gbounds.lo.y) and (yhi <= gbounds.hi.y) then
+        if (zlo >= gbounds.lo.z) and (zlo <= gbounds.hi.z) then
 	  var pt : int3d = { x = xhi, y = yhi, z = xlo }
           var wt : double = (    xfrac) * (    yfrac) * (1 - zfrac)
 	  particles[p].ex += wt * grid[pt].ex
 	  particles[p].ey += wt * grid[pt].ey
 	  particles[p].ez += wt * grid[pt].ez
         end
-        if (zhi >= gbounds.lo.x[2]) and (zhi <= gbounds.hi.x[2]) then
+        if (zhi >= gbounds.lo.z) and (zhi <= gbounds.hi.z) then
 	  var pt : int3d = { x = xhi, y = yhi, z = xhi }
           var wt : double = (    xfrac) * (    yfrac) * (    zfrac)
 	  particles[p].ex += wt * grid[pt].ex
@@ -544,25 +528,25 @@ end
 task calculate_field(grid : region(ispace(int3d), fs_grid), ginfo : grid_info)
 where reads(grid.potential), writes(grid.{ex,ey,ez})
 do
-  var gbounds = [ get_region_bounds(grid) ]
+  var gbounds = grid.bounds
 
   for i in grid do
     do
       var dp : double = 0
-      if (i.x > gbounds.lo.x[0]) then dp -= grid[ { x = i.x - 1, y = i.y, z = i.z } ].potential end
-      if (i.x < gbounds.hi.x[0]) then dp += grid[ { x = i.x + 1, y = i.y, z = i.z } ].potential end
+      if (i.x > gbounds.lo.x) then dp -= grid[ { x = i.x - 1, y = i.y, z = i.z } ].potential end
+      if (i.x < gbounds.hi.x) then dp += grid[ { x = i.x + 1, y = i.y, z = i.z } ].potential end
       grid[i].ex = dp / ginfo.dx
     end
     do
       var dp : double = 0
-      if (i.y > gbounds.lo.x[1]) then dp -= grid[ { x = i.x, y = i.y - 1, z = i.z } ].potential end
-      if (i.y < gbounds.hi.x[1]) then dp += grid[ { x = i.x, y = i.y + 1, z = i.z } ].potential end
+      if (i.y > gbounds.lo.y) then dp -= grid[ { x = i.x, y = i.y - 1, z = i.z } ].potential end
+      if (i.y < gbounds.hi.y) then dp += grid[ { x = i.x, y = i.y + 1, z = i.z } ].potential end
       grid[i].ey = dp / ginfo.dy
     end
     do
       var dp : double = 0
-      if (i.z > gbounds.lo.x[1]) then dp -= grid[ { x = i.x, y = i.y, z = i.z - 1 } ].potential end
-      if (i.z < gbounds.hi.x[1]) then dp += grid[ { x = i.x, y = i.y, z = i.z + 1 } ].potential end
+      if (i.z > gbounds.lo.z) then dp -= grid[ { x = i.x, y = i.y, z = i.z - 1 } ].potential end
+      if (i.z < gbounds.hi.z) then dp += grid[ { x = i.x, y = i.y, z = i.z + 1 } ].potential end
       grid[i].ez = dp / ginfo.dz
     end
   end

@@ -151,6 +151,12 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the broadcast tree
+// when attempting to shutdown the runtime
+#ifndef LEGION_SHUTDOWN_RADIX
+#define LEGION_SHUTDOWN_RADIX             8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -335,7 +341,13 @@ typedef enum legion_error_t {
   ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
   ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME = 150,
   ERROR_INVALID_MAPPER_SYNCHRONIZATION = 151,
-  ERROR_ILLEGAL_RESTRICTED_REDUCTION = 152,
+  ERROR_ILLEGAL_PARTIAL_ACQUISITION = 152,
+  ERROR_ILLEGAL_INTERFERING_RESTRICTIONS = 153,
+  ERROR_ILLEGAL_PARTIAL_RESTRICTION = 154,
+  ERROR_ILLEGAL_INTERFERING_ACQUISITIONS = 155,
+  ERROR_UNRESTRICTED_ACQUIRE = 156,
+  ERROR_UNACQUIRED_RELEASE = 157,
+  ERROR_UNATTACHED_DETACH = 158,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -373,7 +385,7 @@ typedef enum legion_region_flags_t {
   NO_ACCESS_FLAG  = 0x00000002,
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
-} legion_region_flags_T;
+} legion_region_flags_t;
 
 typedef enum legion_index_space_kind_t {
   UNSTRUCTURED_KIND,
@@ -510,6 +522,9 @@ typedef enum legion_specialized_constraint_t {
   REDUCTION_FOLD_SPECIALIZE = 2,
   REDUCTION_LIST_SPECIALIZE = 3,
   VIRTUAL_SPECIALIZE = 4,
+  // All file types must go below here, everything else above
+  GENERIC_FILE_SPECIALIZE = 5,
+  HDF5_FILE_SPECIALIZE = 6,
 } legion_specialized_constraint_t;
 
 //==========================================================================

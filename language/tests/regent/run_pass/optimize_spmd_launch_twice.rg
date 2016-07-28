@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "4", "-fflow-spmd", "1"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -108,7 +108,7 @@ task main()
   var pieces = 4
 
   __demand(__spmd)
-  for t = 0, 4 do
+  for t = 0, 3 do
     for i = 0, pieces do
       inc_ba(p[i])
     end
@@ -129,7 +129,7 @@ task main()
   end
 
   __demand(__spmd)
-  for t = 0, 6 do
+  for t = 0, 3 do
     for i = 0, pieces do
       avg_ac(p[i], q[i])
     end
@@ -146,9 +146,9 @@ task main()
     c.printf("x %d %d %d\n", x.a, x.b, x.c)
   end
 
-  regentlib.assert(x0.a ==  9428, "test failed")
-  regentlib.assert(x1.a == 10710, "test failed")
-  regentlib.assert(x2.a ==  9287, "test failed")
-  regentlib.assert(x3.a == 10675, "test failed")
+  regentlib.assert(x0.a ==  9669, "test failed")
+  regentlib.assert(x1.a == 10410, "test failed")
+  regentlib.assert(x2.a ==  9676, "test failed")
+  regentlib.assert(x3.a == 10385, "test failed")
 end
 regentlib.start(main)

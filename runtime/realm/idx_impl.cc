@@ -70,7 +70,7 @@ namespace Realm {
 
       IndexSpaceImpl *impl = get_runtime()->local_index_space_free_list->alloc_entry();
       assert(impl);
-      assert(ID(impl->me).type() == ID::ID_INDEXSPACE);
+      assert(ID(impl->me).is_idxspace());
 
       StaticAccess<IndexSpaceImpl> p_data(get_runtime()->get_index_space_impl(parent));
 
@@ -121,9 +121,7 @@ namespace Realm {
       if(!r_impl->valid_mask_complete) {
 	Event wait_on = r_impl->request_valid_mask();
 	
-	log_copy.info("missing valid mask (" IDFMT "/%p) - waiting for " IDFMT "/%d",
-		      id, r_impl->valid_mask,
-		      wait_on.id, wait_on.gen);
+	log_copy.info() << "missing valid mask (" << *this << ") - waiting for " << wait_on;
 
 	wait_on.wait();
       }
@@ -1626,11 +1624,11 @@ namespace Realm {
 
     void IndexSpaceImpl::init(IndexSpace _me, unsigned _init_owner)
     {
-      assert(!_me.exists() || (_init_owner == ID(_me).node()));
+      assert(!_me.exists() || (_init_owner == ID(_me).idxspace.owner_node));
 
       me = _me;
       locked_data.valid = false;
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).idxspace.owner_node);
       lock.in_use = true;
       lock.set_local_data(&locked_data);
       valid_mask = 0;
@@ -1673,7 +1671,7 @@ namespace Realm {
 	  locked_data.last_elmt = pdata->last_elmt;
 	}
       }
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).idxspace.owner_node);
       lock.in_use = true;
       lock.set_local_data(&locked_data);
     }
@@ -1709,7 +1707,7 @@ namespace Realm {
 	}
 	
 	valid_mask = new ElementMask(num_elmts);
-	valid_mask_owner = ID(me).node(); // a good guess?
+	valid_mask_owner = ID(me).idxspace.owner_node; // a good guess?
 	valid_mask_count = (valid_mask->raw_size() + 2047) >> 11;
 	valid_mask_complete = false;
 	valid_mask_event = GenEventImpl::create_genevent()->current_event();

@@ -1,21 +1,40 @@
 # Regent Compiler
 
-This directory contains the compiler for the Regent language. See
-below for instructions for installing and running the compiler.
+This directory contains the compiler for the Regent language.
+
+## Quickstart for Ubuntu
+
+```
+sudo apt-get install llvm-3.5-dev libclang-3.5-dev clang-3.5
+./install.py --debug
+./regent.py examples/circuit.rg
+```
 
 ## Prerequisites
 
-  * Linux, OS X, or another Unix.
-  * Python >= 2.7 (for the self-installer and test suite).
+Regent requires:
+
+  * Python 2.7 or 3.x (for the self-installer and test suite)
   * LLVM and Clang **with headers** (as of December 2015 LLVM 3.5 is
-    recommended; 3.6 works but is missing debug symbols).
+    recommended; 3.6 works but is missing debug symbols)
+
+Regent also has a number of transitive dependencies via Legion:
+
+  * Linux, macOS, or another Unix
+  * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
+  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
+  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: HDF5 (for file I/O)
 
 ## Installing
 
 Run the following command from the `language` directory:
 
-    ./install.py [-h] [--with-terra TERRA] [--debug] [--general] [--gasnet]
-                 [--cuda] [-j [THREAD_COUNT]]
+```
+./install.py [-h] [--with-terra TERRA] [--debug] [--gasnet]
+             [--cuda] [-j [THREAD_COUNT]]
+```
 
 This command:
 
@@ -40,21 +59,16 @@ Notes:
 
 To use Regent, run:
 
-    ./regent.py [SCRIPT]
+```
+./regent.py [SCRIPT] [OPTIONS]
+```
 
-This starts the Regent frontend with the Legion dynamic library on
-`LD_LIBRARY_PATH` (or `DYLD_LIBRARY_PATH` on OS X).
+Regent source files use the extension `.rg`. A number of examples are
+contained in the examples directory. For example:
 
-## Using
-
-From the Regent shell, run the following command to import the
-language:
-
-    import "regent"
-
-This imports the Regent compiler into scope and adds hooks to the
-Regent compiler to the Terra parser so that you can start writing
-Regent code.
+```
+./regent.py examples/circuit.rg
+```
 
 ## Tests
 

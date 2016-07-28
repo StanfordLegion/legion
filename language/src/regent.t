@@ -16,6 +16,7 @@
 
 local builtins = require("regent/builtins")
 local passes = require("regent/passes")
+local passes_default = require("regent/passes_default")
 local std = require("regent/std")
 
 -- Add Language Builtins to Global Environment
@@ -40,6 +41,7 @@ local language = {
   name = "legion",
   entrypoints = {
     "__demand",
+    "__forbid",
     "fspace",
     "rexpr",
     "rquote",
@@ -48,20 +50,20 @@ local language = {
   keywords = {
     "__context",
     "__cuda",
+    "__delete",
     "__demand",
     "__fields",
     "__forbid",
     "__inline",
     "__parallel",
     "__physical",
-    "__delete",
     "__raw",
     "__runtime",
     "__spmd",
     "__trace",
     "__unroll",
     "__vectorize",
-    "__block",
+    "acquire",
     "aliased",
     "allocate_scratch_fields",
     "advance",
@@ -105,6 +107,7 @@ local language = {
     "reads",
     "reduces",
     "relaxed",
+    "release",
     "region",
     "simultaneous",
     "static_cast",

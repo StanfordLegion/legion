@@ -105,14 +105,13 @@ namespace Legion {
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space,
-                                                   RtUserEvent dest_event,
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
         local_space(loc_space), gc_lock(Reservation::create_reservation()),
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         gc_references(0), valid_references(0), resource_references(0), 
-        destruction_event(dest_event), registered_with_runtime(do_registration)
+        registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -120,15 +119,14 @@ namespace Legion {
         assert(runtime->determine_owner(did) == owner_space);
 #endif
       if (do_registration)
-      {
-#ifdef DEBUG_LEGION
-        if (!is_owner())
-          assert(dest_event.exists());
-#endif
         runtime->register_distributed_collectable(did, this);
-      }
       if (!is_owner())
+      {
         remote_instances.add(owner_space);
+        // Add a base resource ref that will be held until
+        // the owner node removes it with an unregister message
+        add_base_resource_ref(REMOTE_DID_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -140,26 +138,6 @@ namespace Legion {
       assert(valid_references == 0);
       assert(resource_references == 0);
 #endif
-      if (registered_with_runtime)
-      {
-        runtime->unregister_distributed_collectable(did);
-        if (is_owner())
-        {
-          // We can only recycle the distributed ID on the owner
-          // node since the ID is the same across all the nodes.
-          // We have to defer the collection of the ID until
-          // after all of the remote nodes notify us that they
-          // have finished collecting it.
-          if (!recycle_events.empty())
-            runtime->recycle_distributed_id(did, 
-                Runtime::merge_events(recycle_events));
-          else
-            runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
-        }
-      }
-      // Only do this after unregistering ourselves
-      if (destruction_event.exists())
-        Runtime::trigger_event(destruction_event);
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
     }
@@ -1190,25 +1168,8 @@ namespace Legion {
                                                      AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_owner());
-#endif
       AutoLock gc(gc_lock);
       remote_instances.add(remote_inst);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::register_remote_instance(AddressSpaceID source,
-                                                          RtEvent destroyed)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner()); // This should only happen on the owner node
-      assert(source != local_space);
-#endif
-      AutoLock gc(gc_lock);
-      remote_instances.add(source);
-      recycle_events.insert(destroyed);
     }
 
     //--------------------------------------------------------------------------
@@ -1226,6 +1187,82 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DistributedCollectable::unregister_with_runtime(
+                                                    VirtualChannelKind vc) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(registered_with_runtime);
+#endif
+      runtime->unregister_distributed_collectable(did);
+      registered_with_runtime = false;
+      // If the virtual channel is MAX_NUM_VIRTUAL_CHANNELS we'll use
+      // that as a signal to avoid sending any messages
+      if (!remote_instances.empty() && (vc != MAX_NUM_VIRTUAL_CHANNELS))
+        runtime->recycle_distributed_id(did, send_unregister_messages(vc));
+      else
+        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::UnregisterFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez;
+      rez.serialize(did);
+      rez.serialize(done_event); 
+      runtime->send_did_remote_unregister(target, rez, vc);
+      done_events.insert(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent DistributedCollectable::send_unregister_messages(
+                                                    VirtualChannelKind vc) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(!remote_instances.empty());
+#endif
+      std::set<RtEvent> done_events;
+      UnregisterFunctor functor(runtime, did, vc, done_events); 
+      // No need for the lock since we're being destroyed
+      remote_instances.map(functor);
+      return Runtime::merge_events(done_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::unregister_collectable(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(registered_with_runtime);
+#endif
+      runtime->unregister_distributed_collectable(did);
+      registered_with_runtime = false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_unregister_collectable(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      dc->unregister_collectable();
+      Runtime::trigger_event(done_event);
+      // Now remove the resource reference we were holding
+      if (dc->remove_base_resource_ref(REMOTE_DID_REF))
+        delete dc;
+    }
+
+    //--------------------------------------------------------------------------
     void DistributedCollectable::send_remote_registration(
                                                       ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -1239,7 +1276,6 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(destruction_event);
         rez.serialize(registered_event);
       }
       runtime->send_did_remote_registration(owner_space, rez);     
@@ -1397,13 +1433,11 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent destroy_event;
-      derez.deserialize(destroy_event);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      target->register_remote_instance(source, destroy_event);
+      target->update_remote_instances(source);
       Runtime::trigger_event(done_event);
     }
     
