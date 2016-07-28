@@ -369,6 +369,7 @@ namespace Legion {
                               std::vector<PhysicalInstance> &instances);
       LogicalRegion default_find_common_ancestor(MapperContext ctx,
                                       const std::set<LogicalRegion> &regions);
+      bool have_procset_variant(const MapperContext ctx, TaskID id);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>

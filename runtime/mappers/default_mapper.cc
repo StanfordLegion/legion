@@ -301,15 +301,8 @@ namespace Legion {
                                             MapperContext ctx, const Task &task)
     //--------------------------------------------------------------------------
     {
-      std::vector<VariantID> variants;
-      runtime->find_valid_variants(ctx, task.task_id, variants);
-      /* find if we have a procset variant for task */
-      for(unsigned i = 0; i < variants.size(); i++)
-      {
-        const ExecutionConstraintSet exset =
-           runtime->find_execution_constraints(ctx, task.task_id, variants[i]);
-        if(exset.processor_constraint.kind == Processor::PROC_SET)
-          return default_get_next_global_procset();
+      if (have_procset_variant(ctx, task.task_id)) {
+        return default_get_next_global_procset();
       }
  
       VariantInfo info = 
@@ -487,6 +480,26 @@ namespace Legion {
       if (finder != preferred_variants.end() && 
           (!needs_tight_bound || finder->second.tight_bound))
         return finder->second;
+
+      Machine::ProcessorQuery all_procsets(machine);
+      all_procsets.only_kind(Processor::PROC_SET);
+      Machine::ProcessorQuery::iterator procset_finder = all_procsets.begin();
+
+
+      /* if we have a procset variant use it */
+      if (have_procset_variant(ctx, task.task_id)) {
+        std::vector<VariantID> variants;
+        runtime->find_valid_variants(ctx, task.task_id, variants, Processor::PROC_SET);
+        if (variants.size() > 0) {
+          VariantInfo result;
+          result.proc_kind = Processor::PROC_SET;
+          result.variant = variants[0];
+          result.tight_bound = (variants.size() == 1);
+          result.is_inner = false;
+          return result;
+        }
+      }
+
       // Otherwise we actually need to pick one
       // Ask the runtime for the variant IDs for the given task type
       std::vector<VariantID> variants;
@@ -907,6 +920,43 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default slice_task in %s", get_mapper_name());
+
+      std::vector<VariantID> variants;
+      runtime->find_valid_variants(ctx, task.task_id, variants);
+      /* find if we have a procset variant for task */
+      for(unsigned i = 0; i < variants.size(); i++)
+      {
+        const ExecutionConstraintSet exset =
+           runtime->find_execution_constraints(ctx, task.task_id, variants[i]);
+        if(exset.processor_constraint.kind == Processor::PROC_SET) {
+
+           // Before we do anything else, see if it is in the cache
+           std::map<Domain,std::vector<TaskSlice> >::const_iterator finder =
+             procset_slices_cache.find(input.domain);
+           if (finder != procset_slices_cache.end()) {
+                   output.slices = finder->second;
+                   return;
+           }
+
+          output.slices.resize(input.domain.get_volume());
+          unsigned idx = 0;
+          LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
+          for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
+              pir; pir++, idx++)
+          {
+            Rect<1> slice(pir.p, pir.p);
+            output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+              remote_procsets[idx % remote_cpus.size()],
+              false/*recurse*/, false/*stealable*/);
+          }
+
+          // Save the result in the cache
+          procset_slices_cache[input.domain] = output.slices;
+          return;
+        }
+      }
+ 
+
       // Whatever kind of processor we are is the one this task should
       // be scheduled on as determined by select initial task
       Processor::Kind target_kind =
@@ -1454,15 +1504,7 @@ namespace Legion {
             }
           case Processor::PROC_SET:
             {
-              // Put any of our local cpus on here
-              // TODO: NUMA-ness needs to go here
-              // If we're part of a must epoch launch, our 
-              // target proc will be sufficient
-              if (!task.must_epoch_task)
-                target_procs.insert(target_procs.end(),
-                    local_procsets.begin(), local_procsets.end());
-              else
-                target_procs.push_back(task.target_proc);
+              target_procs.push_back(task.target_proc);
               break;
             }
           default:
@@ -2704,6 +2746,24 @@ namespace Legion {
       }
     }
 
+   //--------------------------------------------------------------------------
+   bool DefaultMapper::have_procset_variant(const MapperContext ctx, TaskID id)
+   //--------------------------------------------------------------------------
+   {
+     std::vector<VariantID> variants;
+     runtime->find_valid_variants(ctx, id, variants);
+
+     for(unsigned i = 0; i < variants.size(); i++)
+     {
+       const ExecutionConstraintSet exset =
+         runtime->find_execution_constraints(ctx, id, variants[i]);
+       if(exset.processor_constraint.kind == Processor::PROC_SET)
+               return true;
+     }
+     return false; 
+   }
+
+
     //--------------------------------------------------------------------------
     void DefaultMapper::map_must_epoch(const MapperContext           ctx,
                                        const MapMustEpochInput&      input,
@@ -2725,21 +2785,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < input.tasks.size(); idx++)
         {
           const Task *task = input.tasks[idx];
-          std::vector<VariantID> variants;
-          runtime->find_valid_variants(ctx, task->task_id, variants);
-
-          /* find if we have a procset variant for task */
-          bool procset = false;
-          for(unsigned i = 0; i < variants.size(); i++) 
-          {
-            const ExecutionConstraintSet exset = 
-              runtime->find_execution_constraints(ctx, task->task_id, variants[i]); 
-            if(exset.processor_constraint.kind == Processor::PROC_SET) 
-               procset = true;
-          }
-
           /* if we have a procset variant use it */
-          if (procset) 
+          if (have_procset_variant(ctx, task->task_id)) 
           {
             if (procset_finder == all_procsets.end())
             {
