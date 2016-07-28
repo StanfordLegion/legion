@@ -13,6 +13,15 @@ variables:
   DEBUG: "1"
 .release: &release
   DEBUG: "0"
+.cxx98_normal: &cxx98_normal
+  CC_FLAGS: "-std=c++98"
+.cxx98_checks: &cxx98_checks
+  CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+.cxx98_spy: &cxx98_spy
+  CC_FLAGS: "-std=c++98 -DLEGION_SPY"
+  TEST_SPY: "1"
+.cxx11_normal: &cxx11_normal
+  CC_FLAGS: "-std=c++11"
 
 # This set of commands will run before each job.
 before_script:
@@ -81,44 +90,34 @@ before_script:
 gcc_cxx98_release:
   <<: [*image, *tests]
   variables:
-    <<: [*gcc49, *release]
-    CC_FLAGS: "-std=c++98"
+    <<: [*gcc49, *release, *cxx98_normal]
 gcc_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
-    <<: [*gcc49, *debug]
-    CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+    <<: [*gcc49, *debug, *cxx98_checks]
 gcc_cxx98_debug_spy:
   <<: [*image, *tests]
   variables:
-    <<: [*gcc49, *debug]
-    CC_FLAGS: "-std=c++98 -DLEGION_SPY"
-    TEST_SPY: "1"
+    <<: [*gcc49, *debug, *cxx98_spy]
 gcc_cxx11_release:
   <<: [*image, *tests]
   variables:
-    <<: [*gcc49, *release]
-    CC_FLAGS: "-std=c++11"
+    <<: [*gcc49, *release, *cxx11_normal]
 
 # - Clang
 clang_cxx98_release:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *release]
-    CC_FLAGS: "-std=c++98"
+    <<: [*clang35, *release, cxx98_normal]
 clang_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *debug]
-    CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+    <<: [*clang35, *debug, cxx98_checks]
 clang_cxx98_debug_spy:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *debug]
-    CC_FLAGS: "-std=c++98 -DLEGION_SPY"
-    TEST_SPY: "1"
+    <<: [*clang35, *debug, *cxx98_spy]
 clang_cxx11_release:
   <<: [*image, *tests]
   variables:
-    <<: [*clang35, *release]
-    CC_FLAGS: "-std=c++11"
+    <<: [*clang35, *release, *cxx11_normal]
