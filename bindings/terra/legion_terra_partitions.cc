@@ -817,23 +817,53 @@ create_cross_product_tree(HighLevelRuntime *runtime,
   }
 }
 
-// Populates `domains` with the Domain of each ispace in `ispaces`.
+// For each index space in `ispaces`, adds its domain's rectangle to `rects`.
 // ASSUMES that each ispace is structured and only has one domain.
+// `DIM` should match the dimensionality of the index spaces.
+template <unsigned DIM>
 static void
-extract_domains_structured(HighLevelRuntime *runtime,
-                           Context ctx,
-                           const std::vector<IndexSpace> &ispaces,
-                           std::vector<Domain>& domains)
+extract_ispace_domain_rects(HighLevelRuntime *runtime,
+                            Context ctx,
+                            const std::vector<IndexSpace> &ispaces,
+                            std::vector<Rect<DIM> >& rects)
 {
-  assert(domains.empty());
-  domains.reserve(ispaces.size());
+  assert(DIM > 0);
+  assert(rects.empty());
+  rects.reserve(ispaces.size());
   for (size_t i = 0; i < ispaces.size(); i++) {
     const IndexSpace &ispace = ispaces[i];
     // Doesn't currently handle structured index spaces with multiple domains.
     assert(!runtime->has_multiple_domains(ctx, ispace));
     Domain domain = runtime->get_index_space_domain(ctx, ispace);
-    assert(domain.get_dim() > 0); // Should be structured.
-    domains.push_back(domain);
+    rects.push_back(domain.get_rect<DIM>());
+  }
+}
+
+// Version of `create_cross_product_shallow_structured` templetized on the
+// dimensionality of the structured index spaces.
+template <unsigned DIM>
+static void
+create_cross_product_shallow_structured_spec(
+    HighLevelRuntime *runtime,
+    Context ctx,
+    const std::vector<IndexSpace> &lhs,
+    const std::vector<IndexSpace> &rhs,
+    legion_terra_index_space_list_list_t &result)
+{
+  assert(DIM > 0); // Should be structured.
+
+  std::vector<Rect<DIM> > lh_rects, rh_rects;
+  extract_ispace_domain_rects<DIM>(runtime, ctx, lhs, lh_rects);
+  extract_ispace_domain_rects<DIM>(runtime, ctx, rhs, rh_rects);
+
+  for (size_t i = 0; i < lhs.size(); i++) {
+    Rect<DIM> lh_rect = lh_rects[i];
+    for (size_t j = 0; j < rhs.size(); j++) {
+      Rect<DIM> rh_rect = rh_rects[j];
+      if (lh_rect.overlaps(rh_rect)) {
+        assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
+      }
+    }
   }
 }
 
@@ -847,19 +877,32 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
                                         const std::vector<IndexSpace> &rhs,
                                         legion_terra_index_space_list_list_t &result)
 {
-  std::vector<Domain> lh_domains, rh_domains;
-  extract_domains_structured(runtime, ctx, lhs, lh_domains);
-  extract_domains_structured(runtime, ctx, rhs, rh_domains);
+  if (lhs.empty() || rhs.empty()) return;
 
-  for (size_t i = 0; i < lhs.size(); i++) {
-    Domain lh_domain = lh_domains[i];
-    for (size_t j = 0; j < rhs.size(); j++) {
-      Domain rh_domain = rh_domains[j];
-      if (lh_domain.intersection(rh_domain).get_volume() > 0) {
-        // Intersection isn't empty.
-        assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
+  int dim = runtime->get_index_space_domain(ctx, lhs[0]).get_dim();
+  switch (dim) {
+    case 0:
+      assert(false); // Index space should be structured.
+    case 1:
+      {
+        create_cross_product_shallow_structured_spec<1>(
+            runtime, ctx, lhs, rhs, result);
+        break;
       }
-    }
+    case 2:
+      {
+        create_cross_product_shallow_structured_spec<2>(
+            runtime, ctx, lhs, rhs, result);
+        break;
+      }
+    case 3:
+      {
+        create_cross_product_shallow_structured_spec<3>(
+            runtime, ctx, lhs, rhs, result);
+        break;
+      }
+    default:
+      assert(false);
   }
 }
 
