@@ -810,6 +810,26 @@ create_cross_product_tree(HighLevelRuntime *runtime,
   }
 }
 
+// Populates `domains` with the Domain of each ispace in `ispaces`.
+// ASSUMES that each ispace is structured and only has one domain.
+static void
+extract_domains_structured(HighLevelRuntime *runtime,
+                           Context ctx,
+                           const std::vector<IndexSpace> &ispaces,
+                           std::vector<Domain>& domains)
+{
+  assert(domains.empty());
+  domains.reserve(ispaces.size());
+  for (size_t i = 0; i < ispaces.size(); i++) {
+    const IndexSpace &ispace = ispaces[i];
+    // Doesn't currently handle structured index spaces with multiple domains.
+    assert(!runtime->has_multiple_domains(ctx, ispace));
+    Domain domain = runtime->get_index_space_domain(ctx, ispace);
+    assert(domain.get_dim() > 0); // Should be structured.
+    domains.push_back(domain);
+  }
+}
+
 // Takes the "shallow" cross product between lists of structured index spaces
 // `lhs` and `rhs`.  Specifically, if `lhs[i]` and `rhs[j]` intersect,
 // `result[i][j]` is populated with `rhs[j]`.
@@ -820,22 +840,17 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
                                         const std::vector<IndexSpace> &rhs,
                                         legion_terra_index_space_list_list_t &result)
 {
+  std::vector<Domain> lh_domains, rh_domains;
+  extract_domains_structured(runtime, ctx, lhs, lh_domains);
+  extract_domains_structured(runtime, ctx, rhs, rh_domains);
+
   for (size_t i = 0; i < lhs.size(); i++) {
-    const IndexSpace &lh_space = lhs[i];
-    // Doesn't currently handle structured index spaces with multiple domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(ctx, lh_space);
-    assert(lh_domain.get_dim() > 0); // Should be structured.
-
+    Domain lh_domain = lh_domains[i];
     for (size_t j = 0; j < rhs.size(); j++) {
-      const IndexSpace &rh_space = rhs[j];
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(ctx, rh_space);
-      assert(rh_domain.get_dim() > 0);
-
+      Domain rh_domain = rh_domains[j];
       if (lh_domain.intersection(rh_domain).get_volume() > 0) {
         // Intersection isn't empty.
-        assign_list_list(result, i, j, CObjectWrapper::wrap(rh_space));
+        assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
       }
     }
   }
