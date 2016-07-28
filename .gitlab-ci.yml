@@ -1,7 +1,8 @@
 # Variables:
 #  - Global:
 variables:
-  LLVM_CONFIG: llvm-config-3.5
+  LLVM_CONFIG: "llvm-config-3.5"
+  REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
 
 #  - Local:
 .gcc49: &gcc49

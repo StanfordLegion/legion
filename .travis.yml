@@ -10,6 +10,7 @@ compiler:
 env:
   global:
   - WARN_AS_ERROR=1
+  - REALM_SYNTHETIC_CORE_MAP=""
   matrix:
   - CC_FLAGS= DEBUG=0
   - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
