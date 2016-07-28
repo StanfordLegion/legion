@@ -26,7 +26,7 @@ branches:
     - stable
     - master
 before_install:
-  - env
+  - export THREADS=2
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
@@ -50,7 +50,7 @@ before_install:
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
-      make -j2
+      make -j$THREADS
       popd
     fi
 script:
@@ -60,7 +60,7 @@ script:
   # Legion tutorials
   - |
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
-    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
+    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j$THREADS
     tutorial/00_hello_world/hello_world -logfile out_%.log
     make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
     tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log

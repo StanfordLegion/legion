@@ -16,6 +16,7 @@ variables:
 # This set of commands will run before each job.
 before_script:
   - uname -a
+  - export THREADS=$(nproc --all)
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
@@ -24,7 +25,7 @@ before_script:
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
-      make -j2
+      make -j$THREADS
       popd
     fi
 
@@ -38,7 +39,7 @@ before_script:
     - ./language/travis.py
     - |
       make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
-      make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
+      make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j$THREADS
       tutorial/00_hello_world/hello_world -logfile out_%.log
       make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
       tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
@@ -59,7 +60,6 @@ before_script:
       make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
       tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
     - |
-      make -s -C examples/full_circuit LG_RT_DIR=../../runtime
       make -s -C examples/full_circuit LG_RT_DIR=../../runtime
       examples/full_circuit/ckt_sim -logfile out_%.log
       make -s -C examples/full_ghost LG_RT_DIR=../../runtime
