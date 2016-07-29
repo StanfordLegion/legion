@@ -13,7 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
+--   "-fparallelize-dop", "9"]]
 
 import "regent"
 
@@ -72,9 +73,14 @@ task test(size : int)
   c.srand48(12345)
   var is = ispace(int2d, {size, size})
   var primary_region = region(is, fs)
+  init(primary_region)
+  stencil(primary_region)
+  stencil_serial(primary_region)
+  for e in primary_region do
+    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
+  end
   var np = 2
   var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
-  init(primary_region)
   stencil(primary_region)
   stencil_serial(primary_region)
   for e in primary_region do

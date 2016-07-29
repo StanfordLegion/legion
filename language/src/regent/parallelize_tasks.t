@@ -363,6 +363,28 @@ local function mk_expr_partition(partition_type, colors, coloring)
   }
 end
 
+local function mk_expr_ispace(index_type, extent)
+  assert(not index_type:is_opaque())
+  return ast.typed.expr.Ispace {
+    extent = extent,
+    start = false,
+    index_type = index_type,
+    expr_type = std.ispace(index_type),
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function mk_expr_partition_equal(partition_type, colors)
+  return ast.typed.expr.PartitionEqual {
+    region = mk_expr_id(partition_type.parent_region_symbol),
+    colors = colors,
+    expr_type = partition_type,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
 local function mk_stat_var(sym, ty, value)
   ty = ty or sym:gettype()
   return ast.typed.stat.Var {
@@ -897,6 +919,13 @@ end
 
 function caller_context:add_primary_partition(region, partition)
   self.__primary_partitions[region] = partition
+  local ghost_partitions = {}
+  for stencil, partition in pairs(self.__ghost_partitions) do
+    if stencil:range() ~= region then
+      ghost_partitions[stencil] = partition
+    end
+  end
+  self.__ghost_partitions = ghost_partitions
 end
 
 function caller_context:get_primary_partition(region)
@@ -1174,6 +1203,24 @@ end
 -- ## Task call transformer
 -- #################
 
+local function factorize(number, ways)
+  local factors = terralib.newlist()
+  for k = ways, 2, -1 do
+    local limit = math.ceil(math.pow(number, 1 / k))
+    local factor
+    for idx = 1, limit do
+      if number % idx == 0 then
+        factor = idx
+      end
+    end
+    number = number / factor
+    factors:insert(factor)
+  end
+  factors:insert(number)
+  factors:sort()
+  return factors
+end
+
 function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, lhs)
   local info = global_cx[call_expr.fn.value.name]
   assert(info)
@@ -1212,6 +1259,35 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
         stats:insertall(subset_partition_stats)
       end
     end
+
+    -- If a primary partition still doesn't exist,
+    -- create a new disjoint partition
+    if not local_cx:get_primary_partition(region_symbol) then
+      local dop = std.config["parallelize-dop"]
+      local region_type = region_symbol:gettype()
+      local index_type = region_type:ispace().index_type
+      local dim = index_type.dim
+      local factors = factorize(dop, dim)
+      local extent_expr
+      if dim > 1 then
+        extent_expr = mk_expr_ctor(factors:map(function(f)
+          return mk_expr_constant(f, int)
+        end))
+      else
+        extent_expr = mk_expr_constant(factors[1], int)
+      end
+
+      local color_space_expr = mk_expr_ispace(index_type, extent_expr)
+      local color_space_symbol = get_new_tmp_var(color_space_expr.expr_type)
+      local partition_type =
+        std.partition(disjoint, region_symbol, color_space_symbol)
+      local partition_symbol = get_new_tmp_var(partition_type)
+      local_cx:add_primary_partition(region_symbol, partition_symbol)
+      stats:insert(mk_stat_var(
+        partition_symbol,
+        nil,
+        mk_expr_partition_equal(partition_type, color_space_expr)))
+    end
   end
 
   for idx = 1, #task_cx.stencils do
@@ -1221,7 +1297,6 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
       local region_symbol = stencil:region()
       local range_symbol = stencil:range()
       local partition_symbol = local_cx:get_primary_partition(range_symbol)
-      -- TODO: handle the case where no primary partition exists
       assert(partition_symbol)
       local ghost_partition_stats
       ghost_partition_symbol, ghost_partition_stats =
