@@ -24,6 +24,25 @@ local passes = require("regent/passes")
 
 local c = std.c
 
+-- Initialize all sub-components
+local Lambda
+local Stencil
+
+local parallel_task_context = {}
+local caller_context = {}
+local global_context = {}
+
+local check_parallelizable = {}
+local normalize_accesses = {}
+local reduction_analysis = {}
+local stencil_analysis = {}
+local parallelize_task_calls = {}
+local parallelize_tasks = {}
+
+-- #####################################
+-- ## Utilities for point and rect manipulation
+-- #################
+
 local print_rect = {
   [std.rect1d] = terra(r : std.rect1d)
     c.printf("%d -- %d\n", r.lo.__ptr, r.hi.__ptr)
@@ -187,7 +206,10 @@ local function shallow_copy(tbl)
   return new_tbl
 end
 
--- utility functions for AST node construction
+-- #####################################
+-- ## Utilities for AST node manipulation
+-- #################
+
 local tmp_var_id = 0
 
 local function get_new_tmp_var(ty)
@@ -535,24 +557,9 @@ local function rewrite_symbol(node, from, to)
     to)
 end
 
-local check_parallelizable = {}
-
-function check_parallelizable.top_task(node)
-  -- TODO: raise an error if a task has unsupported syntax
-
-  -- conditions of parallelizable tasks
-  -- 1. no task call; i.e. needs to be leaf
-  -- 2. no aliasing between read and write sets (a subset of 6)
-  -- 3. no region or partition creation or deletion
-  -- 4. no region allocation
-  -- 5. no break or return in the middle of control flow
-  -- 6. loops should be vectorizable, but scalar reductions are allowed
-  -- 7. only math function calls are allowed (through std.*)
-  -- 8. uncentered accesses should have indices of form either
-  --    e +/- c or (e +/- c) % r.bounds where r is a region
-end
-
-local Lambda
+-- #####################################
+-- ## Stencil and Lambda
+-- #################
 
 do
   local lambda = {}
@@ -661,14 +668,25 @@ do
   Lambda = setmetatable({}, lambda_factory)
 end
 
-local Stencil
-
 do
   local stencil = {}
   stencil.__index = stencil
 
-  function stencil:region()
-    return self.__region
+  function stencil:subst(mapping)
+    return Stencil {
+      region = self:region(mapping),
+      index = self:index(mapping),
+      range = self:range(mapping),
+      fields = shallow_copy(self.__fields),
+    }
+  end
+
+  function stencil:region(mapping)
+    local region = self.__region
+    if mapping then
+      region = mapping[region] or region
+    end
+    return region
   end
 
   function stencil:index(mapping)
@@ -698,8 +716,12 @@ do
     return index
   end
 
-  function stencil:range()
-    return self.__range
+  function stencil:range(mapping)
+    local range = self.__range
+    if mapping then
+      range = mapping[range] or range
+    end
+    return range
   end
 
   function stencil:fields()
@@ -729,7 +751,7 @@ do
       region = self:region(),
       index = index,
       range = self:range(),
-      fields = shallow_copy(self:fields()),
+      fields = shallow_copy(self.__fields),
     }
   end
 
@@ -741,22 +763,6 @@ do
       mk_expr_id(region, std.rawref(&region:gettype())),
       expr, std.ref(region, region:fspace()))
   end
-
-  --function stencil:eta_expand_index()
-  --  local index_expr = self:index()
-  --  local cx = self:context()
-  --  local symbols_set = extract_symbols(always, index_expr)
-  --  local symbols = terralib.newlist()
-  --  symbols:sort(function(a, b)
-  --    local idx_a = cx.region_params[a] or math.huge
-  --    local idx_b = cx.region_params[b] or math.huge
-  --    return idx_a < idx_b
-  --  end)
-  --  return self:replace_index(Lambda {
-  --    expr = index_expr,
-  --    binders = symbols,
-  --  })
-  --end
 
   function stencil:__tostring()
     local fields = self:fields()
@@ -790,7 +796,7 @@ do
   end
 
   function stencil_factory.is_stencil(s)
-    return getmetatable(e) == stencil
+    return type(s) == "table" and getmetatable(s) == stencil
   end
 
   function stencil_factory.is_singleton(s)
@@ -805,11 +811,13 @@ do
   Stencil = setmetatable({}, stencil_factory)
 end
 
+-- #####################################
+-- ## Some context objects
+-- #################
 
-local context = {}
-context.__index = context
+parallel_task_context.__index = parallel_task_context
 
-function context.new_task_scope(region_params)
+function parallel_task_context.new_task_scope(region_params)
   local cx = {}
   cx.region_params = region_params
   cx.region_param_mapping = {}
@@ -820,14 +828,14 @@ function context.new_task_scope(region_params)
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
   cx.ghost_symbols = terralib.newlist()
-  return setmetatable(cx, context)
+  return setmetatable(cx, parallel_task_context)
 end
 
-function context:is_region_param(idx)
+function parallel_task_context:is_region_param(idx)
   return self.region_params[idx] ~= nil
 end
 
-function context:make_param_arg_mapping(args)
+function parallel_task_context:make_param_arg_mapping(args)
   local mapping = {}
   for idx = 1, #args do
     if self:is_region_param(idx) then
@@ -838,19 +846,19 @@ function context:make_param_arg_mapping(args)
   return mapping
 end
 
-function context:access_requires_stencil_analysis(access)
+function parallel_task_context:access_requires_stencil_analysis(access)
   return self.field_accesses[access] ~= nil
 end
 
-function context:record_stat_requires_case_split(stat)
+function parallel_task_context:record_stat_requires_case_split(stat)
   self.field_access_stats[stat] = true
 end
 
-function context:stat_requires_case_split(stat)
+function parallel_task_context:stat_requires_case_split(stat)
   return self.field_access_stats[stat]
 end
 
-function context:add_accesses(accesses, loop_var)
+function parallel_task_context:add_accesses(accesses, loop_var)
   for access, _ in pairs(accesses) do
     assert(std.is_ref(access.expr_type))
     local index_access = extract_index_access_expr(access)
@@ -876,6 +884,60 @@ function context:add_accesses(accesses, loop_var)
     end
   end
 end
+
+caller_context.__index = caller_context
+
+function caller_context.new_task_scope()
+  local cx = {
+    __primary_partitions = {},
+    __ghost_partitions = {},
+  }
+  return setmetatable(cx, caller_context)
+end
+
+function caller_context:add_primary_partition(region, partition)
+  self.__primary_partitions[region] = partition
+end
+
+function caller_context:get_primary_partition(region)
+  return self.__primary_partitions[region]
+end
+
+function caller_context:get_ghost_partition(stencil)
+  for stencil_, partition in pairs(self.__ghost_partitions) do
+    if stencil_analysis.stencils_compatible(stencil, stencil_) then
+      return partition
+    end
+  end
+  return nil
+end
+
+function caller_context:add_ghost_partition(stencil, partition)
+  self.__ghost_partitions[stencil] = partition
+end
+
+-- #####################################
+-- ## Task parallelizability checker
+-- #################
+
+function check_parallelizable.top_task(node)
+  -- TODO: raise an error if a task has unsupported syntax
+
+  -- conditions of parallelizable tasks
+  -- 1. no task call; i.e. needs to be leaf
+  -- 2. no aliasing between read and write sets (a subset of 6)
+  -- 3. no region or partition creation or deletion
+  -- 4. no region allocation
+  -- 5. no break or return in the middle of control flow
+  -- 6. loops should be vectorizable, but scalar reductions are allowed
+  -- 7. only math function calls are allowed (through std.*)
+  -- 8. uncentered accesses should have indices of form either
+  --    e +/- c or (e +/- c) % r.bounds where r is a region
+end
+
+-- #####################################
+-- ## Code generation utilities for partition creation and indexspace launch
+-- #################
 
 -- makes a loop as follows to create a coloring object:
 --
@@ -1030,7 +1092,7 @@ local function create_indexspace_launch(local_cx, task_cx, call_expr, mapping,
   for idx = 1, #call_expr.args do
     if task_cx:is_region_param(idx) then
       local region_symbol = call_expr.args[idx].value
-      local partition_symbol = local_cx.primary_partitions[region_symbol]
+      local partition_symbol = local_cx:get_primary_partition(region_symbol)
       assert(partition_symbol)
       pp = partition_symbol
       break
@@ -1058,7 +1120,7 @@ local function create_indexspace_launch(local_cx, task_cx, call_expr, mapping,
     if task_cx:is_region_param(idx) then
       assert(call_expr.args[idx]:is(ast.typed.expr.ID))
       local region_symbol = call_expr.args[idx].value
-      local partition_symbol = local_cx.primary_partitions[region_symbol]
+      local partition_symbol = local_cx:get_primary_partition(region_symbol)
       local partition_expr = mk_expr_id(partition_symbol)
       assert(partition_symbol)
       args:insert(
@@ -1108,7 +1170,9 @@ local function create_indexspace_launch(local_cx, task_cx, call_expr, mapping,
   return stats
 end
 
-local parallelize_task_calls = {}
+-- #####################################
+-- ## Task call transformer
+-- #################
 
 function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, lhs)
   local info = global_cx[call_expr.fn.value.name]
@@ -1128,39 +1192,45 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
   for param, region_symbol in pairs(param_arg_mapping) do
     -- If a region doesn't have a primary partition,
     -- try to check if its parent region has a primary partition
-    if not local_cx.primary_partitions[region_symbol] then
+    if not local_cx:get_primary_partition(region_symbol) then
       local primary_region
       for idx = 1, #constraints do
         local op = constraints[idx].op
         local lhs = constraints[idx].lhs
         local rhs = constraints[idx].rhs
         if op == "<=" and lhs == param and
-           local_cx.primary_partitions[param_arg_mapping[rhs]] then
+           local_cx:get_primary_partition(param_arg_mapping[rhs]) then
           primary_region = param_arg_mapping[rhs]
         end
       end
       if primary_region then
-        local primary_partition = local_cx.primary_partitions[primary_region]
+        local primary_partition =
+          local_cx:get_primary_partition(primary_region)
         local subset_partition_symbol, subset_partition_stats =
           create_subset_partition(region_symbol, primary_partition)
-        local_cx.primary_partitions[region_symbol] = subset_partition_symbol
+        local_cx:add_primary_partition(region_symbol, subset_partition_symbol)
         stats:insertall(subset_partition_stats)
       end
     end
   end
 
   for idx = 1, #task_cx.stencils do
-    local stencil = task_cx.stencils[idx]
-    local region_symbol = param_arg_mapping[stencil:region()]
-    local range_symbol = param_arg_mapping[stencil:range()]
-    local partition_symbol = local_cx.primary_partitions[range_symbol]
-    -- TODO: handle the case where no primary partition exists
-    assert(partition_symbol)
-    stencil = stencil:index(param_arg_mapping)
-    local ghost_partition_symbol, ghost_partition_stats =
-      create_image_partition(region_symbol, partition_symbol, stencil)
+    local stencil = task_cx.stencils[idx]:subst(param_arg_mapping)
+    local ghost_partition_symbol = local_cx:get_ghost_partition(stencil)
+    if not ghost_partition_symbol then
+      local region_symbol = stencil:region()
+      local range_symbol = stencil:range()
+      local partition_symbol = local_cx:get_primary_partition(range_symbol)
+      -- TODO: handle the case where no primary partition exists
+      assert(partition_symbol)
+      local ghost_partition_stats
+      ghost_partition_symbol, ghost_partition_stats =
+        create_image_partition(region_symbol, partition_symbol,
+                               stencil:index())
+      stats:insertall(ghost_partition_stats)
+      local_cx:add_ghost_partition(stencil, ghost_partition_symbol)
+    end
     ghost_partition_symbols:insert(ghost_partition_symbol)
-    stats:insertall(ghost_partition_stats)
   end
 
   -- create an indexspace launch
@@ -1168,11 +1238,11 @@ function parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, l
                                            param_arg_mapping,
                                            ghost_partition_symbols,
                                            parallel_task, lhs))
-  return mk_stat_block(mk_block(stats))
+  return stats
 end
 
 function parallelize_task_calls.top_task(global_cx, node)
-  local local_cx = { primary_partitions = {} }
+  local local_cx = caller_context:new_task_scope()
 
   local function parallelizable(node)
     if not node:is(ast.typed.expr.Call) then return false end
@@ -1237,7 +1307,7 @@ function parallelize_task_calls.top_task(global_cx, node)
       local lhs =
         mk_expr_id(node.symbols[1],
                    std.rawref(&std.as_read(node.symbols[1]:gettype())))
-      parallelized:insert(
+      parallelized:insertall(
         parallelize_task_calls.stat_expr_call(global_cx, local_cx, call_expr, lhs))
 
     elseif node:is(ast.typed.stat.Var) then
@@ -1245,15 +1315,15 @@ function parallelize_task_calls.top_task(global_cx, node)
         if std.is_partition(node.symbols[idx]:gettype()) then
           local partition_type = node.symbols[idx]:gettype()
           if partition_type:is_disjoint() then
-            local_cx.primary_partitions[partition_type.parent_region_symbol] =
-              node.symbols[idx]
+            local_cx:add_primary_partition(partition_type.parent_region_symbol,
+                                           node.symbols[idx])
           end
         end
       end
       parallelized:insert(node)
 
     elseif node:is(ast.typed.stat.Expr) and parallelizable(node.expr) then
-      parallelized:insert(
+      parallelized:insertall(
         parallelize_task_calls.stat_expr_call(global_cx, local_cx, node.expr))
 
     else
@@ -1264,13 +1334,16 @@ function parallelize_task_calls.top_task(global_cx, node)
   return node { body = node.body { stats = parallelized } }
 end
 
+-- #####################################
+-- ## Normalizer for region accesses
+-- #################
+
 -- normalize field accesses; e.g.
 -- a = b.f
 -- ~>  t = b.f
 --     a = t
 -- also, collect all field accesses for stencil analysis
 --       and track the return value
-local normalize_accesses = {}
 
 function normalize_accesses.expr(cx, node)
   if node:is(ast.typed.expr.Deref) then
@@ -1368,7 +1441,9 @@ function normalize_accesses.top_task_body(cx, node)
   }
 end
 
-local reduction_analysis = {}
+-- #####################################
+-- ## Analyzer for scalar reductions
+-- #################
 
 function reduction_analysis.top_task(cx, node)
   if node.return_type:isunit() then return end
@@ -1413,8 +1488,6 @@ function reduction_analysis.top_task(cx, node)
   }
 end
 
-local stencil_analysis = {}
-
 local function extract_constant_offsets(n)
   assert(n:is(ast.typed.expr.Ctor) and
          data.all(n.fields:map(function(field)
@@ -1436,6 +1509,10 @@ local function extract_constant_offsets(n)
   end
   return offsets, num_nonzeros
 end
+
+-- #####################################
+-- ## Stencil analyzer
+-- #################
 
 -- (a, b, c) -->  (a, 0, 0), (0, b, 0), (0, 0, c),
 --                (a, b, 0), (0, b, c), (a, 0, c),
@@ -1603,6 +1680,42 @@ function stencil_analysis.join_stencil(cx, s1, s2)
   end
 end
 
+function stencil_analysis.stencils_compatible(s1, s2)
+  if Stencil.is_stencil(s1) and Stencil.is_stencil(s2) then
+    local tmp_loop_var =
+      get_new_tmp_var(s1:range():gettype():ispace().index_type)
+    return s1:range() == s2:range() and
+           stencil_analysis.stencils_compatible(s1:index()(tmp_loop_var),
+                                                s2:index()(tmp_loop_var))
+
+  elseif ast.is_node(s1) and ast.is_node(s1) and s1:is(s2:type()) then
+    if s1:is(ast.typed.expr.ID) then
+      return s1.value == s2.value
+    elseif s1:is(ast.typed.expr.FieldAccess) then
+      return s1.field_name == "bounds" and
+             stencil_analysis.stencils_compatible(s1.value, s2.value)
+    elseif s1:is(ast.typed.expr.Binary) then
+      return s1.op == s2.op and
+             stencil_analysis.stencils_compatible(s1.lhs, s2.lhs) and
+             stencil_analysis.stencils_compatible(s1.rhs, s2.rhs)
+    elseif s1:is(ast.typed.expr.Ctor) then
+      local o1 = extract_constant_offsets(s1)
+      local o2 = extract_constant_offsets(s2)
+      if #o1 ~= #o2 then return false end
+      for idx = 1, #o1 do
+        if o1[idx] ~= o2[idx] then return false end
+      end
+      return true
+    elseif s1:is(ast.typed.expr.Constant) then
+      return s1.value == s2.value
+    else
+      return false
+    end
+  else
+    return false
+  end
+end
+
 function stencil_analysis.top(cx)
   for _, access_info in pairs(cx.field_accesses) do
     local stencil = access_info.stencil
@@ -1632,8 +1745,6 @@ function stencil_analysis.top(cx)
   end
 end
 
-local parallelize_tasks = {}
-
 local function make_new_region_access(region_expr, index_expr, field)
   local region_symbol = region_expr.value
   local region_type = std.as_read(region_expr.expr_type)
@@ -1646,6 +1757,10 @@ local function make_new_region_access(region_expr, index_expr, field)
   end
   return expr
 end
+
+-- #####################################
+-- ## Task parallelizer
+-- #################
 
 function parallelize_tasks.stat_for_list(cx, node)
   local loop_var = node.symbol
@@ -1673,7 +1788,7 @@ function parallelize_tasks.stat_for_list(cx, node)
       -- Cache index calculation for several comparisions later
       local access_info = cx.field_accesses[stat.values[1]]
       local index_expr =
-        access_info.stencil:index(cx.region_param_mapping)(loop_var)
+        access_info.stencil:subst(cx.region_param_mapping):index()(loop_var)
       local index_symbol = get_new_tmp_var(loop_var:gettype().index_type)
       local index_symbol_expr = mk_expr_id(index_symbol)
       stats:insert(mk_stat_var(index_symbol, nil, index_expr))
@@ -1776,7 +1891,7 @@ function parallelize_tasks.top_task(node)
   end
 
   -- Analyze loops in the task
-  local cx = context.new_task_scope(region_params)
+  local cx = parallel_task_context.new_task_scope(region_params)
   local normalized = normalize_accesses.top_task_body(cx, node.body)
   reduction_analysis.top_task(cx, node)
   stencil_analysis.top(cx)
@@ -1871,8 +1986,6 @@ function parallelize_tasks.top_task(node)
 
   return task_code, cx
 end
-
-local global_context = {}
 
 function parallelize_tasks.entry(node)
   if node:is(ast.typed.top.Task) then
