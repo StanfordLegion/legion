@@ -239,6 +239,7 @@ namespace Legion {
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
                                        RestrictInfo &restrict_info,
+                                       VersionInfo &version_info,
                                        ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_reduction_close_analysis(Operation *op, unsigned idx,
@@ -1260,11 +1261,10 @@ namespace Legion {
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
-      inline PhysicalState* get_physical_state(VersionInfo &info,
-                                               bool capture = true)
+      inline PhysicalState* get_physical_state(VersionInfo &info)
       {
         // First check to see if the version info already has a state
-        PhysicalState *result = info.find_physical_state(this, capture);  
+        PhysicalState *result = info.find_physical_state(this);  
 #ifdef DEBUG_LEGION
         assert(result != NULL);
 #endif
@@ -1277,6 +1277,14 @@ namespace Legion {
       inline CurrentState* get_current_state_ptr(ContextID ctx)
       {
         return current_states.lookup_entry(ctx, this, ctx);
+      }
+      inline VersionManager& get_current_version_manager(ContextID ctx)
+      {
+        return *(current_versions.lookup_entry(ctx, this, ctx));
+      }
+      inline VersionManager* get_current_version_manager_ptr(ContextID ctx)
+      {
+        return current_versions.lookup_entry(ctx, this, ctx);
       }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -1293,7 +1301,8 @@ namespace Legion {
                                  const LogicalUser &user,
                                  RegionTreePath &path,
                                  const TraceInfo &trace_info,
-                                 const ProjectionInfo &projection_info,
+                                 VersionInfo &version_info,
+                                 ProjectionInfo &projection_info,
                                  const FieldMask &local_open_mask,
                                  FieldMask &unopened_field_mask,
                      LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
@@ -1360,8 +1369,8 @@ namespace Legion {
                             const LegionDeque<FieldState>::aligned &new_states);
       void filter_prev_epoch_users(CurrentState &state, const FieldMask &mask);
       void filter_curr_epoch_users(CurrentState &state, const FieldMask &mask);
-      void report_uninitialized_usage(const LogicalUser &user,
-                                    const FieldMask &uninitialized);
+      void report_uninitialized_usage(Operation *op, unsigned index,
+                                      const FieldMask &uninitialized);
       void record_logical_reduction(CurrentState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
       void clear_logical_reduction_fields(CurrentState &state,
@@ -1624,6 +1633,7 @@ namespace Legion {
       bool destroyed;
     protected:
       DynamicTable<CurrentStateAllocator> current_states;
+      DynamicTable<VersionManagerAllocator> current_versions;
     protected:
       Reservation node_lock;
       // While logical states and version managers have dense keys

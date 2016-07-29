@@ -106,7 +106,6 @@ namespace Legion {
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
-      virtual void recapture_version_info(unsigned idx);
     public:
       virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
@@ -641,6 +640,8 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+    public:
+      virtual AddressSpaceID get_version_owner(RegionTreeNode *node);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -773,7 +774,6 @@ namespace Legion {
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
-      virtual void recapture_version_info(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -873,7 +873,6 @@ namespace Legion {
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
-      virtual void recapture_version_info(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -985,7 +984,6 @@ namespace Legion {
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
-      virtual void recapture_version_info(unsigned idx);
       virtual bool is_inline_task(void) const;
     public:
       virtual ApEvent get_task_completion(void) const;

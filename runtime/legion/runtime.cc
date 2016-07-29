@@ -18777,6 +18777,8 @@ namespace Legion {
           return "Dense Index Set";
         case CURRENT_STATE_ALLOC:
           return "Current State";
+        case VERSION_MANAGER_ALLOC:
+          return "Version Manager";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
         case VERSION_STATE_ALLOC:

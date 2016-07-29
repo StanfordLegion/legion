@@ -38,7 +38,7 @@ namespace Legion {
     enum ReferenceSource {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,
-      CURRENT_STATE_REF = 2,
+      VERSION_MANAGER_REF = 2,
       VERSION_INFO_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
@@ -55,7 +55,6 @@ namespace Legion {
       NEVER_GC_REF = 17,
       CONTEXT_REF = 18,
       RESTRICTED_REF = 19,
-      LEVEL_INFO_REF = 20,
       LAST_SOURCE_REF = 21,
     };
 
@@ -69,7 +68,7 @@ namespace Legion {
     const char *const names[LAST_SOURCE_REF] = {    \
       "Future Handle Reference",                    \
       "Deferred Task Reference",                    \
-      "Current State Reference",                    \
+      "Version Manager Reference",                  \
       "Version Info Reference",                     \
       "Physical State Reference",                   \
       "Physical Region Reference",                  \
@@ -84,7 +83,6 @@ namespace Legion {
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Never GC Reference",                         \
-      "Level Info Reference",                       \
       "Context Reference",                          \
       "Restricted Reference",                       \
     }

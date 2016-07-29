@@ -732,13 +732,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::recapture_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     bool TaskOp::is_inline_task(void) const
     //--------------------------------------------------------------------------
     {
@@ -820,7 +813,7 @@ namespace Legion {
         bool full_info;
         derez.deserialize(full_info);
         if (full_info)
-          infos[idx].unpack_version_info(derez);
+          infos[idx].unpack_version_info(derez, runtime->forest);
         else
           infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
@@ -2215,8 +2208,7 @@ namespace Legion {
                               );
         // Now apply our mapping
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        version_info.apply_mapping(req_ctx.get_id(), owner_space,
-                                   applied_conditions);
+        version_info.apply_mapping(owner_space, applied_conditions);
       }
       return true;
     }
@@ -7861,16 +7853,6 @@ namespace Legion {
       return &restrict_infos;
     }
 
-    //--------------------------------------------------------------------------
-    void MultiTask::recapture_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      version_infos[idx].recapture_state();
-    }
-
     /////////////////////////////////////////////////////////////
     // Individual Task 
     /////////////////////////////////////////////////////////////
@@ -8204,11 +8186,13 @@ namespace Legion {
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       restrict_infos.resize(regions.size());
+      version_infos.resize(regions.size());
       ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
+                                                     version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -8228,6 +8212,7 @@ namespace Legion {
         {
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        restrict_infos[*it],
+                                                       version_infos[*it],
                                                        projection_info,
                                                        privilege_paths[*it]);
           // If we still have re-run requirements, then we have
@@ -8336,20 +8321,15 @@ namespace Legion {
       // "mapping" does not change the physical state
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        RegionRequirement &req = regions[idx];
 	VersionInfo &version_info = version_infos[idx];
-	RegionTreeContext req_ctx =
-	  parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
-	// don't bother if this wasn't going to change mapping state anyway
-	// only requirements with write privileges bump version numbers
-	if(!IS_WRITE(req))
-	  continue;
-	version_info.apply_mapping(req_ctx.get_id(),
-				   runtime->address_space,
+	version_info.apply_mapping(runtime->address_space,
 				   map_applied_conditions,
-				   true /*copy previous*/);
-      }      
-      complete_mapping();
+				   true /*copy through*/);
+      }   
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
       trigger_children_complete();
     }
 
@@ -8407,15 +8387,15 @@ namespace Legion {
           AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
             if (!virtual_mapped[idx] && !no_access_regions[idx])
-              version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                           owner_space, map_applied_conditions);
+              version_infos[idx].apply_mapping(owner_space, 
+                                               map_applied_conditions);
         }
         else
         {
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
             if (!virtual_mapped[idx] && !no_access_regions[idx])
-              version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                runtime->address_space, map_applied_conditions);
+              version_infos[idx].apply_mapping(runtime->address_space, 
+                                               map_applied_conditions);
         }
         // If we succeeded in mapping and everything was mapped
         // then we get to mark that we are done mapping
@@ -8510,12 +8490,12 @@ namespace Legion {
       if (is_remote())
       {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        version_infos[index].apply_mapping(virtual_ctx.get_id(),
-                                    owner_space, temp_map_applied_conditions);
+        version_infos[index].apply_mapping(owner_space, 
+                                           temp_map_applied_conditions);
       }
       else
-        version_infos[index].apply_mapping(virtual_ctx.get_id(),
-                         runtime->address_space, temp_map_applied_conditions);
+        version_infos[index].apply_mapping(runtime->address_space, 
+                                           temp_map_applied_conditions);
       if (!temp_map_applied_conditions.empty())
       {
         AutoLock o_lock(op_lock);
@@ -8566,16 +8546,6 @@ namespace Legion {
       assert(idx < privilege_paths.size());
 #endif
       return privilege_paths[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::recapture_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      version_infos[idx].recapture_state();
     }
 
     //--------------------------------------------------------------------------
@@ -8718,7 +8688,7 @@ namespace Legion {
       for (std::vector<VersionInfo>::iterator it = version_infos.begin();
             it != version_infos.end(); it++)
       {
-        it->release();
+        it->clear();
       }
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
@@ -9328,13 +9298,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_restrict_infos();
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::recapture_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      slice_owner->recapture_version_info(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -10793,12 +10756,14 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
+      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         ProjectionInfo projection_info(runtime, regions[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
+                                                     version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -10819,6 +10784,7 @@ namespace Legion {
           ProjectionInfo projection_info(runtime, regions[*it], index_domain);
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        restrict_infos[*it],
+                                                       version_infos[*it],
                                                        projection_info,
                                                        privilege_paths[*it]);
           // If we still have re-run requirements, then we have
@@ -11160,7 +11126,7 @@ namespace Legion {
       for (std::vector<VersionInfo>::iterator it = version_infos.begin();
             it != version_infos.end(); it++)
       {
-        it->release();
+        it->clear();
       }
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
@@ -11657,12 +11623,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_DEACTIVATE_CALL);
-      if (!version_infos.empty())
-      {
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].release();
-        version_infos.clear();
-      }
+      version_infos.clear();
       deactivate_multi();
       // Deactivate all our points 
       for (std::vector<PointTask*>::const_iterator it = points.begin();
@@ -11750,8 +11711,7 @@ namespace Legion {
       AddressSpaceID owner_space = runtime->address_space; 
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
       {
-        version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                         owner_space, map_conditions);
+        version_infos[idx].apply_mapping(owner_space, map_conditions);
       }
     }
 
@@ -12012,8 +11972,6 @@ namespace Legion {
       else
       {
         // Release our version infos
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].release();
         version_infos.clear();
       }
       // Always return true for slice tasks since they should
@@ -12400,8 +12358,7 @@ namespace Legion {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
         {
-          version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                           owner_space, map_applied_conditions);
+          version_infos[idx].apply_mapping(owner_space, map_applied_conditions);
         }
         if (!map_applied_conditions.empty())
           applied_condition = Runtime::merge_events(map_applied_conditions);
@@ -12499,11 +12456,6 @@ namespace Legion {
         index_owner->return_slice_commit(points.size());
       }
       // We can release our version infos now
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-            it != version_infos.end(); it++)
-      {
-        it->release();
-      }
       version_infos.clear();
       commit_operation(true/*deactivate*/);
     }

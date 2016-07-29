@@ -1923,6 +1923,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -2006,8 +2007,8 @@ namespace Legion {
       assert(!mapped_instances.empty());
 #endif 
       // We're done so apply our mapping changes
-      version_info.apply_mapping(physical_ctx.get_id(), 
-                               runtime->address_space, map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space, 
+                                 map_applied_conditions);
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
       region.impl->reset_references(mapped_instances, termination_event);
@@ -2099,7 +2100,7 @@ namespace Legion {
     void MapOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       // Don't commit this operation until we've reported our profiling
       commit_operation(true/*deactivate*/, profiling_reported); 
     }
@@ -3023,12 +3024,15 @@ namespace Legion {
       // Register a dependence on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
+      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_restrict_infos[idx],
+                                                     src_versions[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx]);
+      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
@@ -3040,6 +3044,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_restrict_infos[idx],
+                                                     dst_versions[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
@@ -3055,14 +3060,12 @@ namespace Legion {
     {
       // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
-      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      src_requirements[idx],
                                                      src_privilege_paths[idx],
                                                      src_versions[idx],
                                                      preconditions);
-      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      dst_requirements[idx],
@@ -3083,8 +3086,18 @@ namespace Legion {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
-      assert(0 && "TODO: advance mapping states if you care");
-      complete_mapping();
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        src_versions[idx].apply_mapping(runtime->address_space,
+                                        map_applied_conditions,
+                                        true/*copy through*/);
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        dst_versions[idx].apply_mapping(runtime->address_space,
+                                        map_applied_conditions,
+                                        true/*copy through*/);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -3336,10 +3349,10 @@ namespace Legion {
         // Don't apply changes to the source if we have a composite instance
         // because it is unsound to mutate the region tree that way
         if (src_composite == -1)
-          src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
-                              runtime->address_space, map_applied_conditions);
-        dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
-                            runtime->address_space, map_applied_conditions); 
+          src_versions[idx].apply_mapping(runtime->address_space, 
+                                          map_applied_conditions);
+        dst_versions[idx].apply_mapping(runtime->address_space, 
+                                        map_applied_conditions); 
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
 #ifdef LEGION_SPY
@@ -3380,12 +3393,12 @@ namespace Legion {
       for (std::vector<VersionInfo>::iterator it = src_versions.begin();
             it != src_versions.end(); it++)
       {
-        it->release();
+        it->clear();
       }
       for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
             it != dst_versions.end(); it++)
       {
-        it->release();
+        it->clear();
       }
       // Don't commit this operation until we've reported our profiling
       commit_operation(true/*deactivate*/, profiling_reported);
@@ -4516,7 +4529,7 @@ namespace Legion {
         runtime->forest->perform_deletion_analysis(this, idx, req, 
                                                    restrict_info,
                                                    privilege_path);
-        version_info.release();
+        version_info.clear();
       }
       end_dependence_analysis();
     }
@@ -5020,7 +5033,7 @@ namespace Legion {
     void CloseOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       commit_operation(true/*deactivate*/);
     }
 
@@ -5216,7 +5229,7 @@ namespace Legion {
     void InterCloseOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       // Don't commit this operation until the profiling information is reported
       commit_operation(true/*deactivate*/, profiling_reported);
     }
@@ -5687,6 +5700,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                      requirement,
                                                      restrict_info,
+                                                     version_info,
                                                      projection_info,
                                                      privilege_path);
       }
@@ -5745,7 +5759,7 @@ namespace Legion {
     void PostCloseOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       // Only commit this operation if we are done profiling
       commit_operation(true/*deactivate*/, profiling_reported);
     }
@@ -5940,6 +5954,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -6168,6 +6183,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       // Tell the parent that we've done an acquisition
@@ -6197,8 +6213,13 @@ namespace Legion {
     {
       // Clean up this operation
       complete_execution();
-      assert(0 && "TODO: advance mapping states if you care");
-      complete_mapping();
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions,
+                                 true/*copy through*/);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -6245,8 +6266,8 @@ namespace Legion {
                                              , unique_op_id
 #endif
                                              );
-      version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space,map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions);
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<ApEvent> acquire_preconditions;
@@ -6309,7 +6330,7 @@ namespace Legion {
     void AcquireOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       // Don't commit thisoperation until we've reported profiling information
       commit_operation(true/*deactivate*/, profiling_reported);
     }
@@ -6698,6 +6719,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -6725,8 +6747,13 @@ namespace Legion {
     {
       // Clean up this operation
       complete_execution();
-      assert(0 && "TODO: advance mapping states if you care");
-      complete_mapping();
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions,
+                                 true/*copy through*/);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -6772,8 +6799,8 @@ namespace Legion {
                                              , unique_op_id
 #endif
                                              );
-      version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space,map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions);
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
@@ -6834,7 +6861,7 @@ namespace Legion {
     void ReleaseOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       // Don't commit this operation until the profiling is done
       commit_operation(true/*deactivate*/, profiling_reported);
     }
@@ -9465,6 +9492,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -9610,7 +9638,7 @@ namespace Legion {
     void DependentPartitionOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       commit_operation(true/*deactivate*/);
     }
 
@@ -9951,6 +9979,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -9980,8 +10009,13 @@ namespace Legion {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
-      assert(0 && "TODO: advance mapping states if you care");
-      complete_mapping();
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions,
+                                 true/*copy through*/);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -10053,8 +10087,8 @@ namespace Legion {
                                           completion_event);
 #endif
         }
-        version_info.apply_mapping(physical_ctx.get_id(),
-                               runtime->address_space, map_applied_conditions);
+        version_info.apply_mapping(runtime->address_space, 
+                                   map_applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
@@ -10144,8 +10178,8 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      version_info.apply_mapping(physical_ctx.get_id(),
-                              runtime->address_space, map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space, 
+                                 map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -10177,7 +10211,7 @@ namespace Legion {
     void FillOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       commit_operation(true/*deactivate*/);
     }
 
@@ -10573,6 +10607,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info, 
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       // If we have any restriction on ourselves, that is very bad
@@ -10640,8 +10675,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space,map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space,
+                                 map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
@@ -10671,7 +10706,7 @@ namespace Legion {
     void AttachOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       commit_operation(true/*deactivate*/);
     }
 
@@ -10998,6 +11033,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    restrict_info,
+                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
@@ -11055,8 +11091,8 @@ namespace Legion {
         runtime->forest->detach_file(physical_ctx, requirement, 
                                      this, version_info, reference);
       std::set<RtEvent> applied_conditions;
-      version_info.apply_mapping(physical_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+      version_info.apply_mapping(runtime->address_space, 
+                                 applied_conditions);
       if (!applied_conditions.empty())
         complete_mapping(Runtime::merge_events(applied_conditions));
       else
@@ -11082,7 +11118,7 @@ namespace Legion {
     void DetachOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
       commit_operation(true/*deactivate*/);
     }
 

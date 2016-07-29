@@ -832,7 +832,7 @@ namespace Legion {
         {
           // We only actually have to do the invalidations if we are not split
           bool is_split = false;
-          version_info.get_advance_mask(logical_node, is_split);
+          version_info.get_split_mask(logical_node, is_split);
           if (!is_split)
             perform_read_invalidations(copy_mask, version_info, 
                                        source, applied_events);
@@ -1105,7 +1105,7 @@ namespace Legion {
       {
         // We only actually have to do the invalidations if we are not split
         bool is_split = false;
-        version_info.get_advance_mask(logical_node, is_split);
+        version_info.get_split_mask(logical_node, is_split);
         if (!is_split)
           perform_read_invalidations(user_mask, version_info, 
                                      source, applied_events);
@@ -1366,7 +1366,7 @@ namespace Legion {
 #ifndef LEGION_SPY
       const FieldMask &advance_mask = 
 #endif
-        version_info.get_advance_mask(logical_node, is_split);
+        version_info.get_split_mask(logical_node, is_split);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             field_versions.begin(); it != field_versions.end(); it++)
       {
@@ -3362,10 +3362,9 @@ namespace Legion {
       }
       // Make a temporary version info just for these field versions
       VersionInfo temp_version_info;
-      VersionInfo::NodeInfo &node_info = 
-        temp_version_info.find_tree_node_info(logical_node);
       field_versions->add_reference();
-      node_info.field_versions = field_versions;
+      temp_version_info.add_field_versions(logical_node->get_depth(), 
+                                           field_versions);
       std::set<RtEvent> applied_conditions;
       if (is_copy)
       {
@@ -3607,7 +3606,7 @@ namespace Legion {
     CompositeVersionInfo::~CompositeVersionInfo(void)
     //--------------------------------------------------------------------------
     {
-      version_info.release();
+      version_info.clear();
     }
 
     //--------------------------------------------------------------------------
