@@ -489,8 +489,8 @@ namespace Legion {
                                  const std::vector<MapperID> &thieves);
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
-      void add_to_ready_queue(TaskOp *op, bool previous_failure);
-      void add_to_local_ready_queue(Operation *op, bool previous_failure);
+      void add_to_ready_queue(TaskOp *op);
+      void add_to_local_ready_queue(Operation *op);
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -1283,7 +1283,6 @@ namespace Legion {
         HLRTaskID hlr_id;
         ProcessorManager *manager;
         TaskOp *task;
-        bool prev_fail;
       };
       struct MPIRankArgs {
         HLRTaskID hlr_id;
@@ -2223,8 +2222,8 @@ namespace Legion {
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
-                  bool prev_fail, RtEvent wait_on = RtEvent::NO_RT_EVENT);
-      void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
+                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void add_to_local_queue(Processor p, Operation *op);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);

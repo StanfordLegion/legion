@@ -255,7 +255,7 @@ namespace Legion {
       // but by the runtime, therefore any operations must be
       // placed on the ready queue in order for the runtime to
       // perform this mapping
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       // The function to trigger once speculation is
       // ready to be resolved
       virtual void trigger_resolution(void);
@@ -628,7 +628,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -698,7 +698,7 @@ namespace Legion {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_internal_requirement(unsigned idx);
@@ -786,7 +786,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
     protected:
       FenceKind fence_kind;
@@ -818,7 +818,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
     protected:
       ApEvent previous_completion;
@@ -871,7 +871,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       DeletionKind kind;
@@ -951,8 +951,6 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
-      virtual void trigger_commit(void);
     protected:
       RegionTreeNode *start_node;
       RegionTreePath  open_path;
@@ -987,8 +985,6 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
-      virtual void trigger_commit(void);
     protected:
       RegionTreeNode *parent_node;
       RegionTreeNode *child_node; // inclusive
@@ -1069,7 +1065,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
     public:
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -1164,7 +1160,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -1211,7 +1207,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
@@ -1246,7 +1242,7 @@ namespace Legion {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
@@ -1308,7 +1304,7 @@ namespace Legion {
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
@@ -1372,7 +1368,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
       virtual void trigger_complete(void);
     protected:
@@ -1552,7 +1548,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
@@ -1645,7 +1641,7 @@ namespace Legion {
     public:
       MustEpochTriggerer& operator=(const MustEpochTriggerer &rhs);
     public:
-      bool trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
+      void trigger_tasks(const std::vector<IndividualTask*> &indiv_tasks,
                          std::vector<bool> &indiv_triggered,
                          const std::vector<IndexTask*> &index_tasks,
                          std::vector<bool> &index_triggered);
@@ -1657,8 +1653,6 @@ namespace Legion {
     private:
       MustEpochOp *const owner;
       Reservation trigger_lock;
-      std::set<IndividualTask*> failed_individual_tasks;
-      std::set<IndexTask*> failed_index_tasks;
     };
 
     /**
@@ -1680,14 +1674,13 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
+      void map_tasks(const std::deque<SingleTask*> &single_tasks,
             const std::vector<std::set<unsigned> > &dependences);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);
     private:
       MustEpochOp *const owner;
-      bool success;
     };
 
     class MustEpochDistributor {
@@ -1909,7 +1902,7 @@ namespace Legion {
       void perform_logging();
       inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);
@@ -1960,7 +1953,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
     public:
@@ -2031,7 +2024,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
       virtual void resolve_true(void);
       virtual void resolve_false(void);
@@ -2098,7 +2091,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -2147,7 +2140,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     protected:
@@ -2189,7 +2182,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual bool trigger_mapping(void);
+      virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
       virtual void trigger_complete(void);
     protected:

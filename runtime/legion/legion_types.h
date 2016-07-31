@@ -199,6 +199,7 @@ namespace Legion {
       OPEN_READ_WRITE      = 2, // unknown dirty information below
       OPEN_SINGLE_REDUCE   = 3, // only one open child with reductions below
       OPEN_MULTI_REDUCE    = 4, // multiple open children with same reduction
+      // Only projection states below here
       OPEN_READ_ONLY_PROJ  = 5, // read-only projection
       OPEN_READ_WRITE_PROJ = 6, // read-write projection
       OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=1, children disjoint
@@ -283,6 +284,10 @@ namespace Legion {
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
       HLR_REMOTE_VIEW_CREATION_TASK_ID,
+      HLR_DEFER_DISTRIBUTE_TASK_ID,
+      HLR_DEFER_PERFORM_MAPPING_TASK_ID,
+      HLR_DEFER_LAUNCH_TASK_ID,
+      HLR_DEFER_MAP_AND_LAUNCH_TASK_ID,
       HLR_MESSAGE_ID, // These two must be the last two
       HLR_RETRY_SHUTDOWN_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -352,6 +357,10 @@ namespace Legion {
         "Deferred Remove Version State Valid Ref",                \
         "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
+        "Defer Task Distribution",                                \
+        "Defer Task Perform Mapping",                             \
+        "Defer Task Launch",                                      \
+        "Defer Task Map and Launch",                              \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -448,10 +457,25 @@ namespace Legion {
       "handle_task_result",                         \
     }
 
+    // Methodology for assigning priorities to meta-tasks
+    // The lowest priority is for the heavy lifting meta
+    // tasks, so they go through the queue at low priority.
+    // The deferred-throughput priority is for tasks that
+    // have already gone through the queue once with 
+    // throughput priority, but had to be deferred for
+    // some reason and therefore shouldn't get stuck at
+    // the back of the throughput queue again. Latency 
+    // priority is for very small tasks which take a 
+    // minimal amount of time to perform and therefore 
+    // shouldn't get stuck behind the heavy meta-tasks. 
+    // Resource priority means that this task holds a 
+    // Realm resource (e.g. reservation) and therefore 
+    // shouldn't be stuck behind anything.
     enum HLRPriority {
-      HLR_THROUGHPUT_PRIORITY = 0, // don't care so much
-      HLR_LATENCY_PRIORITY = 1, // care some but not too much
-      HLR_RESOURCE_PRIORITY = 2, // this needs to be first
+      HLR_THROUGHPUT_PRIORITY = 0,
+      HLR_DEFERRED_THROUGHPUT_PRIORITY = 1,
+      HLR_LATENCY_PRIORITY = 2,
+      HLR_RESOURCE_PRIORITY = 3,
     };
 
     enum VirtualChannelKind {
@@ -787,6 +811,8 @@ namespace Legion {
       REALM_ISSUE_FILL_CALL,
       REGION_TREE_LOGICAL_ANALYSIS_CALL,
       REGION_TREE_LOGICAL_FENCE_CALL,
+      REGION_TREE_VERSIONING_ANALYSIS_CALL,
+      REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL,
       REGION_TREE_INITIALIZE_CONTEXT_CALL,
       REGION_TREE_INVALIDATE_CONTEXT_CALL,
       REGION_TREE_PHYSICAL_TRAVERSE_CALL,
@@ -958,6 +984,8 @@ namespace Legion {
       "Realm Issue Fill",                                             \
       "Region Tree Logical Analysis",                                 \
       "Region Tree Logical Fence",                                    \
+      "Region Tree Versioning Analysis",                              \
+      "Region Tree Advance Version Numbers",                          \
       "Region Tree Initialize Context",                               \
       "Region Tree Invalidate Context",                               \
       "Region Tree Physical Traverse",                                \
@@ -1334,6 +1362,7 @@ namespace Legion {
   typedef ::legion_variant_id_t VariantID;
   typedef ::legion_unique_id_t UniqueID;
   typedef ::legion_version_id_t VersionID;
+  typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
   typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;

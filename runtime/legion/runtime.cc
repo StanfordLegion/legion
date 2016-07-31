@@ -1960,7 +1960,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_ready_queue(TaskOp *task, bool prev_failure)
+    void ProcessorManager::add_to_ready_queue(TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1976,18 +1976,14 @@ namespace Legion {
       assert(ready_queues.find(task->map_id) != ready_queues.end());
 #endif
       ContextState &state = context_states[ctx_id];
-      if (prev_failure)
-        ready_queues[task->map_id].push_front(task);
-      else
-        ready_queues[task->map_id].push_back(task);
+      ready_queues[task->map_id].push_back(task);
       if (state.active && (state.owned_tasks == 0))
         increment_active_contexts();
       state.owned_tasks++;
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_local_ready_queue(Operation *op, 
-                                                    bool prev_failure)
+    void ProcessorManager::add_to_local_ready_queue(Operation *op) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1997,21 +1993,14 @@ namespace Legion {
       args.hlr_id = HLR_TRIGGER_OP_ID;
       args.manager = this;
       args.op = op;
-      if (!prev_failure)
-      {
-        AutoLock l_lock(local_queue_lock); 
-        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                      HLR_TRIGGER_OP_ID, 
-                                                      HLR_THROUGHPUT_PRIORITY,
-                        op, local_scheduler_preconditions[next_local_index]);
-        local_scheduler_preconditions[next_local_index++] = next;
-        if (next_local_index == superscalar_width)
-          next_local_index = 0;
-      }
-      else
-        runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                         HLR_TRIGGER_OP_ID, 
-                                         HLR_THROUGHPUT_PRIORITY, op);
+      AutoLock l_lock(local_queue_lock); 
+      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                    HLR_TRIGGER_OP_ID, 
+                                                    HLR_THROUGHPUT_PRIORITY,
+                      op, local_scheduler_preconditions[next_local_index]);
+      local_scheduler_preconditions[next_local_index++] = next;
+      if (next_local_index == superscalar_width)
+        next_local_index = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2160,9 +2149,9 @@ namespace Legion {
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
-        TriggerTaskArgs args;
-        args.hlr_id = HLR_TRIGGER_TASK_ID;
-        args.manager = this;
+        TriggerTaskArgs trigger_args;
+        trigger_args.hlr_id = HLR_TRIGGER_TASK_ID;
+        trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -2173,15 +2162,10 @@ namespace Legion {
           const bool send_remotely = (finder != output.relocate_tasks.end());
           if (send_remotely)
             task->set_target_proc(finder->second);
+          // Mark that this task is no longer outstanding
           task->deactivate_outstanding_task();
-          // We give a slight priority to triggering the execution
-          // of tasks relative to other runtime operations because
-          // they actually have a feedback mechanism controlling
-          // how far they get ahead.  We give a slight edge in priority
-          // to tasks being sent remotely to get them in flight.
-          // Give priority to things which are getting sent remotely
-          args.op = task;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
+          trigger_args.op = task;
+          runtime->issue_runtime_meta_task(&trigger_args,sizeof(trigger_args),
                                            HLR_TRIGGER_TASK_ID, 
                                            HLR_THROUGHPUT_PRIORITY, task);
         }
@@ -8121,7 +8105,7 @@ namespace Legion {
       }
       increment_outstanding_top_level_tasks();
       // Put the task in the ready queue
-      add_to_ready_queue(target, top_task, false/*prev failure*/);
+      add_to_ready_queue(target, top_task);
     }
 
     //--------------------------------------------------------------------------
@@ -8166,7 +8150,7 @@ namespace Legion {
       // Mark that we have another outstanding top level task
       increment_outstanding_top_level_tasks();
       // Now we can put it on the queue
-      add_to_ready_queue(proc, mapper_task, false/*prev failure*/);
+      add_to_ready_queue(proc, mapper_task);
       return result;
     }
 
@@ -14126,7 +14110,7 @@ namespace Legion {
       {
         // Update the current processor
         task->set_current_proc(target);
-        finder->second->add_to_ready_queue(task,false/*previous failure*/);
+        finder->second->add_to_ready_queue(task);
       }
       else
       {
@@ -14172,7 +14156,7 @@ namespace Legion {
         {
           // Update the current processor
           (*it)->current_proc = target;
-          finder->second->add_to_ready_queue(*it,false/*previous failure*/);
+          finder->second->add_to_ready_queue(*it);
         }
       }
       else
@@ -16354,8 +16338,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, TaskOp *op, 
-                                     bool prev_fail, RtEvent wait_on)
+    void Runtime::add_to_ready_queue(Processor p, TaskOp *op, RtEvent wait_on)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16368,24 +16351,22 @@ namespace Legion {
         args.hlr_id = HLR_DEFERRED_ENQUEUE_TASK_ID;
         args.manager = proc_managers[p];
         args.task = op;
-        args.prev_fail = prev_fail;
         issue_runtime_meta_task(&args, sizeof(args), 
             HLR_DEFERRED_ENQUEUE_TASK_ID, HLR_LATENCY_PRIORITY, op, wait_on);
       }
       else
-        proc_managers[p]->add_to_ready_queue(op, prev_fail);
+        proc_managers[p]->add_to_ready_queue(op);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_local_queue(Processor p, 
-                                           Operation *op, bool prev_fail)
+    void Runtime::add_to_local_queue(Processor p, Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      proc_managers[p]->add_to_local_ready_queue(op, prev_fail);
+      proc_managers[p]->add_to_local_ready_queue(op);
     }
 
     //--------------------------------------------------------------------------
@@ -20479,13 +20460,7 @@ namespace Legion {
             // Key off of args here instead of data
             const ProcessorManager::TriggerOpArgs *trigger_args = 
                             (const ProcessorManager::TriggerOpArgs*)args;
-            Operation *op = trigger_args->op;
-            bool mapped = op->trigger_mapping();
-            if (!mapped)
-            {
-              ProcessorManager *manager = trigger_args->manager;
-              manager->add_to_local_ready_queue(op, true/*failure*/);
-            }
+            trigger_args->op->trigger_mapping();
             break;
           }
         case HLR_TRIGGER_TASK_ID:
@@ -20493,13 +20468,7 @@ namespace Legion {
             // Key off of args here instead of data
             const ProcessorManager::TriggerTaskArgs *trigger_args = 
                           (const ProcessorManager::TriggerTaskArgs*)args;
-            TaskOp *op = trigger_args->op; 
-            bool mapped = op->trigger_mapping();
-            if (!mapped)
-            {
-              ProcessorManager *manager = trigger_args->manager;
-              manager->add_to_ready_queue(op, true/*failure*/);
-            }
+            trigger_args->op->trigger_mapping(); 
             break;
           }
         case HLR_DEFERRED_RECYCLE_ID:
@@ -20791,8 +20760,7 @@ namespace Legion {
           {
             const DeferredEnqueueArgs *enqueue_args = 
               (const DeferredEnqueueArgs*)args;
-            enqueue_args->manager->add_to_ready_queue(enqueue_args->task,
-                                                      enqueue_args->prev_fail);
+            enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
         case HLR_DEFER_MAPPER_MESSAGE_TASK_ID:
@@ -20834,6 +20802,37 @@ namespace Legion {
         case HLR_REMOTE_VIEW_CREATION_TASK_ID:
           {
             SingleTask::handle_remote_view_creation(args);
+            break;
+          }
+        case HLR_DEFER_DISTRIBUTE_TASK_ID:
+          {
+            const TaskOp::DeferDistributeArgs *dargs = 
+              (const TaskOp::DeferDistributeArgs*)args;
+            dargs->proxy_this->distribute_task();
+            break;
+          }
+        case HLR_DEFER_PERFORM_MAPPING_TASK_ID:
+          {
+            const TaskOp::DeferMappingArgs *margs = 
+              (const TaskOp::DeferMappingArgs*)args;
+            RtEvent wait_on = margs->proxy_this->perform_mapping(
+                                                    margs->must_op);
+            if (wait_on.exists())
+              wait_on.wait();
+            break;
+          }
+        case HLR_DEFER_LAUNCH_TASK_ID:
+          {
+            const TaskOp::DeferLaunchArgs *largs = 
+              (const TaskOp::DeferLaunchArgs*)args;
+            largs->proxy_this->launch_task();
+            break;
+          }
+        case HLR_DEFER_MAP_AND_LAUNCH_TASK_ID:
+          {
+            const SliceTask::DeferMapAndLaunchArgs *margs = 
+              (const SliceTask::DeferMapAndLaunchArgs*)args;
+            margs->proxy_this->map_and_launch();
             break;
           }
         case HLR_RETRY_SHUTDOWN_TASK_ID:

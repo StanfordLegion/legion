@@ -1640,6 +1640,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::perform_versioning_analysis(Operation *op, 
+                        unsigned idx, const RegionRequirement &req,
+                        const RegionTreePath &path, VersionInfo &version_info,
+                        std::set<RtEvent> &ready_events, bool partial_traversal)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
+      SingleTask *parent_ctx = op->get_parent();
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+#ifdef DEBUG_LEGION
+      assert(ctx.exists());
+#endif
+      RegionUsage usage(req); 
+      RegionNode *parent_node = get_node(req.parent);
+      FieldMask user_mask = 
+        parent_node->column_source->get_field_mask(req.privilege_fields);
+      // Keep track of any unversioned fields
+      FieldMask unversioned_mask = user_mask;
+      // Do the traversal to compute the version numbers
+      parent_node->compute_version_numbers(ctx.get_id(), path, usage,
+                                           user_mask, unversioned_mask,
+                                           op, idx, parent_ctx, version_info, 
+                                           ready_events, partial_traversal);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::advance_version_numbers(Operation *op, unsigned idx,
+                                                bool dedup_opens, 
+                                                bool dedup_advances, 
+                                                ProjectionEpochID open_epoch, 
+                                                ProjectionEpochID advance_epoch,
+                                                RegionTreeNode *parent, 
+                                                const RegionTreePath &path,
+                                                const FieldMask &advance_mask, 
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL);
+      SingleTask *parent_ctx = op->get_parent();
+      RegionTreeContext ctx = 
+        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+#ifdef DEBUG_LEGION
+      assert(ctx.exists());
+#endif
+      parent->advance_version_numbers(ctx.get_id(), path, advance_mask,
+                                      parent_ctx, dedup_opens, dedup_advances,
+                                      open_epoch, advance_epoch, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &sources,
                     ApEvent term_event, SingleTask *context,unsigned init_index,
@@ -10339,12 +10390,14 @@ namespace Legion {
         // reduction at this node in the region tree
         if ((user.usage.redop > 0) && !proj_info.is_projecting())
           record_logical_reduction(state, user.usage.redop, user.field_mask);
-        // If we're projecting, record any split fields
+        // If we're projecting, record any split fields and projection epochs
         if (proj_info.is_projecting())
         {
           FieldMask split_fields = state.dirty_below & user.field_mask;
           if (!!split_fields)
             version_info.record_split_fields(this, split_fields);
+          // Record our projection epochs
+          state.capture_projection_epochs(user.field_mask, proj_info);
         }
         // Finish dependence analysis for any advance operations
         if (!advances.empty())
@@ -10573,6 +10626,10 @@ namespace Legion {
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  new_states, already_open);
+        // If this was a projection field state then we need to 
+        // advance the epoch version numbers
+        if (it->is_projection_state())
+          state.advance_projection_epochs(overlap); 
         // Remove the state if it is now empty
         if (!it->valid_fields)
           it = state.field_states.erase(it);
@@ -10580,7 +10637,8 @@ namespace Legion {
           it++;
       }
       // Merge any new field states
-      merge_new_field_states(state, new_states);
+      if (!new_states.empty())
+        merge_new_field_states(state, new_states);
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields
@@ -10889,7 +10947,10 @@ namespace Legion {
 #endif
                   closer.record_close_operation(this, overlap,                
                    false/*leave open*/, true/*read only*/, false/*flush only*/);
+                  // Advance the projection epochs
+                  state.advance_projection_epochs(overlap);
                 }
+                it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -10912,7 +10973,10 @@ namespace Legion {
                 closer.record_close_operation(this, overlap,
                                   IS_READ_ONLY(closer.user.usage)/*leave open*/,
                                   false/*read only*/, false/*flush only*/);
+                // Advance the projection epochs
+                state.advance_projection_epochs(overlap);
               }
+              it->valid_fields -= current_mask;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -10934,7 +10998,10 @@ namespace Legion {
 #endif
                   closer.record_close_operation(this, overlap,
                    false/*leave open*/, false/*read only*/,false/*flush only*/);
+                  // Advance the projection epochs
+                  state.advance_projection_epochs(overlap);
                 }
+                it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -11084,7 +11151,10 @@ namespace Legion {
                   closer.record_close_operation(this, overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
+                  // Advance the projection epochs
+                  state.advance_projection_epochs(overlap);
                 }
+                it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -11125,7 +11195,10 @@ namespace Legion {
                   closer.record_close_operation(this, overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
+                  // Advance the projection epochs
+                  state.advance_projection_epochs(overlap);
                 }
+                it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -11149,7 +11222,10 @@ namespace Legion {
                   closer.record_close_operation(this, overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
+                  // Advance the projection epochs
+                  state.advance_projection_epochs(overlap);
                 }
+                it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -11848,7 +11924,8 @@ namespace Legion {
         // See if our child is open, if it's not then we can keep going
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
           it->open_children.find(next_child);
-        if (finder == it->open_children.end())
+        if (!it->is_projection_state() && 
+            (finder == it->open_children.end()))
         {
           it++;
           continue;
@@ -11968,6 +12045,36 @@ namespace Legion {
                 it++;
               break;
             }
+          case OPEN_READ_ONLY_PROJ:
+            {
+              // Do a read only close here 
+              closer.record_close_operation(this, overlap,
+                  false/*leave open*/, true/*read only*/, false/*flush only*/);
+              // Advance the projection epochs
+              state.advance_projection_epochs(overlap);
+              it->valid_fields -= current_mask;
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+              break;
+            }
+          case OPEN_READ_WRITE_PROJ:
+          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+          case OPEN_REDUCE_PROJ:
+            {
+              // Do the close here 
+              closer.record_close_operation(this, overlap,
+                  false/*leave open*/, false/*read only*/, false/*flush only*/);
+              // Advance the projection epochs
+              state.advance_projection_epochs(overlap);
+              it->valid_fields -= current_mask;
+              if (!it->valid_fields)
+                it = state.field_states.erase(it);
+              else
+                it++;
+              break;
+            }
           default:
             assert(false); // should never get here
         }
@@ -11976,6 +12083,94 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::compute_version_numbers(ContextID ctx,
+                                               const RegionTreePath &path,
+                                               const RegionUsage &usage,
+                                               const FieldMask &version_mask,
+                                               FieldMask &unversioned_mask,
+                                               Operation *op, unsigned idx,
+                                               SingleTask *parent_ctx,
+                                               VersionInfo &version_info,
+                                               std::set<RtEvent> &ready_events,
+                                               bool partial_traversal)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      const unsigned depth = get_depth();
+      const bool arrived = !path.has_child(depth);
+      if (arrived)
+      {
+        if (partial_traversal)
+        {
+          // If we are doing a partial traversal, then we just do the
+          // normal path only traversal and don't recurse
+          const FieldMask &split_mask = version_info.get_split_mask(depth);
+          manager.record_path_only_versions(version_mask, split_mask,
+                               unversioned_mask, parent_ctx, op, idx, 
+                               usage, version_info, ready_events);
+        }
+        else
+        {
+          // If we are at the destination node and we are writing then
+          // we need to advance the version number, we are guaranteed by
+          // the logical analysis that this is a safe to do without
+          // any kind of synchronization
+          if (IS_WRITE(usage))
+            manager.advance_versions(version_mask, parent_ctx, ready_events);
+          // Record the actual versions to be used here 
+          manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
+                                  op, idx, usage, version_info, ready_events);
+          // If we had any unversioned fields all the way down then we
+          // have to report that uninitialized data is being used
+          if (!!unversioned_mask)
+            report_uninitialized_usage(op, idx, unversioned_mask);
+        }
+      }
+      else
+      {
+        // Record the path only versions
+        const FieldMask &split_mask = version_info.get_split_mask(depth);
+        manager.record_path_only_versions(version_mask, split_mask,
+                             unversioned_mask, parent_ctx, op, idx, 
+                             usage, version_info, ready_events);
+        // Continue the traversal down the tree
+        RegionTreeNode *child = get_tree_child(path.get_child(depth));
+        child->compute_version_numbers(ctx, path, usage, version_mask,
+                                unversioned_mask, op, idx, parent_ctx, 
+                                version_info, ready_events, partial_traversal);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::advance_version_numbers(ContextID ctx,
+                                               const RegionTreePath &path,
+                                               const FieldMask &advance_mask,
+                                               SingleTask *parent_ctx, 
+                                               bool dedup_opens, 
+                                               bool dedup_advances, 
+                                               ProjectionEpochID open_epoch,
+                                               ProjectionEpochID advance_epoch,
+                                               std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      // Perform the advance
+      manager.advance_versions(advance_mask, parent_ctx, ready_events,
+          dedup_opens, open_epoch, dedup_advances, advance_epoch);
+      // Continue the traversal, 
+      const unsigned depth = get_depth();
+      const bool arrived = !path.has_child(depth);
+      // wonder if we get tail call recursion optimization
+      if (!arrived)
+      {
+        RegionTreeNode *child = get_tree_child(path.get_child(depth));
+        child->advance_version_numbers(ctx, path, advance_mask, parent_ctx,
+                                       dedup_opens, dedup_advances, 
+                                       open_epoch, advance_epoch, ready_events);
+      }
     }
 
     //--------------------------------------------------------------------------

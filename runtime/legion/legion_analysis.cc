@@ -380,6 +380,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const FieldMask& VersionInfo::get_split_mask(unsigned depth) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(depth < split_masks.size());
+#endif
+      return split_masks[depth];
+    }
+
+    //--------------------------------------------------------------------------
     const FieldMask& VersionInfo::get_split_mask(RegionTreeNode *node,
                                                  bool &is_split) const
     //--------------------------------------------------------------------------
@@ -1209,6 +1219,50 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::record_projection_epoch(ProjectionEpochID epoch,
+                                                 const FieldMask &epoch_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(projection_epochs.find(epoch) == projection_epochs.end());
+#endif
+      projection_epochs[epoch] = epoch_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::pack_info(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(projection_epochs.size());
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+            it = projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::unpack_info(Deserializer &derez, Runtime *runtime,
+                      const RegionRequirement &req, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      if (req.handle_type != SINGULAR)
+      {
+        projection = runtime->find_projection_function(req.projection);
+        projection_domain = launch_domain; 
+      }
+      size_t num_epochs;
+      derez.deserialize(num_epochs);
+      for (unsigned idx = 0; idx < num_epochs; idx++)
+      {
+        ProjectionEpochID epoch_id;
+        derez.deserialize(epoch_id);
+        derez.deserialize(projection_epochs[epoch_id]);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
@@ -1767,6 +1821,7 @@ namespace Legion {
       : owner(node)
     //--------------------------------------------------------------------------
     {
+      projection_epochs[0] = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
     }
 
     //--------------------------------------------------------------------------
@@ -1829,6 +1884,7 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
+      assert(projection_epochs.size() == 1);
 #endif
     }
 
@@ -1867,6 +1923,8 @@ namespace Legion {
       dirty_below.clear();
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
+      projection_epochs.clear();
+      projection_epochs[0] = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
     } 
 
     //--------------------------------------------------------------------------
@@ -1921,6 +1979,80 @@ namespace Legion {
         }
       }
       dirty_below -= deleted_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentState::advance_projection_epochs(const FieldMask &advance_mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<ProjectionEpochID,FieldMask>::aligned to_add; 
+      std::set<ProjectionEpochID> to_delete;
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::reverse_iterator 
+            it = projection_epochs.rbegin(); 
+            it != projection_epochs.rend(); it++) 
+      {
+        FieldMask overlap = it->second & advance_mask;
+        if (!overlap)
+          continue;
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.insert(it->first);
+        // See if we can add it to an existing one
+        LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator finder = 
+          projection_epochs.find(it->first+1);
+        if (finder != projection_epochs.end())
+        {
+          // If we were going to erase it, then don't erase it anymore
+          if (!finder->second)
+          {
+#ifdef DEBUG_LEGION
+            assert(to_delete.find(finder->first) != to_delete.end());
+#endif
+            to_delete.erase(finder->first);
+          }
+          finder->second |= overlap;
+        }
+        else
+          to_add[it->first+1] = overlap;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::set<ProjectionEpochID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          // Field should be empty
+#ifdef DEBUG_LEGION
+          assert(!projection_epochs[*it]);
+#endif
+          projection_epochs.erase(*it);
+        }
+      }
+      if (!to_add.empty())
+      {
+        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+              it = to_add.begin(); it != to_add.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(projection_epochs.find(it->first) == projection_epochs.end());
+#endif
+          projection_epochs.insert(*it); 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentState::capture_projection_epochs(const FieldMask &capture_mask,
+                                                 ProjectionInfo &info) const
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        FieldMask overlap = it->second & capture_mask;
+        if (!overlap)
+          continue;
+        info.record_projection_epoch(it->first, overlap);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3298,6 +3430,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::record_versions(const FieldMask &version_mask, 
+                                    FieldMask &unversioned_mask,
                                     SingleTask *context, 
                                     Operation *op, unsigned index,
                                     const RegionUsage &usage,
@@ -3465,13 +3598,18 @@ namespace Legion {
                                            false/*path only*/);
           it->first->request_initial_version_state(it->second, ready_events);
         }
+        // Keep any unversioned fields
+        unversioned_mask &= unversioned;
       }
+      else if (!!unversioned_mask)
+        unversioned_mask.clear();
     }
 
     //--------------------------------------------------------------------------
     void VersionManager::record_path_only_versions(
                                                 const FieldMask &version_mask,
                                                 const FieldMask &split_mask,
+                                                FieldMask &unversioned_mask,
                                                 SingleTask *context,
                                                 Operation *op, unsigned index,
                                                 const RegionUsage &usage,
@@ -3527,6 +3665,7 @@ namespace Legion {
             FieldMask overlap = vit->second.valid_fields & version_mask;
             if (!overlap)
               continue;
+            unversioned -= overlap;
             if (vit->second.single)
             {
               VersionState *state = vit->second.versions.single_version;
@@ -3548,6 +3687,28 @@ namespace Legion {
                                                        ready_events);
               }
             }
+            if (!unversioned)
+              break;
+          }
+          // We don't care about versioning information for writes because
+          // they can modify the next version
+          if (!!unversioned_mask)
+            unversioned_mask.clear();
+        }
+        else if (!!unversioned_mask)
+        {
+          // If we are a reduction and we have previously unversioned
+          // fields then we need to do a little check to make sure
+          // that versions at least exist
+          for (LegionMap<VersionID,VersionStates>::aligned::const_iterator
+                vit = previous_version_infos.begin(); vit != 
+                previous_version_infos.end(); vit++)
+          {
+            // Don't need to capture the actual states, just need to 
+            // remove all the fields for which we have a prior version
+            unversioned_mask -= vit->second.valid_fields;
+            if (!unversioned_mask)
+              break;
           }
         }
         for (LegionMap<VersionID,VersionStates>::aligned::const_iterator
@@ -3557,7 +3718,6 @@ namespace Legion {
           FieldMask overlap = vit->second.valid_fields & version_mask;
           if (!overlap)
             continue;
-          unversioned -= overlap;
           if (vit->second.single)
           {
             VersionState *state = vit->second.versions.single_version;
@@ -3578,8 +3738,6 @@ namespace Legion {
               // No need to request anything since we're contributing
             }
           }
-          if (!unversioned)
-            break;
         }
       }
       else if (!!split_mask)
@@ -3652,9 +3810,15 @@ namespace Legion {
                                                          ready_events);
               }
             }
-            if (!unversioned)
-              break;
           } 
+        }
+        // Update the unversioned mask if necessary
+        if (!!unversioned_mask)
+        {
+          if (!!unversioned)
+            unversioned_mask &= unversioned;
+          else
+            unversioned_mask.clear();
         }
       }
       else
@@ -3694,6 +3858,14 @@ namespace Legion {
           if (!unversioned)
             break;
         }
+        // Update the unversioned mask if necessary
+        if (!!unversioned_mask)
+        {
+          if (!!unversioned)
+            unversioned_mask &= unversioned;
+          else
+            unversioned_mask.clear();
+        }
       }
 #ifdef DEBUG_LEGION
       sanity_check();
@@ -3704,7 +3876,10 @@ namespace Legion {
     void VersionManager::advance_versions(FieldMask mask,
                                           SingleTask *context,
                                           std::set<RtEvent> &applied_events,
-                                          bool dedup_advances, UniqueID op_id)
+                                          bool dedup_opens,
+                                          ProjectionEpochID open_epoch,
+                                          bool dedup_advances, 
+                                          ProjectionEpochID advance_epoch)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 
@@ -3715,6 +3890,34 @@ namespace Legion {
         owner_space = context->get_version_owner(node);
         is_owner = (owner_space == node->context->runtime->address_space);
         current_context = context;
+      }
+      // If we are deduplicating advances, do that now
+      // to see if we can avoid any communication
+      if (dedup_opens || dedup_advances)
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        if (dedup_opens)
+        {
+          LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+            finder = previous_opens.find(open_epoch);
+          if (finder != previous_opens.end())
+          {
+            mask -= finder->second;
+            if (!mask)
+              return;
+          }
+        }
+        if (dedup_advances)
+        {
+          LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+            finder = previous_advancers.find(advance_epoch);
+          if (finder != previous_advancers.end())
+          {
+            mask -= finder->second;
+            if (!mask)
+              return;
+          }
+        }
       }
       // Check to see if we are the owner
       if (!is_owner)
@@ -3729,31 +3932,44 @@ namespace Legion {
       // We need the lock in exclusive mode because we are going
       // to be mutating our data structures
       AutoLock m_lock(manager_lock);
-      // If we are deduplicating advances, do that now
-      if (dedup_advances)
+      // Recheck for any advance or open fields in case we lost the race
+      if (dedup_opens)
       {
-        LegionMap<UniqueID,FieldMask>::aligned::iterator finder = 
-          previous_advancers.find(op_id);
-        if (finder != previous_advancers.end())
+        LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator
+          finder = previous_opens.find(open_epoch);
+        if (finder != previous_opens.end())
         {
           mask -= finder->second;
-          // If there are no more fields to advance then we are done
           if (!mask)
             return;
-          // Save ourself on the set of previous advancers
           finder->second |= mask;
         }
         else
-          previous_advancers[op_id] = mask;
+          previous_opens[open_epoch] = mask;
       }
-      // Filter out any previous advancers if necessary  
-      if (!previous_advancers.empty())
+      if (dedup_advances)
       {
-        std::vector<UniqueID> to_delete;
-        for (LegionMap<UniqueID,FieldMask>::aligned::iterator it = 
-              previous_advancers.begin(); it != previous_advancers.end(); it++)
+        LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator 
+          finder = previous_advancers.find(advance_epoch);
+        if (finder != previous_advancers.end())
         {
-          if (it->first == op_id)
+          mask -= finder->second;
+          if (!mask)
+            return;
+          finder->second |= mask;
+        }
+        else
+          previous_advancers[advance_epoch] = mask;
+      }
+      // Filter out any previous opens if necessary
+      if (!previous_opens.empty())
+      {
+        std::vector<ProjectionEpochID> to_delete;
+        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it = 
+              previous_opens.begin(); it != previous_opens.end(); it++)
+        {
+          if ((dedup_opens && (it->first == open_epoch)) ||
+              (dedup_advances && (it->first == advance_epoch)))
             continue;
           it->second -= mask;
           if (!it->second)
@@ -3761,7 +3977,28 @@ namespace Legion {
         }
         if (!to_delete.empty())
         {
-          for (std::vector<UniqueID>::const_iterator it = 
+          for (std::vector<ProjectionEpochID>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            previous_opens.erase(*it);
+        }
+      }
+      // Filter out any previous advancers if necessary  
+      if (!previous_advancers.empty())
+      {
+        std::vector<ProjectionEpochID> to_delete;
+        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it = 
+              previous_advancers.begin(); it != previous_advancers.end(); it++)
+        {
+          if ((dedup_opens && (it->first == open_epoch)) ||
+              (dedup_advances && (it->first == advance_epoch)))
+            continue;
+          it->second -= mask;
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<ProjectionEpochID>::const_iterator it = 
                 to_delete.begin(); it != to_delete.end(); it++)
             previous_advancers.erase(*it);
         }

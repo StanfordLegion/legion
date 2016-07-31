@@ -135,6 +135,8 @@ namespace Legion {
       inline RegionTreeNode* get_upper_bound_node(void) const 
         { return upper_bound_node; }
       void set_upper_bound_node(RegionTreeNode *node);
+      inline bool has_physical_states(void) const 
+        { return !physical_states.empty(); }
     public:
       // The copy through parameter is useful for mis-speculated
       // operations that still need to copy state from one 
@@ -151,6 +153,7 @@ namespace Legion {
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
+      const FieldMask& get_split_mask(unsigned depth) const;
       const FieldMask& get_split_mask(RegionTreeNode *node, 
                                       bool &is_split) const;
     public:
@@ -282,10 +285,10 @@ namespace Legion {
     };
 
     /**
-     * \struct ProjectionInfo
+     * \class ProjectionInfo
      * Projection information for index space requirements
      */
-    struct ProjectionInfo {
+    class ProjectionInfo {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_domain(Domain::NO_DOMAIN) { }
@@ -293,9 +296,19 @@ namespace Legion {
                      const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
+      inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
+        get_projection_epochs(void) const { return projection_epochs; }
+      void record_projection_epoch(ProjectionEpochID epoch,
+                                   const FieldMask &epoch_mask);
     public:
-      ProjectionFunction *const projection;
-      const Domain projection_domain;
+      void pack_info(Serializer &rez) const;
+      void unpack_info(Deserializer &derez, Runtime *runtime,
+          const RegionRequirement &req, const Domain &launch_domain);
+    public:
+      ProjectionFunction *projection;
+      Domain projection_domain;
+    protected:
+      LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
     };
 
     /**
@@ -389,6 +402,9 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m,
                  ProjectionFunction *proj, const Domain &proj_domain, bool dis);
     public:
+      inline bool is_projection_state(void) const 
+        { return (open_state >= OPEN_READ_ONLY_PROJ); } 
+    public:
       bool overlaps(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
@@ -430,6 +446,10 @@ namespace Legion {
       void reset(void);
       void clear_deleted_state(const FieldMask &deleted_mask);
     public:
+      void advance_projection_epochs(const FieldMask &advance_mask);
+      void capture_projection_epochs(const FieldMask &capture_mask,
+                                     ProjectionInfo &info) const;
+    public:
       RegionTreeNode *const owner;
     public:
       LegionList<FieldState,
@@ -445,6 +465,8 @@ namespace Legion {
     public:
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
+      // Keep track of the current projection epoch for each field
+      LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
     };
 
     typedef DynamicTableAllocator<CurrentState,10,8> CurrentStateAllocator;
@@ -629,6 +651,7 @@ namespace Legion {
                             const std::vector<LogicalView*> &corresponding);
     public:
       void record_versions(const FieldMask &version_mask,
+                           FieldMask &unversioned_mask,
                            SingleTask *context,
                            Operation *op, unsigned index,
                            const RegionUsage &usage,
@@ -636,6 +659,7 @@ namespace Legion {
                            std::set<RtEvent> &ready_events);
       void record_path_only_versions(const FieldMask &version_mask,
                                      const FieldMask &split_mask,
+                                     FieldMask &unversioned_mask,
                                      SingleTask *context,
                                      Operation *op, unsigned index,
                                      const RegionUsage &usage,
@@ -644,7 +668,10 @@ namespace Legion {
       void advance_versions(FieldMask version_mask, 
                             SingleTask *context,
                             std::set<RtEvent> &applied_events,
-                            bool dedup_advances = false, UniqueID op_id = 0);
+                            bool dedup_opens = false,
+                            ProjectionEpochID open_epoch = 0,
+                            bool dedup_advances = false, 
+                            ProjectionEpochID advance_epoch = 0);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -677,8 +704,10 @@ namespace Legion {
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
+      // Information about preivous opens
+      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_opens;
       // Information about previous advances
-      LegionMap<UniqueID,FieldMask>::aligned previous_advancers;
+      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_advancers;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;

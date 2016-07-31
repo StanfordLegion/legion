@@ -391,10 +391,10 @@ namespace Legion {
               if (!ready_events.empty())
               {
                 RtEvent ready = Runtime::merge_events(ready_events);
-                rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
+                rt->add_to_ready_queue(current, task, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, false/*prev fail*/);
+                rt->add_to_ready_queue(current, task);
             }
             break;
           }
@@ -407,10 +407,10 @@ namespace Legion {
               if (!ready_events.empty())
               {
                 RtEvent ready = Runtime::merge_events(ready_events);
-                rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
+                rt->add_to_ready_queue(current, task, ready);
               }
               else
-                rt->add_to_ready_queue(current, task, false/*prev fail*/);
+                rt->add_to_ready_queue(current, task);
             }
             break;
           }
@@ -759,6 +759,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent TaskOp::defer_distribute_task(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DeferDistributeArgs args;
+      args.hlr_id = HLR_DEFER_DISTRIBUTE_TASK_ID;
+      args.proxy_this = this;
+      return runtime->issue_runtime_meta_task(&args, sizeof(args),
+          HLR_DEFER_DISTRIBUTE_TASK_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
+          this, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent TaskOp::defer_perform_mapping(RtEvent precondition, MustEpochOp *op)
+    //--------------------------------------------------------------------------
+    {
+      DeferMappingArgs args;
+      args.hlr_id = HLR_DEFER_PERFORM_MAPPING_TASK_ID;
+      args.proxy_this = this;
+      args.must_op = op;
+      return runtime->issue_runtime_meta_task(&args, sizeof(args),
+          HLR_DEFER_PERFORM_MAPPING_TASK_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
+          this, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent TaskOp::defer_launch_task(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DeferMappingArgs args;
+      args.hlr_id = HLR_DEFER_LAUNCH_TASK_ID;
+      args.proxy_this = this;
+      return runtime->issue_runtime_meta_task(&args, sizeof(args),
+          HLR_DEFER_LAUNCH_TASK_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
+          this, precondition);
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeContext TaskOp::get_parent_context(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -778,7 +815,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Processor p = parent_ctx->get_executing_processor();
-      runtime->add_to_ready_queue(p, this, false/*previous fail*/, wait_on);
+      runtime->add_to_ready_queue(p, this, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -868,6 +905,57 @@ namespace Legion {
           assert(index < infos.size());
 #endif
           infos[index].unpack_info(derez, runtime, ready_events);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::pack_projection_infos(Serializer &rez, 
+                                       std::vector<ProjectionInfo> &infos)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      size_t count = 0;
+      for (unsigned idx = 0; idx < infos.size(); idx++)
+      {
+        if (infos[idx].is_projecting())
+          count++;
+      }
+      rez.serialize(count);
+      if (count > 0)
+      {
+        for (unsigned idx = 0; idx < infos.size(); idx++)
+        {
+          if (infos[idx].is_projecting())
+          {
+            rez.serialize(idx);
+            infos[idx].pack_info(rez);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::unpack_projection_infos(Deserializer &derez,
+                                         std::vector<ProjectionInfo> &infos,
+                                         const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      infos.resize(regions.size());
+      size_t num_projections;
+      derez.deserialize(num_projections);
+      if (num_projections > 0)
+      {
+        for (unsigned idx = 0; idx < num_projections; idx++)
+        {
+          unsigned index;
+          derez.deserialize(index);
+#ifdef DEBUG_LEGION
+          assert(index < infos.size());
+#endif
+          infos[index].unpack_info(derez, runtime, 
+                                   regions[index], launch_domain);
         }
       }
     }
@@ -1993,11 +2081,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::early_map_regions(std::set<RtEvent> &applied_conditions,
+    void TaskOp::early_map_regions(std::set<RtEvent> &applied_conditions,
                                    const std::vector<unsigned> &must_premap)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
+      // A little bit of suckinesss here, it's unclear if we have
+      // our version infos with the proper versioning information
+      // so we might need to "page" it in now.  We'll overlap it as
+      // much as possible, but it will still suck. The common case is that
+      // we don't have anything to premap though so we shouldn't be
+      // doing this all that often.
+      std::set<RtEvent> version_ready_events;
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
+      {
+        VersionInfo &version_info = get_version_info(*it); 
+        if (version_info.has_physical_states())
+          continue;
+        RegionTreePath &privilege_path = get_privilege_path(*it); 
+        runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
+                                                     privilege_path,
+                                                     version_info,
+                                                     version_ready_events);
+      }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
       // Initialize this to not have a new target processor
@@ -2005,6 +2112,13 @@ namespace Legion {
       // Set up the inputs and outputs 
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
+      // At this point if we have any version ready events we need to wait
+      if (!version_ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(version_ready_events);
+        // This wait sucks but whatever for now
+        wait_on.wait();
+      }
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
       {
@@ -2210,7 +2324,6 @@ namespace Legion {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
         version_info.apply_mapping(owner_space, applied_conditions);
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2220,9 +2333,8 @@ namespace Legion {
       if (is_locally_mapped())
         return false;
       if (!is_remote())
-        return early_map_task();
-      else
-        return true;
+        early_map_task();
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -3564,7 +3676,7 @@ namespace Legion {
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
                                               HLR_ISSUE_FRAME_TASK_ID, 
-                                              HLR_THROUGHPUT_PRIORITY, this);
+                                              HLR_LATENCY_PRIORITY, this);
         wait_on.wait();
       }
     }
@@ -5264,11 +5376,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::trigger_mapping(void)
+    void SingleTask::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, TRIGGER_SINGLE_CALL);
-      bool success = true;
       if (is_remote())
       {
         if (distribute_task())
@@ -5284,12 +5395,11 @@ namespace Legion {
           else
           {
             // Remote but still need to map
-            if (perform_mapping())
-            {
+            RtEvent done_mapping = perform_mapping();
+            if (done_mapping.exists() && !done_mapping.has_triggered())
+              defer_launch_task(done_mapping);
+            else
               launch_task();
-            }
-            else // failed to map
-              success = false;
           }
         }
         // otherwise it was sent away
@@ -5297,62 +5407,55 @@ namespace Legion {
       else
       {
         // Not remote
-        if (early_map_task())
+        early_map_task();
+        // See if we have a must epoch in which case
+        // we can simply record ourselves and we are done
+        if (must_epoch != NULL)
         {
-          // See if we have a must epoch in which case
-          // we can simply record ourselves and we are done
-          if (must_epoch != NULL)
+          must_epoch->register_single_task(this, must_epoch_index);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(target_proc.exists());
+#endif
+          // See if this task is going to be sent
+          // remotely in which case we need to do the
+          // mapping now, otherwise we can defer it
+          // until the task ends up on the target processor
+          if (is_locally_mapped() && target_proc.exists() &&
+              !runtime->is_local(target_proc))
           {
-            must_epoch->register_single_task(this, must_epoch_index);
+            RtEvent done_mapping = perform_mapping();
+            if (done_mapping.exists() && !done_mapping.has_triggered())
+              defer_distribute_task(done_mapping);
+            else
+            {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+              bool still_local = 
+#endif
+#endif
+              distribute_task();
+#ifdef DEBUG_LEGION
+              assert(!still_local);
+#endif
+            }
           }
           else
           {
-#ifdef DEBUG_LEGION
-            assert(target_proc.exists());
-#endif
-            // See if this task is going to be sent
-            // remotely in which case we need to do the
-            // mapping now, otherwise we can defer it
-            // until the task ends up on the target processor
-            if (is_locally_mapped() && target_proc.exists() &&
-                !runtime->is_local(target_proc))
+            if (distribute_task())
             {
-              if (perform_mapping())
-              {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                bool still_local = 
-#endif
-#endif
-                distribute_task();
-#ifdef DEBUG_LEGION
-                assert(!still_local);
-#endif
-              }
-              else // failed to map
-                success = false; 
-            }
-            else
-            {
-              if (distribute_task())
-              {
-                // Still local so try mapping and launching
-                if (perform_mapping())
-                {
-                  // Still local and mapped so
-                  // we can now launch it
-                  launch_task();
-                }
-                else // failed to map
-                  success = false;
-              }
+              // Still local so try mapping and launching
+              RtEvent done_mapping = perform_mapping();
+              if (done_mapping.exists() && !done_mapping.has_triggered())
+                defer_launch_task(done_mapping);
+              else
+                launch_task();
             }
           }
         }
-        else // failed to premap
-          success = false;
       }
-      return success;
     } 
 
     //--------------------------------------------------------------------------
@@ -6077,7 +6180,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::map_all_regions(ApEvent local_termination_event,
+    void SingleTask::map_all_regions(ApEvent local_termination_event,
                                      MustEpochOp *must_epoch_op /*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -6172,8 +6275,6 @@ namespace Legion {
       }
       if (perform_postmap)
         perform_post_mapping();
-      // See if we need to invoke a post-map mapper call for this task
-      return true;
     }  
 
     //--------------------------------------------------------------------------
@@ -7441,6 +7542,7 @@ namespace Legion {
       slices.clear(); 
       version_infos.clear();
       restrict_infos.clear();
+      projection_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -7451,7 +7553,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MultiTask::slice_index_space(void)
+    void MultiTask::slice_index_space(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_INDEX_SPACE_CALL);
@@ -7577,23 +7679,22 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
       }
 #endif
-      bool success = trigger_slices(); 
+      trigger_slices(); 
       // If we succeeded and this is an intermediate slice task
       // then we can reclaim it, otherwise, if it is the original
       // index task then we want to keep it around. Note it is safe
       // to call get_task_kind here despite the cleanup race because
       // it is a static property of the object.
-      if (success && (get_task_kind() == SLICE_TASK_KIND))
+      if (get_task_kind() == SLICE_TASK_KIND)
         deactivate();
-      return success;
     }
 
     //--------------------------------------------------------------------------
-    bool MultiTask::trigger_slices(void)
+    void MultiTask::trigger_slices(void)
     //--------------------------------------------------------------------------
     {
       DeferredSlicer slicer(this);
-      return slicer.trigger_slices(slices);
+      slicer.trigger_slices(slices);
     }
 
     //--------------------------------------------------------------------------
@@ -7615,6 +7716,7 @@ namespace Legion {
         initialize_reduction_state();
       }
       this->restrict_infos = rhs->restrict_infos;
+      this->projection_infos = rhs->projection_infos;
       // Copy over the version infos that we need, we can skip this if
       // we are remote and locally mapped
       if (!is_remote() || !is_locally_mapped())
@@ -7630,11 +7732,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MultiTask::trigger_mapping(void)
+    void MultiTask::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MULTI_TRIGGER_EXECUTION_CALL);
-      bool success = true;
       if (is_remote())
       {
         // distribute, slice, then map/launch
@@ -7644,88 +7745,77 @@ namespace Legion {
           if (is_sliced())
           {
             if (is_locally_mapped())
-            {
               launch_task();
-            }
             else
-            {
-              // Try mapping and launching
-              success = map_and_launch();
-            }
+              map_and_launch();
           }
           else
-            success = slice_index_space();
+            slice_index_space();
         }
       }
       else
       {
         // Not remote
-        if (early_map_task())
+        early_map_task();
+        if (is_locally_mapped())
         {
-          if (is_locally_mapped())
+          if (is_sliced())
           {
-            if (is_sliced())
+            if (must_epoch != NULL)
+              register_must_epoch();
+            else
             {
-              if (must_epoch != NULL)
-                register_must_epoch();
-              else
+              // See if we're going to send it
+              // remotely.  If so we need to do
+              // the mapping now.  Otherwise we
+              // can defer the mapping until we get
+              // on the target processor.
+              if (target_proc.exists() && !runtime->is_local(target_proc))
               {
-                // See if we're going to send it
-                // remotely.  If so we need to do
-                // the mapping now.  Otherwise we
-                // can defer the mapping until we get
-                // on the target processor.
-                if (target_proc.exists() && !runtime->is_local(target_proc))
-                {
-                  if (perform_mapping())
-                  {
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-                    bool still_local = 
-#endif
-#endif
-                    distribute_task();
-#ifdef DEBUG_LEGION
-                    assert(!still_local);
-#endif
-                  }
-                  else // failed to map
-                    success = false;
-                }
+                RtEvent done_mapping = perform_mapping();
+                if (done_mapping.exists() && !done_mapping.has_triggered())
+                  defer_distribute_task(done_mapping);
                 else
                 {
-                  // We know that it is staying on one
-                  // of our local processors.  If it is
-                  // still this processor then map and run it
-                  if (distribute_task())
-                  {
-                    // Still local so we can map and launch it
-                    success = map_and_launch();
-                  }
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+                  bool still_local = 
+#endif
+#endif
+                  distribute_task();
+#ifdef DEBUG_LEGION
+                  assert(!still_local);
+#endif
+                }
+              }
+              else
+              {
+                // We know that it is staying on one
+                // of our local processors.  If it is
+                // still this processor then map and run it
+                if (distribute_task())
+                {
+                  // Still local so we can map and launch it
+                  map_and_launch();
                 }
               }
             }
-            else
-              success = slice_index_space();
           }
           else
+            slice_index_space();
+        }
+        else
+        {
+          if (distribute_task())
           {
-            if (distribute_task())
-            {
-              // Still local try slicing, mapping, and launching
-              if (is_sliced())
-              {
-                success = map_and_launch();
-              }
-              else
-                success = slice_index_space();
-            }
+            // Still local try slicing, mapping, and launching
+            if (is_sliced())
+              map_and_launch();
+            else
+              slice_index_space();
           }
         }
-        else // failed to premap
-          success = false; 
       }
-      return success;
     } 
 
     //--------------------------------------------------------------------------
@@ -8233,6 +8323,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent IndividualTask::perform_versioning_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == version_infos.size());
+#endif
+      std::set<RtEvent> ready_events;
+      // If we're remote we're going to have to recompute our privilege
+      // paths otherwise we can use our existing privilege paths
+      if (is_remote())
+      {
+        // If we're remote and locally mapped, then we are already done
+        if (is_locally_mapped())
+          return RtEvent::NO_RT_EVENT;
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+            continue;
+          VersionInfo &version_info = version_infos[idx];
+          if (version_info.has_physical_states())
+            continue;
+          RegionTreePath privilege_path;
+          initialize_privilege_path(privilege_path, regions[idx]);
+          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                                                       privilege_path,
+                                                       version_info,
+                                                       ready_events);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+            continue;
+          VersionInfo &version_info = version_infos[idx];
+          if (version_info.has_physical_states())
+            continue;
+          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                                                       privilege_paths[idx],
+                                                       version_info,
+                                                       ready_events);
+        }
+      }
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::report_interfering_requirements(unsigned idx1, 
                                                          unsigned idx2)
     //--------------------------------------------------------------------------
@@ -8334,7 +8474,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::early_map_task(void)
+    void IndividualTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       // For individual tasks we always early map restricted regions
@@ -8346,13 +8486,10 @@ namespace Legion {
       }
       if (!early_map_indexes.empty())
       {
-        bool result = early_map_regions(map_applied_conditions, 
-                                        early_map_indexes);
+        early_map_regions(map_applied_conditions, early_map_indexes);
         if (!acquired_instances.empty())
           release_acquired_instances(acquired_instances);
-        return result;
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8368,61 +8505,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
+    RtEvent IndividualTask::perform_mapping(
+                                         MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PERFORM_MAPPING_CALL);
+      // See if we need to do any versioning computations first
+      RtEvent version_ready_event = perform_versioning_analysis();
+      if (version_ready_event.exists() && !version_ready_event.has_triggered())
+        return defer_perform_mapping(version_ready_event, must_epoch_owner);
       // Now try to do the mapping, we can just use our completion
       // event since we know this task will object will be active
       // throughout the duration of the computation
-      bool map_success = map_all_regions(get_task_completion(), 
-                                         must_epoch_owner);
-      if (map_success)
+      map_all_regions(get_task_completion(), must_epoch_owner);
+      // If we mapped, then we are no longer stealable
+      stealable = false;
+      // Also flush out physical regions
+      if (is_remote())
       {
-        // If we mapped, then we are no longer stealable
-        stealable = false;
-        // Also flush out physical regions
+        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          if (!virtual_mapped[idx] && !no_access_regions[idx])
+            version_infos[idx].apply_mapping(owner_space, 
+                                             map_applied_conditions);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < version_infos.size(); idx++)
+          if (!virtual_mapped[idx] && !no_access_regions[idx])
+            version_infos[idx].apply_mapping(runtime->address_space, 
+                                             map_applied_conditions);
+      }
+      // If we succeeded in mapping and everything was mapped
+      // then we get to mark that we are done mapping
+      if (is_leaf())
+      {
+        RtEvent applied_condition;
+        if (!map_applied_conditions.empty())
+        {
+          applied_condition = Runtime::merge_events(map_applied_conditions);
+          map_applied_conditions.clear();
+        }
         if (is_remote())
         {
-          AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            if (!virtual_mapped[idx] && !no_access_regions[idx])
-              version_infos[idx].apply_mapping(owner_space, 
-                                               map_applied_conditions);
+          // Send back the message saying that we finished mapping
+          Serializer rez;
+          // Only need to send back the pointer to the task instance
+          rez.serialize(orig_task);
+          rez.serialize(applied_condition);
+          runtime->send_individual_remote_mapped(orig_proc, rez);
         }
-        else
-        {
-          for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            if (!virtual_mapped[idx] && !no_access_regions[idx])
-              version_infos[idx].apply_mapping(runtime->address_space, 
-                                               map_applied_conditions);
-        }
-        // If we succeeded in mapping and everything was mapped
-        // then we get to mark that we are done mapping
-        if (is_leaf())
-        {
-          RtEvent applied_condition;
-          if (!map_applied_conditions.empty())
-          {
-            applied_condition = Runtime::merge_events(map_applied_conditions);
-            map_applied_conditions.clear();
-          }
-          if (is_remote())
-          {
-            // Send back the message saying that we finished mapping
-            Serializer rez;
-            // Only need to send back the pointer to the task instance
-            rez.serialize(orig_task);
-            rez.serialize(applied_condition);
-            runtime->send_individual_remote_mapped(orig_proc, rez);
-          }
-          // Mark that we have completed mapping
-          complete_mapping(applied_condition);
-          if (!acquired_instances.empty())
-            release_acquired_instances(acquired_instances);
-        }
+        // Mark that we have completed mapping
+        complete_mapping(applied_condition);
+        if (!acquired_instances.empty())
+          release_acquired_instances(acquired_instances);
       }
-      return map_success;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8871,8 +9009,7 @@ namespace Legion {
         sent_remotely = false;
         // Put the original instance back on the mapping queue and
         // deactivate this version of the task
-        runtime->add_to_ready_queue(current_proc, orig_task, 
-                                    false/*prev fail*/);
+        runtime->add_to_ready_queue(current_proc, orig_task);
         deactivate();
         return false;
       }
@@ -9173,7 +9310,95 @@ namespace Legion {
         }
         remote_instances.clear();
       }
+      version_infos.clear();
       runtime->free_point_task(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::perform_versioning_analysis(std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(version_infos.empty());
+#endif
+      // Copy the version info information over from our slice owner
+      version_infos = slice_owner->version_infos;
+#ifdef DEBUG_LEGION
+      assert(version_infos.size() == regions.size());
+#endif
+      // We have to walk down the tree from the upper bound node
+      // to where we are asking for privileges, along the way we
+      // first have to check to see if the tree is open, and then
+      // again to see if it has been advanced if we are going to 
+      // be writing/reducing below in the tree
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // If this is an early mapped region then we don't need to do anything
+        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          continue;
+        ProjectionInfo &proj_info = slice_owner->projection_infos[idx]; 
+        RegionTreeNode *parent_node;
+        const RegionRequirement &slice_req = slice_owner->regions[idx];
+        if (slice_req.handle_type == PART_PROJECTION)
+          parent_node = runtime->forest->get_node(slice_req.partition);
+        else
+          parent_node = runtime->forest->get_node(slice_req.region);
+#ifdef DEBUG_LEGION
+        assert(regions[idx].handle_type == SINGULAR);
+#endif
+        RegionTreeNode *child_node = 
+          runtime->forest->get_node(regions[idx].region);
+        // If they are the same node, we are already done
+        if (child_node == parent_node)
+          continue;
+        // Compute our privilege path
+        RegionTreePath path;
+        runtime->forest->initialize_path(child_node->get_row_source(),
+                                         parent_node->get_row_source(), path);
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned &proj_epochs = 
+          proj_info.get_projection_epochs();
+        // Do the analysis to see if we've opened all the nodes to the child
+        {
+          RegionTreeNode *one_below = parent_node->get_tree_child(
+                                  path.get_child(parent_node->get_depth()));
+          RegionTreePath open_path;
+          open_path.initialize(path.get_min_depth()+1, path.get_max_depth());
+          for (unsigned idx = path.get_min_depth()+1; 
+                idx < path.get_max_depth(); idx++)
+            open_path.register_child(idx, path.get_child(idx));
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+                it = proj_epochs.begin(); it != proj_epochs.end(); it++)
+          {
+            // Advance version numbers from one below the upper bound
+            // all the way down to the child
+            runtime->forest->advance_version_numbers(this, idx, 
+                true/*dedup opens*/, false/*dedup advance*/, it->first, 0/*id*/,
+                one_below, open_path, it->second, ready_events);
+          }
+        }
+        // If we're doing something other than reading, we need
+        // to also do the advance for anything open below
+        if (!IS_READ_ONLY(regions[idx]))
+        {
+          RegionTreePath advance_path;
+          advance_path.initialize(path.get_min_depth(), path.get_max_depth()-1);
+          for (unsigned idx = path.get_min_depth(); 
+                idx < (path.get_max_depth()-1); idx++)
+            advance_path.register_child(idx, path.get_child(idx));
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+                it = proj_epochs.begin(); it != proj_epochs.end(); it++)
+          {
+            // Advance version numbers from the upper bound to one above
+            // the target child for split version numbers
+            runtime->forest->advance_version_numbers(this, idx, 
+                false/*dedup opens*/, true/*dedup advances*/, 0/*id*/,
+                it->first, parent_node, advance_path, it->second, ready_events);
+          }
+        }
+        // Now we can record our version numbers just like everyone else
+        runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                                      path, version_infos[idx], ready_events);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9193,11 +9418,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::early_map_task(void)
+    void PointTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       // Point tasks are always done with early mapping
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9209,17 +9433,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
+    RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      // Our versioning analysis was done with our slice
+      
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
-      bool map_success = map_all_regions(point_termination, must_epoch_owner);
+      map_all_regions(point_termination, must_epoch_owner);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
-      if (map_success && is_leaf()) 
+      if (is_leaf()) 
       {
         if (!map_applied_conditions.empty())
         {
@@ -9235,7 +9461,7 @@ namespace Legion {
           complete_mapping();
         }
       }
-      return map_success;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9276,7 +9502,10 @@ namespace Legion {
     VersionInfo& PointTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->get_version_info(idx);
+#ifdef DEBUG_LEGION
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -9290,7 +9519,7 @@ namespace Legion {
     const std::vector<VersionInfo>* PointTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->get_version_infos();
+      return &version_infos;
     }
 
     //--------------------------------------------------------------------------
@@ -9612,12 +9841,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::early_map_task(void)
+    void WrapperTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -9630,12 +9858,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::perform_mapping(MustEpochOp *owner)
+    RtEvent WrapperTask::perform_mapping(MustEpochOp *owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-      return false;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10758,13 +10986,15 @@ namespace Legion {
       register_predicate_dependence();
       version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
+      projection_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        ProjectionInfo projection_info(runtime, regions[idx], index_domain);
+        projection_infos[idx] = 
+          ProjectionInfo(runtime, regions[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
                                                      version_infos[idx],
-                                                     projection_info,
+                                                     projection_infos[idx],
                                                      privilege_paths[idx]);
       }
       // See if we have any requirements that interferred with a close
@@ -10781,11 +11011,10 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               rerun.begin(); it != rerun.end(); it++)
         {
-          ProjectionInfo projection_info(runtime, regions[*it], index_domain);
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        restrict_infos[*it],
                                                        version_infos[*it],
-                                                       projection_info,
+                                                       projection_infos[*it],
                                                        privilege_paths[*it]);
           // If we still have re-run requirements, then we have
           // interfering region requirements so warn the user
@@ -10950,7 +11179,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::early_map_task(void)
+    void IndexTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_EARLY_MAP_TASK_CALL);
@@ -10963,13 +11192,10 @@ namespace Legion {
       }
       if (!early_map_indexes.empty())
       {
-        bool result = early_map_regions(map_applied_conditions, 
-                                        early_map_indexes);
+        early_map_regions(map_applied_conditions, early_map_indexes);
         if (!acquired_instances.empty())
           release_acquired_instances(acquired_instances);
-        return result;
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11005,7 +11231,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::perform_mapping(MustEpochOp *owner/*=NULL*/)
+    RtEvent IndexTask::perform_mapping(MustEpochOp *owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_MAPPING_CALL);
@@ -11013,24 +11239,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!slices.empty());
 #endif
-      bool map_success = true;
       for (std::list<SliceTask*>::iterator it = slices.begin();
             it != slices.end(); /*nothing*/)
       {
-        bool slice_success = (*it)->trigger_mapping();
-        if (!slice_success)
-        {
-          // Didn't succeed, leave it on the list for next time
-          map_success = false;
-          it++;
-        }
-        else
-        {
-          // Succeeded, so take it off the list
-          it = slices.erase(it);
-        }
+        (*it)->trigger_mapping();
+        it = slices.erase(it);
       }
-      return map_success;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11065,7 +11280,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::map_and_launch(void)
+    void IndexTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
       // This should only ever be called if we had slices which failed to map
@@ -11073,7 +11288,7 @@ namespace Legion {
       assert(is_sliced());
       assert(!slices.empty());
 #endif
-      return trigger_slices();
+      trigger_slices();
     }
 
     //--------------------------------------------------------------------------
@@ -11605,9 +11820,7 @@ namespace Legion {
       activate_multi();
       // Slice tasks never have to resolve speculation
       resolve_speculation();
-      reclaim = false;
       index_complete = ApEvent::NO_AP_EVENT;
-      mapping_index = 0;
       num_unmapped_points = 0;
       num_uncomplete_points = 0;
       num_uncommitted_points = 0;
@@ -11616,6 +11829,7 @@ namespace Legion {
       remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
       locally_mapped = false;
+      need_versioning_analysis = true;
     }
 
     //--------------------------------------------------------------------------
@@ -11663,11 +11877,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::early_map_task(void)
+    void SliceTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
       // Slices are already done with early mapping 
-      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent SliceTask::perform_versioning_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+      assert(need_versioning_analysis);
+      assert(regions.size() == version_infos.size());
+#endif
+      // Once we return from this function we'll be done with versioning
+      need_versioning_analysis = false;
+      // If we're locally mapped and already remote then we know
+      // we are done mapping so there is no need to do any
+      // versioning computation
+      if (is_remote() && is_locally_mapped())
+        return RtEvent::NO_RT_EVENT;
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        // If this was early mapped, then we can skip it
+        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          continue;
+        VersionInfo &version_info = version_infos[idx];
+        // If we already have physical state for it then we've 
+        // done this before so there is no need to do it again
+        if (version_info.has_physical_states())
+          continue;
+        // Compute our privilege path
+        RegionTreePath privilege_path;
+        initialize_privilege_path(privilege_path, regions[idx]);
+        runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                                                     privilege_path,
+                                                     version_info,
+                                                     ready_events,
+                                                     true/*partial traversal*/);
+      }
+      // Now do the analysis for each of our points
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        points[idx]->perform_versioning_analysis(ready_events);
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11728,9 +11985,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_DISTRIBUTE_CALL);
-      // Quick out in case this slice task is to be reclaimed
-      if (reclaim)
-        return true;
       if (target_proc.exists() && (target_proc != current_proc))
       {
         runtime->send_task(this);
@@ -11742,54 +11996,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/)
+    RtEvent SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_PERFORM_MAPPING_CALL);
+      // Check to see if we already enumerated all the points, if
+      // not then do so now
+      if (points.empty())
+        enumerate_points();
+      // See if we have to do our versioning computation first
+      if (need_versioning_analysis)
+      {
+        RtEvent version_ready_event = perform_versioning_analysis();
+        if (version_ready_event.exists() && 
+            !version_ready_event.has_triggered())
+          return defer_perform_mapping(version_ready_event, epoch_owner);
+      }
       // Walk the path down to the upper bounds for all points first
       prewalk_slice();
-      // If slices are empty, this is a leaf slice so we can do the
-      // normal mapping procedure
-      if (slices.empty())
+      
+      std::set<RtEvent> mapped_events;
+      for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        // Check to see if we already enumerated all the points, if
-        // not then do so now
-        if (points.empty())
-          enumerate_points();
-        for (unsigned idx = 0; idx < points.size(); idx++)
-        {
-#ifdef DEBUG_LEGION
-          bool point_success = 
-#endif
-            points[idx]->perform_mapping(epoch_owner);
-#ifdef DEBUG_LEGION
-          assert(point_success);
-#endif
-        }
-        // If we succeeded in mapping we are no longer stealable
-        stealable = false;
+        RtEvent map_event = points[idx]->perform_mapping(epoch_owner);
+        if (map_event.exists())
+          mapped_events.insert(map_event);
       }
-      else
-      {
-        // This case only occurs if this is an intermediate slice and
-        // its sub-slices failed to map, so try to remap them.
-        for (std::list<SliceTask*>::iterator it = slices.begin();
-              it != slices.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          bool slice_success = 
-#endif
-            (*it)->trigger_mapping();
-#ifdef DEBUG_LEGION
-          assert(slice_success);
-#endif
-        }
-        slices.clear();
-        // If we succeeded in mapping all our remaining
-        // slices then mark that this task can be reclaimed
-        reclaim = true;
-      }
-      return true;
+      // If we succeeded in mapping we are no longer stealable
+      stealable = false;
+      if (!mapped_events.empty())
+        return Runtime::merge_events(mapped_events);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11797,12 +12034,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_LAUNCH_CALL);
-      // Quick out in case we are reclaiming this task
-      if (reclaim)
-      {
-        deactivate();
-        return;
-      }
 #ifdef DEBUG_LEGION
       assert(!points.empty());
 #endif
@@ -11834,48 +12065,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::map_and_launch(void)
+    void SliceTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_MAP_AND_LAUNCH_CALL);
+      // First enumerate all of our points if we haven't already done so
+      if (points.empty())
+        enumerate_points();
+      // See if we have to do our versioning computation first
+      if (need_versioning_analysis)
+      {
+        RtEvent version_ready_event = perform_versioning_analysis();
+        if (version_ready_event.exists() && 
+            !version_ready_event.has_triggered())
+        {
+          defer_map_and_launch(version_ready_event);
+          return;
+        }
+      }
       // Walk the path down to the upper bounds for all points first
       prewalk_slice();
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.
       stealable = false;
-      // First enumerate all of our points if we haven't already done so
-      if (points.empty())
-        enumerate_points();
 #ifdef DEBUG_LEGION
       assert(!points.empty());
-      assert(mapping_index <= points.size());
 #endif
       // Now try mapping and then launching all the points starting
       // at the index of the last known good index
       // Copy the points onto the stack to avoid them being
       // cleaned up while we are still iterating through the loop
-      std::vector<PointTask*> local_points(points.size()-mapping_index);
-      for (unsigned idx = mapping_index; idx < points.size(); idx++)
-        local_points[idx-mapping_index] = points[idx];
+      std::vector<PointTask*> local_points(points);
       for (std::vector<PointTask*>::const_iterator it = local_points.begin();
             it != local_points.end(); it++)
       {
         PointTask *next_point = *it;
-#ifdef DEBUG_LEGION
-        bool point_success = 
-#endif
-          next_point->perform_mapping();
-#ifdef DEBUG_LEGION
-        assert(point_success);
-#endif
-        // Update the mapping index and then launch
-        // the point (it is imperative that these happen in this order!)
-        mapping_index++;
+        RtEvent map_event = next_point->perform_mapping();
         // Once we call this function on the last point it
         // is possible that this slice task object can be recycled
-        next_point->launch_task();
+        if (map_event.exists() && !map_event.has_triggered())
+          next_point->defer_launch_task(map_event);
+        else
+          next_point->launch_task();
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11936,6 +12168,10 @@ namespace Legion {
         pack_restrict_infos(rez, restrict_infos);
       else
         index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
+      if (is_remote())
+        pack_projection_infos(rez, projection_infos);
+      else
+        index_owner->pack_projection_infos(rez, index_owner->projection_infos);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
@@ -11999,6 +12235,7 @@ namespace Legion {
       derez.deserialize(remote_owner_uid);
       unpack_version_infos(derez, version_infos);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
+      unpack_projection_infos(derez, projection_infos, index_domain);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)
@@ -12190,8 +12427,6 @@ namespace Legion {
       points.resize(num_points);
       for (unsigned idx = 0; idx < num_points; idx++)
         points[idx] = clone_as_point_task(minimal_points[idx]);
-      // Initialize the mapping index
-      mapping_index = 0;
       // Mark how many points we have
       num_unmapped_points = points.size();
       num_uncomplete_points = points.size();
@@ -12533,6 +12768,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent SliceTask::defer_map_and_launch(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DeferMapAndLaunchArgs args;
+      args.hlr_id = HLR_DEFER_MAP_AND_LAUNCH_TASK_ID;
+      args.proxy_this = this;
+      return runtime->issue_runtime_meta_task(&args, sizeof(args),
+          HLR_DEFER_MAP_AND_LAUNCH_TASK_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
+          this, precondition);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void SliceTask::handle_slice_return(Runtime *rt, 
                                                    Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -12582,7 +12829,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DeferredSlicer::trigger_slices(std::list<SliceTask*> &slices)
+    void DeferredSlicer::trigger_slices(std::list<SliceTask*> &slices)
     //--------------------------------------------------------------------------
     {
       // Watch out for the cleanup race with some acrobatics here
@@ -12620,38 +12867,13 @@ namespace Legion {
         RtEvent sliced_event = Runtime::merge_events(wait_events);
         sliced_event.wait();
       }
-
-      bool success = failed_slices.empty();
-      // If there were some slices that didn't succeed, then we
-      // need to clean up the ones that did so we know when
-      // which ones to re-trigger when we try again later. Otherwise
-      // if all the slices succeeded, then the normal deactivation of
-      // this task will clean up the slices. Note that if we have
-      // at least one slice that didn't succeed then we know this
-      // task cannot be deactivated.
-      if (!success)
-      {
-        for (std::list<SliceTask*>::iterator it = slices.begin();
-              it != slices.end(); /*nothing*/)
-        {
-          if (failed_slices.find(*it) == failed_slices.end())
-            it = slices.erase(it);
-          else
-            it++;
-        }
-      }
-      return success;
     }
 
     //--------------------------------------------------------------------------
     void DeferredSlicer::perform_slice(SliceTask *slice)
     //--------------------------------------------------------------------------
     {
-      if (!slice->trigger_mapping())
-      {
-        AutoLock s_lock(slice_lock);
-        failed_slices.insert(slice);
-      }
+      slice->trigger_mapping();
     }
 
     //--------------------------------------------------------------------------

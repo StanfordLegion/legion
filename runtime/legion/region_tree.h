@@ -255,7 +255,16 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const RegionTreePath &path,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &preconditions);
+                                       std::set<RtEvent> &ready_events,
+                                       bool partial_traversal = false);
+      void advance_version_numbers(Operation *op, unsigned idx,
+                                   bool dedup_opens, bool dedup_advances, 
+                                   ProjectionEpochID open_epoch,
+                                   ProjectionEpochID advance_epoch,
+                                   RegionTreeNode *parent, 
+                                   const RegionTreePath &path,
+                                   const FieldMask &advance_mask,
+                                   std::set<RtEvent> &ready_events);
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
@@ -539,6 +548,8 @@ namespace Legion {
                            RegionTreePath &path);
       void initialize_path(IndexPartition child, IndexPartition parent,
                            RegionTreePath &path);
+      void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
+                           RegionTreePath &path);
     public:
 #ifdef NEW_INSTANCE_CREATION
       ApEvent create_instance(const Domain &dom, Memory target,
@@ -551,9 +562,6 @@ namespace Legion {
                                        size_t blocking_factor, 
                                        ReductionOpID redop, UniqueID op_id);
 #endif
-    protected:
-      void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
-                           RegionTreePath &path);
     public:
       template<typename T>
       Color generate_unique_color(const std::map<Color,T> &current_map);
@@ -1391,6 +1399,25 @@ namespace Legion {
                                    const ColorPoint &next_child,
                                    FieldMask &open_below,
                                    bool force_close_next);
+    public:
+      void compute_version_numbers(ContextID ctx, 
+                                   const RegionTreePath &path,
+                                   const RegionUsage &usage,
+                                   const FieldMask &version_mask,
+                                   FieldMask &unversioned_mask,
+                                   Operation *op, unsigned idx,
+                                   SingleTask *parent_ctx,
+                                   VersionInfo &version_info,
+                                   std::set<RtEvent> &ready_events,
+                                   bool partial_traversal);
+      void advance_version_numbers(ContextID ctx,
+                                   const RegionTreePath &path,
+                                   const FieldMask &advance_mask,
+                                   SingleTask *parent_ctx,
+                                   bool dedup_opens, bool dedup_advances, 
+                                   ProjectionEpochID open_epoch,
+                                   ProjectionEpochID advance_epoch,
+                                   std::set<RtEvent> &ready_events);
     public:
       void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
                                    const FieldMask &send_mask, 

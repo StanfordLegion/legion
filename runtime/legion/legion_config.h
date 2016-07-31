@@ -561,6 +561,7 @@ typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
+typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 

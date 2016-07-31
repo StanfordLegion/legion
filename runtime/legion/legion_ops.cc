@@ -291,24 +291,18 @@ namespace Legion {
     void Operation::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      // Put this thing on the ready queue
       enqueue_ready_operation();
-#if 0
-      // Then put this thing on the ready queue
-      runtime->add_to_local_queue(parent_ctx->get_executing_processor(),
-                                  this, false/*prev fail*/);
-#endif
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::trigger_mapping(void)
+    void Operation::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Mark that we finished mapping
       complete_mapping();
       // If we have nothing to do also mark that we have completed execution
       complete_execution();
-      // Return true indicating we successfully triggered
-      return true;
     }
     
     //--------------------------------------------------------------------------
@@ -539,7 +533,7 @@ namespace Legion {
       else
       {
         Processor p = parent_ctx->get_executing_processor();
-        runtime->add_to_local_queue(p, this, false/*previous failure*/);
+        runtime->add_to_local_queue(p, this);
       }
     }
 
@@ -1947,7 +1941,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MapOp::trigger_mapping(void)
+    void MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -2073,8 +2067,6 @@ namespace Legion {
       }
       else
         deferred_execute();
-      // return true since we succeeded
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -3121,7 +3113,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CopyOp::trigger_mapping(void)
+    void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
@@ -3382,8 +3374,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(copy_complete_event));
-      // We succeeded mapping
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4066,7 +4056,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FenceOp::trigger_mapping(void)
+    void FenceOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       switch (fence_kind)
@@ -4118,8 +4108,6 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      // If we successfully performed the operation return true
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4224,7 +4212,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FrameOp::trigger_mapping(void)
+    void FrameOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Increment the number of mapped frames
@@ -4262,7 +4250,6 @@ namespace Legion {
       }
       else
         deferred_execute();
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4535,7 +4522,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DeletionOp::trigger_mapping(void)
+    void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -4579,7 +4566,6 @@ namespace Legion {
       }
       complete_mapping();
       complete_execution();
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4760,6 +4746,27 @@ namespace Legion {
       return open_mask;
     }
 
+    //--------------------------------------------------------------------------
+    void OpenOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> open_events;
+      runtime->forest->advance_version_numbers(this, 0/*idx*/,
+                                               false/*dedup opens*/,
+                                               false/*dedup advances*/, 
+                                               0/*open id*/, 0/*advance id*/,
+                                               start_node, open_path, 
+                                               open_mask, open_events);
+      // Deviate from the normal pipeline and don't even put this on the
+      // ready queue, we are done executing and can be considered mapped
+      // once all the open events have triggered
+      if (!open_events.empty())
+        complete_mapping(Runtime::merge_events(open_events));
+      else
+        complete_mapping();
+      complete_execution();
+    }
+
     /////////////////////////////////////////////////////////////
     // Advance Operation 
     /////////////////////////////////////////////////////////////
@@ -4855,6 +4862,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return advance_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void AdvanceOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Compute the path to use
+      RegionTreePath path; 
+      runtime->forest->initialize_path(child_node->get_row_source(),
+                                       parent_node->get_row_source(), path);
+      // Do the advance
+      std::set<RtEvent> advance_events;
+      runtime->forest->advance_version_numbers(this, 0/*idx*/, 
+                                               false/*dedup opens*/,
+                                               false/*dedup advance*/,
+                                               0/*open id*/, 0/*advance id*/,
+                                               parent_node, path,
+                                               advance_mask, advance_events);
+      // Deviate from the normal pipeline and don't even put this
+      // on the ready queue, we are done executing and can be considered
+      // mapped once all the advance events have triggered
+      if (!advance_events.empty())
+        complete_mapping(Runtime::merge_events(advance_events));
+      else
+        complete_mapping();
+      complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -5158,7 +5191,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InterCloseOp::trigger_mapping(void)
+    void InterCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5221,8 +5254,6 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution(Runtime::protect_event(close_event));
-      // This should always succeed
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -5708,7 +5739,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PostCloseOp::trigger_mapping(void)
+    void PostCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5751,8 +5782,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, close_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(close_event));
-      // This should always succeed
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -5961,7 +5990,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool VirtualCloseOp::trigger_mapping(void)
+    void VirtualCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -5987,7 +6016,6 @@ namespace Legion {
       else
         complete_mapping();
       complete_execution();
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -6243,7 +6271,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireOp::trigger_mapping(void)
+    void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -6322,8 +6350,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, acquire_complete);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(acquire_complete));
-      // we succeeded in mapping
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -6777,7 +6803,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseOp::trigger_mapping(void)
+    void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -6853,8 +6879,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, release_complete);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(release_complete));
-      // We succeeded in mapping
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -7212,7 +7236,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DynamicCollectiveOp::trigger_mapping(void)
+    void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       ApEvent barrier = Runtime::get_previous_phase(collective.phase_barrier);
@@ -7230,7 +7254,6 @@ namespace Legion {
       else
         deferred_execute();
       complete_mapping();
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8206,7 +8229,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochOp::trigger_mapping(void)
+    void MustEpochOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // First mark that each of the tasks will be locally mapped
@@ -8224,10 +8247,8 @@ namespace Legion {
       {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
         MustEpochTriggerer triggerer(this);
-        if (!triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
-                                     index_tasks, index_triggered))
-          return false;
-
+        triggerer.trigger_tasks(indiv_tasks, indiv_triggered,
+                                     index_tasks, index_triggered);
 #ifdef DEBUG_LEGION
         assert(!single_tasks.empty());
 #endif 
@@ -8347,8 +8368,7 @@ namespace Legion {
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
-        if (!mapper.map_tasks(single_tasks, mapping_dependences))
-          return false;
+        mapper.map_tasks(single_tasks, mapping_dependences);
         mapping_dependences.clear();
       }
       // Once all the tasks have been initialized we can defer
@@ -8378,7 +8398,6 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution(all_complete);
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8739,7 +8758,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochTriggerer::trigger_tasks(
+    void MustEpochTriggerer::trigger_tasks(
                                 const std::vector<IndividualTask*> &indiv_tasks,
                                 std::vector<bool> &indiv_triggered,
                                 const std::vector<IndexTask*> &index_tasks,
@@ -8757,9 +8776,7 @@ namespace Legion {
           args.task = indiv_tasks[idx];
           RtEvent wait = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                                    HLR_MUST_INDIV_ID, 
-                                                    HLR_THROUGHPUT_PRIORITY,
-                                                    owner);
+                HLR_MUST_INDIV_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -8773,10 +8790,8 @@ namespace Legion {
           args.triggerer = this;
           args.task = index_tasks[idx];
           RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                                    HLR_MUST_INDEX_ID, 
-                                                    HLR_THROUGHPUT_PRIORITY,
-                                                    owner);
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                HLR_MUST_INDEX_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -8788,53 +8803,20 @@ namespace Legion {
         RtEvent trigger_event = Runtime::merge_events(wait_events);
         trigger_event.wait();
       }
-      // Now see if any failed
-      // Otherwise mark which ones succeeded
-      if (!failed_individual_tasks.empty())
-      {
-        for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        {
-          if (indiv_triggered[idx])
-            continue;
-          if (failed_individual_tasks.find(indiv_tasks[idx]) ==
-              failed_individual_tasks.end())
-            indiv_triggered[idx] = true;
-        }
-      }
-      if (!failed_index_tasks.empty())
-      {
-        for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        {
-          if (index_triggered[idx])
-            continue;
-          if (failed_index_tasks.find(index_tasks[idx]) ==
-              failed_index_tasks.end())
-            index_triggered[idx] = true;
-        }
-      }
-      return (failed_individual_tasks.empty() && failed_index_tasks.empty());
     }
 
     //--------------------------------------------------------------------------
     void MustEpochTriggerer::trigger_individual(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
-      if (!task->trigger_mapping())
-      {
-        AutoLock t_lock(trigger_lock);
-        failed_individual_tasks.insert(task);
-      }
+      task->trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
     void MustEpochTriggerer::trigger_index(IndexTask *task)
     //--------------------------------------------------------------------------
     {
-      if (!task->trigger_mapping())
-      {
-        AutoLock t_lock(trigger_lock);
-        failed_index_tasks.insert(task);
-      }
+      task->trigger_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -8859,7 +8841,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochMapper::MustEpochMapper(MustEpochOp *own)
-      : owner(own), success(true)
+      : owner(own)
     //--------------------------------------------------------------------------
     {
     }
@@ -8889,7 +8871,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
+    void MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
                             const std::vector<std::set<unsigned> > &dependences)
     //--------------------------------------------------------------------------
     {
@@ -8920,16 +8902,13 @@ namespace Legion {
           RtEvent precondition = Runtime::merge_events(preconditions);
           mapped_events[idx] = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                    HLR_MUST_MAP_ID,
-                                                    HLR_THROUGHPUT_PRIORITY,
-                                                    owner, precondition); 
+                HLR_MUST_MAP_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
+                owner, precondition); 
         }
         else
           mapped_events[idx] = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                    HLR_MUST_MAP_ID,
-                                                    HLR_THROUGHPUT_PRIORITY,
-                                                    owner);
+                HLR_MUST_MAP_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
       }
       std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
@@ -8937,10 +8916,6 @@ namespace Legion {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
         mapped_event.wait();
       }
-#ifdef DEBUG_LEGION
-      assert(success); // should always succeed now
-#endif
-      return success;
     }
 
     //--------------------------------------------------------------------------
@@ -8950,8 +8925,9 @@ namespace Legion {
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
-      if (!task->perform_mapping(owner))
-        success = false;
+      RtEvent done_mapping = task->perform_mapping(owner);
+      if (done_mapping.exists())
+        done_mapping.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -9017,8 +8993,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
-                                             HLR_MUST_DIST_ID, 
-                                             HLR_THROUGHPUT_PRIORITY, owner);
+                HLR_MUST_DIST_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9026,9 +9001,8 @@ namespace Legion {
         {
           launch_args.task = *it;
           RtEvent wait = 
-            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args), 
-                                             HLR_MUST_LAUNCH_ID, 
-                                             HLR_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args),
+                HLR_MUST_LAUNCH_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9041,8 +9015,7 @@ namespace Legion {
           dist_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
-                                             HLR_MUST_DIST_ID, 
-                                             HLR_THROUGHPUT_PRIORITY, owner);
+                HLR_MUST_DIST_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9051,8 +9024,7 @@ namespace Legion {
           launch_args.task = *it;
           RtEvent wait = 
             runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args), 
-                                             HLR_MUST_LAUNCH_ID, 
-                                             HLR_THROUGHPUT_PRIORITY, owner);
+                HLR_MUST_LAUNCH_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9298,7 +9270,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PendingPartitionOp::trigger_mapping(void)
+    void PendingPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
@@ -9309,8 +9281,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(ready_event));
-      // Return true since we succeeded
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9515,7 +9485,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DependentPartitionOp::trigger_mapping(void)
+    void DependentPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -9577,8 +9547,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(ready_event));
-      // return true since we succeeded
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10027,7 +9995,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillOp::trigger_mapping(void)
+    void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -10128,8 +10096,6 @@ namespace Legion {
         else
           deferred_execute(); // can do the completion now
       }
-      // This should never fail
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10649,7 +10615,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AttachOp::trigger_mapping(void)
+    void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       RegionTreeContext physical_ctx = 
@@ -10688,8 +10654,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, attach_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(attach_event));
-      // Should always succeed
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11056,7 +11020,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DetachOp::trigger_mapping(void)
+    void DetachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Actual unmap of an inline mapped region was deferred to here
@@ -11100,8 +11064,6 @@ namespace Legion {
       Runtime::trigger_event(completion_event, detach_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(detach_event));
-      // This should always succeed
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -11261,7 +11223,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TimingOp::trigger_mapping(void)
+    void TimingOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       complete_mapping();
@@ -11279,7 +11241,6 @@ namespace Legion {
       }
       else
         deferred_execute();
-      return true;
     }
 
     //--------------------------------------------------------------------------
