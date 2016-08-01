@@ -30,7 +30,7 @@ local Stencil
 
 local parallel_task_context = {}
 local caller_context = {}
-local global_context = {}
+local global_context = data.newmap()
 
 local check_parallelizable = {}
 local normalize_accesses = {}
@@ -1450,9 +1450,10 @@ function normalize_accesses.stat_for_list(cx, node)
 
   -- Find all region accesses and reserve temporary variables
   local function find_field_access(node, continuation)
-    if node:is(ast.typed.expr.FieldAccess) or
-       node:is(ast.typed.expr.IndexAccess) or
-       node:is(ast.typed.expr.Deref) then
+    if (node:is(ast.typed.expr.FieldAccess) or
+        node:is(ast.typed.expr.IndexAccess) or
+        node:is(ast.typed.expr.Deref)) and
+       std.is_ref(node.expr_type) then
       local tmp_symbol = get_new_tmp_var(std.as_read(node.expr_type))
       rewrites[node] = mk_expr_id(tmp_symbol)
       field_reads[normalize_accesses.expr(cx, node)] = rewrites[node]
