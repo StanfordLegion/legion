@@ -1433,6 +1433,7 @@ namespace Legion {
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
+      void invalidate_version_state(ContextID ctx);
     public:
       // Physical traversal operations
       CompositeView* create_composite_instance(ContextID ctx_id,

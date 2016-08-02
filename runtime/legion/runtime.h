@@ -1997,6 +1997,8 @@ namespace Legion {
       void send_remote_context_free(AddressSpaceID target, Serializer &rez);
       void send_remote_convert_virtual_instances(AddressSpaceID target, 
                                                  Serializer &rez);
+      void send_version_owner_request(AddressSpaceID target, Serializer &rez);
+      void send_version_owner_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_path_only(AddressSpaceID target, Serializer &rez);
       void send_version_state_initialization(AddressSpaceID target, 
                                              Serializer &rez);
@@ -2145,6 +2147,9 @@ namespace Legion {
       void handle_remote_context_response(Deserializer &derez);
       void handle_remote_context_free(Deserializer &derez);
       void handle_remote_convert_virtual_instances(Deserializer &derez);
+      void handle_version_owner_request(Deserializer &derez, 
+                                        AddressSpaceID source);
+      void handle_version_owner_response(Deserializer &derez);
       void handle_version_state_path_only(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_version_state_initialization(Deserializer &derez,
@@ -2402,6 +2407,8 @@ namespace Legion {
       void unregister_remote_context(UniqueID context_uid);
       SingleTask* find_context(UniqueID context_uid, 
                                bool return_null_if_not_found = false);
+      inline AddressSpaceID get_runtime_owner(UniqueID uid) const
+        { return (uid % runtime_stride); }
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);

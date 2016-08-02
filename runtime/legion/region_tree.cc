@@ -13837,6 +13837,14 @@ namespace Legion {
       CurrentState &state = get_current_state(ctx);
       state.clear_deleted_state(deleted_mask);
     }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_version_state(ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.reset();
+    }
     
     //--------------------------------------------------------------------------
     bool RegionTreeNode::register_instance_view(PhysicalManager *manager,

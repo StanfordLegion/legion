@@ -3389,8 +3389,10 @@ namespace Legion {
       // See if we have been assigned
       if (context != current_context)
       {
-        owner_space = context->get_version_owner(node);
-        is_owner = (owner_space == node->context->runtime->address_space);
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
         current_context = context;
       }
       // No need to hold the lock when initializing
@@ -3441,8 +3443,10 @@ namespace Legion {
       // See if we have been assigned
       if (context != current_context)
       {
-        owner_space = context->get_version_owner(node);
-        is_owner = (owner_space == node->context->runtime->address_space);
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
         current_context = context;
       }
       // If we're writing then we have to advance the version numbers
@@ -3620,8 +3624,10 @@ namespace Legion {
       // See if we have been assigned
       if (context != current_context)
       {
-        owner_space = context->get_version_owner(node);
-        is_owner = (owner_space == node->context->runtime->address_space);
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
         current_context = context;
       }
       // See if we are the owner
@@ -3887,8 +3893,10 @@ namespace Legion {
       // See if we have been assigned
       if (context != current_context)
       {
-        owner_space = context->get_version_owner(node);
-        is_owner = (owner_space == node->context->runtime->address_space);
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
         current_context = context;
       }
       // If we are deduplicating advances, do that now

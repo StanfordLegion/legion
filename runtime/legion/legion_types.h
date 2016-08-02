@@ -491,7 +491,8 @@ namespace Legion {
       VIEW_VIRTUAL_CHANNEL = 9,
       UPDATE_VIRTUAL_CHANNEL = 10,
       VARIANT_VIRTUAL_CHANNEL = 11,
-      MAX_NUM_VIRTUAL_CHANNELS = 12, // this one must be last
+      VERSION_VIRTUAL_CHANNEL = 12,
+      MAX_NUM_VIRTUAL_CHANNELS = 13, // this one must be last
     };
 
     enum MessageKind {
@@ -579,6 +580,8 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_RESPONSE,
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONVERT_VIRTUAL,
+      SEND_VERSION_OWNER_REQUEST,
+      SEND_VERSION_OWNER_RESPONSE,
       SEND_VERSION_STATE_PATH,
       SEND_VERSION_STATE_INIT,
       SEND_VERSION_STATE_REQUEST,
@@ -689,6 +692,8 @@ namespace Legion {
         "Send Remote Context Response",                               \
         "Send Remote Context Free",                                   \
         "Send Remote Convert Virtual Instances",                      \
+        "Send Version Owner Request",                                 \
+        "Send Version Owner Response",                                \
         "Send Version State Path",                                    \
         "Send Version State Init",                                    \
         "Send Version State Request",                                 \

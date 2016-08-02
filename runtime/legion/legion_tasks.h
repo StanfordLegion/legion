@@ -648,6 +648,10 @@ namespace Legion {
       // Override by RemoteTask
       virtual SingleTask* find_parent_context(void);
     public:
+      // Override by RemoteTask
+      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
+                                               AddressSpaceID source);
+    public:
       // Override these methods from operation class
       virtual void trigger_mapping(void); 
     protected:
@@ -666,8 +670,6 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
-    public:
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node);
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -756,6 +758,8 @@ namespace Legion {
     protected:
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
+    protected:
+      std::map<RegionTreeNode*,AddressSpaceID> region_tree_owners;
 #ifdef LEGION_SPY
     public:
       RtEvent update_previous_mapped_event(RtEvent next);
@@ -1155,6 +1159,15 @@ namespace Legion {
       virtual void send_remote_context(AddressSpaceID target, 
                                        RemoteTask *dst);
       virtual SingleTask* find_parent_context(void);
+      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
+                                               AddressSpaceID source);
+    public:
+      static void handle_version_owner_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      void process_version_owner_response(RegionTreeNode *node, 
+                                          AddressSpaceID result);
+      static void handle_version_owner_response(Deserializer &derez,
+                                                Runtime *runtime);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1179,6 +1192,7 @@ namespace Legion {
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
       ApEvent remote_completion_event;
       std::vector<VersionInfo> version_infos;
+      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     };
 
     /**

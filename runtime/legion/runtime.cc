@@ -5172,6 +5172,16 @@ namespace Legion {
               runtime->handle_remote_convert_virtual_instances(derez);
               break;
             }
+          case SEND_VERSION_OWNER_REQUEST: 
+            {
+              runtime->handle_version_owner_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_VERSION_OWNER_RESPONSE:
+            {
+              runtime->handle_version_owner_response(derez);
+              break;
+            }
           case SEND_VERSION_STATE_PATH:
             {
               runtime->handle_version_state_path_only(derez, 
@@ -15012,6 +15022,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_owner_request(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_REQUEST,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_owner_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_RESPONSE,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_state_path_only(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15894,6 +15922,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteTask::handle_convert_virtual_instances(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_owner_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTask::handle_version_owner_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_owner_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTask::handle_version_owner_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -18230,7 +18273,7 @@ namespace Legion {
 #endif
         // We have to send the message
         // Figure out the target
-        AddressSpaceID target = context_uid % runtime_stride;
+        AddressSpaceID target = get_runtime_owner(context_uid);
 #ifdef DEBUG_LEGION
         assert(target != address_space);
 #endif
