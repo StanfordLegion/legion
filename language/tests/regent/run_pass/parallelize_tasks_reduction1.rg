@@ -13,84 +13,79 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fflow", "0", "-fdebug", "1",
 --   "-fparallelize-dop", "9"]]
+
+-- FIXME: Breaks RDIR
 
 import "regent"
 
 local c = regentlib.c
 
-fspace fs
-{
-  f : double,
-  g : double,
-  h : double,
-}
-
 __demand(__parallel)
-task init(r : region(ispace(int2d), fs))
+task init(r : region(ispace(int2d), double))
 where reads writes(r)
 do
-  for e in r do e.f = c.drand48() end
-  for e in r do e.g = 0 end
-  for e in r do e.h = 0 end
+  for e in r do @e = c.drand48() end
 end
 
 __demand(__parallel)
-task stencil(r : region(ispace(int2d), fs))
-where reads(r.f), reads writes(r.g)
+task stencil(r : region(ispace(int2d), double))
+where reads(r)
 do
+  var sum = 3
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
-    e.g = 0.5 * (e.f +
-                 r[(e + {-2, 0}) % r.bounds].f +
-                 r[(e - {1, 1}) % r.bounds].f +
-                 r[(e - {-2, -2}) % r.bounds].f +
-                 r[(e + {1, 0}) % r.bounds].f)
+    sum max= 0.5 * (@e +
+                    r[(e - {0, 1}) % r.bounds] +
+                    r[(e + {1, 0}) % r.bounds])
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("parallel version: %lu us\n", ts_end - ts_start)
+  return sum
 end
 
-task stencil_serial(r : region(ispace(int2d), fs))
-where reads(r.f), reads writes(r.h)
+task stencil_serial(r : region(ispace(int2d), double))
+where reads(r)
 do
+  var sum = 3
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
-    e.h = 0.5 * (e.f +
-                 r[(e + {-2, 0}) % r.bounds].f +
-                 r[(e - {1, 1}) % r.bounds].f +
-                 r[(e - {-2, -2}) % r.bounds].f +
-                 r[(e + {1, 0}) % r.bounds].f)
+    sum max= 0.5 * (@e +
+                    r[(e - {0, 1}) % r.bounds] +
+                    r[(e + {1, 0}) % r.bounds])
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("serial version: %lu us\n", ts_end - ts_start)
+  return sum
 end
 
 local cmath = terralib.includec("math.h")
 
+terra wait_for(x : double) return 1 end
+
 task test(size : int)
   c.srand48(12345)
   var is = ispace(int2d, {size, size})
-  var primary_region = region(is, fs)
+  var primary_region = region(is, double)
   init(primary_region)
-  stencil(primary_region)
-  stencil_serial(primary_region)
-  for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
-  end
+  var result1 = stencil(primary_region)
+  result1 = stencil(primary_region)
   var np = 2
   var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
-  stencil(primary_region)
-  stencil_serial(primary_region)
-  for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
-  end
+  result1 -= stencil(primary_region)
+  result1 += stencil(primary_region)
+  wait_for(result1)
+  var result2 = 0
+  result2 = stencil_serial(primary_region)
+  wait_for(result2)
+  regentlib.assert(cmath.fabs(result1 - result2) < 0.000001, "test failed")
+  return 1
 end
 
 task toplevel()
-  test(10)
-  test(1000)
+  wait_for(test(10))
+  wait_for(test(500))
 end
 
 regentlib.start(toplevel)

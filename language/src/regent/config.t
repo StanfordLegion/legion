@@ -36,6 +36,7 @@ local default_options = {
 
   -- Experimental auto-parallelization flags:
   ["parallelize"] = true,
+  ["parallelize-dop"] = 4,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,

@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "12"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1"]]
 
 import "regent"
 
@@ -28,7 +27,7 @@ fspace fs
 }
 
 __demand(__parallel)
-task init(r : region(ispace(int3d), fs))
+task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
   for e in r do e.f = c.drand48() end
@@ -37,35 +36,29 @@ do
 end
 
 __demand(__parallel)
-task stencil(r : region(ispace(int3d), fs))
-where reads(r.f), reads writes(r.g)
+task stencil(interior : region(ispace(int2d), fs),
+                    r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.g), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
-  for e in r do
-    e.g = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+  for e in interior do
+    r[e].g = 0.5 * (r[e].f +
+                    r[e + {-2, 0}].f + r[e + {0, -1}].f +
+                    r[e + { 1, 0}].f + r[e + {0,  2}].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
-task stencil_serial(r : region(ispace(int3d), fs))
-where reads(r.f), reads writes(r.h)
+task stencil_serial(interior : region(ispace(int2d), fs),
+                           r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.h), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
-  for e in r do
-    e.h = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+  for e in interior do
+    r[e].h = 0.5 * (r[e].f +
+                    r[e + {-2, 0}].f + r[e + {0, -1}].f +
+                    r[e + { 1, 0}].f + r[e + {0,  2}].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("serial version: %lu us\n", ts_end - ts_start)
@@ -75,27 +68,29 @@ local cmath = terralib.includec("math.h")
 
 task test(size : int)
   c.srand48(12345)
-  var is = ispace(int3d, {size, size, size})
+  var is = ispace(int2d, {size, size})
   var primary_region = region(is, fs)
-  init(primary_region)
-  stencil(primary_region)
-  stencil_serial(primary_region)
-  for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
-  end
   var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int3d, {np, np, np}))
+  var bounds = primary_region.bounds
+  var coloring = c.legion_domain_point_coloring_create()
+  c.legion_domain_point_coloring_color_domain(coloring, [int1d](0),
+                                              rect2d { bounds.lo + {2, 1},
+                                                       bounds.hi - {1, 2} })
+  var interior_partition = partition(disjoint, primary_region, coloring, ispace(int1d, 1))
+  c.legion_domain_point_coloring_destroy(coloring)
+  var interior_region = interior_partition[0]
+  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
   init(primary_region)
-  stencil(primary_region)
-  stencil_serial(primary_region)
+  stencil(interior_region, primary_region)
+  stencil_serial(interior_region, primary_region)
   for e in primary_region do
     regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
   end
 end
 
 task toplevel()
-  test(50)
-  test(100)
+  test(10)
+  test(1000)
 end
 
 regentlib.start(toplevel)
