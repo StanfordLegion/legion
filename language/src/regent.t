@@ -93,6 +93,7 @@ local language = {
     "list_invert",
     "list_phase_barriers",
     "list_range",
+    "list_ispace",
     "max",
     "min",
     "must_epoch",

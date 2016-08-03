@@ -107,6 +107,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or

@@ -4461,6 +4461,79 @@ function codegen.expr_list_range(cx, node)
     expr_type)
 end
 
+function codegen.expr_list_ispace(cx, node)
+  local ispace_type = std.as_read(node.ispace.expr_type)
+  local ispace = codegen.expr(cx, node.ispace):read(cx, ispace_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local result = terralib.newsymbol(expr_type, "result") -- Resulting list.
+  local result_len = terralib.newsymbol(uint64, "result_len")
+
+  -- Construct AST that populates the `result` list with indices from `ispace`.
+  --
+  -- Loop variable: `for p in ispace do`
+  local bound
+  if node.ispace:is(ast.typed.expr.ID) then
+    bound = node.ispace.value
+  else
+    bound = std.newsymbol(ispace_type)
+  end
+  local p_symbol = std.newsymbol(
+    ispace_type.index_type(bound),
+    "p")
+  -- Index in list: `result[i] = p; i += 1`.
+  local i = terralib.newsymbol(int, "i")
+
+  local loop_body = ast.typed.stat.Internal {
+    actions = quote
+      regentlib.assert((i >= 0) and (i < [result_len]), "list index out of bounds in list_ispace")
+      [expr_type:data(result)][ [i] ] = [p_symbol:getsymbol()];
+      [i] = [i] + 1
+    end,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+  local populate_list_loop = ast.typed.stat.ForList {
+    symbol = p_symbol,
+    value = node.ispace,
+    block = ast.typed.Block {
+      stats = terralib.newlist({loop_body}),
+      span = node.span,
+    },
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+
+  local actions = quote
+    [ispace.actions]
+    [emit_debuginfo(node)]
+
+    -- Compute size of resulting list.
+    -- Currently doesn't support index spaces with multiple domains.
+    regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [ispace.value].impl),
+      "list_ispace doesn't support index spaces with multiple domains")
+    var ispace_domain = c.legion_index_space_get_domain([cx.runtime], [ispace.value].impl)
+    var [result_len] = c.legion_domain_get_volume(ispace_domain)
+
+    -- Allocate list.
+    var data = c.malloc(terralib.sizeof([expr_type.element_type]) * [result_len])
+    regentlib.assert(data ~= nil, "malloc failed in list_ispace")
+    var [result] = expr_type {
+      __size = [result_len],
+      __data = data
+    }
+
+    -- Populate list with indices from index space.
+    var [i] = 0;
+    [codegen.stat(cx, populate_list_loop)]
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_phase_barrier(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local value = codegen.expr(cx, node.value):read(cx, value_type)
@@ -5925,6 +5998,9 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.ListRange) then
     return codegen.expr_list_range(cx, node)
 
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return codegen.expr_list_ispace(cx, node)
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return codegen.expr_phase_barrier(cx, node)
 
@@ -5994,6 +6070,11 @@ local function cleanup_after(cx, block)
   local result = terralib.newlist({quote [block] end})
   result:insert(cx:get_cleanup_items())
   return quote [result] end
+end
+
+function codegen.stat_internal(cx, node)
+  assert(terralib.isquote(node.actions))
+  return node.actions
 end
 
 function codegen.stat_if(cx, node)
@@ -7254,7 +7335,10 @@ function codegen.stat_raw_delete(cx, node)
 end
 
 function codegen.stat(cx, node)
-  if node:is(ast.typed.stat.If) then
+  if node:is(ast.typed.stat.Internal) then
+    return codegen.stat_internal(cx, node)
+
+  elseif node:is(ast.typed.stat.If) then
     return codegen.stat_if(cx, node)
 
   elseif node:is(ast.typed.stat.While) then

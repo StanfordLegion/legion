@@ -2056,6 +2056,22 @@ function type_check.expr_list_range(cx, node)
   }
 end
 
+function type_check.expr_list_ispace(cx, node)
+  local ispace = type_check.expr(cx, node.ispace)
+  local ispace_type = std.check_read(cx, ispace)
+  if not std.is_ispace(ispace_type) then
+    log.error(node, "type mismatch in argument 1: expected an ispace but got " .. tostring(ispace_type))
+  end
+  local expr_type = std.list(ispace_type.index_type)
+
+  return ast.typed.expr.ListIspace {
+    ispace = ispace,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_phase_barrier(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -2735,6 +2751,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListIspace) then
+    return type_check.expr_list_ispace(cx, node)
 
   elseif node:is(ast.specialized.expr.PhaseBarrier) then
     return type_check.expr_phase_barrier(cx, node)

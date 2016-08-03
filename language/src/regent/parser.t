@@ -846,6 +846,16 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_ispace") then
+    p:expect("(")
+    local ispace = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListIspace {
+      ispace = ispace,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("phase_barrier") then
     p:expect("(")
     local value = p:expr()
