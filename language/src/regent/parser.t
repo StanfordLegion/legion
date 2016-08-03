@@ -222,7 +222,7 @@ end
 function parser.condition_variable(p)
   local start = ast.save(p)
   local name = p:expect(p.name).value
-  p:ref(region_name)
+  p:ref(name)
   return ast.unspecialized.ConditionVariable {
     name = name,
     span = ast.span(start, p),
