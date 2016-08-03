@@ -1223,6 +1223,13 @@ typedef legion_lowlevel_coord_t coord_t;
                                   legion_logical_region_t handle);
 
   /**
+   * @see Legion::Runtime::get_logical_region_color_point()
+   */
+  legion_domain_point_t
+  legion_logical_region_get_color_domain_point(legion_runtime_t runtime_,
+                                               legion_logical_region_t handle_);
+
+  /**
    * @see Legion::Runtime::has_parent_logical_partition()
    */
   bool
