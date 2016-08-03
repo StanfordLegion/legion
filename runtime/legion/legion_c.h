@@ -764,6 +764,13 @@ typedef legion_lowlevel_coord_t coord_t;
                                    legion_domain_t domain);
 
   /**
+   * @see Legion::Runtime::has_multiple_domains().
+   */
+  bool
+  legion_index_space_has_multiple_domains(legion_runtime_t runtime,
+                                          legion_index_space_t handle);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Runtime::get_index_space_domain()

@@ -510,6 +510,16 @@ legion_index_space_destroy(legion_runtime_t runtime_,
   runtime->destroy_index_space(ctx, handle);
 }
 
+bool
+legion_index_space_has_multiple_domains(legion_runtime_t runtime_,
+                                        legion_index_space_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->has_multiple_domains(handle);
+}
+
 legion_domain_t
 legion_index_space_get_domain(legion_runtime_t runtime_,
                               legion_index_space_t handle_)
