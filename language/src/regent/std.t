@@ -2033,6 +2033,19 @@ std.rect_type = terralib.memoize(function(index_type)
     return self.hi - self.lo + [st.index_type:const(1)]
   end
 
+  if index_type.fields then
+    terra st:volume()
+      var size = self:size()
+      return [data.reduce(
+        function(result, field) return `([result] * ([size].__ptr.[field])) end,
+        index_type.fields, `(1))]
+    end
+  else
+    terra st:volume()
+      return int(self:size().__ptr)
+    end
+  end
+
   return st
 end)
 function std.index_type(base_type, displayname)
@@ -2142,6 +2155,16 @@ function std.index_type(base_type, displayname)
     return [make_domain_point(self)]
   end
 
+  function st:from_domain_point(pt_expr)
+    local fields = self.fields
+    if fields then
+      return `(self { __ptr = [self.impl_type] {
+        [data.mapi(function(i) return `([pt_expr].point_data[i-1]) end, self.fields)] } })
+    else
+      return `(self { __ptr = [self.impl_type]([pt_expr].point_data[0]) })
+    end
+  end
+
   for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
     st.metamethods[method_name] = method
   end
@@ -2156,6 +2179,40 @@ function std.index_type(base_type, displayname)
           return (a + b:size()) % b:size()
         end
       })
+  end
+
+  -- Element-wise min and max functions.
+  -- TODO(zhangwen): de-duplicate.
+  function st:e_min(expr1, expr2)
+    -- TODO(zhangwen): assert they're my type.
+    local fields = self.fields
+    if fields then
+      return quote
+        var v1 = [expr1].__ptr
+        var v2 = [expr2].__ptr
+      in
+        (self { __ptr = [self.impl_type]
+          { [fields:map(function(field) return `(std.fmin(v1.[field], v2.[field])) end)] } })
+      end
+    else
+      return `(self { __ptr = [self.impl_type](std.fmin(expr1.__ptr, expr2.__ptr)) })
+    end
+  end
+
+  function st:e_max(expr1, expr2)
+    -- TODO(zhangwen): assert they're my type.
+    local fields = self.fields
+    if fields then
+      return quote
+        var v1 = [expr1].__ptr
+        var v2 = [expr2].__ptr
+      in
+        (self { __ptr = [self.impl_type] {
+          [fields:map(function(field) return `(std.fmax(v1.[field], v2.[field])) end)] } })
+      end
+    else
+      return `(self { __ptr = [self.impl_type](std.fmax(expr1.__ptr, expr2.__ptr)) })
+    end
   end
 
   return setmetatable(st, index_type)

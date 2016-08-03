@@ -3827,6 +3827,24 @@ function codegen.expr_cross_product_array(cx, node)
     expr_type)
 end
 
+-- Returns Terra expression for subregion of partition of specified color.
+-- The color space can be either structured or unstructured, i.e. `color` can
+-- be an integer or of an index type.
+local function get_partition_subregion(cx, partition, color)
+  local color_type = color.type
+  assert(terralib.types.istype(color_type))
+
+  if std.validate_implicit_cast(color_type, int) then
+    -- TODO(zhangwen): what about int1d?
+    return `(c.legion_logical_partition_get_logical_subregion_by_color(
+      [cx.runtime], [partition.value].impl, color))
+  else
+    assert(std.is_index_type(color_type))
+    return `(c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+      [cx.runtime], [partition.value].impl, [color]:to_domain_point()))
+  end
+end
+
 function codegen.expr_list_slice_partition(cx, node)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
@@ -3865,8 +3883,7 @@ function codegen.expr_list_slice_partition(cx, node)
 
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
-      var r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+      var r = [get_partition_subregion(cx, partition, color)]
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
@@ -3927,8 +3944,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
-      var orig_r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+      var orig_r = [get_partition_subregion(cx, partition, color)]
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
       var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
@@ -4279,6 +4295,38 @@ function codegen.expr_list_phase_barriers(cx, node)
     expr_type)
 end
 
+-- Returns Terra expression for color as an index_type (e.g. int2d).
+local function get_logical_region_color(cx, region, color_type)
+  assert(terralib.types.istype(color_type))
+  local domain_pt_expr =
+    `(c.legion_logical_region_get_color_domain_point([cx.runtime], region))
+  return color_type:from_domain_point(domain_pt_expr)
+end
+
+-- Returns Terra expression for offset of `point` in a rectangle.
+local function get_offset_in_rect(point, rect_size)
+  local point_type = point.type
+  local rect_size_type = rect_size.type
+  assert(std.is_index_type(point_type))
+  assert(std.is_index_type(rect_size_type))
+  assert(point_type.dim > 0)
+  assert(point_type.dim == rect_size_type.dim)
+
+  local pp = `(point.__ptr)
+  local rsp = `(rect_size.__ptr)
+
+  if point_type == int1d then
+    return `(int([point]))
+  elseif point_type == int2d then
+    return `([pp].x + [rsp].x * [pp].y)
+  elseif point_type == int3d then
+    return `([pp].x + [rsp].x * [pp].y
+      + [rsp].x * [rsp].y * [pp].z)
+  else
+    assert(false)
+  end
+end
+
 function codegen.expr_list_invert(cx, node)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local rhs = codegen.expr(cx, node.rhs):read(cx, rhs_type)
@@ -4292,6 +4340,11 @@ function codegen.expr_list_invert(cx, node)
     [product.actions]
     [barriers.actions]
     [emit_debuginfo(node)]
+  end
+
+  local color_type = rhs_type:partition():colors().index_type
+  if color_type:is_opaque() then  -- Treat `ptr` as `int1d`.
+    color_type = int1d
   end
 
   local result = terralib.newsymbol(expr_type, "result")
@@ -4316,19 +4369,21 @@ function codegen.expr_list_invert(cx, node)
       -- 1. Compute an index from colors to rhs index.
 
       -- Determine the range of colors in rhs.
-      var min_color : c.legion_color_t = 0
-      var max_color : c.legion_color_t = 0
+      var min_color : color_type
+      var max_color : color_type
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
         if i == 0 then
           min_color, max_color = rhs_color, rhs_color
         else
-          min_color, max_color = std.fmin(min_color, rhs_color), std.fmax(max_color, rhs_color)
+          min_color, max_color =
+            [color_type:e_min(min_color, rhs_color)], [color_type:e_max(max_color, rhs_color)]
         end
       end
-      var num_colors = max_color - min_color + 1
+      var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
+      var colors_size = colors_rect:size()
+      var num_colors = colors_rect:volume()
       regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
 
       -- Build the index.
@@ -4342,13 +4397,17 @@ function codegen.expr_list_invert(cx, node)
 
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
 
+        var delta = rhs_color - min_color
+        var color_index = [get_offset_in_rect(delta, colors_size)]
         regentlib.assert(
-          color_to_index[rhs_color - min_color] == -1,
+          (0 <= color_index) and (color_index < num_colors),
+          "color index out of bounds in list_invert")
+        regentlib.assert(
+          color_to_index[color_index] == -1,
           "duplicate colors in list_invert")
-        color_to_index[rhs_color - min_color] = i
+        color_to_index[color_index] = i
       end
 
       -- 2. Compute sublists sizes.
@@ -4374,9 +4433,9 @@ function codegen.expr_list_invert(cx, node)
             inner = parent
           end
 
-          var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
-          var i = color_to_index[inner_color - min_color]
+          var inner_color = [get_logical_region_color(cx, inner, color_type)]
+          var delta = inner_color - min_color
+          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
           [expr_type:data(result)][i].__size =
             [expr_type:data(result)][i].__size + 1
         end
@@ -4418,9 +4477,9 @@ function codegen.expr_list_invert(cx, node)
             inner = parent
           end
 
-          var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
-          var i = color_to_index[inner_color - min_color]
+          var inner_color = [get_logical_region_color(cx, inner, color_type)]
+          var delta = inner_color - min_color
+          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
           regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
                            "overflowed sublist in list_invert")
           [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
