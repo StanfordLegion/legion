@@ -12119,7 +12119,11 @@ namespace Legion {
           // the logical analysis that this is a safe to do without
           // any kind of synchronization
           if (IS_WRITE(usage))
-            manager.advance_versions(version_mask, parent_ctx, ready_events);
+          {
+            const AddressSpaceID local_space = context->runtime->address_space;
+            manager.advance_versions(version_mask, parent_ctx, 
+                         true/*has initial state*/, local_space, ready_events);
+          }
           // Record the actual versions to be used here 
           manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
                                   op, idx, usage, version_info, ready_events);
@@ -12158,8 +12162,9 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       // Perform the advance
-      manager.advance_versions(advance_mask, parent_ctx, ready_events,
-          dedup_opens, open_epoch, dedup_advances, advance_epoch);
+      manager.advance_versions(advance_mask, parent_ctx, 
+           false/*has initial state*/, 0/*dummy space*/, ready_events,
+           dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -12167,8 +12172,8 @@ namespace Legion {
       if (!arrived)
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
-        child->advance_version_numbers(ctx, path, advance_mask, parent_ctx,
-                                       dedup_opens, dedup_advances, 
+        child->advance_version_numbers(ctx, path, advance_mask, 
+                                       parent_ctx, dedup_opens, dedup_advances, 
                                        open_epoch, advance_epoch, ready_events);
       }
     }
@@ -13892,53 +13897,6 @@ namespace Legion {
       if (finder != instance_views.end())
         return finder->second;
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    VersionState* RegionTreeNode::find_remote_version_state(VersionID vid, 
-       DistributedID did, AddressSpaceID owner_space, ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Use the node lock to ensure that we don't
-      // replicated version states on a node
-      VersionState *result = NULL;
-      Runtime *runtime = context->runtime;
-      {
-        AutoLock n_lock(node_lock);
-        if (runtime->has_distributed_collectable(did))
-        {
-          DistributedCollectable *dc = 
-            runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-          result = dynamic_cast<VersionState*>(dc);
-          assert(result != NULL);
-#else
-          result = static_cast<VersionState*>(dc);
-#endif
-        }
-        else // Otherwise make it
-        {
-          AddressSpaceID local_space = runtime->address_space;
-#ifdef DEBUG_LEGION
-          assert(owner_space != local_space);
-#endif
-          result = legion_new<VersionState>(vid, context->runtime, 
-              did, owner_space, local_space, this, false/*register now*/);
-          result->register_with_runtime(mutator);
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    VersionState* RegionTreeNode::create_new_version_state(VersionID vid)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID new_did = 
-        context->runtime->get_available_distributed_id(false);
-      AddressSpace local_space = context->runtime->address_space;
-      return legion_new<VersionState>(vid, context->runtime, 
-          new_did, local_space, local_space, this, true/*register now*/);
     }
 
     //--------------------------------------------------------------------------

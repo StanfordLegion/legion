@@ -3230,6 +3230,17 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    VersionState* VersionManager::create_new_version_state(VersionID vid,
+                           bool has_initial_state, AddressSpaceID initial_space)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did = runtime->get_available_distributed_id(false);
+      return legion_new<VersionState>(vid, runtime, did, 
+          runtime->address_space, runtime->address_space,
+          has_initial_state, initial_space, node, true/*register now*/);
+    }
+
     /////////////////////////////////////////////////////////////
     // Version Manager 
     /////////////////////////////////////////////////////////////
@@ -3398,8 +3409,13 @@ namespace Legion {
       // No need to hold the lock when initializing
       if (current_version_infos.empty())
       {
+        std::set<RtEvent> dummy_events;
         VersionState *init_state = 
-          node->create_new_version_state(init_version);
+          create_new_version_state(init_version, true/*has initial state*/, 
+                                   runtime->address_space);
+#ifdef DEBUG_LEGION
+        assert(dummy_events.empty());
+#endif
         init_state->add_base_valid_ref(VERSION_MANAGER_REF, context);
         init_state->initialize(term_event, usage, user_mask, 
                                targets, context, init_index, corresponding);
@@ -3421,7 +3437,10 @@ namespace Legion {
 #endif
         finder->second.valid_fields |= user_mask;
         VersionState *init_state = 
-          finder->second.versions.single_version->get_version_state(node);
+          finder->second.versions.single_version;
+#ifdef DEBUG_LEGION
+        assert(node == init_state->logical_node);
+#endif
         init_state->initialize(term_event, usage, user_mask, targets, 
                                context, init_index, corresponding);
       }
@@ -3449,11 +3468,6 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
-      // If we're writing then we have to advance the version numbers
-      // Do this before we request the data in case it results in an
-      // invalidation of the local state
-      if (IS_WRITE(usage))
-        advance_versions(version_mask, context, ready_events);
       // See if we are the owner
       if (!is_owner)
       {
@@ -3591,19 +3605,89 @@ namespace Legion {
       // version state object(s) for those fields
       if (!!unversioned)
       {
-        LegionMap<VersionState*,FieldMask>::aligned new_states;
-        create_initial_version_state(unversioned, new_states);
-        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-              new_states.begin(); it != new_states.end(); it++)
+#ifdef DEBUG_LEGION
+        assert(is_owner); // should only get here on the owner
+#endif
+        // Retake the lock in exclusive mode and see if we lost any races
+        AutoLock m_lock(manager_lock);
+        for (LegionMap<VersionID,VersionStates>::aligned::const_iterator
+              vit = current_version_infos.begin(); vit != 
+              current_version_infos.end(); vit++)
         {
-          version_info.add_current_version(it->first, it->second,
-                                           false/*path only*/);
-          version_info.add_advance_version(it->first, it->second,
-                                           false/*path only*/);
-          it->first->request_initial_version_state(it->second, ready_events);
+          // Only need to check against unversioned this time
+          FieldMask overlap = vit->second.valid_fields & unversioned;
+          if (!overlap)
+            continue;
+          unversioned -= overlap;
+          if (vit->second.single)
+          {
+            VersionState *state = vit->second.versions.single_version;
+            version_info.add_current_version(state, overlap,false/*path only*/);
+            version_info.add_advance_version(state, overlap,false/*path only*/);
+            state->request_initial_version_state(overlap, ready_events);
+          }
+          else
+          {
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = vit->second.versions.multi_versions->begin(); it !=
+                  vit->second.versions.multi_versions->end(); it++)
+            {
+              FieldMask state_overlap = it->second & overlap;
+              if (!state_overlap)
+                continue;
+              version_info.add_current_version(it->first, state_overlap,
+                                               false/*path only*/);
+              version_info.add_advance_version(it->first, state_overlap,
+                                               false/*path only*/);
+              it->first->request_initial_version_state(state_overlap, 
+                                                       ready_events);
+            }
+          }
+          if (!unversioned)
+            break;
         }
-        // Keep any unversioned fields
-        unversioned_mask &= unversioned;
+        if (!!unversioned)
+        {
+          VersionState *new_state = create_new_version_state(init_version,
+                      false/*has initial state*/, 0/*dummy address space*/);
+          version_info.add_current_version(new_state, unversioned,
+                                           false/*path only*/);
+          version_info.add_advance_version(new_state, unversioned,
+                                           false/*path only*/);
+          // No need to query for initial state since we know there is none
+          WrapperReferenceMutator mutator(ready_events);
+          new_state->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
+          // Add the new version state to the set
+          VersionStates &info = current_version_infos[init_version];
+          if (info.single)
+          {
+            if (info.versions.single_version == NULL)
+            {
+              info.versions.single_version = new_state;
+              info.valid_fields = unversioned;
+            }
+            else
+            {
+              // Go to multi
+              LegionMap<VersionState*,FieldMask>::aligned *multi = 
+                new LegionMap<VersionState*,FieldMask>::aligned();
+              (*multi)[info.versions.single_version] = info.valid_fields;
+              (*multi)[new_state] = unversioned;
+              info.single = false;
+              info.versions.multi_versions = multi;
+              info.valid_fields |= unversioned;
+            }
+          }
+          else
+          {
+            (*info.versions.multi_versions)[new_state] = unversioned;
+            info.valid_fields |= unversioned;
+          }
+          // Keep any unversioned fields
+          unversioned_mask &= unversioned;
+        }
+        else if (!!unversioned_mask)
+          unversioned_mask.clear();
       }
       else if (!!unversioned_mask)
         unversioned_mask.clear();
@@ -3879,8 +3963,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::advance_versions(FieldMask mask,
-                                          SingleTask *context,
+    void VersionManager::advance_versions(FieldMask mask, SingleTask *context, 
+                                          bool has_initial_state,
+                                          AddressSpaceID initial_space,
                                           std::set<RtEvent> &applied_events,
                                           bool dedup_opens,
                                           ProjectionEpochID open_epoch,
@@ -3937,6 +4022,7 @@ namespace Legion {
 
         return;
       }
+      WrapperReferenceMutator mutator(applied_events);
       // We need the lock in exclusive mode because we are going
       // to be mutating our data structures
       AutoLock m_lock(manager_lock);
@@ -4257,7 +4343,7 @@ namespace Legion {
               prev_info.valid_fields = overlap;
               // Add the valid reference
               info.versions.single_version->add_base_valid_ref(
-                                                            VERSION_MANAGER_REF);
+                                                VERSION_MANAGER_REF, &mutator);
             }
             else
             {
@@ -4273,7 +4359,7 @@ namespace Legion {
                 {
                   // Add the valid reference
                   info.versions.single_version->add_base_valid_ref(
-                                                  VERSION_MANAGER_REF);
+                                              VERSION_MANAGER_REF, &mutator);
                   // Not the same go to multi
                   LegionMap<VersionState*,FieldMask>::aligned *multi = 
                     new LegionMap<VersionState*,FieldMask>::aligned();
@@ -4298,7 +4384,7 @@ namespace Legion {
                     [info.versions.single_version] = overlap;
                   // Add the valid reference
                   info.versions.single_version->add_base_valid_ref(
-                                                          VERSION_MANAGER_REF);
+                                                VERSION_MANAGER_REF, &mutator);
                 }
                 else // already exists, so just add our fields
                   finder->second |= overlap;
@@ -4327,7 +4413,7 @@ namespace Legion {
                 if (!it->second) // Whole state flows back including reference
                   to_delete.push_back(it->first);
                 else // Partial flow back so add a reference
-                  it->first->add_base_valid_ref(VERSION_MANAGER_REF);
+                  it->first->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
                 if (prev_info.single)
                 {
                   if (prev_info.versions.single_version == NULL)
@@ -4421,7 +4507,8 @@ namespace Legion {
                     if (prev_info.versions.single_version != it->first)
                     {
                       // Add an extra reference
-                      it->first->add_base_valid_ref(VERSION_MANAGER_REF);
+                      it->first->add_base_valid_ref(VERSION_MANAGER_REF,
+                                                    &mutator);
                       // Go to multi
                       LegionMap<VersionState*,FieldMask>::aligned *multi = 
                         new LegionMap<VersionState*,FieldMask>::aligned();
@@ -4442,7 +4529,8 @@ namespace Legion {
                       (*prev_info.versions.multi_versions)[it->first] = 
                         state_overlap;
                       // Add an extra reference
-                      it->first->add_base_valid_ref(VERSION_MANAGER_REF);
+                      it->first->add_base_valid_ref(VERSION_MANAGER_REF,
+                                                    &mutator);
                     }
                     else
                       finder->second |= state_overlap;
@@ -4477,9 +4565,10 @@ namespace Legion {
         // Remove this version number from the delete set
         to_delete_current.erase(next_version);
         VersionState *new_state = 
-          node->create_new_version_state(next_version);
+          create_new_version_state(next_version, 
+                                   has_initial_state, initial_space);
         // Add our reference now
-        new_state->add_base_valid_ref(VERSION_MANAGER_REF);
+        new_state->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
         // Kind of dangerous to be getting another iterator to this
         // data structure that we're iterating, but since neither
         // is mutating, we won't invalidate any iterators
@@ -4534,8 +4623,9 @@ namespace Legion {
       if (!!current_filter)
       {
         VersionState *new_state = 
-          node->create_new_version_state(init_version);
-        new_state->add_base_valid_ref(VERSION_MANAGER_REF);
+          create_new_version_state(init_version,
+                                   has_initial_state, initial_space);
+        new_state->add_base_valid_ref(VERSION_MANAGER_REF, &mutator);
         VersionStates &info = current_version_infos[init_version];
         if (info.single)
         {
@@ -4739,10 +4829,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
+                               bool has_initial, AddressSpaceID initial_sp,
                                RegionTreeNode *node, bool register_now)
       : DistributedCollectable(rt, id, own_sp, local_sp, register_now), 
-        version_number(vid), logical_node(node), 
-        state_lock(Reservation::create_reservation())
+        version_number(vid), logical_node(node), has_initial_state(has_initial),
+        initial_space(initial_sp), state_lock(Reservation::create_reservation())
 #ifdef DEBUG_LEGION
         , currently_active(true), currently_valid(true)
 #endif
@@ -4761,7 +4852,8 @@ namespace Legion {
     VersionState::VersionState(const VersionState &rhs)
       : DistributedCollectable(rhs.runtime, rhs.did, rhs.local_space,
                                rhs.owner_space, false/*register now*/),
-        version_number(0), logical_node(NULL)
+        version_number(0), logical_node(NULL), 
+        has_initial_state(false), initial_space(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4888,9 +4980,7 @@ namespace Legion {
           // we can't access it anyway
         }
       }
-      // Update our field information, we know we are the owner
-      initial_nodes[local_space] |= user_mask;
-      initial_fields |= user_mask;
+      valid_fields |= user_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5020,33 +5110,7 @@ namespace Legion {
             finder->second |= overlap;
         }
       }
-      if (is_owner())
-      {
-        path_only_nodes[local_space] |= merge_mask;
-      }
-      else
-      {
-        FieldMask new_path_only = merge_mask - path_only_fields;
-        if (!!new_path_only)
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(new_path_only);
-            if (target != owner_space)
-            {
-              RtUserEvent registered_event = Runtime::create_rt_user_event();
-              rez.serialize(registered_event);
-              applied_conditions.insert(registered_event);
-            }
-            else
-              rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-          }
-          runtime->send_version_state_path_only(owner_space, rez);
-        }
-      }
-      path_only_fields |= merge_mask;
+      valid_fields |= merge_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5134,35 +5198,7 @@ namespace Legion {
             finder->second |= overlap;
         }
       }
-      // Update our field information
-      if (is_owner())
-      {
-        initial_nodes[local_space] |= merge_mask;
-      }
-      else
-      {
-        // We're remote see if we need to send any notifications
-        FieldMask new_initial_fields = merge_mask - initial_fields;
-        if (!!new_initial_fields)
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(new_initial_fields);
-            if (owner_space != target)
-            {
-              RtUserEvent registered_event = Runtime::create_rt_user_event();
-              rez.serialize(registered_event);
-              applied_conditions.insert(registered_event);
-            }
-            else
-              rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-          }
-          runtime->send_version_state_initialization(owner_space, rez);
-        }
-      }
-      initial_fields |= merge_mask;
+      valid_fields |= merge_mask;
       if (need_lock)
         state_lock.release();
     }
@@ -5238,110 +5274,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionState::get_version_state(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(node == logical_node);
-#endif
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
     void VersionState::request_initial_version_state(
                 const FieldMask &request_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_REQUEST_INITIAL_CALL);
-      RtUserEvent ready_event;
+      // If there is no initial state we are done
+      if (!has_initial_state)
+        return;
+      // If we are the initial state, we are also done
+      if (initial_space == local_space)
+        return;
+      // We're not the initial owner, send requests for fields we haven't
+      // already requested
       FieldMask remaining_mask = request_mask;
-      LegionDeque<RequestInfo>::aligned targets;
+      AutoLock s_lock(state_lock);
+      for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+            initial_events.begin(); it != initial_events.end(); it++)
       {
-        AutoLock s_lock(state_lock);
-        // Check to see which fields we already have initial events for
-        if (!(remaining_mask * initial_fields))
-        {
-          if (!initial_events.empty())
-          {
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                  initial_events.begin(); it != initial_events.end(); it++)
-            {
-              if (remaining_mask * it->second)
-                continue;
-              preconditions.insert(it->first);
-            }
-          }
-          remaining_mask -= initial_fields;
-          if (!remaining_mask)
-            return;
-        }
-        // Also check to see which fields we already have final events for
-        if (!(remaining_mask * final_fields))
-        {
-          if (!final_events.empty())
-          {
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                  final_events.begin(); it != final_events.end(); it++)
-            {
-              if (remaining_mask * it->second)
-                continue;
-              preconditions.insert(it->first);
-            }
-          }
-          remaining_mask -= final_fields;
-          if (!remaining_mask)
-            return;
-        }
-        // If we are the owner and there are no existing versions, we can
-        // immediately make ourselves a local_version
-        if (is_owner())
-        {
-          if (initial_nodes.empty())
-          {
-            initial_fields |= remaining_mask;
-            initial_nodes[local_space] = remaining_mask;
-          }
-          else
-          {
-            select_initial_targets(local_space, remaining_mask, 
-                                   targets, preconditions);
-            // At this point we can now upgrade our initial fields
-            // and our node information
-            initial_fields |= request_mask;
-            initial_nodes[local_space] |= request_mask;
-          }
-        }
-        else
-        {
-          // Make a user event and record it as a precondition
-          ready_event = Runtime::create_rt_user_event();
-          initial_events[ready_event] = remaining_mask;
-          initial_fields |= remaining_mask;
-          preconditions.insert(ready_event);
-        }
+        FieldMask overlap = remaining_mask & it->second;
+        if (!overlap)
+          continue;
+        preconditions.insert(it->first);
+        remaining_mask -= overlap;
+        if (!remaining_mask)
+          return;
       }
-      if (!is_owner())
+      // If we still have remaining fields, make a new event and 
+      // send a request to the intial owner
+      if (!!remaining_mask)
       {
-#ifdef DEBUG_LEGION
-        assert(!!remaining_mask);
-#endif
-        // If we make it here, then send a request to the owner
-        // for the remaining fields
-        send_version_state_request(owner_space, local_space, ready_event, 
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        send_version_state_request(initial_space, local_space, ready_event, 
                                    remaining_mask, INITIAL_VERSION_REQUEST);
+        // Save the event indicating when the fields will be ready
+        initial_events[ready_event] = remaining_mask;
+        preconditions.insert(ready_event);
       }
-      else if (!targets.empty())
-      {
-        // otherwise we're the owner, send out requests to all 
-        for (LegionDeque<RequestInfo>::aligned::const_iterator 
-              it = targets.begin(); it != targets.end(); it++)
-        {
-          send_version_state_request(it->target, local_space, it->to_trigger,
-                                     it->request_mask, it->kind);
-                                
-        }
-      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::FinalRequestFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // Skip the requestor
+      if (target == requestor)
+        return;
+      RtUserEvent ready_event = Runtime::create_rt_user_event();
+      proxy_this->send_version_state_request(target, requestor, ready_event,
+                                             mask, FINAL_VERSION_REQUEST);
+      preconditions.insert(ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -5351,223 +5334,72 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_REQUEST_FINAL_CALL);
-      RtUserEvent ready_event;
-      FieldMask remaining_mask = req_mask;
-      LegionDeque<RequestInfo>::aligned targets;
+      if (is_owner())
       {
-        AutoLock s_lock(state_lock);
-        if (!(remaining_mask * final_fields))
+        // We are the owner node so see if we need to do any reequests
+        // to remote nodes to get our valid data
+        if (has_remote_instances())
         {
-          if (!final_events.empty())
+          // Figure out which fields we need to request
+          FieldMask remaining_mask = req_mask;
+          AutoLock s_lock(state_lock);
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+                final_events.begin(); it != final_events.end(); it++)
           {
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                  final_events.begin(); it != final_events.end(); it++)
-            {
-              if (remaining_mask * it->second)
-                continue;
-              preconditions.insert(it->first);
-            }
+            FieldMask overlap = it->second & remaining_mask;
+            if (!overlap)
+              continue;
+            preconditions.insert(it->first);
+            remaining_mask -= overlap;
+            if (!remaining_mask)
+              return; 
           }
-          remaining_mask -= final_fields;
+          // If we still have remaining fields, we have to send requests to
+          // all the other nodes asking for their data
+          if (!!remaining_mask)
+          {
+            std::set<RtEvent> local_preconditions;
+            FinalRequestFunctor functor(this, local_space, 
+                                        remaining_mask, local_preconditions);
+            map_over_remote_instances(functor);
+            RtEvent ready_event = Runtime::merge_events(local_preconditions);
+            final_events[ready_event] = remaining_mask;
+            preconditions.insert(ready_event);
+          }
+        }
+        // otherwise we're the only copy so there is nothing to do
+      }
+      else
+      {
+        FieldMask remaining_mask = req_mask;
+        // We are not the owner so figure out which fields we still need to
+        // send a request for
+        AutoLock s_lock(state_lock); 
+        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+              final_events.begin(); it != final_events.end(); it++)
+        {
+          FieldMask overlap = it->second & remaining_mask;
+          if (!overlap)
+            continue;
+          preconditions.insert(it->first);
+          remaining_mask -= overlap;
           if (!remaining_mask)
             return;
         }
-        if (is_owner())
+        if (!!remaining_mask)
         {
-          select_final_targets(local_space, remaining_mask,
-                               targets, preconditions);
-          // We can now update our final fields and local information
-          final_fields |= req_mask;
-          final_nodes[local_space] |= req_mask;
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(!!remaining_mask);
-#endif
-          // Make a user event and record it as a precondition   
-          ready_event = Runtime::create_rt_user_event();
-          final_fields |= remaining_mask;
+          RtUserEvent ready_event = Runtime::create_rt_user_event();
+          send_version_state_request(owner_space, local_space, ready_event,
+                                     remaining_mask, FINAL_VERSION_REQUEST);
+          // Save the event indicating when the fields will be ready
           final_events[ready_event] = remaining_mask;
           preconditions.insert(ready_event);
-        }
-      }
-      if (!is_owner())
-      {
-        send_version_state_request(owner_space, local_space, ready_event,
-                                   remaining_mask, FINAL_VERSION_REQUEST); 
-      }
-      else if (!targets.empty())
-      {
-        for (LegionDeque<RequestInfo>::aligned::const_iterator 
-              it = targets.begin(); it != targets.end(); it++)
-        {
-          send_version_state_request(it->target, local_space, it->to_trigger,
-                                     it->request_mask, it->kind);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::select_initial_targets(AddressSpaceID request_space,
-                                              FieldMask &needed_mask,
-                                     LegionDeque<RequestInfo>::aligned &targets,
-                                              std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Better be called while holding the lock
-#ifdef DEBUG_LEGION
-      assert(is_owner()); // should only be called on the owner node
-#endif
-      // Iterate over the initial nodes and issue requests to the first
-      // node we happen upon who has the valid data
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
-            initial_nodes.begin(); it != initial_nodes.end(); it++)
-      {
-        // Skip the requesting space
-        if (request_space == it->first)
-          continue;
-        FieldMask overlap = needed_mask & it->second;
-        if (!overlap)
-          continue;
-        targets.push_back(RequestInfo());
-        RequestInfo &info = targets.back();
-        info.target = it->first;
-        info.to_trigger = Runtime::create_rt_user_event();
-        info.request_mask = overlap;
-        info.kind = INITIAL_VERSION_REQUEST;
-        // Add the event to the set of preconditions
-        preconditions.insert(info.to_trigger);
-        // If we are the requester, then update our initial events
-        if (request_space == local_space)
-          initial_events[info.to_trigger] = overlap;
-        needed_mask -= overlap;
-        if (!needed_mask)
-          return;
-      }
-      // If we still have needed fields, check to see if we have
-      // any path only nodes that we need to request
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-            path_only_nodes.begin(); it != path_only_nodes.end(); it++)
-      {
-        // Skip the requesting space
-        if (request_space == it->first)
-          continue;
-        FieldMask overlap = needed_mask & it->second;
-        if (!overlap)
-          continue;
-        targets.push_back(RequestInfo());
-        RequestInfo &info = targets.back();
-        info.target = it->first;
-        info.to_trigger = Runtime::create_rt_user_event();
-        info.request_mask = overlap;
-        info.kind = PATH_ONLY_VERSION_REQUEST;
-        // Add the event to the set of preconditions
-        preconditions.insert(info.to_trigger);
-        // If we are the requester, then update our initial events
-        if (request_space == local_space)
-          initial_events[info.to_trigger] = overlap;
-        needed_mask -= overlap;
-        if (!needed_mask)
-          break;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::select_final_targets(AddressSpaceID request_space,
-                                            FieldMask &needed_mask,
-                                    LegionDeque<RequestInfo>::aligned &targets,
-                                            std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Better be called while holding the lock
-#ifdef DEBUG_LEGION
-      assert(is_owner()); // should only be called on the owner node
-#endif
-      // First check to see if there are any final versions we can copy from
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
-            final_nodes.begin(); it != final_nodes.end(); it++)
-      {
-        // Skip the requesting state
-        if (request_space == it->first)
-          continue;
-        FieldMask overlap = needed_mask & it->second;
-        if (!overlap)
-          continue;
-        targets.push_back(RequestInfo());
-        RequestInfo &info = targets.back();
-        info.target = it->first;
-        info.to_trigger = Runtime::create_rt_user_event();
-        info.request_mask = overlap;
-        info.kind = FINAL_VERSION_REQUEST;
-        // Add the event to the set of preconditions
-        preconditions.insert(info.to_trigger);
-        // If we are the requester, then update our final events
-        if (request_space == local_space)
-          final_events[info.to_trigger] = overlap;
-        needed_mask -= overlap;
-        if (!needed_mask)
-          return;
-      }
-      // Now if we still have needed fields, we need to create a final
-      // version from all of the earlier versions across all the nodes
-      FieldMask requested_mask;
-      std::set<RtEvent> merge_preconditions;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it = 
-            initial_nodes.begin(); it != initial_nodes.end(); it++)
-      {
-        if (request_space == it->first)
-          continue;
-        FieldMask overlap = needed_mask & it->second;
-        if (!overlap)
-          continue;
-        targets.push_back(RequestInfo());
-        RequestInfo &info = targets.back();
-        info.target = it->first;
-        info.to_trigger = Runtime::create_rt_user_event();
-        info.request_mask = overlap;
-        info.kind = INITIAL_VERSION_REQUEST;
-        merge_preconditions.insert(info.to_trigger); 
-        requested_mask |= overlap;
-      }
-      needed_mask -= requested_mask;
-      // Also check for any path only nodes for fields with no initial states
-      if (!!needed_mask)
-      {
-        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-              path_only_nodes.begin(); it != path_only_nodes.end(); it++)
-        {
-          if (request_space == it->first)
-            continue;
-          FieldMask overlap = needed_mask & it->second;
-          if (!overlap)
-            continue;
-          targets.push_back(RequestInfo());
-          RequestInfo &info = targets.back();
-          info.target = it->first;
-          info.to_trigger = Runtime::create_rt_user_event();
-          info.request_mask = overlap;
-          info.kind = PATH_ONLY_VERSION_REQUEST;
-          merge_preconditions.insert(info.to_trigger); 
-          requested_mask |= overlap;
-        }
-        needed_mask -= requested_mask;
-      }
-      if (!!requested_mask)
-      {
-        RtEvent precondition = Runtime::merge_events(merge_preconditions);
-        if (precondition.exists())
-        {
-          preconditions.insert(precondition);
-          if (request_space == local_space)
-            final_events[precondition] = requested_mask;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state(AddressSpaceID target,
-                                          VersionRequestKind request_kind,
                                           const FieldMask &request_mask,
                                           RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
@@ -5575,20 +5407,54 @@ namespace Legion {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_SEND_STATE_CALL);
       Serializer rez;
-      if (request_kind == PATH_ONLY_VERSION_REQUEST)
+      RezCheck z(rez);
+      rez.serialize(did);
+      rez.serialize(to_trigger);
+      rez.serialize(request_mask);
+      // Hold the lock in read-only mode while iterating these structures
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      // See if we should send all the fields or just do a partial send
+      if (!(valid_fields - request_mask))
       {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(to_trigger);
-        rez.serialize(request_kind);
-        // Hold the lock in read-only mode while iterating these structures
-        AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        if (!(children.valid_fields * request_mask))
+        // Send everything
+        rez.serialize(dirty_mask);
+        rez.serialize(reduction_mask);
+        rez.serialize<size_t>(children.open_children.size()); 
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+              children.open_children.begin(); it != 
+              children.open_children.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(valid_views.size());
+        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::const_iterator it = valid_views.begin(); it !=
+              valid_views.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(reduction_views.size());
+        for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::const_iterator it = reduction_views.begin(); 
+              it != reduction_views.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+      }
+      else
+      {
+        // Partial send
+        rez.serialize(dirty_mask & request_mask);
+        rez.serialize(reduction_mask & request_mask);
+        if (!children.open_children.empty())
         {
           Serializer child_rez;
           size_t count = 0;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                children.open_children.begin(); it != 
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                children.open_children.begin(); it !=
                 children.open_children.end(); it++)
           {
             FieldMask overlap = it->second & request_mask;
@@ -5598,122 +5464,53 @@ namespace Legion {
             child_rez.serialize(overlap);
             count++;
           }
-          rez.serialize<size_t>(count);
+          rez.serialize(count);
           rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
         }
         else
           rez.serialize<size_t>(0);
-      }
-      else // All other request go through the normal path
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(to_trigger);
-        rez.serialize(request_kind);
-        // Hold the lock in read-only mode while iterating these structures
-        AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        // See if we should send all the fields or just do a partial send
-        if (!((initial_fields | final_fields) - request_mask))
+        if (!valid_views.empty())
         {
-          // Send everything
-          rez.serialize(dirty_mask);
-          rez.serialize(reduction_mask);
-          rez.serialize<size_t>(children.open_children.size()); 
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-                children.open_children.begin(); it != 
-                children.open_children.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          rez.serialize<size_t>(valid_views.size());
+          Serializer valid_rez;
+          size_t count = 0;
           for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
                 track_aligned::const_iterator it = valid_views.begin(); it !=
                 valid_views.end(); it++)
           {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
+            FieldMask overlap = it->second & request_mask;
+            if (!overlap)
+              continue;
+            valid_rez.serialize(it->first->did);
+            valid_rez.serialize(overlap);
+            count++;
           }
-          rez.serialize<size_t>(reduction_views.size());
-          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-                track_aligned::const_iterator it = reduction_views.begin(); 
-                it != reduction_views.end(); it++)
-          {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
+          rez.serialize(count);
+          rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
         }
         else
+          rez.serialize<size_t>(0);
+        if (!reduction_views.empty())
         {
-          // Partial send
-          rez.serialize(dirty_mask & request_mask);
-          rez.serialize(reduction_mask & request_mask);
-          if (!children.open_children.empty())
+          Serializer reduc_rez;
+          size_t count = 0;
+          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                track_aligned::const_iterator it = reduction_views.begin();
+                it != reduction_views.end(); it++)
           {
-            Serializer child_rez;
-            size_t count = 0;
-            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-                  children.open_children.begin(); it !=
-                  children.open_children.end(); it++)
-            {
-              FieldMask overlap = it->second & request_mask;
-              if (!overlap)
-                continue;
-              child_rez.serialize(it->first);
-              child_rez.serialize(overlap);
-              count++;
-            }
-            rez.serialize(count);
-            rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
+            FieldMask overlap = it->second & request_mask;
+            if (!overlap)
+              continue;
+            reduc_rez.serialize(it->first->did);
+            reduc_rez.serialize(overlap);
+            count++;
           }
-          else
-            rez.serialize<size_t>(0);
-          if (!valid_views.empty())
-          {
-            Serializer valid_rez;
-            size_t count = 0;
-            for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-                  track_aligned::const_iterator it = valid_views.begin(); it !=
-                  valid_views.end(); it++)
-            {
-              FieldMask overlap = it->second & request_mask;
-              if (!overlap)
-                continue;
-              valid_rez.serialize(it->first->did);
-              valid_rez.serialize(overlap);
-              count++;
-            }
-            rez.serialize(count);
-            rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
-          }
-          else
-            rez.serialize<size_t>(0);
-          if (!reduction_views.empty())
-          {
-            Serializer reduc_rez;
-            size_t count = 0;
-            for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-                  track_aligned::const_iterator it = reduction_views.begin();
-                  it != reduction_views.end(); it++)
-            {
-              FieldMask overlap = it->second & request_mask;
-              if (!overlap)
-                continue;
-              reduc_rez.serialize(it->first->did);
-              reduc_rez.serialize(overlap);
-              count++;
-            }
-            rez.serialize(count);
-            rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
-          }
-          else
-            rez.serialize<size_t>(0);
+          rez.serialize(count);
+          rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
         }
+        else
+          rez.serialize<size_t>(0);
       }
       runtime->send_version_state_response(target, rez);
-      // The owner will get updated automatically so only update remotely
-      if (!is_owner())
-        update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -5739,7 +5536,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state(AddressSpaceID target,
                                                  RtUserEvent to_trigger, 
-                                                 VersionRequestKind req_kind,
                                                  const FieldMask &request_mask, 
                                                  RtEvent precondition)
     //--------------------------------------------------------------------------
@@ -5748,37 +5544,12 @@ namespace Legion {
       args.hlr_id = HLR_SEND_VERSION_STATE_TASK_ID;
       args.proxy_this = this;
       args.target = target;
-      args.request_kind = req_kind;
       args.request_mask = legion_new<FieldMask>(request_mask);
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
                                        HLR_LATENCY_PRIORITY,
                                        NULL/*op*/, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_path_only(AddressSpaceID source,
-                                                      FieldMask &path_only_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      AutoLock s_lock(state_lock);
-      path_only_nodes[source] |= path_only_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_initialization(
-                                 AddressSpaceID source, FieldMask &initial_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      AutoLock s_lock(state_lock);
-      initial_nodes[source] |= initial_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5789,266 +5560,102 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_REQUEST_CALL);
-      if (!is_owner())
+      // If this is an initial version request, we can handle that easy
+      if (request_kind == INITIAL_VERSION_REQUEST)
       {
-        // If we are not the owner, we should definitely be able to handle this
-        std::set<RtEvent> launch_preconditions;
 #ifdef DEBUG_LEGION
-        FieldMask remaining_mask = request_mask;
+        assert(initial_space == local_space);
 #endif
-        if (request_kind == FINAL_VERSION_REQUEST)
-        {
-          AutoLock s_lock(state_lock,1,false/*exclusive*/);
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                final_events.begin(); it != final_events.end(); it++)
-          {
-            if (it->second * request_mask)
-              continue;
-            launch_preconditions.insert(it->first);
-          }
-#ifdef DEBUG_LEGION
-          remaining_mask -= final_fields;
-#endif
-        }
-        else if (request_kind == INITIAL_VERSION_REQUEST)
-        {
-          AutoLock s_lock(state_lock,1,false/*exclusive*/);
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                initial_events.begin(); it != initial_events.end(); it++)
-          {
-            if (it->second * request_mask)
-              continue;
-            launch_preconditions.insert(it->first);
-          }
-#ifdef DEBUG_LEGION
-          remaining_mask -= initial_fields;
-#endif
-        }
-#ifdef DEBUG_LEGION
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        FieldMask overlap = valid_fields & request_mask;
+        if (!overlap)
+          Runtime::trigger_event(to_trigger);
         else
-        {
-          assert(request_kind == PATH_ONLY_VERSION_REQUEST);
-          // There are no preconditions for path only, but we
-          // will take the lock to update the remaining mask
-          // for debugging purposes
-          AutoLock s_lock(state_lock,1,false/*exclusive*/);
-          remaining_mask -= path_only_fields;
-        }
-        assert(!remaining_mask); // request mask should now be empty
-#endif
-        if (!launch_preconditions.empty())
-        {
-          RtEvent pre = Runtime::merge_events(launch_preconditions);
-          launch_send_version_state(source, to_trigger, request_kind, 
-                                    request_mask, pre);
-        }
-        else
-          launch_send_version_state(source, to_trigger, 
-                                    request_kind, request_mask);
+          // No need to wait for anything since we are the initial owner
+          launch_send_version_state(source, to_trigger, overlap);
       }
       else
       {
-        // We're the owner, figure out what to do
-        FieldMask remaining_fields = request_mask;
-        FieldMask local_fields;
-        int path_only_local_index = -1;
-        int initial_local_index = -1;
-        std::set<RtEvent> local_preconditions, done_conditions;
-        LegionDeque<RequestInfo>::aligned targets;
-        if (request_kind == FINAL_VERSION_REQUEST)
-        {
-          AutoLock s_lock(state_lock);
-          // See if we can handle any of the fields locally
-          local_fields = remaining_fields & final_fields;
-          if (!!local_fields)
-          {
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                  final_events.begin(); it != final_events.end(); it++)
-            {
-              if (it->second * local_fields)
-                continue;
-              local_preconditions.insert(it->first);
-            }
-            remaining_fields -= local_fields;
-          }
-          // See if there are any remote nodes that can handle it
-          if (!!remaining_fields && !final_nodes.empty())
-          {
-            select_final_targets(source, remaining_fields,
-                                 targets, done_conditions);
-          }
-          // Once we are here, we can update our remote state information
-          final_nodes[source] |= request_mask;
-        }
-        else if (request_kind == INITIAL_VERSION_REQUEST)
-        {
-          AutoLock s_lock(state_lock);
-          // See if we can handle any of the fields locally
-          local_fields = remaining_fields & initial_fields;
-          if (!!local_fields)
-          {
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                  initial_events.begin(); it != initial_events.end(); it++)
-            {
-              if (it->second * local_fields)
-                continue;
-              local_preconditions.insert(it->first);
-            }
-            remaining_fields -= local_fields;
-          }
-          // Now see if there are any remote nodes that can handle it
-          if (!!remaining_fields && !initial_nodes.empty())
-          {
-            select_initial_targets(source, remaining_fields,
-                                   targets, done_conditions);
-          }
-          // Once we are here we can update our remote state information
-          initial_nodes[source] |= request_mask;
-        }
-        else // should never get a request for path only on the owner node
-          assert(false);  
-        // First, issue all our remote requests, pull out any that
-        // were actually intended for us
-        if (!targets.empty())
-        {
-          int idx = 0;
-          for (LegionDeque<RequestInfo>::aligned::const_iterator it = 
-                targets.begin(); it != targets.end(); it++, idx++)
-          {
-            if (it->target == local_space)
-            {
-              // Handle cases where we were supposed to send something
-              if (request_kind == INITIAL_VERSION_REQUEST)
-              {
 #ifdef DEBUG_LEGION
-                assert(it->kind == PATH_ONLY_VERSION_REQUEST);
+        assert(request_kind == FINAL_VERSION_REQUEST);
 #endif
-                path_only_local_index = idx;
-              }
-              else
+        if (!is_owner())
+        {
+          // If we are not the owner, all we have to do is replay with our state
+          AutoLock s_lock(state_lock,1,false/*exclusive*/);
+          FieldMask overlap = valid_fields & request_mask;
+          if (!overlap)
+            Runtime::trigger_event(to_trigger);
+          else
+            launch_send_version_state(source, to_trigger, overlap);
+        }
+        else
+        {
+          // We're the owner handling a final version request
+          // See if we have any remote instances to handle ourselves
+          if (has_remote_instances())
+          {
+            std::set<RtEvent> local_preconditions;
+            FinalRequestFunctor functor(this, source, request_mask, 
+                                        local_preconditions);
+            map_over_remote_instances(functor);
+            if (!local_preconditions.empty())
+            {
+              AutoLock s_lock(state_lock,1,false/*exclusive*/);
+              FieldMask overlap = valid_fields & request_mask;
+              if (!overlap)
               {
-#ifdef DEBUG_LEGION
-                assert((request_kind == FINAL_VERSION_REQUEST) &&
-                       (it->kind == INITIAL_VERSION_REQUEST));
-#endif
-                initial_local_index = idx;
+                RtUserEvent local_event = Runtime::create_rt_user_event();
+                launch_send_version_state(source, local_event, overlap);
+                local_preconditions.insert(local_event);
               }
+              Runtime::trigger_event(to_trigger,
+                  Runtime::merge_events(local_preconditions));
             }
             else
-              send_version_state_request(it->target, source, it->to_trigger,
-                                         it->request_mask, it->kind);
-          }
-        }
-        // Now see if we have any local fields to send
-        if (!!local_fields)
-        {
-          RtUserEvent local_trigger = Runtime::create_rt_user_event();
-          if (!local_preconditions.empty())
-          {
-            RtEvent pre = Runtime::merge_events(local_preconditions);
-            launch_send_version_state(source, local_trigger, request_kind,
-                                      local_fields, pre); 
-          }
-          else
-            launch_send_version_state(source, local_trigger,
-                                      request_kind, local_fields); 
-          done_conditions.insert(local_trigger);
-        }
-        // We might also have some additional local fields to send
-        if (path_only_local_index >= 0)
-        {
-          RequestInfo &info = targets[path_only_local_index];
-          launch_send_version_state(source, info.to_trigger, info.kind,
-                                    info.request_mask);
-          done_conditions.insert(info.to_trigger);
-        }
-        if (initial_local_index >= 0)
-        {
-          RequestInfo &info = targets[initial_local_index];
-          local_preconditions.clear();
-          // Retake the lock to read the local data structure
-          {
-            AutoLock s_lock(state_lock,1,false/*exclusive*/);
-            for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                  initial_events.begin(); it != initial_events.end(); it++)
             {
-              if (it->second * info.request_mask)
-                continue;
-              local_preconditions.insert(it->first);
+              // Didn't send any messages so do the normal path
+              AutoLock s_lock(state_lock,1,false/*exclusive*/);
+              FieldMask overlap = valid_fields & request_mask;
+              if (!overlap)
+                Runtime::trigger_event(to_trigger);
+              else
+                launch_send_version_state(source, to_trigger, overlap);
             }
           }
-          if (!local_preconditions.empty())
+          else // We just have to send our local state
           {
-            RtEvent pre = Runtime::merge_events(local_preconditions);
-            launch_send_version_state(source, info.to_trigger, info.kind, 
-                                      info.request_mask, pre);
+            AutoLock s_lock(state_lock,1,false/*exclusive*/);
+            FieldMask overlap = valid_fields & request_mask;
+            if (!overlap)
+              Runtime::trigger_event(to_trigger);
+            else
+              launch_send_version_state(source, to_trigger, overlap);
           }
-          else
-            launch_send_version_state(source, info.to_trigger, info.kind,
-                                      info.request_mask);
-          done_conditions.insert(info.to_trigger);
         }
-        // Now if we have any done conditions we trigger the proper 
-        // precondition event, otherwise we can do it immediately
-        if (!done_conditions.empty())
-          Runtime::trigger_event(to_trigger,
-                                 Runtime::merge_events(done_conditions));
-        else
-          Runtime::trigger_event(to_trigger);
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_response(AddressSpaceID source,
                                                      RtUserEvent to_trigger, 
-                                            VersionRequestKind request_kind, 
-                                                     Deserializer &derez)
+                                                     Deserializer &derez,
+                                                     const FieldMask &update)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_RESPONSE_CALL);
-      // Special case for path only response
-      if (request_kind == PATH_ONLY_VERSION_REQUEST)
-      {
-        {
-          AutoLock s_lock(state_lock);
-          size_t num_children;
-          derez.deserialize(num_children);
-          for (unsigned idx = 0; idx < num_children; idx++)
-          {
-            ColorPoint child;
-            derez.deserialize(child);
-            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-              children.open_children.find(child);
-            if (finder != children.open_children.end())
-            {
-              FieldMask child_update;
-              derez.deserialize(child_update);
-              finder->second |= child_update;
-              children.valid_fields |= child_update;
-            }
-            else
-            {
-              FieldMask &mask = children.open_children[child];
-              derez.deserialize(mask);
-              children.valid_fields |= mask;
-            }
-          }
-        }
-        Runtime::trigger_event(to_trigger);
-        return;
-      }
       std::set<RtEvent> preconditions;
       std::map<LogicalView*,RtEvent> pending_views;
       WrapperReferenceMutator mutator(preconditions);
       {
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
-        AutoLock s_lock(state_lock);
+        AutoLock s_lock(state_lock); 
         // Check to see what state we are generating, if it is the initial
         // one then we can just do our unpack in-place, otherwise we have
         // to unpack separately and then do a merge.
-        const bool in_place = !initial_fields && !final_fields;
+        const bool in_place = !valid_fields;
         // Unpack the dirty and reduction fields
         if (in_place)
         {
@@ -6066,7 +5673,7 @@ namespace Legion {
           reduction_mask |= reduction_update;
         }
         // Unpack the open children
-        if (in_place && !path_only_fields)
+        if (in_place)
         {
           size_t num_children;
           derez.deserialize(num_children);
@@ -6105,7 +5712,7 @@ namespace Legion {
           }
         }
         // Finally do the views
-        if (!initial_fields && !final_fields)
+        if (!valid_fields)
         {
           size_t num_valid_views;
           derez.deserialize(num_valid_views);
@@ -6221,6 +5828,8 @@ namespace Legion {
             }
           }
         }
+        // Finally update our valid mask from this transaction
+        valid_fields |= update;
       }
       if (!pending_views.empty())
       {
@@ -6284,54 +5893,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_path_only(
-                       Runtime *rt, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      FieldMask path_only_mask;
-      derez.deserialize(path_only_mask);
-      DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      VersionState *vs = dynamic_cast<VersionState*>(target);
-      assert(vs != NULL);
-#else
-      VersionState *vs = static_cast<VersionState*>(target);
-#endif
-      vs->handle_version_state_path_only(source, path_only_mask);
-      RtUserEvent registered_event;
-      derez.deserialize(registered_event);
-      if (registered_event.exists())
-        Runtime::trigger_event(registered_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionState::process_version_state_initialization(
-                       Runtime *rt, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      FieldMask initial_mask;
-      derez.deserialize(initial_mask);
-      DistributedCollectable *target = rt->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      VersionState *vs = dynamic_cast<VersionState*>(target);
-      assert(vs != NULL);
-#else
-      VersionState *vs = static_cast<VersionState*>(target);
-#endif
-      vs->handle_version_state_initialization(source, initial_mask);
-      RtUserEvent registered_event;
-      derez.deserialize(registered_event);
-      if (registered_event.exists())
-        Runtime::trigger_event(registered_event);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_request(Runtime *rt,
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -6368,8 +5929,8 @@ namespace Legion {
       derez.deserialize(did);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      VersionRequestKind req_kind;
-      derez.deserialize(req_kind);
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
       DistributedCollectable *target = rt->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       VersionState *vs = dynamic_cast<VersionState*>(target);
@@ -6377,7 +5938,7 @@ namespace Legion {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_response(source, to_trigger, req_kind, derez);
+      vs->handle_version_state_response(source, to_trigger, derez, update_mask);
     } 
 
     /////////////////////////////////////////////////////////////

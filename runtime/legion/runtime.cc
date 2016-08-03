@@ -5182,18 +5182,6 @@ namespace Legion {
               runtime->handle_version_owner_response(derez);
               break;
             }
-          case SEND_VERSION_STATE_PATH:
-            {
-              runtime->handle_version_state_path_only(derez, 
-                                                      remote_address_space);
-              break;
-            }
-          case SEND_VERSION_STATE_INIT:
-            {
-              runtime->handle_version_state_initialization(derez, 
-                                                          remote_address_space);
-              break;
-            }
           case SEND_VERSION_STATE_REQUEST:
             {
               runtime->handle_version_state_request(derez);
@@ -15040,24 +15028,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_path_only(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_PATH,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_initialization(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_INIT,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_version_state_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15937,22 +15907,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteTask::handle_version_owner_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_path_only(Deserializer &derez,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_path_only(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_initialization(Deserializer &derez,
-                                                      AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_initialization(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -20673,7 +20627,6 @@ namespace Legion {
             VersionState::SendVersionStateArgs *vargs = 
               (VersionState::SendVersionStateArgs*)args;
             vargs->proxy_this->send_version_state(vargs->target, 
-                                                  vargs->request_kind,
                                                   *(vargs->request_mask),
                                                   vargs->to_trigger);
             legion_delete(vargs->request_mask);

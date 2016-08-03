@@ -338,6 +338,7 @@ namespace Legion {
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
     public:
+      inline bool has_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
@@ -479,6 +480,14 @@ namespace Legion {
       // If previous is equal to count, the value is now
       // zero so it is safe to reclaim this object
       return (prev == cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::has_remote_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return !remote_instances.empty();
     }
 
     //--------------------------------------------------------------------------

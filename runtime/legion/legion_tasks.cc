@@ -2785,13 +2785,15 @@ namespace Legion {
       // state managers we need to reset
       if (!region_tree_owners.empty())
       {
-        const AddressSpaceID local_space = runtime->address_space;
-        for (std::map<RegionTreeNode*,AddressSpaceID>::const_iterator it =
+        for (std::map<RegionTreeNode*,
+                      std::pair<AddressSpaceID,bool> >::const_iterator it =
               region_tree_owners.begin(); it != region_tree_owners.end(); it++)
         {
-          if (it->second == local_space)
+          // If this is a remote only then we don't need to invalidate it
+          if (!it->second.second)
             it->first->invalidate_version_state(context.get_id()); 
         }
+        region_tree_owners.clear();
       }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
@@ -5394,13 +5396,20 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock); 
       // See if we've already assigned it
-      std::map<RegionTreeNode*,AddressSpaceID>::const_iterator finder = 
-        region_tree_owners.find(node);
+      std::map<RegionTreeNode*,std::pair<AddressSpaceID,bool> >::iterator
+        finder = region_tree_owners.find(node);
       // If we already assigned it then we are done
       if (finder != region_tree_owners.end())
-        return finder->second;
+      {
+        // If it is remote only, see if it gets to stay that way
+        if (finder->second.second && (source == runtime->address_space))
+          finder->second.second = false; // no longer remote only
+        return finder->second.first;
+      }
       // Otherwise assign it to the source
-      region_tree_owners[node] = source;
+      region_tree_owners[node] = 
+        std::pair<AddressSpaceID,bool>(source, 
+                                      (source != runtime->address_space));
       return source;
     }
 
@@ -10227,10 +10236,11 @@ namespace Legion {
       RtEvent wait_on;
       {
         AutoLock o_lock(op_lock);
-        std::map<RegionTreeNode*,AddressSpaceID>::const_iterator finder = 
+        std::map<RegionTreeNode*,
+                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
           region_tree_owners.find(node);
         if (finder != region_tree_owners.end())
-          return finder->second;
+          return finder->second.first;
         // See if we already have an outstanding request
         std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
           pending_version_owner_requests.find(node);
@@ -10266,12 +10276,13 @@ namespace Legion {
       wait_on.wait();
       // Retake the lock in read-only mode and get the answer
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,AddressSpaceID>::const_iterator finder = 
+      std::map<RegionTreeNode*,
+               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
         region_tree_owners.find(node);
 #ifdef DEBUG_LEGION
       assert(finder != region_tree_owners.end());
 #endif
-      return finder->second;
+      return finder->second.first;
     }
 
     //--------------------------------------------------------------------------
@@ -10325,7 +10336,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(region_tree_owners.find(node) == region_tree_owners.end());
 #endif
-        region_tree_owners[node] = result; 
+        region_tree_owners[node] = 
+          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
         // Find the event to trigger
         std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
           pending_version_owner_requests.find(node);

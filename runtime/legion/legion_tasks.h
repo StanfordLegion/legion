@@ -759,7 +759,8 @@ namespace Legion {
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
     protected:
-      std::map<RegionTreeNode*,AddressSpaceID> region_tree_owners;
+      std::map<RegionTreeNode*,
+        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
 #ifdef LEGION_SPY
     public:
       RtEvent update_previous_mapped_event(RtEvent next);

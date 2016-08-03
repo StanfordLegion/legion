@@ -1570,10 +1570,6 @@ namespace Legion {
       InstanceView* find_instance_view(PhysicalManager *manager,
                                        SingleTask *context);
     public:
-      VersionState* find_remote_version_state(VersionID vid,
-        DistributedID did, AddressSpaceID owner, ReferenceMutator *mutator);
-      VersionState* create_new_version_state(VersionID vid); 
-    public:
       bool register_physical_manager(PhysicalManager *manager);
       void unregister_physical_manager(PhysicalManager *manager);
       PhysicalManager* find_manager(DistributedID did);

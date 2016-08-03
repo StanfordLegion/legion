@@ -665,8 +665,8 @@ namespace Legion {
                                      const RegionUsage &usage,
                                      VersionInfo &version_info,
                                      std::set<RtEvent> &ready_events);
-      void advance_versions(FieldMask version_mask, 
-                            SingleTask *context,
+      void advance_versions(FieldMask version_mask, SingleTask *context,
+                            bool has_initial_state,AddressSpaceID initial_space,
                             std::set<RtEvent> &applied_events,
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
@@ -678,8 +678,8 @@ namespace Legion {
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     protected:
-      void create_initial_version_state(const FieldMask &mask,
-          LegionMap<VersionState*,FieldMask>::aligned &new_states);
+      VersionState* create_new_version_state(VersionID vid,
+          bool has_initial_state, AddressSpaceID initial_space);
     protected:
       void sanity_check(void);
     public:
@@ -723,16 +723,8 @@ namespace Legion {
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
       enum VersionRequestKind {
-        PATH_ONLY_VERSION_REQUEST,
         INITIAL_VERSION_REQUEST,
         FINAL_VERSION_REQUEST,
-      };
-      struct RequestInfo {
-      public:
-        AddressSpaceID target;
-        RtUserEvent to_trigger;
-        FieldMask request_mask;
-        VersionRequestKind kind;
       };
     public:
       struct SendVersionStateArgs {
@@ -740,7 +732,6 @@ namespace Legion {
         HLRTaskID hlr_id;
         VersionState *proxy_this;
         AddressSpaceID target;
-        VersionRequestKind request_kind;
         FieldMask *request_mask;
         RtUserEvent to_trigger;
       };
@@ -756,9 +747,23 @@ namespace Legion {
         VersionState *proxy_this;
         ReferenceSource ref_kind;
       };
+      struct FinalRequestFunctor {
+      public:
+        FinalRequestFunctor(VersionState *proxy, AddressSpaceID r,
+                            const FieldMask &m, std::set<RtEvent> &pre)
+          : proxy_this(proxy), requestor(r), mask(m), preconditions(pre) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        VersionState *proxy_this;
+        AddressSpaceID requestor;
+        const FieldMask &mask;
+        std::set<RtEvent> &preconditions;
+      };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
+                   bool has_initial_state, AddressSpaceID initial_space,
                    RegionTreeNode *node, bool register_now);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
@@ -793,42 +798,27 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
-      VersionState* get_version_state(RegionTreeNode *node);
-    public:
       void request_initial_version_state(const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);
       void request_final_version_state(const FieldMask &request_mask,
                                        std::set<RtEvent> &preconditions);
-      void select_initial_targets(AddressSpaceID request_space, 
-                                  FieldMask &needed_mask,
-                                  LegionDeque<RequestInfo>::aligned &targets,
-                                  std::set<RtEvent> &preconditions);
-      void select_final_targets(AddressSpaceID request_space,
-                                FieldMask &needed_mask,
-                                LegionDeque<RequestInfo>::aligned &targets,
-                                std::set<RtEvent> &preconditions);
     public:
-      void send_version_state(AddressSpaceID target, VersionRequestKind kind,
+      void send_version_state(AddressSpaceID target,
                          const FieldMask &request_mask, RtUserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
                           RtUserEvent to_trigger, const FieldMask &request_mask,
                           VersionRequestKind request_kind);
       void launch_send_version_state(AddressSpaceID target,
                                      RtUserEvent to_trigger, 
-                                     VersionRequestKind request_kind,
                                      const FieldMask &request_mask, 
                                      RtEvent precondition=RtEvent::NO_RT_EVENT);
     public:
-      void handle_version_state_path_only(AddressSpaceID source,
-                                          FieldMask &path_only_mask);
-      void handle_version_state_initialization(AddressSpaceID source,
-                                               FieldMask &initial_mask);
       void handle_version_state_request(AddressSpaceID source, 
                                         RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,
                                         FieldMask &request_mask);
       void handle_version_state_response(AddressSpaceID source,
-          RtUserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
+          RtUserEvent to_trigger, Deserializer &derez, const FieldMask &update);
     public:
       void remove_version_state_ref(ReferenceSource ref_kind, 
                                      RtEvent done_event);
@@ -836,10 +826,6 @@ namespace Legion {
     public:
       static void process_view_references(const void *args);
     public:
-      static void process_version_state_path_only(Runtime *rt,
-                              Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_initialization(Runtime *rt,
-                              Deserializer &derez, AddressSpaceID source);
       static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
       static void process_version_state_response(Runtime *rt,
@@ -847,6 +833,8 @@ namespace Legion {
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;
+      const bool has_initial_state;
+      const AddressSpaceID initial_space;
     protected:
       Reservation state_lock;
       // Fields which have been directly written to
@@ -867,19 +855,11 @@ namespace Legion {
       bool currently_valid;
 #endif
     protected:
-      // Fields which are in the path only state
-      FieldMask path_only_fields;
-      // Fields which are in the initial state
-      FieldMask initial_fields;
-      // Fields which are in the final state
-      FieldMask final_fields;
-      // Initial ready events
+      // The fields for which we have seen updates
+      FieldMask valid_fields;
+      // Track when we have valid data for initial and final fields
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;
-      // These are valid on the owner node only
-      LegionMap<AddressSpaceID,FieldMask>::aligned path_only_nodes;
-      LegionMap<AddressSpaceID,FieldMask>::aligned initial_nodes;
-      LegionMap<AddressSpaceID,FieldMask>::aligned final_nodes;
     };
 
     /**
