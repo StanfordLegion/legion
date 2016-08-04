@@ -82,13 +82,16 @@ local function get_ghost_rect_body(res, sz, r, s, f)
       -- wrapped around left, periodic boundary
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
         -- shift left
-        if [acc(`([r].lo.__ptr))] < [acc(`([s].hi.__ptr))] then
+        if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
           [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
           [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
         -- shift right
-        else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
+        elseif [acc(`([s].lo.__ptr))] <= [acc(`([r].hi.__ptr))] then
           [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
           [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+        else
+          std.assert(false,
+            "ambiguous ghost region, primary region should be bigger for this stencil")
         end
       else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
         -- shift left
@@ -105,11 +108,24 @@ local function get_ghost_rect_body(res, sz, r, s, f)
   end
 end
 
+local function bounds_checks(res)
+  local checks = quote end
+  if std.config["debug"] then
+    checks = quote
+      std.assert(
+        [res].lo <= [res].hi,
+        "invalid size for a ghost region. the serial code has an out-of-bounds access")
+    end
+  end
+  return checks
+end
+
 local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
     [get_ghost_rect_body(diff_rect, sz, r, s)]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
@@ -117,6 +133,7 @@ local get_ghost_rect = {
     var diff_rect : std.rect2d
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
@@ -125,6 +142,7 @@ local get_ghost_rect = {
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end
 }
@@ -1127,12 +1145,18 @@ local function create_image_partition(pr, pp, stencil)
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
                                     mk_expr_id(tmp_var) })
-  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
-  --                                           sr_bounds_expr)))
-  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
-  --                                           ghost_rect_expr)))
-  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf,
-  --                                           mk_expr_constant("\n", rawstring))))
+  --loop_body:insert(mk_stat_block(mk_block(terralib.newlist {
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            pr_bounds_expr)),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            sr_bounds_expr)),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            mk_expr_id(tmp_var))),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            ghost_rect_expr)),
+  --  mk_stat_expr(mk_expr_call(c.printf,
+  --                            mk_expr_constant("\n", rawstring)))
+  --  })))
   loop_body:insert(mk_stat_expr(
     mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
@@ -2148,6 +2172,14 @@ function parallelize_tasks.stat_for_list(cx, node)
       assert(case_split_if)
       if std.config["debug"] then
         case_split_if.else_block.stats:insertall(terralib.newlist {
+          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+          --             terralib.newlist {
+          --               mk_expr_id(loop_var)
+          --             })),
+          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+          --             terralib.newlist {
+          --               index_symbol_expr
+          --             })),
           mk_stat_expr(mk_expr_call(std.assert,
                        terralib.newlist {
                          mk_expr_constant(false, bool),
