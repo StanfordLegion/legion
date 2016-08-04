@@ -13,7 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
+--   "-fparallelize-dop", "7"]]
 
 import "regent"
 
@@ -72,8 +73,6 @@ task test(size : int)
   c.srand48(12345)
   var is = ispace(int1d, size)
   var primary_region = region(is, fs)
-  var np = 4
-  var primary_partition = partition(equal, primary_region, ispace(int1d, np))
   init(primary_region)
   stencil(primary_region)
   stencil_serial(primary_region)

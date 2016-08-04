@@ -173,6 +173,7 @@ end
 function parser.region_root(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -202,6 +203,7 @@ end
 function parser.region_bare(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   return ast.unspecialized.region.Bare {
     region_name = region_name,
     span = ast.span(start, p),
@@ -220,6 +222,7 @@ end
 function parser.condition_variable(p)
   local start = ast.save(p)
   local name = p:expect(p.name).value
+  p:ref(name)
   return ast.unspecialized.ConditionVariable {
     name = name,
     span = ast.span(start, p),

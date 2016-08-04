@@ -28,13 +28,13 @@ local parallelize_tasks = require("regent/parallelize_tasks")
 local vectorize_loops = require("regent/vectorize_loops")
 
 if std.config["flow"] then
-  require("regent/flow_from_ast") -- priority 10
-  require("regent/flow_spmd")     -- priority 11
-  require("regent/flow_to_ast")   -- priority 19
+  require("regent/flow_from_ast") -- priority 15
+  require("regent/flow_spmd")     -- priority 16
+  require("regent/flow_to_ast")   -- priority 24
 end
 
 if std.config["inline"] then passes_hooks.add_optimization(1, inline_tasks) end
-if std.config["parallelize"] then passes_hooks.add_optimization(20, parallelize_tasks) end
+if std.config["parallelize"] then passes_hooks.add_optimization(10, parallelize_tasks) end
 if std.config["index-launch"] then passes_hooks.add_optimization(25, optimize_index_launches) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end
 if std.config["leaf"] then passes_hooks.add_optimization(40, optimize_config_options) end

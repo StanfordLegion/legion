@@ -124,7 +124,9 @@ local function convert_lua_value(cx, node, value, allow_lists)
     value = value:getast()
     if value:is(ast.specialized.top.QuoteExpr) then
       assert(value.expr:is(ast.specialized.expr))
-      local value = alpha_convert.entry(value, cx.env, cx.mapping)
+      if not cx.is_quote then
+        value = alpha_convert.entry(value, cx.env, cx.mapping)
+      end
       return value.expr
     elseif value:is(ast.specialized.top.QuoteStat) then
       log.error(node, "unable to specialize quoted statement as an expression")
@@ -1713,7 +1715,9 @@ local function get_quote_contents(cx, expr)
   local value = expr:getast()
   if value:is(ast.specialized.top.QuoteExpr) then
     assert(value.expr:is(ast.specialized.expr))
-    local value = alpha_convert.entry(value, cx.env, cx.mapping)
+    if not cx.is_quote then
+      value = alpha_convert.entry(value, cx.env, cx.mapping)
+    end
     return terralib.newlist({
       ast.specialized.stat.Expr {
         expr = value.expr,
@@ -1723,7 +1727,9 @@ local function get_quote_contents(cx, expr)
     })
   elseif value:is(ast.specialized.top.QuoteStat) then
     assert(value.block:is(ast.specialized.Block))
-    local value = alpha_convert.entry(value, cx.env, cx.mapping)
+    if not cx.is_quote then
+      value = alpha_convert.entry(value, cx.env, cx.mapping)
+    end
     return value.block.stats
   else
     assert(false)

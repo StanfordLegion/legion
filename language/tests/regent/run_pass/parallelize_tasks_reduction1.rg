@@ -13,7 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fflow", "0"]]
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fflow", "0", "-fdebug", "1",
+--   "-fparallelize-dop", "9"]]
 
 -- FIXME: Breaks RDIR
 
@@ -67,13 +68,15 @@ task test(size : int)
   c.srand48(12345)
   var is = ispace(int2d, {size, size})
   var primary_region = region(is, double)
-  var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
   init(primary_region)
   var result1 = stencil(primary_region)
-  result1 = stencil(primary_region)
-  result1 -= stencil(primary_region)
-  result1 += stencil(primary_region)
+  do
+    result1 = stencil(primary_region)
+    for idx = 0, 1 do
+      result1 -= stencil(primary_region)
+      result1 += stencil(primary_region)
+    end
+  end
   wait_for(result1)
   var result2 = 0
   result2 = stencil_serial(primary_region)

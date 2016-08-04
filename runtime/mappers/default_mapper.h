@@ -41,13 +41,14 @@ namespace Legion {
     class DefaultMapper : public Mapper {
     public:
       enum DefaultTunables { // tunable IDs recognized by the default mapper
-        DEFAULT_TUNABLE_NODE_COUNT,
-        DEFAULT_TUNABLE_LOCAL_CPUS,
-        DEFAULT_TUNABLE_LOCAL_GPUS,
-        DEFAULT_TUNABLE_LOCAL_IOS,
-        DEFAULT_TUNABLE_GLOBAL_CPUS,
-        DEFAULT_TUNABLE_GLOBAL_GPUS,
-        DEFAULT_TUNABLE_GLOBAL_IOS,
+        DEFAULT_TUNABLE_NODE_COUNT = 0,
+        DEFAULT_TUNABLE_LOCAL_CPUS = 1,
+        DEFAULT_TUNABLE_LOCAL_GPUS = 2,
+        DEFAULT_TUNABLE_LOCAL_IOS = 3,
+        DEFAULT_TUNABLE_GLOBAL_CPUS = 4,
+        DEFAULT_TUNABLE_GLOBAL_GPUS = 5,
+        DEFAULT_TUNABLE_GLOBAL_IOS = 6,
+        DEFAULT_TUNABLE_LAST = 7, // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
