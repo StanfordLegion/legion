@@ -173,6 +173,8 @@ local function check_annotations_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.location) or
       node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind) or
       node:is(ast.TaskConfigOptions)
     then
       -- Pass

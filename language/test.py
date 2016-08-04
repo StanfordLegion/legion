@@ -98,8 +98,10 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
 
+    runs_with = find_labeled_flags(filename, 'runs-with')
     try:
-        run(filename, debug, False, flags, env)
+        for params in runs_with:
+            run(filename, debug, False, flags + params, env)
     except TestFailure as e:
         lines = (line.strip() for line in e.output.strip().split('\n')
                  if len(line.strip()) > 0)

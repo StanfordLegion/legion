@@ -3743,7 +3743,7 @@ end
 function codegen.expr_cross_product_array(cx, node)
   local lhs = codegen.expr(cx, node.lhs):read(cx)
   local colorings = codegen.expr(cx, node.colorings):read(cx)
-  local disjoint = node.disjointness == std.disjoint
+  local disjoint = node.disjointness:is(ast.disjointness_kind.Disjoint)
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
