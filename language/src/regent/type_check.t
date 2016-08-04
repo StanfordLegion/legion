@@ -520,7 +520,6 @@ function type_check.expr_field_access(cx, node)
     field_type = std.rect_type(index_type)
   elseif std.is_ispace(std.as_read(unpack_type)) and node.field_name == "volume" then
     -- Volume can be retrieved on any ispace.
-    -- TODO(zhangwen): can it??
     field_type = int64
   elseif std.is_region(std.as_read(unpack_type)) and node.field_name == "bounds" then
     local index_type = std.as_read(unpack_type):ispace().index_type

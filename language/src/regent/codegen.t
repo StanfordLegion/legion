@@ -1736,7 +1736,9 @@ function codegen.expr_field_access(cx, node)
       [value.actions]
       [emit_debuginfo(node)]
 
-      -- TODO(zhangwen): multiple domains?
+      -- Currently doesn't support index spaces with multiple domains.
+      regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [value.value].impl),
+        "\"volume\" field isn't supported on index spaces with multiple domains")
       var [volume] = c.legion_domain_get_volume(
         c.legion_index_space_get_domain([cx.runtime], [value.value].impl))
     end
@@ -3828,21 +3830,12 @@ function codegen.expr_cross_product_array(cx, node)
 end
 
 -- Returns Terra expression for subregion of partition of specified color.
--- The color space can be either structured or unstructured, i.e. `color` can
--- be an integer or of an index type.
+-- The color space can be either structured or unstructured.
 local function get_partition_subregion(cx, partition, color)
-  local color_type = color.type
-  assert(terralib.types.istype(color_type))
-
-  if std.validate_implicit_cast(color_type, int) then
-    -- TODO(zhangwen): what about int1d?
-    return `(c.legion_logical_partition_get_logical_subregion_by_color(
-      [cx.runtime], [partition.value].impl, color))
-  else
-    assert(std.is_index_type(color_type))
-    return `(c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
-      [cx.runtime], [partition.value].impl, [color]:to_domain_point()))
-  end
+  local partition_type = partition.value.type
+  local part_color_type = partition_type:colors().index_type
+  return `(c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+    [cx.runtime], [partition.value].impl, [part_color_type]([color]):to_domain_point()))
 end
 
 function codegen.expr_list_slice_partition(cx, node)
@@ -4297,10 +4290,10 @@ end
 
 -- Returns Terra expression for color as an index_type (e.g. int2d).
 local function get_logical_region_color(cx, region, color_type)
-  assert(terralib.types.istype(color_type))
+  assert(std.is_index_type(color_type))
   local domain_pt_expr =
     `(c.legion_logical_region_get_color_domain_point([cx.runtime], region))
-  return color_type:from_domain_point(domain_pt_expr)
+  return `([color_type.from_domain_point](domain_pt_expr))
 end
 
 -- Returns Terra expression for offset of `point` in a rectangle.
@@ -4308,22 +4301,19 @@ local function get_offset_in_rect(point, rect_size)
   local point_type = point.type
   local rect_size_type = rect_size.type
   assert(std.is_index_type(point_type))
-  assert(std.is_index_type(rect_size_type))
-  assert(point_type.dim > 0)
-  assert(point_type.dim == rect_size_type.dim)
+  assert(std.type_eq(point_type, rect_size_type))
 
-  local pp = `(point.__ptr)
-  local rsp = `(rect_size.__ptr)
-
-  if point_type == int1d then
-    return `(int([point]))
-  elseif point_type == int2d then
-    return `([pp].x + [rsp].x * [pp].y)
-  elseif point_type == int3d then
-    return `([pp].x + [rsp].x * [pp].y
-      + [rsp].x * [rsp].y * [pp].z)
+  local fields = point_type.fields
+  if fields then
+    local offset = `0
+    local multiplicand = `1
+    for _, field in ipairs(fields) do
+      offset = `([offset] + [point].__ptr.[field] * [multiplicand])
+      multiplicand = `([multiplicand] * [rect_size].__ptr.[field])
+    end
+    return offset
   else
-    assert(false)
+    return `([point].__ptr)
   end
 end
 
@@ -4378,7 +4368,8 @@ function codegen.expr_list_invert(cx, node)
           min_color, max_color = rhs_color, rhs_color
         else
           min_color, max_color =
-            [color_type:e_min(min_color, rhs_color)], [color_type:e_max(max_color, rhs_color)]
+            [color_type.elem_min](min_color, rhs_color),
+            [color_type.elem_max](max_color, rhs_color)
         end
       end
       var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
