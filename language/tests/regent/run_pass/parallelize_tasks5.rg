@@ -36,8 +36,8 @@ do
 end
 
 __demand(__parallel)
-task stencil(interior : region(ispace(int2d), fs),
-                    r : region(ispace(int2d), fs))
+task stencil1(interior : region(ispace(int2d), fs),
+                     r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
@@ -47,11 +47,38 @@ do
                     r[e + { 1, 0}].f + r[e + {0,  2}].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("parallel version: %lu us\n", ts_end - ts_start)
+  c.printf("[stencil1] parallel: %lu us\n", ts_end - ts_start)
 end
 
-task stencil_serial(interior : region(ispace(int2d), fs),
-                           r : region(ispace(int2d), fs))
+__demand(__parallel)
+task stencil2(interior : region(ispace(int2d), fs),
+                     r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.g), interior <= r
+do
+  var ts_start = c.legion_get_current_time_in_micros()
+  for e in interior do
+    r[e].g = 0.5 * (r[e].f +
+                    r[e + {-1, 0}].f + r[e + {0, -1}].f +
+                    r[e + { 1, 0}].f + r[e + {0,  1}].f)
+  end
+  var ts_end = c.legion_get_current_time_in_micros()
+  c.printf("[stencil2] parallel: %lu us\n", ts_end - ts_start)
+end
+
+__demand(__parallel)
+task stencil3(r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.g)
+do
+  var ts_start = c.legion_get_current_time_in_micros()
+  for e in r do
+    r[e].g = 0.5 * (r[e].f + r[(e + {2, 0}) % r.bounds].f)
+  end
+  var ts_end = c.legion_get_current_time_in_micros()
+  c.printf("[stencil3] parallel: %lu us\n", ts_end - ts_start)
+end
+
+task stencil1_serial(interior : region(ispace(int2d), fs),
+                            r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.h), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
@@ -61,16 +88,48 @@ do
                     r[e + { 1, 0}].f + r[e + {0,  2}].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("serial version: %lu us\n", ts_end - ts_start)
+  c.printf("[stencil1] serial: %lu us\n", ts_end - ts_start)
+end
+
+task stencil2_serial(interior : region(ispace(int2d), fs),
+                            r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.h), interior <= r
+do
+  var ts_start = c.legion_get_current_time_in_micros()
+  for e in interior do
+    r[e].h = 0.5 * (r[e].f +
+                    r[e + {-1, 0}].f + r[e + {0, -1}].f +
+                    r[e + { 1, 0}].f + r[e + {0,  1}].f)
+  end
+  var ts_end = c.legion_get_current_time_in_micros()
+  c.printf("[stencil2] serial: %lu us\n", ts_end - ts_start)
+end
+
+task stencil3_serial(r : region(ispace(int2d), fs))
+where reads(r.f), reads writes(r.h)
+do
+  var ts_start = c.legion_get_current_time_in_micros()
+  for e in r do
+    r[e].h = 0.5 * (r[e].f + r[(e + {2, 0}) % r.bounds].f)
+  end
+  var ts_end = c.legion_get_current_time_in_micros()
+  c.printf("[stencil3] serial: %lu us\n", ts_end - ts_start)
 end
 
 local cmath = terralib.includec("math.h")
+
+task check(r : region(ispace(int2d), fs))
+where reads(r.{g, h})
+do
+  for e in r do
+    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
+  end
+end
 
 task test(size : int)
   c.srand48(12345)
   var is = ispace(int2d, {size, size})
   var primary_region = region(is, fs)
-  var np = 2
   var bounds = primary_region.bounds
   var coloring = c.legion_domain_point_coloring_create()
   c.legion_domain_point_coloring_color_domain(coloring, [int1d](0),
@@ -79,18 +138,33 @@ task test(size : int)
   var interior_partition = partition(disjoint, primary_region, coloring, ispace(int1d, 1))
   c.legion_domain_point_coloring_destroy(coloring)
   var interior_region = interior_partition[0]
-  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
+
   init(primary_region)
-  stencil(interior_region, primary_region)
-  stencil_serial(interior_region, primary_region)
-  for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
+
+  do
+    stencil1(interior_region, primary_region)
+    stencil1_serial(interior_region, primary_region)
+    check(primary_region)
+  end
+
+  while true do
+    for idx = 0, 2 do
+      stencil3(primary_region)
+      stencil3_serial(primary_region)
+      check(primary_region)
+    end
+    break
+  end
+
+  do
+    stencil2(interior_region, primary_region)
+    stencil2_serial(interior_region, primary_region)
+    check(primary_region)
   end
 end
 
 task toplevel()
-  test(10)
-  test(1000)
+  test(100)
 end
 
 regentlib.start(toplevel)

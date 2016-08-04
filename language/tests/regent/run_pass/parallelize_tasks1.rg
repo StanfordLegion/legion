@@ -79,13 +79,6 @@ task test(size : int)
   for e in primary_region do
     regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
   end
-  var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
-  stencil(primary_region)
-  stencil_serial(primary_region)
-  for e in primary_region do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
-  end
 end
 
 task toplevel()

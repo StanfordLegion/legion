@@ -70,11 +70,13 @@ task test(size : int)
   var primary_region = region(is, double)
   init(primary_region)
   var result1 = stencil(primary_region)
-  result1 = stencil(primary_region)
-  var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
-  result1 -= stencil(primary_region)
-  result1 += stencil(primary_region)
+  do
+    result1 = stencil(primary_region)
+    for idx = 0, 1 do
+      result1 -= stencil(primary_region)
+      result1 += stencil(primary_region)
+    end
+  end
   wait_for(result1)
   var result2 = 0
   result2 = stencil_serial(primary_region)
