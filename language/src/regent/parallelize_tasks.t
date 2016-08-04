@@ -31,7 +31,7 @@ local Stencil
 local parallel_task_context = {}
 local parallel_param = {}
 local caller_context = {}
-local global_context = data.newmap()
+local global_context = {}
 
 local check_parallelizable = {}
 local normalize_accesses = {}
@@ -1624,7 +1624,7 @@ function parallelize_task_calls.top_task(global_cx, node)
     if not node:is(ast.typed.expr.Call) then return false end
     local fn = node.fn.value
     return not node.annotations.parallel:is(ast.annotation.Forbid) and
-           std.is_task(fn) and global_cx[fn.name]
+           std.is_task(fn) and global_cx[fn]
   end
 
   -- Return if there is no parallelizable task call
@@ -2228,7 +2228,7 @@ function parallelize_tasks.top_task_body(cx, node)
   }
 end
 
-function parallelize_tasks.top_task(node)
+function parallelize_tasks.top_task(global_cx, node)
   -- Replicate all region-typed parameters to refer to the original values
   local region_params = {}
   for idx = 1, #node.params do
@@ -2332,6 +2332,8 @@ function parallelize_tasks.top_task(node)
     span = node.span,
   }
 
+  -- Hack: prevents parallelized verions from going through parallelizer again
+  global_cx[prototype] = {}
   local task_ast_optimized = passes.optimize(task_ast)
   local task_code = passes.codegen(task_ast_optimized, true)
 
@@ -2339,17 +2341,17 @@ function parallelize_tasks.top_task(node)
 end
 
 function parallelize_tasks.entry(node)
-  if node:is(ast.typed.top.Task) and not global_context[node.name] then
+  if node:is(ast.typed.top.Task) then
+    if global_context[node.prototype] then return node end
     if node.annotations.parallel:is(ast.annotation.Demand) then
       check_parallelizable.top_task(node)
       local task_name = node.name
-      local new_task_code, cx = parallelize_tasks.top_task(node)
+      local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
       local info = {
         task = new_task_code,
         cx = cx,
       }
-      global_context[task_name] = info
-      global_context[new_task_code.name] = info
+      global_context[node.prototype] = info
       return node
     else
       return parallelize_task_calls.top_task(global_context, node)
