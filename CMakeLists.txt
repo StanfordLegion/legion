@@ -76,7 +76,9 @@ if (USE_LIBDL)
  list(APPEND EXTRA_LIBS dl)
 endif (USE_LIBDL)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lrt") 
+if (NOT APPLE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lrt")
+endif(NOT APPLE)
 set (CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -ldl")
 #------------------------------------------------------------------------------#
 # THREADS configuration
