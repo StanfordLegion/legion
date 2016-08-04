@@ -168,7 +168,7 @@ end
 
 function pretty.expr_condition(cx, node)
   return join({
-      join(node.conditions, true), "(", pretty.expr(cx, node.value), ")"})
+      join(node.conditions:map(tostring), true), "(", pretty.expr(cx, node.value), ")"})
 end
 
 function pretty.expr_region_root(cx, node)

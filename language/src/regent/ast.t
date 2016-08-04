@@ -52,6 +52,8 @@ function ast_node:__newindex(field, value)
   error(node_type .. " has no field '" .. field .. "' (in assignment)", 2)
 end
 
+ast_node.hash = false -- Don't blow up inside a data.newmap()
+
 function ast.is_node(node)
   return type(node) == "table" and getmetatable(node) == ast_node
 end
@@ -96,7 +98,15 @@ local function ast_node_tostring(node, indent, hide)
 end
 
 function ast_node:tostring(hide)
-  return ast_node_tostring(self, 0, hide)
+  if self.node_type.print_custom then
+    if type(self.node_type.print_custom) == "string" then
+      return self.node_type.print_custom
+    else
+      return self.node_type.print_custom(self)
+    end
+  else
+    return ast_node_tostring(self, 0, hide)
+  end
 end
 
 function ast_node:__tostring()
@@ -152,6 +162,22 @@ function ast_ctor:__index(field)
   error(tostring(self) .. " has no field '" .. field .. "'", 2)
 end
 
+function ast_ctor:set_memoize()
+  assert(not self.memoize_cache)
+  if #self.expected_fields > 0 then
+    self.memoize_cache = {}
+  else
+    self.memoize_cache = self({})
+  end
+  return self
+end
+
+function ast_ctor:set_print_custom(thunk)
+  assert(not self.print_custom)
+  self.print_custom = thunk
+  return self
+end
+
 function ast_ctor:__call(node)
   assert(type(node) == "table", tostring(self) .. " expected table")
 
@@ -159,28 +185,52 @@ function ast_ctor:__call(node)
   -- node. This is not true if the incoming node is itself an
   -- AST. (ASTs are not supposed to be mutable!) If so, copy the
   -- fields.
+  local result = node
   if ast.is_node(node) then
     local copy = {}
     for k, v in pairs(node) do
       copy[k] = v
     end
     copy["node_type"] = nil
-    node = copy
+    result = copy
   end
 
-  for i, f in ipairs(self.expected_fields) do
-    if rawget(node, f) == nil then
+  -- Check that the supplied fields are necessary and sufficient.
+  for _, f in ipairs(self.expected_fields) do
+    if rawget(result, f) == nil then
       error(tostring(self) .. " missing required argument '" .. f .. "'", 2)
     end
   end
-  for f, _ in pairs(node) do
+  for f, _ in pairs(result) do
     if rawget(self.expected_field_set, f) == nil then
       error(tostring(self) .. " does not require argument '" .. f .. "'", 2)
     end
   end
-  rawset(node, "node_type", self)
-  setmetatable(node, ast_node)
-  return node
+
+  -- Prepare the result to be returned.
+  rawset(result, "node_type", self)
+  setmetatable(result, ast_node)
+
+  if self.memoize_cache then
+    local cache = self.memoize_cache
+    for i, f in ipairs(self.expected_fields) do
+      local value = rawget(result, f)
+      if not cache[value] then
+        if i < #self.expected_fields then
+          cache[value] = {}
+        else
+          cache[value] = result
+        end
+      end
+      cache = cache[value]
+    end
+    if cache then
+      assert(cache:is(self))
+      return cache
+    end
+  end
+
+  return result
 end
 
 function ast_ctor:__tostring()
@@ -246,6 +296,8 @@ function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hid
       expected_field_set = data.set(fields),
       print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
       print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
+      print_custom = false,
+      memoize_cache = false,
     }, ast_ctor)
 
   assert(rawget(self, ctor_name) == nil,
@@ -492,6 +544,38 @@ function ast.default_annotations()
   }
 end
 
+-- Kinds: Constraints, Privileges, Coherence, Flags, Conditions, Disjointness
+
+ast:inner("constraint_kind")
+ast.constraint_kind:leaf("Subregion"):set_memoize():set_print_custom("<=")
+ast.constraint_kind:leaf("Disjointness"):set_memoize():set_print_custom("*")
+
+ast:inner("privilege_kind", {})
+ast.privilege_kind:leaf("Reads"):set_memoize():set_print_custom("reads")
+ast.privilege_kind:leaf("Writes"):set_memoize():set_print_custom("writes")
+ast.privilege_kind:leaf("Reduces", {"op"}):set_memoize():set_print_custom(
+  function(node) return "reduces " .. tostring(node.op) end)
+
+ast:inner("coherence_kind", {})
+ast.coherence_kind:leaf("Exclusive"):set_memoize():set_print_custom("exclusive")
+ast.coherence_kind:leaf("Atomic"):set_memoize():set_print_custom("atomic")
+ast.coherence_kind:leaf("Simultaneous"):set_memoize():set_print_custom(
+  "simultaneous")
+ast.coherence_kind:leaf("Relaxed"):set_memoize():set_print_custom("relaxed")
+
+ast:inner("flag_kind", {})
+ast.flag_kind:leaf("NoAccessFlag"):set_memoize():set_print_custom(
+  "no_access_flag")
+
+ast:inner("condition_kind", {})
+ast.condition_kind:leaf("Arrives"):set_memoize():set_print_custom("arrives")
+ast.condition_kind:leaf("Awaits"):set_memoize():set_print_custom("awaits")
+
+ast:inner("disjointness_kind")
+ast.disjointness_kind:leaf("Aliased"):set_memoize():set_print_custom("aliased")
+ast.disjointness_kind:leaf("Disjoint"):set_memoize():set_print_custom(
+  "disjoint")
+
 -- Node Types (Unspecialized)
 
 ast:inner("unspecialized", {"span"})
@@ -503,37 +587,16 @@ ast.unspecialized.region:leaf("Bare", {"region_name"})
 ast.unspecialized.region:leaf("Root", {"region_name", "fields"})
 ast.unspecialized.region:leaf("Field", {"field_name", "fields"})
 
-ast.unspecialized:inner("constraint_kind")
-ast.unspecialized.constraint_kind:leaf("Subregion")
-ast.unspecialized.constraint_kind:leaf("Disjointness")
 ast.unspecialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
-ast.unspecialized:inner("privilege_kind", {})
-ast.unspecialized.privilege_kind:leaf("Reads")
-ast.unspecialized.privilege_kind:leaf("Writes")
-ast.unspecialized.privilege_kind:leaf("Reduces", {"op"})
 ast.unspecialized:leaf("Privilege", {"privileges", "regions"})
 
-ast.unspecialized:inner("coherence_kind", {})
-ast.unspecialized.coherence_kind:leaf("Exclusive")
-ast.unspecialized.coherence_kind:leaf("Atomic")
-ast.unspecialized.coherence_kind:leaf("Simultaneous")
-ast.unspecialized.coherence_kind:leaf("Relaxed")
 ast.unspecialized:leaf("Coherence", {"coherence_modes", "regions"})
 
-ast.unspecialized:inner("flag_kind", {})
-ast.unspecialized.flag_kind:leaf("NoAccessFlag")
 ast.unspecialized:leaf("Flag", {"flags", "regions"})
 
 ast.unspecialized:leaf("ConditionVariable", {"name"})
-ast.unspecialized:inner("condition_kind", {})
-ast.unspecialized.condition_kind:leaf("Arrives")
-ast.unspecialized.condition_kind:leaf("Awaits")
 ast.unspecialized:leaf("Condition", {"conditions", "variables"})
-
-ast.unspecialized:inner("disjointness_kind")
-ast.unspecialized.disjointness_kind:leaf("Aliased")
-ast.unspecialized.disjointness_kind:leaf("Disjoint")
 
 ast.unspecialized:inner("expr", {"annotations"})
 ast.unspecialized.expr:leaf("ID", {"name"})
@@ -636,32 +699,15 @@ ast.specialized.region:leaf("Bare", {"symbol"})
 ast.specialized.region:leaf("Root", {"symbol", "fields"})
 ast.specialized.region:leaf("Field", {"field_name", "fields"})
 
-ast.specialized:inner("constraint_kind")
-ast.specialized.constraint_kind:leaf("Subregion")
-ast.specialized.constraint_kind:leaf("Disjointness")
 ast.specialized:leaf("Constraint", {"lhs", "op", "rhs"})
 
-ast.specialized:inner("privilege_kind", {})
-ast.specialized.privilege_kind:leaf("Reads")
-ast.specialized.privilege_kind:leaf("Writes")
-ast.specialized.privilege_kind:leaf("Reduces", {"op"})
 ast.specialized:leaf("Privilege", {"privileges", "regions"})
 
-ast.specialized:inner("coherence_kind", {})
-ast.specialized.coherence_kind:leaf("Exclusive")
-ast.specialized.coherence_kind:leaf("Atomic")
-ast.specialized.coherence_kind:leaf("Simultaneous")
-ast.specialized.coherence_kind:leaf("Relaxed")
 ast.specialized:leaf("Coherence", {"coherence_modes", "regions"})
 
-ast.specialized:inner("flag_kind", {})
-ast.specialized.flag_kind:leaf("NoAccessFlag")
 ast.specialized:leaf("Flag", {"flags", "regions"})
 
 ast.specialized:leaf("ConditionVariable", {"symbol"})
-ast.specialized:inner("condition_kind", {})
-ast.specialized.condition_kind:leaf("Arrives")
-ast.specialized.condition_kind:leaf("Awaits")
 ast.specialized:leaf("Condition", {"conditions", "variables"})
 
 ast.specialized:inner("expr", {"annotations"})

@@ -134,7 +134,9 @@ local function analyze_leaf_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.IndexLaunchArgsProvably) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       return true
 
@@ -248,7 +250,9 @@ local function analyze_inner_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.IndexLaunchArgsProvably) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       return true
 

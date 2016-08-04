@@ -252,7 +252,9 @@ local function validate_vars_node(cx)
       node:is(ast.typed.stat.UnmapRegions) or
       node:is(ast.typed.Block) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       continuation(node, true)
 

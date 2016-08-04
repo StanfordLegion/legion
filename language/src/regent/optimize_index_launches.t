@@ -90,11 +90,10 @@ end
 local function analyze_noninterference_previous(
     cx, task, region_type, regions_previously_used, mapping)
   for i, other_region_type in pairs(regions_previously_used) do
-    local constraint = {
-      lhs = region_type,
-      rhs = other_region_type,
-      op = "*"
-    }
+    local constraint = std.constraint(
+      region_type,
+      other_region_type,
+      std.disjointness)
 
     if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
