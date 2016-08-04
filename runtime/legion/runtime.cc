@@ -5047,7 +5047,7 @@ namespace Legion {
             {
               runtime->handle_manager_request(derez, remote_address_space);
               break;
-            }
+            } 
           case SEND_FUTURE_RESULT:
             {
               runtime->handle_future_result(derez);
@@ -5180,6 +5180,17 @@ namespace Legion {
           case SEND_VERSION_OWNER_RESPONSE:
             {
               runtime->handle_version_owner_response(derez);
+              break;
+            }
+          case SEND_VERSION_STATE_REQUEST:
+            {
+              runtime->handle_version_state_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_VERSION_STATE_RESPONSE:
+            {
+              runtime->handle_version_state_response(derez,
+                                                     remote_address_space);
               break;
             }
           case SEND_VERSION_STATE_UPDATE_REQUEST:
@@ -15049,6 +15060,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_state_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_state_update_request(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15971,6 +15991,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::handle_version_state_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_response(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::handle_version_state_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_version_state_update_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -16813,6 +16849,18 @@ namespace Legion {
         assert(false);
       // Have to static cast since the memory might not have been initialized
       return static_cast<PhysicalManager*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionState* Runtime::find_or_request_version_state(DistributedID did,
+                                                         RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable *dc = find_or_request_distributed_collectable<
+        VersionState, SEND_VERSION_STATE_REQUEST, VERSION_VIRTUAL_CHANNEL>(did,
+                                                                        ready);
+      // Have to static cast since the memory might not have been initialized
+      return static_cast<VersionState*>(dc);
     }
 
     //--------------------------------------------------------------------------

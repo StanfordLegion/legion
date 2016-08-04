@@ -861,6 +861,12 @@ namespace Legion {
                                      const FieldMask &request_mask, 
                                      RtEvent precondition=RtEvent::NO_RT_EVENT);
     public:
+      void send_version_state(AddressSpaceID source);
+      static void handle_version_state_request(Deserializer &derez,
+                                      Runtime *runtime, AddressSpaceID source);
+      static void handle_version_state_response(Deserializer &derez,
+                                      Runtime *runtime, AddressSpaceID source);
+    public:
       void handle_version_state_update_request(AddressSpaceID source, 
                                         RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,

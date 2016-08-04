@@ -1999,6 +1999,7 @@ namespace Legion {
                                                  Serializer &rez);
       void send_version_owner_request(AddressSpaceID target, Serializer &rez);
       void send_version_owner_response(AddressSpaceID target, Serializer &rez);
+      void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_update_request(AddressSpaceID target, 
                                              Serializer &rez);
       void send_version_state_update_response(AddressSpaceID target, 
@@ -2154,6 +2155,10 @@ namespace Legion {
       void handle_version_owner_request(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_version_owner_response(Deserializer &derez);
+      void handle_version_state_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_version_state_response(Deserializer &derez,
+                                         AddressSpaceID source);
       void handle_version_state_update_request(Deserializer &derez);
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_manager_advance(Deserializer &derez,

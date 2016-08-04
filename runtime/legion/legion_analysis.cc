@@ -6175,6 +6175,102 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionState::send_version_state(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(version_number);
+        if (logical_node->is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(logical_node->as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(logical_node->as_partition_node()->handle);
+        }
+        rez.serialize(has_initial_state);
+        if (has_initial_state)
+          rez.serialize(initial_space);
+      }
+      runtime->send_version_state_response(target, rez);
+      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::handle_version_state_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      VersionState *state = dynamic_cast<VersionState*>(dc);
+      assert(state != NULL);
+#else
+      VersionState *state = static_cast<VersionState*>(dc);
+#endif
+      state->send_version_state(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::handle_version_state_response(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      VersionID version_number;
+      derez.deserialize(version_number);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      bool has_initial_state;
+      derez.deserialize(has_initial_state);
+      AddressSpaceID initial_space = 0;
+      if (has_initial_state)
+        derez.deserialize(initial_space);
+      void *location;
+      VersionState *state = NULL;
+      if (runtime->find_pending_collectable_location(did, location))
+        state = legion_new_in_place<VersionState>(location, version_number,
+                                                  runtime, did, source, 
+                                                  runtime->address_space,
+                                                  has_initial_state,
+                                                  initial_space, node,
+                                                  false/*register now*/);
+      else
+        state = legion_new<VersionState>(version_number, runtime, did,
+                                         source, runtime->address_space,
+                                         has_initial_state, initial_space,
+                                         node, false/*register now*/);
+      // Once construction is complete then we do the registration
+      state->register_with_runtime(NULL/*no remote registration needed*/);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionState::handle_version_state_update_request(
                     AddressSpaceID source, RtUserEvent to_trigger, 
                     VersionRequestKind request_kind, FieldMask &request_mask)

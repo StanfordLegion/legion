@@ -582,6 +582,8 @@ namespace Legion {
       SEND_REMOTE_CONVERT_VIRTUAL,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
+      SEND_VERSION_STATE_REQUEST,
+      SEND_VERSION_STATE_RESPONSE,
       SEND_VERSION_STATE_UPDATE_REQUEST,
       SEND_VERSION_STATE_UPDATE_RESPONSE,
       SEND_VERSION_MANAGER_ADVANCE,
@@ -696,6 +698,8 @@ namespace Legion {
         "Send Remote Convert Virtual Instances",                      \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
+        "Send Version State Request",                                 \
+        "Send Version State Response",                                \
         "Send Version State Update Request",                          \
         "Send Version State Update Response",                         \
         "Send Version Manager Advance",                               \
