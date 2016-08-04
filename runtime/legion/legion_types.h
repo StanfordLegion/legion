@@ -259,7 +259,7 @@ namespace Legion {
       HLR_SPACE_INDEPENDENCE_TASK_ID,
       HLR_PENDING_CHILD_TASK_ID,
       HLR_DECREMENT_PENDING_TASK_ID,
-      HLR_SEND_VERSION_STATE_TASK_ID,
+      HLR_SEND_VERSION_STATE_UPDATE_TASK_ID,
       HLR_ADD_TO_DEP_QUEUE_TASK_ID,
       HLR_WINDOW_WAIT_TASK_ID,
       HLR_ISSUE_FRAME_TASK_ID,
@@ -332,7 +332,7 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
-        "Send Version State",                                     \
+        "Send Version State Update",                              \
         "Add to Dependence Queue",                                \
         "Window Wait",                                            \
         "Issue Frame",                                            \
@@ -582,8 +582,12 @@ namespace Legion {
       SEND_REMOTE_CONVERT_VIRTUAL,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
-      SEND_VERSION_STATE_REQUEST,
-      SEND_VERSION_STATE_RESPONSE,
+      SEND_VERSION_STATE_UPDATE_REQUEST,
+      SEND_VERSION_STATE_UPDATE_RESPONSE,
+      SEND_VERSION_MANAGER_ADVANCE,
+      SEND_VERSION_MANAGER_INVALIDATE,
+      SEND_VERSION_MANAGER_REQUEST,
+      SEND_VERSION_MANAGER_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_GC_PRIORITY_UPDATE,
@@ -692,8 +696,12 @@ namespace Legion {
         "Send Remote Convert Virtual Instances",                      \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
-        "Send Version State Request",                                 \
-        "Send Version State Response",                                \
+        "Send Version State Update Request",                          \
+        "Send Version State Update Response",                         \
+        "Send Version Manager Advance",                               \
+        "Send Version Manager Invalidate",                            \
+        "Send Version Manager Request",                               \
+        "Send Version Manager Response",                              \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send GC Priority Update",                                    \

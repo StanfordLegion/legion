@@ -5182,15 +5182,36 @@ namespace Legion {
               runtime->handle_version_owner_response(derez);
               break;
             }
-          case SEND_VERSION_STATE_REQUEST:
+          case SEND_VERSION_STATE_UPDATE_REQUEST:
             {
-              runtime->handle_version_state_request(derez);
+              runtime->handle_version_state_update_request(derez);
               break;
             }
-          case SEND_VERSION_STATE_RESPONSE:
+          case SEND_VERSION_STATE_UPDATE_RESPONSE:
             {
-              runtime->handle_version_state_response(derez,
-                                                     remote_address_space);
+              runtime->handle_version_state_update_response(derez);
+              break;
+            }
+          case SEND_VERSION_MANAGER_ADVANCE:
+            {
+              runtime->handle_version_manager_advance(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_VERSION_MANAGER_INVALIDATE:
+            {
+              runtime->handle_version_manager_invalidate(derez);
+              break;
+            }
+          case SEND_VERSION_MANAGER_REQUEST:
+            {
+              runtime->handle_version_manager_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_VERSION_MANAGER_RESPONSE:
+            {
+              runtime->handle_version_manager_response(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -15028,20 +15049,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_request(AddressSpaceID target,
-                                             Serializer &rez)
+    void Runtime::send_version_state_update_request(AddressSpaceID target,
+                                                    Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, 
+        SEND_VERSION_STATE_UPDATE_REQUEST,DEFAULT_VIRTUAL_CHANNEL,true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_response(AddressSpaceID target,
-                                              Serializer &rez)
+    void Runtime::send_version_state_update_response(AddressSpaceID target,
+                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
+      find_messenger(target)->send_message(rez, 
+      SEND_VERSION_STATE_UPDATE_RESPONSE,DEFAULT_VIRTUAL_CHANNEL,true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_advance(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_invalidate(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_request(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This goes on the version virtual channel so that it can 
+      // be ordered with respect to advances
+      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_REQUEST,
+                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This comes back on the default channel in case we need to page
+      // in any version managers from remote nodes
+      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -15910,18 +15971,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_request(Deserializer &derez)
+    void Runtime::handle_version_state_update_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionState::process_version_state_request(this, derez);
+      VersionState::process_version_state_update_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_response(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_version_state_update_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionState::process_version_state_response(this, derez, source);
+      VersionState::process_version_state_update_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_advance(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_remote_advance(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_invalidate(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_remote_invalidate(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -20622,11 +20712,11 @@ namespace Legion {
             dargs->parent_ctx->decrement_pending();
             break;
           }
-        case HLR_SEND_VERSION_STATE_TASK_ID:
+        case HLR_SEND_VERSION_STATE_UPDATE_TASK_ID:
           {
             VersionState::SendVersionStateArgs *vargs = 
               (VersionState::SendVersionStateArgs*)args;
-            vargs->proxy_this->send_version_state(vargs->target, 
+            vargs->proxy_this->send_version_state_update(vargs->target, 
                                                   *(vargs->request_mask),
                                                   vargs->to_trigger);
             legion_delete(vargs->request_mask);

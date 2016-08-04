@@ -1999,8 +1999,15 @@ namespace Legion {
                                                  Serializer &rez);
       void send_version_owner_request(AddressSpaceID target, Serializer &rez);
       void send_version_owner_response(AddressSpaceID target, Serializer &rez);
-      void send_version_state_request(AddressSpaceID target, Serializer &rez);
-      void send_version_state_response(AddressSpaceID target, Serializer &rez);
+      void send_version_state_update_request(AddressSpaceID target, 
+                                             Serializer &rez);
+      void send_version_state_update_response(AddressSpaceID target, 
+                                              Serializer &rez);
+      void send_version_manager_advance(AddressSpaceID target, Serializer &rez);
+      void send_version_manager_invalidate(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_version_manager_request(AddressSpaceID target, Serializer &rez);
+      void send_version_manager_response(AddressSpaceID target,Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
@@ -2147,9 +2154,14 @@ namespace Legion {
       void handle_version_owner_request(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_version_owner_response(Deserializer &derez);
-      void handle_version_state_request(Deserializer &derez);
-      void handle_version_state_response(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_version_state_update_request(Deserializer &derez);
+      void handle_version_state_update_response(Deserializer &derez);
+      void handle_version_manager_advance(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_version_manager_invalidate(Deserializer &derez);
+      void handle_version_manager_request(Deserializer &derez, 
+                                          AddressSpaceID source);
+      void handle_version_manager_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
@@ -2252,6 +2264,8 @@ namespace Legion {
                                                 RtEvent &ready);
       PhysicalManager* find_or_request_physical_manager(DistributedID did, 
                                                         RtEvent &ready);
+      VersionState* find_or_request_version_state(DistributedID did,
+                                                  RtEvent &ready);
     protected:
       template<typename T, MessageKind MK, VirtualChannelKind VC>
       DistributedCollectable* find_or_request_distributed_collectable(

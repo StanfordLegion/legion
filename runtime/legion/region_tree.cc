@@ -1685,7 +1685,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
-      parent->advance_version_numbers(ctx.get_id(), path, advance_mask,
+      const AddressSpaceID local = runtime->address_space;
+      parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
                                       parent_ctx, dedup_opens, dedup_advances,
                                       open_epoch, advance_epoch, ready_events);
     }
@@ -12122,7 +12123,7 @@ namespace Legion {
           {
             const AddressSpaceID local_space = context->runtime->address_space;
             manager.advance_versions(version_mask, parent_ctx, 
-                         true/*has initial state*/, local_space, ready_events);
+             true/*has initial state*/, local_space, local_space, ready_events);
           }
           // Record the actual versions to be used here 
           manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
@@ -12150,6 +12151,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::advance_version_numbers(ContextID ctx,
+                                               AddressSpaceID local_space,
                                                const RegionTreePath &path,
                                                const FieldMask &advance_mask,
                                                SingleTask *parent_ctx, 
@@ -12163,7 +12165,7 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       // Perform the advance
       manager.advance_versions(advance_mask, parent_ctx, 
-           false/*has initial state*/, 0/*dummy space*/, ready_events,
+           false/*has initial state*/, local_space, local_space, ready_events,
            dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       const unsigned depth = get_depth();
@@ -12172,7 +12174,7 @@ namespace Legion {
       if (!arrived)
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
-        child->advance_version_numbers(ctx, path, advance_mask, 
+        child->advance_version_numbers(ctx, local_space, path, advance_mask, 
                                        parent_ctx, dedup_opens, dedup_advances, 
                                        open_epoch, advance_epoch, ready_events);
       }

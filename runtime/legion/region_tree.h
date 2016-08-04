@@ -1411,6 +1411,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal);
       void advance_version_numbers(ContextID ctx,
+                                   AddressSpaceID local_space,
                                    const RegionTreePath &path,
                                    const FieldMask &advance_mask,
                                    SingleTask *parent_ctx,

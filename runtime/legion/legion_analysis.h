@@ -667,11 +667,15 @@ namespace Legion {
                                      std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, SingleTask *context,
                             bool has_initial_state,AddressSpaceID initial_space,
+                            AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0);
+      void invalidate_version_infos(const FieldMask &invalidate_mask);
+      static void filter_version_info(const FieldMask &invalidate_mask,
+               LegionMap<VersionID,VersionStates>::aligned &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -680,6 +684,47 @@ namespace Legion {
     protected:
       VersionState* create_new_version_state(VersionID vid,
           bool has_initial_state, AddressSpaceID initial_space);
+    public:
+      RtEvent send_remote_advance(const FieldMask &advance_mask,
+                                  bool has_initial_state,
+                                  AddressSpaceID initial_space,
+                                  bool dedup_opens, 
+                                  ProjectionEpochID open_epoch,
+                                  bool dedup_advances,
+                                  ProjectionEpochID advance_epoch);
+      static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
+                                        AddressSpaceID source_space);
+    public:
+      RtEvent send_remote_invalidate(AddressSpaceID target,
+                                     const FieldMask &invalidate_mask);
+      static void handle_remote_invalidate(Deserializer &derez, 
+                                           Runtime *runtime);
+    public:
+      RtEvent send_remote_version_request(FieldMask request_mask,
+                                          std::set<RtEvent> &ready_events);
+      static void handle_request(Deserializer &derez, Runtime *runtime,
+                                 AddressSpaceID source_space);
+    public:
+      void pack_response(Serializer &rez, AddressSpaceID target,
+                         const FieldMask &request_mask);
+      static void find_send_infos(
+          LegionMap<VersionID,VersionStates>::aligned& version_infos, 
+          const FieldMask &request_mask, 
+          LegionMap<VersionState*,FieldMask>::aligned& send_infos);
+      static void pack_send_infos(Serializer &rez, const
+          LegionMap<VersionState*,FieldMask>::aligned& send_infos);
+    public:
+      void unpack_response(Deserializer &derez, RtUserEvent done_event,
+                           const FieldMask &update_mask,
+                           std::set<RtEvent> *applied_events);
+      static void unpack_send_infos(Deserializer &derez,
+          LegionMap<VersionState*,FieldMask>::aligned &infos,
+          Runtime *runtime, std::set<RtEvent> &preconditions);
+      static void merge_send_infos(
+          LegionMap<VersionID,VersionStates>::aligned &target_infos, 
+          const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
+          ReferenceMutator *mutator);
+      static void handle_response(Deserializer &derez);
     protected:
       void sanity_check(void);
     public:
@@ -708,6 +753,8 @@ namespace Legion {
       LegionMap<ProjectionEpochID,FieldMask>::aligned previous_opens;
       // Information about previous advances
       LegionMap<ProjectionEpochID,FieldMask>::aligned previous_advancers;
+      // Remote information about outstanding requests we've made
+      LegionMap<RtUserEvent,FieldMask>::aligned outstanding_requests;
     };
 
     typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
@@ -803,22 +850,23 @@ namespace Legion {
       void request_final_version_state(const FieldMask &request_mask,
                                        std::set<RtEvent> &preconditions);
     public:
-      void send_version_state(AddressSpaceID target,
+      void send_version_state_update(AddressSpaceID target,
                          const FieldMask &request_mask, RtUserEvent to_trigger);
-      void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                          RtUserEvent to_trigger, const FieldMask &request_mask,
+      void send_version_state_update_request(AddressSpaceID target, 
+                          AddressSpaceID src, RtUserEvent to_trigger, 
+                          const FieldMask &request_mask,
                           VersionRequestKind request_kind);
-      void launch_send_version_state(AddressSpaceID target,
+      void launch_send_version_state_update(AddressSpaceID target,
                                      RtUserEvent to_trigger, 
                                      const FieldMask &request_mask, 
                                      RtEvent precondition=RtEvent::NO_RT_EVENT);
     public:
-      void handle_version_state_request(AddressSpaceID source, 
+      void handle_version_state_update_request(AddressSpaceID source, 
                                         RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,
                                         FieldMask &request_mask);
-      void handle_version_state_response(AddressSpaceID source,
-          RtUserEvent to_trigger, Deserializer &derez, const FieldMask &update);
+      void handle_version_state_update_response(RtUserEvent to_trigger, 
+                          Deserializer &derez, const FieldMask &update);
     public:
       void remove_version_state_ref(ReferenceSource ref_kind, 
                                      RtEvent done_event);
@@ -826,10 +874,10 @@ namespace Legion {
     public:
       static void process_view_references(const void *args);
     public:
-      static void process_version_state_request(Runtime *rt, 
+      static void process_version_state_update_request(Runtime *rt, 
                                                 Deserializer &derez);
-      static void process_version_state_response(Runtime *rt,
-                              Deserializer &derez, AddressSpaceID source); 
+      static void process_version_state_update_response(Runtime *rt,
+                                                 Deserializer &derez); 
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;
