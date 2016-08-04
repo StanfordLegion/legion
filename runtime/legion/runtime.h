@@ -1091,6 +1091,7 @@ namespace Legion {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool returns_value(void) const { return has_return_value; }
+      inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
       inline const TaskLayoutConstraintSet& 

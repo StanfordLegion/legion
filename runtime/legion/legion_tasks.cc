@@ -7232,13 +7232,17 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_operation_events(get_unique_id(), start_condition, 
+        LegionSpy::log_variant_decision(unique_op_id, selected_variant);
+        LegionSpy::log_operation_events(unique_op_id, start_condition, 
                                         completion_event);
         LegionSpy::log_task_priority(unique_op_id, task_priority);
       }
 #else
       if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_variant_decision(unique_op_id, selected_variant);
         LegionSpy::log_task_priority(unique_op_id, task_priority);
+      }
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
                             start_condition, task_priority, profiling_requests);

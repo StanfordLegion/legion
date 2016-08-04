@@ -124,7 +124,9 @@ local function convert_lua_value(cx, node, value, allow_lists)
     value = value:getast()
     if value:is(ast.specialized.top.QuoteExpr) then
       assert(value.expr:is(ast.specialized.expr))
-      local value = alpha_convert.entry(value, cx.env, cx.mapping)
+      if not cx.is_quote then
+        value = alpha_convert.entry(value, cx.env, cx.mapping)
+      end
       return value.expr
     elseif value:is(ast.specialized.top.QuoteStat) then
       log.error(node, "unable to specialize quoted statement as an expression")
@@ -506,12 +508,8 @@ function specialize.condition_variables(cx, node, allow_lists)
 end
 
 function specialize.privilege_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.privilege_kind.Reads) then
-    return ast.specialized.privilege_kind.Reads(node)
-  elseif node:is(ast.unspecialized.privilege_kind.Writes) then
-    return ast.specialized.privilege_kind.Writes(node)
-  elseif node:is(ast.unspecialized.privilege_kind.Reduces) then
-    return ast.specialized.privilege_kind.Reduces(node)
+  if node:is(ast.privilege_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -536,14 +534,8 @@ function specialize.privileges(cx, node, allow_lists)
 end
 
 function specialize.coherence_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.coherence_kind.Exclusive) then
-    return ast.specialized.coherence_kind.Exclusive(node)
-  elseif node:is(ast.unspecialized.coherence_kind.Atomic) then
-    return ast.specialized.coherence_kind.Atomic(node)
-  elseif node:is(ast.unspecialized.coherence_kind.Simultaneous) then
-    return ast.specialized.coherence_kind.Simultaneous(node)
-  elseif node:is(ast.unspecialized.coherence_kind.Relaxed) then
-    return ast.specialized.coherence_kind.Relaxed(node)
+  if node:is(ast.coherence_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -568,8 +560,8 @@ function specialize.coherence_modes(cx, node, allow_lists)
 end
 
 function specialize.flag_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.flag_kind.NoAccessFlag) then
-    return ast.specialized.flag_kind.NoAccessFlag(node)
+  if node:is(ast.flag_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -592,10 +584,8 @@ function specialize.flags(cx, node, allow_lists)
 end
 
 function specialize.condition_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.condition_kind.Arrives) then
-    return ast.specialized.condition_kind.Arrives(node)
-  elseif node:is(ast.unspecialized.condition_kind.Awaits) then
-    return ast.specialized.condition_kind.Awaits(node)
+  if node:is(ast.condition_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -635,10 +625,8 @@ function specialize.expr_conditions(cx, node, allow_lists)
 end
 
 function specialize.constraint_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.constraint_kind.Subregion) then
-    return ast.specialized.constraint_kind.Subregion(node)
-  elseif node:is(ast.unspecialized.constraint_kind.Disjointness) then
-    return ast.specialized.constraint_kind.Disjointness(node)
+  if node:is(ast.constraint_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -659,10 +647,8 @@ function specialize.constraints(cx, node, allow_lists)
 end
 
 function specialize.disjointness_kind(cx, node, allow_lists)
-  if node:is(ast.unspecialized.disjointness_kind.Aliased) then
-    return std.aliased
-  elseif node:is(ast.unspecialized.disjointness_kind.Disjoint) then
-    return std.disjoint
+  if node:is(ast.disjointness_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -1111,6 +1097,14 @@ function specialize.expr_list_range(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_list_ispace(cx, node, allow_lists)
+  return ast.specialized.expr.ListIspace {
+    ispace = specialize.expr(cx, node.ispace),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_phase_barrier(cx, node, allow_lists)
   return ast.specialized.expr.PhaseBarrier {
     value = specialize.expr(cx, node.value),
@@ -1351,6 +1345,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ListRange) then
     return specialize.expr_list_range(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.ListIspace) then
+    return specialize.expr_list_ispace(cx, node)
 
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return specialize.expr_phase_barrier(cx, node, allow_lists)
@@ -1713,7 +1710,9 @@ local function get_quote_contents(cx, expr)
   local value = expr:getast()
   if value:is(ast.specialized.top.QuoteExpr) then
     assert(value.expr:is(ast.specialized.expr))
-    local value = alpha_convert.entry(value, cx.env, cx.mapping)
+    if not cx.is_quote then
+      value = alpha_convert.entry(value, cx.env, cx.mapping)
+    end
     return terralib.newlist({
       ast.specialized.stat.Expr {
         expr = value.expr,
@@ -1723,7 +1722,9 @@ local function get_quote_contents(cx, expr)
     })
   elseif value:is(ast.specialized.top.QuoteStat) then
     assert(value.block:is(ast.specialized.Block))
-    local value = alpha_convert.entry(value, cx.env, cx.mapping)
+    if not cx.is_quote then
+      value = alpha_convert.entry(value, cx.env, cx.mapping)
+    end
     return value.block.stats
   else
     assert(false)

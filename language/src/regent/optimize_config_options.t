@@ -99,6 +99,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.UnsafeCast) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary) or
       node:is(ast.typed.expr.Deref)
@@ -134,7 +135,9 @@ local function analyze_leaf_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.IndexLaunchArgsProvably) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       return true
 
@@ -203,6 +206,7 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
@@ -248,7 +252,9 @@ local function analyze_inner_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.IndexLaunchArgsProvably) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       return true
 
