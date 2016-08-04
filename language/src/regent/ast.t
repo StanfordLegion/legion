@@ -550,24 +550,24 @@ ast:inner("constraint_kind")
 ast.constraint_kind:leaf("Subregion"):set_memoize():set_print_custom("<=")
 ast.constraint_kind:leaf("Disjointness"):set_memoize():set_print_custom("*")
 
-ast:inner("privilege_kind", {})
+ast:inner("privilege_kind")
 ast.privilege_kind:leaf("Reads"):set_memoize():set_print_custom("reads")
 ast.privilege_kind:leaf("Writes"):set_memoize():set_print_custom("writes")
 ast.privilege_kind:leaf("Reduces", {"op"}):set_memoize():set_print_custom(
   function(node) return "reduces " .. tostring(node.op) end)
 
-ast:inner("coherence_kind", {})
+ast:inner("coherence_kind")
 ast.coherence_kind:leaf("Exclusive"):set_memoize():set_print_custom("exclusive")
 ast.coherence_kind:leaf("Atomic"):set_memoize():set_print_custom("atomic")
 ast.coherence_kind:leaf("Simultaneous"):set_memoize():set_print_custom(
   "simultaneous")
 ast.coherence_kind:leaf("Relaxed"):set_memoize():set_print_custom("relaxed")
 
-ast:inner("flag_kind", {})
+ast:inner("flag_kind")
 ast.flag_kind:leaf("NoAccessFlag"):set_memoize():set_print_custom(
   "no_access_flag")
 
-ast:inner("condition_kind", {})
+ast:inner("condition_kind")
 ast.condition_kind:leaf("Arrives"):set_memoize():set_print_custom("arrives")
 ast.condition_kind:leaf("Awaits"):set_memoize():set_print_custom("awaits")
 
@@ -575,6 +575,16 @@ ast:inner("disjointness_kind")
 ast.disjointness_kind:leaf("Aliased"):set_memoize():set_print_custom("aliased")
 ast.disjointness_kind:leaf("Disjoint"):set_memoize():set_print_custom(
   "disjoint")
+
+-- Constraints
+
+ast:inner("constraint")
+ast.constraint:leaf("Constraint", {"lhs", "rhs", "op"})
+
+-- Privileges
+
+ast:inner("privilege")
+ast.privilege:leaf("Privilege", {"privilege", "region", "field_path"})
 
 -- Node Types (Unspecialized)
 

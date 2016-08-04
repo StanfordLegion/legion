@@ -135,6 +135,18 @@ std.disjointness = ast.constraint_kind.Disjointness {}
 -- ## Privileges
 -- #################
 
+function std.privilege(privilege, region, field_path)
+  assert(privilege:is(ast.privilege_kind))
+  assert(std.is_symbol(region))
+  assert(data.is_tuple(field_path))
+
+  return ast.privilege.Privilege {
+    region = region,
+    field_path = field_path,
+    privilege = privilege,
+  }
+end
+
 function std.privileges(privilege, regions_fields)
   local privileges = terralib.newlist()
   for _, region_fields in ipairs(regions_fields) do
@@ -148,12 +160,7 @@ function std.privileges(privilege, regions_fields)
     end
     assert(std.is_symbol(region) and terralib.islist(fields))
     for _, field in ipairs(fields) do
-      privileges:insert(data.map_from_table {
-        node_type = "privilege",
-        region = region,
-        field_path = field,
-        privilege = privilege,
-      })
+      privileges:insert(std.privilege(privilege, region, field))
     end
   end
   return privileges
@@ -165,7 +172,7 @@ end
 
 function std.constraint(lhs, rhs, op)
   assert(op:is(ast.constraint_kind))
-  return {
+  return ast.constraint.Constraint {
     lhs = lhs,
     rhs = rhs,
     op = op,
