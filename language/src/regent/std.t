@@ -1655,6 +1655,83 @@ function rquote:__tostring()
 end
 
 -- #####################################
+-- ## Codegen Helpers
+-- #################
+
+local gen_optimal = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      if [std.quote_binary_op(op, lhs, rhs)] then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
+std.fmax = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+std.fmin = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+function std.quote_unary_op(op, rhs)
+  if op == "-" then
+    return `(-[rhs])
+  elseif op == "not" then
+    return `(not [rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+function std.quote_binary_op(op, lhs, rhs)
+  if op == "*" then
+    return `([lhs] * [rhs])
+  elseif op == "/" then
+    return `([lhs] / [rhs])
+  elseif op == "%" then
+    return `([lhs] % [rhs])
+  elseif op == "+" then
+    return `([lhs] + [rhs])
+  elseif op == "-" then
+    return `([lhs] - [rhs])
+  elseif op == "<" then
+    return `([lhs] < [rhs])
+  elseif op == ">" then
+    return `([lhs] > [rhs])
+  elseif op == "<=" then
+    return `([lhs] <= [rhs])
+  elseif op == ">=" then
+    return `([lhs] >= [rhs])
+  elseif op == "==" then
+    return `([lhs] == [rhs])
+  elseif op == "~=" then
+    return `([lhs] ~= [rhs])
+  elseif op == "and" then
+    return `([lhs] and [rhs])
+  elseif op == "or" then
+    return `([lhs] or [rhs])
+  elseif op == "max" then
+    return `([std.fmax]([lhs], [rhs]))
+  elseif op == "min" then
+    return `([std.fmin]([lhs], [rhs]))
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+-- #####################################
 -- ## Types
 -- #################
 
@@ -2155,14 +2232,34 @@ function std.index_type(base_type, displayname)
     return [make_domain_point(self)]
   end
 
-  function st:from_domain_point(pt_expr)
-    local fields = self.fields
-    if fields then
-      return `(self { __ptr = [self.impl_type] {
-        [data.mapi(function(i) return `([pt_expr].point_data[i-1]) end, self.fields)] } })
+  -- Generate `from_domain_point` function.
+  local function make_from_domain_point(pt_expr)
+    local fields = st.fields
+
+    local dimensionality_match_cond
+    if st.dim <= 1 then  -- We regard 0-dim and 1-dim points as interchangeable.
+      dimensionality_match_cond = `([pt_expr].dim <= 1)
     else
-      return `(self { __ptr = [self.impl_type]([pt_expr].point_data[0]) })
+      dimensionality_match_cond = `([pt_expr].dim == [st.dim])
     end
+    local error_message =
+      "from_domain_point (" .. tostring(st) .. "): dimensionality mismatch"
+
+    if fields then
+      return quote
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type] {
+          [data.mapi(function(i) return `([pt_expr].point_data[ [i-1] ]) end, st.fields)] } }
+      end
+    else
+      return quote
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type]([pt_expr].point_data[0]) }
+      end
+    end
+  end
+  terra st.from_domain_point(pt : c.legion_domain_point_t)
+    [make_from_domain_point(pt)]
   end
 
   for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
@@ -2181,39 +2278,25 @@ function std.index_type(base_type, displayname)
       })
   end
 
-  -- Element-wise min and max functions.
-  -- TODO(zhangwen): de-duplicate.
-  function st:e_min(expr1, expr2)
-    -- TODO(zhangwen): assert they're my type.
-    local fields = self.fields
+  -- Makes a Terra function that performs an operation element-wise on two
+  -- values of this index type.
+  local function make_element_wise_op(op)
+    local fields = st.fields
     if fields then
-      return quote
-        var v1 = [expr1].__ptr
-        var v2 = [expr2].__ptr
-      in
-        (self { __ptr = [self.impl_type]
-          { [fields:map(function(field) return `(std.fmin(v1.[field], v2.[field])) end)] } })
+      return terra(i1 : st, i2 : st)
+        var p1, p2 = i1.__ptr, i2.__ptr
+        return [st] { __ptr = [st.impl_type]
+          { [fields:map(function(field) return `([op](p1.[field], p2.[field])) end)] } }
       end
     else
-      return `(self { __ptr = [self.impl_type](std.fmin(expr1.__ptr, expr2.__ptr)) })
-    end
-  end
-
-  function st:e_max(expr1, expr2)
-    -- TODO(zhangwen): assert they're my type.
-    local fields = self.fields
-    if fields then
-      return quote
-        var v1 = [expr1].__ptr
-        var v2 = [expr2].__ptr
-      in
-        (self { __ptr = [self.impl_type] {
-          [fields:map(function(field) return `(std.fmax(v1.[field], v2.[field])) end)] } })
+      return terra(i1 : st, i2 : st)
+        return [st] { __ptr = [st.impl_type]([op](i1.__ptr, i2.__ptr)) }
       end
-    else
-      return `(self { __ptr = [self.impl_type](std.fmax(expr1.__ptr, expr2.__ptr)) })
     end
   end
+  -- Element-wise min and max.
+  st.elem_min = make_element_wise_op(std.fmin)
+  st.elem_max = make_element_wise_op(std.fmax)
 
   return setmetatable(st, index_type)
 end
@@ -3224,83 +3307,6 @@ function std.newfspace(node, name, has_params)
     fs = fs()
   end
   return fs
-end
-
--- #####################################
--- ## Codegen Helpers
--- #################
-
-local gen_optimal = terralib.memoize(
-  function(op, lhs_type, rhs_type)
-    return terra(lhs : lhs_type, rhs : rhs_type)
-      if [std.quote_binary_op(op, lhs, rhs)] then
-        return lhs
-      else
-        return rhs
-      end
-    end
-  end)
-
-std.fmax = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-std.fmin = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-function std.quote_unary_op(op, rhs)
-  if op == "-" then
-    return `(-[rhs])
-  elseif op == "not" then
-    return `(not [rhs])
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
-function std.quote_binary_op(op, lhs, rhs)
-  if op == "*" then
-    return `([lhs] * [rhs])
-  elseif op == "/" then
-    return `([lhs] / [rhs])
-  elseif op == "%" then
-    return `([lhs] % [rhs])
-  elseif op == "+" then
-    return `([lhs] + [rhs])
-  elseif op == "-" then
-    return `([lhs] - [rhs])
-  elseif op == "<" then
-    return `([lhs] < [rhs])
-  elseif op == ">" then
-    return `([lhs] > [rhs])
-  elseif op == "<=" then
-    return `([lhs] <= [rhs])
-  elseif op == ">=" then
-    return `([lhs] >= [rhs])
-  elseif op == "==" then
-    return `([lhs] == [rhs])
-  elseif op == "~=" then
-    return `([lhs] ~= [rhs])
-  elseif op == "and" then
-    return `([lhs] and [rhs])
-  elseif op == "or" then
-    return `([lhs] or [rhs])
-  elseif op == "max" then
-    return `([std.fmax]([lhs], [rhs]))
-  elseif op == "min" then
-    return `([std.fmin]([lhs], [rhs]))
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
 end
 
 -- #####################################
