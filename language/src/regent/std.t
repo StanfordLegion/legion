@@ -135,7 +135,7 @@ std.disjointness = ast.constraint_kind.Disjointness {}
 -- ## Privileges
 -- #################
 
-function std.privilege(privilege, regions_fields)
+function std.privileges(privilege, regions_fields)
   local privileges = terralib.newlist()
   for _, region_fields in ipairs(regions_fields) do
     local region, fields

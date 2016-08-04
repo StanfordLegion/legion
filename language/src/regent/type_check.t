@@ -189,7 +189,7 @@ function type_check.privilege(cx, node)
   local privileges = type_check.privilege_kinds(cx, node.privileges)
   local region_fields = type_check.regions(cx, node.regions)
   return privileges:map(
-    function(privilege) return std.privilege(privilege, region_fields) end)
+    function(privilege) return std.privileges(privilege, region_fields) end)
 end
 
 function type_check.privileges(cx, node)
