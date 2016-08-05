@@ -608,6 +608,8 @@ ast.unspecialized:leaf("Flag", {"flags", "regions"})
 ast.unspecialized:leaf("ConditionVariable", {"name"})
 ast.unspecialized:leaf("Condition", {"conditions", "variables"})
 
+ast.unspecialized:leaf("Effect", {"expr"})
+
 ast.unspecialized:inner("expr", {"annotations"})
 ast.unspecialized.expr:leaf("ID", {"name"})
 ast.unspecialized.expr:leaf("Escape", {"expr"})
@@ -690,8 +692,7 @@ ast.unspecialized.stat:leaf("RawDelete", {"value"})
 
 ast.unspecialized:inner("top", {"annotations"})
 ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
-                                    "privileges", "coherence_modes", "flags",
-                                    "conditions", "constraints", "body"})
+                                    "effect_exprs", "body"})
 ast.unspecialized.top:leaf("TaskParam", {"param_name", "type_expr"})
 ast.unspecialized.top:leaf("Fspace", {"name", "params", "fields",
                                       "constraints"})

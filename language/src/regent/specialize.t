@@ -428,7 +428,7 @@ local function has_all_valid_field_accesses(node)
   end
 end
 
-function specialize.field_names(cx, node, allow_lists)
+function specialize.field_names(cx, node)
   if type(node.names_expr) == "string" then
     return terralib.newlist({node.names_expr})
   else
@@ -445,7 +445,7 @@ function specialize.field_names(cx, node, allow_lists)
   end
 end
 
-function specialize.region_field(cx, node, allow_lists)
+function specialize.region_field(cx, node)
   local field_names = specialize.field_names(cx, node.field_name)
   return field_names:map(
     function(field_name)
@@ -457,13 +457,13 @@ function specialize.region_field(cx, node, allow_lists)
     end)
 end
 
-function specialize.region_fields(cx, node, allow_lists)
+function specialize.region_fields(cx, node)
   return node and data.flatmap(
     function(field) return specialize.region_field(cx, field) end,
     node)
 end
 
-function specialize.region_root(cx, node, allow_lists)
+function specialize.region_root(cx, node)
   local region = cx.env:lookup(node, node.region_name)
   return ast.specialized.region.Root {
     symbol = region,
@@ -472,7 +472,7 @@ function specialize.region_root(cx, node, allow_lists)
   }
 end
 
-function specialize.expr_region_root(cx, node, allow_lists)
+function specialize.expr_region_root(cx, node)
   return ast.specialized.expr.RegionRoot {
     region = specialize.expr(cx, node.region),
     fields = specialize.region_fields(cx, node.fields),
@@ -481,7 +481,7 @@ function specialize.expr_region_root(cx, node, allow_lists)
   }
 end
 
-function specialize.region_bare(cx, node, allow_lists)
+function specialize.region_bare(cx, node)
   local region = cx.env:lookup(node, node.region_name)
   return ast.specialized.region.Bare {
     symbol = region,
@@ -489,12 +489,12 @@ function specialize.region_bare(cx, node, allow_lists)
   }
 end
 
-function specialize.regions(cx, node, allow_lists)
+function specialize.regions(cx, node)
   return node:map(
     function(region) return specialize.region_root(cx, region) end)
 end
 
-function specialize.condition_variable(cx, node, allow_lists)
+function specialize.condition_variable(cx, node)
   local symbol = cx.env:lookup(node, node.name)
   return ast.specialized.ConditionVariable {
     symbol = symbol,
@@ -502,12 +502,34 @@ function specialize.condition_variable(cx, node, allow_lists)
   }
 end
 
-function specialize.condition_variables(cx, node, allow_lists)
+function specialize.condition_variables(cx, node)
   return node:map(
     function(variable) return specialize.condition_variable(cx, variable) end)
 end
 
-function specialize.privilege_kind(cx, node, allow_lists)
+function specialize.constraint_kind(cx, node)
+  if node:is(ast.constraint_kind) then
+    return node
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.constraint(cx, node)
+  return ast.specialized.Constraint {
+    lhs = specialize.region_bare(cx, node.lhs),
+    op = specialize.constraint_kind(cx, node.op),
+    rhs = specialize.region_bare(cx, node.rhs),
+    span = node.span,
+  }
+end
+
+function specialize.constraints(cx, node)
+  return node:map(
+    function(constraint) return specialize.constraint(cx, constraint) end)
+end
+
+function specialize.privilege_kind(cx, node)
   if node:is(ast.privilege_kind) then
     return node
   else
@@ -515,12 +537,12 @@ function specialize.privilege_kind(cx, node, allow_lists)
   end
 end
 
-function specialize.privilege_kinds(cx, node, allow_lists)
+function specialize.privilege_kinds(cx, node)
   return node:map(
     function(privilege) return specialize.privilege_kind(cx, privilege) end)
 end
 
-function specialize.privilege(cx, node, allow_lists)
+function specialize.privilege(cx, node)
   return ast.specialized.Privilege {
     privileges = specialize.privilege_kinds(cx, node.privileges),
     regions = specialize.regions(cx, node.regions),
@@ -528,12 +550,12 @@ function specialize.privilege(cx, node, allow_lists)
   }
 end
 
-function specialize.privileges(cx, node, allow_lists)
+function specialize.privileges(cx, node)
   return node:map(
     function(privilege) return specialize.privilege(cx, privilege) end)
 end
 
-function specialize.coherence_kind(cx, node, allow_lists)
+function specialize.coherence_kind(cx, node)
   if node:is(ast.coherence_kind) then
     return node
   else
@@ -541,12 +563,12 @@ function specialize.coherence_kind(cx, node, allow_lists)
   end
 end
 
-function specialize.coherence_kinds(cx, node, allow_lists)
+function specialize.coherence_kinds(cx, node)
   return node:map(
     function(coherence) return specialize.coherence_kind(cx, coherence) end)
 end
 
-function specialize.coherence(cx, node, allow_lists)
+function specialize.coherence(cx, node)
   return ast.specialized.Coherence {
     coherence_modes = specialize.coherence_kinds(cx, node.coherence_modes),
     regions = specialize.regions(cx, node.regions),
@@ -554,12 +576,12 @@ function specialize.coherence(cx, node, allow_lists)
   }
 end
 
-function specialize.coherence_modes(cx, node, allow_lists)
+function specialize.coherence_modes(cx, node)
   return node:map(
     function(coherence) return specialize.coherence(cx, coherence) end)
 end
 
-function specialize.flag_kind(cx, node, allow_lists)
+function specialize.flag_kind(cx, node)
   if node:is(ast.flag_kind) then
     return node
   else
@@ -567,11 +589,11 @@ function specialize.flag_kind(cx, node, allow_lists)
   end
 end
 
-function specialize.flag_kinds(cx, node, allow_lists)
+function specialize.flag_kinds(cx, node)
   return node:map(function(flag) return specialize.flag_kind(cx, flag) end)
 end
 
-function specialize.flag(cx, node, allow_lists)
+function specialize.flag(cx, node)
   return ast.specialized.Flag {
     flags = specialize.flag_kinds(cx, node.flags),
     regions = specialize.regions(cx, node.regions),
@@ -579,11 +601,11 @@ function specialize.flag(cx, node, allow_lists)
   }
 end
 
-function specialize.flags(cx, node, allow_lists)
+function specialize.flags(cx, node)
   return node:map(function(flag) return specialize.flag(cx, flag) end)
 end
 
-function specialize.condition_kind(cx, node, allow_lists)
+function specialize.condition_kind(cx, node)
   if node:is(ast.condition_kind) then
     return node
   else
@@ -591,12 +613,12 @@ function specialize.condition_kind(cx, node, allow_lists)
   end
 end
 
-function specialize.condition_kinds(cx, node, allow_lists)
+function specialize.condition_kinds(cx, node)
   return node:map(
     function(condition) return specialize.condition_kind(cx, condition) end)
 end
 
-function specialize.condition(cx, node, allow_lists)
+function specialize.condition(cx, node)
   return ast.specialized.Condition {
     conditions = specialize.condition_kinds(cx, node.conditions),
     variables = specialize.condition_variables(cx, node.variables),
@@ -604,7 +626,7 @@ function specialize.condition(cx, node, allow_lists)
   }
 end
 
-function specialize.expr_condition(cx, node, allow_lists)
+function specialize.expr_condition(cx, node)
   return ast.specialized.expr.Condition {
     conditions = specialize.condition_kinds(cx, node.conditions),
     values = node.values:map(
@@ -614,44 +636,106 @@ function specialize.expr_condition(cx, node, allow_lists)
   }
 end
 
-function specialize.conditions(cx, node, allow_lists)
+function specialize.conditions(cx, node)
   return node:map(
     function(condition) return specialize.condition(cx, condition) end)
 end
 
-function specialize.expr_conditions(cx, node, allow_lists)
+function specialize.expr_conditions(cx, node)
   return node:map(
     function(condition) return specialize.expr_condition(cx, condition) end)
 end
 
-function specialize.constraint_kind(cx, node, allow_lists)
-  if node:is(ast.constraint_kind) then
-    return node
-  else
-    assert(false, "unexpected node type " .. tostring(node:type()))
-  end
-end
-
-function specialize.constraint(cx, node, allow_lists)
-  return ast.specialized.Constraint {
-    lhs = specialize.region_bare(cx, node.lhs),
-    op = specialize.constraint_kind(cx, node.op),
-    rhs = specialize.region_bare(cx, node.rhs),
-    span = node.span,
-  }
-end
-
-function specialize.constraints(cx, node, allow_lists)
-  return node:map(
-    function(constraint) return specialize.constraint(cx, constraint) end)
-end
-
-function specialize.disjointness_kind(cx, node, allow_lists)
+function specialize.disjointness_kind(cx, node)
   if node:is(ast.disjointness_kind) then
     return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
+end
+
+function specialize.effect_expr(cx, node)
+  local span = ast.trivial_span()
+
+  local function make_field(field_path, i)
+    if i > #field_path then
+      return false
+    end
+    return ast.specialized.region.Field {
+      field_name = field_path[i],
+      fields = make_field(field_path, i + 1),
+      span = span,
+    }
+  end
+
+  local function make_fields(field_path)
+    if #field_path == 0 then
+      return false
+    end
+    return terralib.newlist({make_field(field_path, 1)})
+  end
+
+  local value = node.expr(cx.env:env())
+  if value:is(ast.privilege.Privilege) then
+    return ast.specialized.Privilege {
+      privileges = terralib.newlist({value.privilege}),
+      regions = terralib.newlist({
+        ast.specialized.region.Root {
+          symbol = value.region,
+          fields = make_fields(value.field_path),
+          span = span,
+        }
+      }),
+      span = span,
+    }
+  else
+    assert(false, "unexpected value type " .. tostring(value:type()))
+  end
+end
+
+function specialize.effect(cx, node)
+  if node:is(ast.unspecialized.Constraint) then
+    return specialize.constraint(cx, node)
+  elseif node:is(ast.unspecialized.Privilege) then
+    return specialize.privilege(cx, node)
+  elseif node:is(ast.unspecialized.Coherence) then
+    return specialize.coherence(cx, node)
+  elseif node:is(ast.unspecialized.Flag) then
+    return specialize.flag(cx, node)
+  elseif node:is(ast.unspecialized.Condition) then
+    return specialize.condition(cx, node)
+  elseif node:is(ast.unspecialized.Effect) then
+    return specialize.effect_expr(cx, node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.effects(cx, node)
+  local constraints = terralib.newlist()
+  local privileges = terralib.newlist()
+  local coherence_modes = terralib.newlist()
+  local flags = terralib.newlist()
+  local conditions = terralib.newlist()
+
+  for _, effect_expr in ipairs(node) do
+    local effect = specialize.effect(cx, effect_expr)
+    if effect:is(ast.specialized.Constraint) then
+      constraints:insert(effect)
+    elseif effect:is(ast.specialized.Privilege) then
+      privileges:insert(effect)
+    elseif effect:is(ast.specialized.Coherence) then
+      coherence_modes:insert(effect)
+    elseif effect:is(ast.specialized.Flag) then
+      flags:insert(effect)
+    elseif effect:is(ast.specialized.Condition) then
+      conditions:insert(effect)
+    else
+      assert(false, "unexpected node type " .. tostring(node:type()))
+    end
+  end
+
+  return privileges, coherence_modes, flags, conditions, constraints
 end
 
 function specialize.expr_id(cx, node, allow_lists)
@@ -1887,11 +1971,13 @@ function specialize.top_task(cx, node)
 
   local params = specialize.top_task_params(cx, node.params)
   local return_type = node.return_type_expr(cx.env:env())
-  local privileges = specialize.privileges(cx, node.privileges)
-  local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
-  local flags = specialize.flags(cx, node.flags)
-  local conditions = specialize.conditions(cx, node.conditions)
-  local constraints = specialize.constraints(cx, node.constraints)
+  local privileges, coherence_modes, flags, conditions, constraints =
+    specialize.effects(cx, node.effect_exprs)
+  -- local privileges = specialize.privileges(cx, node.privileges)
+  -- local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
+  -- local flags = specialize.flags(cx, node.flags)
+  -- local conditions = specialize.conditions(cx, node.conditions)
+  -- local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
   return ast.specialized.top.Task {
