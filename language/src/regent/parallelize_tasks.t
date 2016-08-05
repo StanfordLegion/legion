@@ -31,7 +31,7 @@ local Stencil
 local parallel_task_context = {}
 local parallel_param = {}
 local caller_context = {}
-local global_context = data.newmap()
+local global_context = {}
 
 local check_parallelizable = {}
 local normalize_accesses = {}
@@ -82,13 +82,16 @@ local function get_ghost_rect_body(res, sz, r, s, f)
       -- wrapped around left, periodic boundary
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
         -- shift left
-        if [acc(`([r].lo.__ptr))] < [acc(`([s].hi.__ptr))] then
+        if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
           [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
           [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
         -- shift right
-        else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
+        elseif [acc(`([s].lo.__ptr))] <= [acc(`([r].hi.__ptr))] then
           [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
           [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+        else
+          std.assert(false,
+            "ambiguous ghost region, primary region should be bigger for this stencil")
         end
       else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
         -- shift left
@@ -105,11 +108,24 @@ local function get_ghost_rect_body(res, sz, r, s, f)
   end
 end
 
+local function bounds_checks(res)
+  local checks = quote end
+  if std.config["debug"] then
+    checks = quote
+      std.assert(
+        [res].lo <= [res].hi,
+        "invalid size for a ghost region. the serial code has an out-of-bounds access")
+    end
+  end
+  return checks
+end
+
 local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
     [get_ghost_rect_body(diff_rect, sz, r, s)]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
@@ -117,6 +133,7 @@ local get_ghost_rect = {
     var diff_rect : std.rect2d
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
@@ -125,6 +142,7 @@ local get_ghost_rect = {
     [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
     [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    [bounds_checks(diff_rect)]
     return diff_rect
   end
 }
@@ -1127,12 +1145,18 @@ local function create_image_partition(pr, pp, stencil)
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
                                     mk_expr_id(tmp_var) })
-  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
-  --                                           sr_bounds_expr)))
-  --loop_body:insert(mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
-  --                                           ghost_rect_expr)))
-  --loop_body:insert(mk_stat_expr(mk_expr_call(c.printf,
-  --                                           mk_expr_constant("\n", rawstring))))
+  --loop_body:insert(mk_stat_block(mk_block(terralib.newlist {
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            pr_bounds_expr)),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            sr_bounds_expr)),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            mk_expr_id(tmp_var))),
+  --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
+  --                            ghost_rect_expr)),
+  --  mk_stat_expr(mk_expr_call(c.printf,
+  --                            mk_expr_constant("\n", rawstring)))
+  --  })))
   loop_body:insert(mk_stat_expr(
     mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
@@ -1600,7 +1624,7 @@ function parallelize_task_calls.top_task(global_cx, node)
     if not node:is(ast.typed.expr.Call) then return false end
     local fn = node.fn.value
     return not node.annotations.parallel:is(ast.annotation.Forbid) and
-           std.is_task(fn) and global_cx[fn.name]
+           std.is_task(fn) and global_cx[fn]
   end
 
   -- Return if there is no parallelizable task call
@@ -2148,6 +2172,14 @@ function parallelize_tasks.stat_for_list(cx, node)
       assert(case_split_if)
       if std.config["debug"] then
         case_split_if.else_block.stats:insertall(terralib.newlist {
+          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+          --             terralib.newlist {
+          --               mk_expr_id(loop_var)
+          --             })),
+          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+          --             terralib.newlist {
+          --               index_symbol_expr
+          --             })),
           mk_stat_expr(mk_expr_call(std.assert,
                        terralib.newlist {
                          mk_expr_constant(false, bool),
@@ -2196,7 +2228,7 @@ function parallelize_tasks.top_task_body(cx, node)
   }
 end
 
-function parallelize_tasks.top_task(node)
+function parallelize_tasks.top_task(global_cx, node)
   -- Replicate all region-typed parameters to refer to the original values
   local region_params = {}
   for idx = 1, #node.params do
@@ -2300,6 +2332,8 @@ function parallelize_tasks.top_task(node)
     span = node.span,
   }
 
+  -- Hack: prevents parallelized verions from going through parallelizer again
+  global_cx[prototype] = {}
   local task_ast_optimized = passes.optimize(task_ast)
   local task_code = passes.codegen(task_ast_optimized, true)
 
@@ -2307,17 +2341,17 @@ function parallelize_tasks.top_task(node)
 end
 
 function parallelize_tasks.entry(node)
-  if node:is(ast.typed.top.Task) and not global_context[node.name] then
+  if node:is(ast.typed.top.Task) then
+    if global_context[node.prototype] then return node end
     if node.annotations.parallel:is(ast.annotation.Demand) then
       check_parallelizable.top_task(node)
       local task_name = node.name
-      local new_task_code, cx = parallelize_tasks.top_task(node)
+      local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
       local info = {
         task = new_task_code,
         cx = cx,
       }
-      global_context[task_name] = info
-      global_context[new_task_code.name] = info
+      global_context[node.prototype] = info
       return node
     else
       return parallelize_task_calls.top_task(global_context, node)
