@@ -854,11 +854,23 @@ function specialize.expr_call(cx, node, allow_lists)
 end
 
 function specialize.expr_ctor_list_field(cx, node, allow_lists)
-  return ast.specialized.expr.CtorListField {
-    value = specialize.expr(cx, node.value),
-    annotations = node.annotations,
-    span = node.span,
-  }
+  local value = specialize.expr(cx, node.value, true)
+
+  local results = terralib.newlist()
+  if terralib.islist(value) then
+    results:insertall(value)
+  else
+    results:insert(value)
+  end
+
+  return results:map(
+    function(result)
+      return ast.specialized.expr.CtorListField {
+        value = result,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end)
 end
 
 function specialize.expr_ctor_rec_field(cx, node, allow_lists)
@@ -869,12 +881,14 @@ function specialize.expr_ctor_rec_field(cx, node, allow_lists)
     assert("expected a string or symbol but found " .. tostring(type(name)))
   end
 
-  return ast.specialized.expr.CtorRecField {
-    name = name,
-    value = specialize.expr(cx, node.value),
-    annotations = node.annotations,
-    span = node.span,
-  }
+  return terralib.newlist({
+    ast.specialized.expr.CtorRecField {
+      name = name,
+      value = specialize.expr(cx, node.value),
+      annotations = node.annotations,
+      span = node.span,
+    }
+  })
 end
 
 function specialize.expr_ctor_field(cx, node, allow_lists)
@@ -883,12 +897,14 @@ function specialize.expr_ctor_field(cx, node, allow_lists)
   elseif node:is(ast.unspecialized.expr.CtorRecField) then
     return specialize.expr_ctor_rec_field(cx, node)
   else
+    assert(false)
   end
 end
 
 function specialize.expr_ctor(cx, node, allow_lists)
-  local fields = node.fields:map(
-    function(field) return specialize.expr_ctor_field(cx, field) end)
+  local fields = data.flatmap(
+    function(field) return specialize.expr_ctor_field(cx, field) end,
+    node.fields)
 
   -- Validate that fields are either all named or all unnamed.
   local all_named = false
