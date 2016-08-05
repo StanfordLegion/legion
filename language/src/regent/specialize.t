@@ -875,10 +875,8 @@ end
 
 function specialize.expr_ctor_rec_field(cx, node, allow_lists)
   local name = node.name_expr(cx.env:env())
-  if terralib.issymbol(name) then
-    name = name.displayname
-  elseif not type(name) == "string" then
-    assert("expected a string or symbol but found " .. tostring(type(name)))
+  if type(name) ~= "string" then
+    log.error(node, "expected a string but found " .. tostring(type(name)))
   end
 
   return terralib.newlist({
@@ -911,12 +909,14 @@ function specialize.expr_ctor(cx, node, allow_lists)
   local all_unnamed = false
   for _, field in ipairs(fields) do
     if field:is(ast.specialized.expr.CtorRecField) then
-      assert(not all_unnamed,
-             "some entries in constructor are named while others are not")
+      if all_unnamed then
+        log.error(node, "some entries in constructor are named while others are not")
+      end
       all_named = true
     elseif field:is(ast.specialized.expr.CtorListField) then
-      assert(not all_named,
-             "some entries in constructor are named while others are not")
+      if all_named then
+        log.error(node, "some entries in constructor are named while others are not")
+      end
       all_unnamed = true
     else
       assert(false)
