@@ -258,6 +258,8 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false);
       void advance_version_numbers(Operation *op, unsigned idx,
+                                   bool update_parent_state,
+                                   bool parent_is_upper_bound,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
@@ -1321,7 +1323,8 @@ namespace Legion {
       void create_logical_advance(CurrentState &state,
                                   const FieldMask &advance_mask,
                                   const LogicalUser &creator,
-                    LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
+                    LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
+                                  bool parent_is_upper_bound);
       void register_local_user(CurrentState &state,
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
@@ -1415,6 +1418,8 @@ namespace Legion {
                                    const RegionTreePath &path,
                                    const FieldMask &advance_mask,
                                    SingleTask *parent_ctx,
+                                   bool update_parent_state,
+                                   bool skip_update_parent,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,

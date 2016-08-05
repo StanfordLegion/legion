@@ -4752,6 +4752,8 @@ namespace Legion {
     {
       std::set<RtEvent> open_events;
       runtime->forest->advance_version_numbers(this, 0/*idx*/,
+                                               false/*update parent state*/,
+                                               false/*doesn't matter*/,
                                                false/*dedup opens*/,
                                                false/*dedup advances*/, 
                                                0/*open id*/, 0/*advance id*/,
@@ -4804,7 +4806,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AdvanceOp::initialize(RegionTreeNode *parent, const FieldMask &advance,
-                               Operation *creator, int req_idx)
+                               Operation *creator, int req_idx, bool is_upper)
     //--------------------------------------------------------------------------
     {
       initialize_internal(creator, req_idx);
@@ -4813,6 +4815,7 @@ namespace Legion {
 #endif
       parent_node = parent;
       advance_mask = advance;
+      parent_is_upper_bound = is_upper;
     }
 
     //--------------------------------------------------------------------------
@@ -4832,6 +4835,7 @@ namespace Legion {
       activate_internal();
       parent_node = NULL;
       child_node = NULL;
+      parent_is_upper_bound = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4875,6 +4879,8 @@ namespace Legion {
       // Do the advance
       std::set<RtEvent> advance_events;
       runtime->forest->advance_version_numbers(this, 0/*idx*/, 
+                                               true/*update parent state*/,
+                                               parent_is_upper_bound,
                                                false/*dedup opens*/,
                                                false/*dedup advance*/,
                                                0/*open id*/, 0/*advance id*/,

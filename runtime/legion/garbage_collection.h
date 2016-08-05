@@ -55,6 +55,7 @@ namespace Legion {
       NEVER_GC_REF = 17,
       CONTEXT_REF = 18,
       RESTRICTED_REF = 19,
+      VERSION_STATE_TREE_REF = 20,
       LAST_SOURCE_REF = 21,
     };
 
@@ -85,6 +86,7 @@ namespace Legion {
       "Never GC Reference",                         \
       "Context Reference",                          \
       "Restricted Reference",                       \
+      "Version State Tree Reference",               \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;

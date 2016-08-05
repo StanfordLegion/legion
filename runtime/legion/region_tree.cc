@@ -1668,6 +1668,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::advance_version_numbers(Operation *op, unsigned idx,
+                                                bool update_parent_state,
+                                                bool parent_is_upper_bound,
                                                 bool dedup_opens, 
                                                 bool dedup_advances, 
                                                 ProjectionEpochID open_epoch, 
@@ -1687,7 +1689,9 @@ namespace Legion {
 #endif
       const AddressSpaceID local = runtime->address_space;
       parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
-                                      parent_ctx, dedup_opens, dedup_advances,
+                                      parent_ctx, update_parent_state,
+                                      parent_is_upper_bound,
+                                      dedup_opens, dedup_advances,
                                       open_epoch, advance_epoch, ready_events);
     }
 
@@ -10345,7 +10349,8 @@ namespace Legion {
           }
           // If we still have fields, then we have to make a new advance
           if (!!advance_mask)
-            create_logical_advance(state, advance_mask, user, advances);
+            create_logical_advance(state, advance_mask, user, advances,
+                                   version_info.is_upper_bound_node(this));
         }
       }
       // We also always do our dependence analysis even if we have
@@ -10467,13 +10472,15 @@ namespace Legion {
     void RegionTreeNode::create_logical_advance(CurrentState &state,
                                                 const FieldMask &advance_mask,
                                                 const LogicalUser &creator,
-                           LegionMap<AdvanceOp*,LogicalUser>::aligned &advances) 
+                           LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
+                                                bool parent_is_upper_bound) 
     //--------------------------------------------------------------------------
     {
       // These are the fields for which we have to issue an advance op
       AdvanceOp *advance = 
         context->runtime->get_available_advance_op(false); 
-      advance->initialize(this, advance_mask, creator.op, creator.idx);
+      advance->initialize(this, advance_mask, creator.op, 
+                          creator.idx, parent_is_upper_bound);
       LogicalUser advance_user(advance, 0/*idx*/, 
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), advance_mask);
       // Add it to the list of current epoch users even if we're tracing 
@@ -12121,9 +12128,13 @@ namespace Legion {
           // any kind of synchronization
           if (IS_WRITE(usage))
           {
+            // We update the parent state if we are not the top-level node
+            const bool update_parent_state = 
+              !version_info.is_upper_bound_node(this);
             const AddressSpaceID local_space = context->runtime->address_space;
             manager.advance_versions(version_mask, parent_ctx, 
-             true/*has initial state*/, local_space, local_space, ready_events);
+             true/*has initial state*/, local_space, update_parent_state,
+             local_space, ready_events);
           }
           // Record the actual versions to be used here 
           manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
@@ -12155,6 +12166,8 @@ namespace Legion {
                                                const RegionTreePath &path,
                                                const FieldMask &advance_mask,
                                                SingleTask *parent_ctx, 
+                                               bool update_parent_state,
+                                               bool skip_update_parent,
                                                bool dedup_opens, 
                                                bool dedup_advances, 
                                                ProjectionEpochID open_epoch,
@@ -12164,9 +12177,12 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       // Perform the advance
+      const bool local_update_parent = update_parent_state && 
+                                       !skip_update_parent;
       manager.advance_versions(advance_mask, parent_ctx, 
-           false/*has initial state*/, local_space, local_space, ready_events,
-           dedup_opens, open_epoch, dedup_advances, advance_epoch);
+           false/*has initial state*/, local_space, local_update_parent,
+           local_space, ready_events, dedup_opens, open_epoch, 
+           dedup_advances, advance_epoch);
       // Continue the traversal, 
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -12175,7 +12191,8 @@ namespace Legion {
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->advance_version_numbers(ctx, local_space, path, advance_mask, 
-                                       parent_ctx, dedup_opens, dedup_advances, 
+                                       parent_ctx, update_parent_state, false,
+                                       dedup_opens, dedup_advances, 
                                        open_epoch, advance_epoch, ready_events);
       }
     }

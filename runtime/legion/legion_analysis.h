@@ -96,12 +96,21 @@ namespace Legion {
      */
     struct VersionStates {
     public:
-      VersionStates(void)
-        : single(true) { versions.single_version = NULL; }
+      VersionStates(void);
 #ifdef DEBUG_LEGION
-      ~VersionStates(void)
-      { if (!single) assert(versions.multi_versions == NULL); }
+      ~VersionStates(void);
 #endif
+    public:
+      inline bool empty(void) const 
+        { return single && (versions.single_version == NULL); }
+    public:
+      void insert(VersionState *state, const FieldMask &mask);
+      // Only add a reference if it is not already in the set
+      void insert(VersionState *state, const FieldMask &mask,
+                  ReferenceSource ref_kind, ReferenceMutator *mutator);
+    public:
+      void merge(const FieldMask &merge_mask, VersionStates &new_states,
+                 ReferenceSource ref_kind, ReferenceMutator *mutator);
     public:
       FieldMask valid_fields;
       union {
@@ -600,6 +609,7 @@ namespace Legion {
       // Fields with outstanding reductions
       FieldMask reduction_mask;
       // State of any child nodes
+      // TODO: We should be able to delete this
       ChildState children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
@@ -667,12 +677,17 @@ namespace Legion {
                                      std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, SingleTask *context,
                             bool has_initial_state,AddressSpaceID initial_space,
+                            bool update_parent_state,
                             AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0);
+      void update_child_versions(SingleTask *context,
+                                 const ColorPoint &child_color,
+                                 VersionStates &new_states,
+                                 std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
                LegionMap<VersionID,VersionStates>::aligned &to_filter);
@@ -688,6 +703,7 @@ namespace Legion {
       RtEvent send_remote_advance(const FieldMask &advance_mask,
                                   bool has_initial_state,
                                   AddressSpaceID initial_space,
+                                  bool update_parent_state,
                                   bool dedup_opens, 
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
@@ -728,6 +744,7 @@ namespace Legion {
     protected:
       void sanity_check(void);
     public:
+      const ContextID ctx;
       RegionTreeNode *const node;
       const unsigned depth;
       Runtime *const runtime;
@@ -830,15 +847,15 @@ namespace Legion {
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
     public: // methods for applying state information
-      void merge_path_only_state(const PhysicalState *state,
-                                 const FieldMask &merge_mask,
-                                 AddressSpaceID target,
-                                 std::set<RtEvent> &applied_conditions);
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
                                 AddressSpaceID target,
                                 std::set<RtEvent> &applied_conditions,
                                 bool need_lock = true);
+      void update_open_children(const ColorPoint &child_color,
+                                const FieldMask &update_mask,
+                                VersionStates &new_states,
+                                std::set<RtEvent> &applied_events);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -897,6 +914,7 @@ namespace Legion {
       FieldMask reduction_mask;
       // State of any child nodes
       ChildState children;
+      LegionMap<ColorPoint,VersionStates>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;

@@ -975,7 +975,8 @@ namespace Legion {
       AdvanceOp& operator=(const AdvanceOp &rhs);
     public:
       void initialize(RegionTreeNode *parent, const FieldMask &advance,
-                      Operation *creator, int req_idx);
+                      Operation *creator, int req_idx,
+                      bool parent_is_upper_bound);
       void set_child_node(RegionTreeNode *child);
     public:
       virtual void activate(void);
@@ -989,6 +990,7 @@ namespace Legion {
       RegionTreeNode *parent_node;
       RegionTreeNode *child_node; // inclusive
       FieldMask       advance_mask;
+      bool parent_is_upper_bound;
     };
 
     /**

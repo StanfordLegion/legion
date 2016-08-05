@@ -9414,8 +9414,9 @@ namespace Legion {
             // Advance version numbers from one below the upper bound
             // all the way down to the child
             runtime->forest->advance_version_numbers(this, idx, 
-                true/*dedup opens*/, false/*dedup advance*/, it->first, 0/*id*/,
-                one_below, open_path, it->second, ready_events);
+                false/*update parent state*/, false/*doesn't matter*/,
+                true/*dedup opens*/, false/*dedup advance*/, it->first, 
+                0/*id*/, one_below, open_path, it->second, ready_events);
           }
         }
         // If we're doing something other than reading, we need
@@ -9427,13 +9428,17 @@ namespace Legion {
           for (unsigned idx = path.get_min_depth(); 
                 idx < (path.get_max_depth()-1); idx++)
             advance_path.register_child(idx, path.get_child(idx));
+          const bool parent_is_upper_bound = 
+            (slice_req.handle_type != PART_PROJECTION) && 
+            (slice_req.region == slice_req.parent);
           for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
                 it = proj_epochs.begin(); it != proj_epochs.end(); it++)
           {
             // Advance version numbers from the upper bound to one above
             // the target child for split version numbers
             runtime->forest->advance_version_numbers(this, idx, 
-                false/*dedup opens*/, true/*dedup advances*/, 0/*id*/,
+                true/*update parent state*/, parent_is_upper_bound,
+                false/*dedup opens*/, true/*dedup advances*/, 0/*id*/, 
                 it->first, parent_node, advance_path, it->second, ready_events);
           }
         }
