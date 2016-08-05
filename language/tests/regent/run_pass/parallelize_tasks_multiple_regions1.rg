@@ -38,7 +38,7 @@ do
   end
 end
 
-task test(n : int, np : int)
+task test(n : int)
   var is = ispace(int1d, n)
   var x = region(is, float)
   var y = region(is, float)
@@ -50,21 +50,10 @@ task test(n : int, np : int)
   for i in is do
     regentlib.assert(abs(y[i] - 0.5) < 0.00001, "test failed")
   end
-
-  var cs = ispace(int1d, np)
-  var px = partition(equal, x, cs)
-  var py = partition(equal, y, cs)
-
-  fill(x, 1.0)
-  fill(y, 0.0)
-  saxpy(x, y, 0.5)
-  for i in is do
-    regentlib.assert(abs(y[i] - 0.5) < 0.00001, "test failed")
-  end
 end
 
 task main()
-  test(10, 2)
-  test(20, 4)
+  test(10)
+  test(20)
 end
 regentlib.start(main)
