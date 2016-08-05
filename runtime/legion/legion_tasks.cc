@@ -2703,6 +2703,7 @@ namespace Legion {
       pending_subtasks = 0;
       pending_frames = 0;
       context_order_event = RtEvent::NO_RT_EVENT;
+      currently_active_context = false;
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         Runtime::initial_task_window_size;
@@ -3352,11 +3353,26 @@ namespace Legion {
       DeferredDependenceArgs args;
       args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
       args.op = op;
-      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                      HLR_TRIGGER_DEPENDENCE_ID, 
-                                      HLR_LATENCY_PRIORITY, op,
-                                      dependence_precondition);
-      dependence_precondition = next;
+      // If we're ahead we give extra priority to the logical analysis
+      // since it is on the critical path, but if not we give it the 
+      // normal priority so that we can balance doing logical analysis
+      // and actually mapping and running tasks
+      if (currently_active_context)
+      {
+        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                        HLR_TRIGGER_DEPENDENCE_ID, 
+                                        HLR_THROUGHPUT_PRIORITY, op,
+                                        dependence_precondition);
+        dependence_precondition = next;
+      }
+      else
+      {
+        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                        HLR_TRIGGER_DEPENDENCE_ID, 
+                                        HLR_LATENCY_PRIORITY, op,
+                                        dependence_precondition);
+        dependence_precondition = next;
+      }
       // Now we can release the lock
       op_lock.release();
     }
@@ -3757,6 +3773,7 @@ namespace Legion {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
+          currently_active_context = true;
         }
         outstanding_subtasks++;
       }
@@ -3797,6 +3814,7 @@ namespace Legion {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
+          currently_active_context = false;
         }
       }
       if (to_trigger.exists())
@@ -3825,6 +3843,7 @@ namespace Legion {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
+          currently_active_context = false;
         }
       }
       if (to_trigger.exists())
@@ -3869,6 +3888,7 @@ namespace Legion {
         wait_on = context_order_event;
         to_trigger = Runtime::create_rt_user_event();
         context_order_event = to_trigger;
+        currently_active_context = true;
       }
       pending_subtasks--;
       // Release the lock before doing the trigger or the wait
@@ -3900,6 +3920,7 @@ namespace Legion {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
+          currently_active_context = false;
         }
       }
       if (to_trigger.exists())
@@ -3930,6 +3951,7 @@ namespace Legion {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
+          currently_active_context = true;
         }
         pending_frames--;
       }
