@@ -8225,7 +8225,7 @@ index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
 index_subspace_pat       = re.compile(
     prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
 field_space_pat          = re.compile(
     prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat     = re.compile(
@@ -8243,12 +8243,12 @@ partition_name_pat       = re.compile(
     prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
            "(?P<name>[-$()\w. ]+)")
 index_space_point_pat    = re.compile(
-    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>[0-9]+) "+
-            "(?P<p2>[0-9]+) (?P<p3>[0-9]+)")
+    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>\-?[0-9]+) "+
+            "(?P<p2>\-?[0-9]+) (?P<p3>\-?[0-9]+)")
 index_space_rect_pat     = re.compile(
-    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<lo1>[0-9]+) "+
-           "(?P<lo2>[0-9]+) (?P<lo3>[0-9]+) (?P<hi1>[0-9]+) (?P<hi2>[0-9]+) "+
-           "(?P<hi3>[0-9]+)")
+    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
+           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
+           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
 empty_index_space_pat    = re.compile(
     prefix+"Empty Index Space (?P<uid>[0-9a-f]+)")
 # Patterns for operations
@@ -8301,7 +8301,7 @@ slice_slice_pat          = re.compile(
     prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
 slice_point_pat          = re.compile(
     prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
 point_point_pat          = re.compile(
     prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 op_index_pat             = re.compile(
