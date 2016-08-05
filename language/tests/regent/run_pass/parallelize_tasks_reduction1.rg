@@ -45,21 +45,6 @@ do
   return sum
 end
 
-task stencil_serial(r : region(ispace(int2d), double))
-where reads(r)
-do
-  var sum = 3
-  var ts_start = c.legion_get_current_time_in_micros()
-  for e in r do
-    sum max= 0.5 * (@e +
-                    r[(e - {0, 1}) % r.bounds] +
-                    r[(e + {1, 0}) % r.bounds])
-  end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("serial version: %lu us\n", ts_end - ts_start)
-  return sum
-end
-
 local cmath = terralib.includec("math.h")
 
 terra wait_for(x : double) return 1 end
@@ -79,7 +64,7 @@ task test(size : int)
   end
   wait_for(result1)
   var result2 = 0
-  result2 = stencil_serial(primary_region)
+  result2 = __forbid(__parallel, stencil(primary_region))
   wait_for(result2)
   regentlib.assert(cmath.fabs(result1 - result2) < 0.000001, "test failed")
   return 1
