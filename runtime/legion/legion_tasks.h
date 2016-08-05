@@ -710,6 +710,9 @@ namespace Legion {
       unsigned pending_frames;
       // Event used to order operations to the runtime
       RtEvent context_order_event;
+      // Track whether this context is current active for scheduling
+      // indicating that it is no longer far enough ahead
+      bool currently_active_context;
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
