@@ -244,14 +244,13 @@ end
 function parser.privilege_kind(p)
   local start = ast.save(p)
   if p:nextif("reads") then
-    return ast.unspecialized.privilege_kind.Reads { span = ast.span(start, p) }
+    return ast.privilege_kind.Reads {}
   elseif p:nextif("writes") then
-    return ast.unspecialized.privilege_kind.Writes { span = ast.span(start, p) }
+    return ast.privilege_kind.Writes {}
   elseif p:nextif("reduces") then
     local op = p:reduction_op()
-    return ast.unspecialized.privilege_kind.Reduces {
+    return ast.privilege_kind.Reduces {
       op = op,
-      span = ast.span(start, p),
     }
   else
     p:error("expected privilege")
@@ -266,21 +265,13 @@ end
 function parser.coherence_kind(p)
   local start = ast.save(p)
   if p:nextif("exclusive") then
-    return ast.unspecialized.coherence_kind.Exclusive {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Exclusive {}
   elseif p:nextif("atomic") then
-    return ast.unspecialized.coherence_kind.Atomic {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Atomic {}
   elseif p:nextif("simultaneous") then
-    return ast.unspecialized.coherence_kind.Simultaneous {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Simultaneous {}
   elseif p:nextif("relaxed") then
-    return ast.unspecialized.coherence_kind.Relaxed {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Relaxed {}
   else
     p:error("expected coherence mode")
   end
@@ -293,9 +284,7 @@ end
 function parser.flag_kind(p)
   local start = ast.save(p)
   if p:nextif("no_access_flag") then
-    return ast.unspecialized.flag_kind.NoAccessFlag {
-      span = ast.span(start, p),
-    }
+    return ast.flag_kind.NoAccessFlag {}
   else
     p:error("expected flag")
   end
@@ -351,13 +340,9 @@ end
 function parser.condition_kind(p)
   local start = ast.save(p)
   if p:nextif("arrives") then
-    return ast.unspecialized.condition_kind.Arrives {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Arrives {}
   elseif p:nextif("awaits") then
-    return ast.unspecialized.condition_kind.Awaits {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Awaits {}
   else
     p:error("expected condition")
   end
@@ -403,13 +388,9 @@ end
 function parser.constraint_kind(p)
   local start = ast.save(p)
   if p:nextif("<=") then
-    return ast.unspecialized.constraint_kind.Subregion {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Subregion {}
   elseif p:nextif("*") then
-    return ast.unspecialized.constraint_kind.Disjointness {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Disjointness {}
   else
     p:error("unexpected token in constraint")
   end
@@ -435,16 +416,23 @@ end
 function parser.disjointness_kind(p)
   local start = ast.save(p)
   if p:nextif("aliased") then
-    return ast.unspecialized.disjointness_kind.Aliased {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Aliased {}
   elseif p:nextif("disjoint") then
-    return ast.unspecialized.disjointness_kind.Disjoint {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Disjoint {}
   else
     p:error("expected disjointness")
   end
+end
+
+function parser.effect(p)
+  local start = ast.save(p)
+  p:expect("[")
+  local effect_expr = p:luaexpr()
+  p:expect("]")
+  return ast.unspecialized.Effect {
+    expr = effect_expr,
+    span = ast.span(start, p),
+  }
 end
 
 function parser.expr_prefix(p)
@@ -865,6 +853,16 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.ListRange {
       start = range_start,
       stop = range_stop,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_ispace") then
+    p:expect("(")
+    local ispace = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListIspace {
+      ispace = ispace,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
@@ -1784,27 +1782,25 @@ function parser.top_task_return(p)
 end
 
 function parser.top_task_effects(p)
-  local privileges = terralib.newlist()
-  local coherence_modes = terralib.newlist()
-  local flags = terralib.newlist()
-  local conditions = terralib.newlist()
-  local constraints = terralib.newlist()
+  local effect_exprs = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+      if p:matches("[") then
+        effect_exprs:insert(p:effect())
+      elseif p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
         local privilege, coherence, flag = p:privilege_coherence_flags()
-        privileges:insert(privilege)
-        coherence_modes:insert(coherence)
-        flags:insert(flag)
+        effect_exprs:insert(privilege)
+        effect_exprs:insert(coherence)
+        effect_exprs:insert(flag)
       elseif p:is_condition_kind() then
-        conditions:insert(p:condition())
+        effect_exprs:insert(p:condition())
       else
-        constraints:insert(p:constraint())
+        effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, flags, conditions, constraints
+  return effect_exprs
 end
 
 function parser.top_task(p, annotations)
@@ -1813,8 +1809,7 @@ function parser.top_task(p, annotations)
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local privileges, coherence_modes, flags, conditions, constraints =
-    p:top_task_effects()
+  local effects = p:top_task_effects()
   local body = p:block()
   p:expect("end")
 
@@ -1822,11 +1817,7 @@ function parser.top_task(p, annotations)
     name = name,
     params = params,
     return_type_expr = return_type,
-    privileges = privileges,
-    coherence_modes = coherence_modes,
-    flags = flags,
-    conditions = conditions,
-    constraints = constraints,
+    effect_exprs = effects,
     body = body,
     annotations = annotations,
     span = ast.span(start, p),

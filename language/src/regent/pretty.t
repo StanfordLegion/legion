@@ -168,7 +168,7 @@ end
 
 function pretty.expr_condition(cx, node)
   return join({
-      join(node.conditions, true), "(", pretty.expr(cx, node.value), ")"})
+      join(node.conditions:map(tostring), true), "(", pretty.expr(cx, node.value), ")"})
 end
 
 function pretty.expr_region_root(cx, node)
@@ -442,6 +442,13 @@ function pretty.expr_list_range(cx, node)
       ")"})
 end
 
+function pretty.expr_list_ispace(cx, node)
+  return join({
+      "list_ispace(",
+      commas({pretty.expr(cx, node.ispace)}),
+      ")"})
+end
+
 function pretty.expr_phase_barrier(cx, node)
   return join({
       "phase_barrier(", commas({pretty.expr(cx, node.value)}), ")"})
@@ -669,6 +676,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListRange) then
     return pretty.expr_list_range(cx, node)
+
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return pretty.expr_list_ispace(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return pretty.expr_phase_barrier(cx, node)

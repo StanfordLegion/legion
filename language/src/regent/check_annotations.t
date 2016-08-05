@@ -107,6 +107,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
@@ -173,6 +174,12 @@ local function check_annotations_node(cx)
     elseif node:is(ast.typed.Block) or
       node:is(ast.location) or
       node:is(ast.annotation) or
+      node:is(ast.constraint_kind) or
+      node:is(ast.privilege_kind) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind) or
+      node:is(ast.constraint) or
+      node:is(ast.privilege) or
       node:is(ast.TaskConfigOptions)
     then
       -- Pass

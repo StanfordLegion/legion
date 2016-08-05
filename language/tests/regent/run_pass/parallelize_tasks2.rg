@@ -13,8 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "12"]]
+-- [
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
+--   "-fparallelize-dop", "5"],
+--  ["-ll:cpu", "4", "-fparallelize-dop", "12"]
+-- ]
 
 import "regent"
 
@@ -86,7 +89,7 @@ task test(size : int)
 end
 
 task toplevel()
-  test(50)
+  test(10)
   test(100)
 end
 

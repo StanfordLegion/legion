@@ -173,12 +173,8 @@ function type_check.condition_variables(cx, node)
 end
 
 function type_check.privilege_kind(cx, node)
-  if node:is(ast.specialized.privilege_kind.Reads) then
-    return std.reads
-  elseif node:is(ast.specialized.privilege_kind.Writes) then
-    return std.writes
-  elseif node:is(ast.specialized.privilege_kind.Reduces) then
-    return std.reduces(node.op)
+  if node:is(ast.privilege_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -193,7 +189,7 @@ function type_check.privilege(cx, node)
   local privileges = type_check.privilege_kinds(cx, node.privileges)
   local region_fields = type_check.regions(cx, node.regions)
   return privileges:map(
-    function(privilege) return std.privilege(privilege, region_fields) end)
+    function(privilege) return std.privileges(privilege, region_fields) end)
 end
 
 function type_check.privileges(cx, node)
@@ -205,14 +201,8 @@ function type_check.privileges(cx, node)
 end
 
 function type_check.coherence_kind(cx, node)
-  if node:is(ast.specialized.coherence_kind.Exclusive) then
-    return std.exclusive
-  elseif node:is(ast.specialized.coherence_kind.Atomic) then
-    return std.atomic
-  elseif node:is(ast.specialized.coherence_kind.Simultaneous) then
-    return std.simultaneous
-  elseif node:is(ast.specialized.coherence_kind.Relaxed) then
-    return std.relaxed
+  if node:is(ast.coherence_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -231,9 +221,9 @@ local function check_coherence_conflict_field(node, region, field,
     assert(other_coherence)
     if other_coherence ~= coherence then
       log.error(
-        node, "conflicting coherence modes: " .. other_coherence .. "(" ..
+        node, "conflicting coherence modes: " .. tostring(other_coherence) .. "(" ..
           (data.newtuple(region) .. other_field):mkstring(".") .. ")" ..
-          " and " .. coherence .. "(" ..
+          " and " .. tostring(coherence) .. "(" ..
           (data.newtuple(region) .. field):mkstring(".") .. ")")
     end
   end
@@ -275,8 +265,8 @@ function type_check.coherence_modes(cx, node)
 end
 
 function type_check.flag_kind(cx, node)
-  if node:is(ast.specialized.flag_kind.NoAccessFlag) then
-    return std.no_access_flag
+  if node:is(ast.flag_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -313,10 +303,8 @@ function type_check.flags(cx, node)
 end
 
 function type_check.condition_kind(cx, node)
-  if node:is(ast.specialized.condition_kind.Arrives) then
-    return std.arrives
-  elseif node:is(ast.specialized.condition_kind.Awaits) then
-    return std.awaits
+  if node:is(ast.condition_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -385,10 +373,8 @@ function type_check.conditions(cx, node, params)
 end
 
 function type_check.constraint_kind(cx, node)
-  if node:is(ast.specialized.constraint_kind.Subregion) then
-    return "<="
-  elseif node:is(ast.specialized.constraint_kind.Disjointness) then
-    return "*"
+  if node:is(ast.constraint_kind) then
+    return node
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -532,6 +518,9 @@ function type_check.expr_field_access(cx, node)
                   tostring(std.as_read(unpack_type)))
     end
     field_type = std.rect_type(index_type)
+  elseif std.is_ispace(std.as_read(unpack_type)) and node.field_name == "volume" then
+    -- Volume can be retrieved on any ispace.
+    field_type = int64
   elseif std.is_region(std.as_read(unpack_type)) and node.field_name == "bounds" then
     local index_type = std.as_read(unpack_type):ispace().index_type
     if index_type:is_opaque() then
@@ -600,7 +589,7 @@ function type_check.expr_index_access(cx, node)
         local other_subregions = value_type:subregions_constant()
         for other_index, other_subregion in pairs(other_subregions) do
           if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, "*", true)
+            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
           end
         end
       end
@@ -608,8 +597,8 @@ function type_check.expr_index_access(cx, node)
       subregion = value_type:subregion_dynamic()
     end
 
-    std.add_constraint(cx, partition, parent, "<=", false)
-    std.add_constraint(cx, subregion, partition, "<=", false)
+    std.add_constraint(cx, partition, parent, std.subregion, false)
+    std.add_constraint(cx, subregion, partition, std.subregion, false)
 
     return ast.typed.expr.IndexAccess {
       value = value,
@@ -636,7 +625,7 @@ function type_check.expr_index_access(cx, node)
         local other_subregions = value_type:subregions_constant()
         for other_index, other_subregion in pairs(other_subregions) do
           if static_index ~= other_index then
-            std.add_constraint(cx, subregion, other_subregion, "*", true)
+            std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
           end
         end
       end
@@ -645,9 +634,9 @@ function type_check.expr_index_access(cx, node)
       subregion = subpartition:parent_region()
     end
 
-    std.add_constraint(cx, partition, parent, "<=", false)
-    std.add_constraint(cx, subregion, partition, "<=", false)
-    std.add_constraint(cx, subpartition:partition(), subregion, "<=", false)
+    std.add_constraint(cx, partition, parent, std.subregion, false)
+    std.add_constraint(cx, subregion, partition, std.subregion, false)
+    std.add_constraint(cx, subpartition:partition(), subregion, std.subregion, false)
 
     return ast.typed.expr.IndexAccess {
       value = value,
@@ -719,7 +708,7 @@ function type_check.expr_index_access(cx, node)
       else
         expr_type = value_type:slice(1)
       end
-      std.add_constraint(cx, expr_type, value_type, "<=", false)
+      std.add_constraint(cx, expr_type, value_type, std.subregion, false)
 
       return ast.typed.expr.IndexAccess {
         value = value,
@@ -1294,11 +1283,10 @@ function type_check.expr_static_cast(cx, node)
   local parent_region_map = {}
   for i, value_region_symbol in ipairs(value_type.bounds_symbols) do
     for j, expr_region_symbol in ipairs(expr_type.bounds_symbols) do
-      local constraint = {
-        lhs = value_region_symbol,
-        rhs = expr_region_symbol,
-        op = "<="
-      }
+      local constraint = std.constraint(
+        value_region_symbol,
+        expr_region_symbol,
+        std.subregion)
       if std.check_constraint(cx, constraint) then
         parent_region_map[i] = j
         break
@@ -1398,8 +1386,8 @@ function type_check.expr_region(cx, node)
   end
   assert(std.type_eq(ispace_symbol:gettype(), ispace_type))
 
-  std.add_privilege(cx, "reads", region, data.newtuple())
-  std.add_privilege(cx, "writes", region, data.newtuple())
+  std.add_privilege(cx, std.reads, region, data.newtuple())
+  std.add_privilege(cx, std.writes, region, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
   -- other regions.
   for other_region, _ in pairs(cx.region_universe) do
@@ -1407,7 +1395,7 @@ function type_check.expr_region(cx, node)
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
     if std.type_maybe_eq(region:fspace(), other_region:fspace()) then
-      std.add_constraint(cx, region, other_region, "*", true)
+      std.add_constraint(cx, region, other_region, std.disjointness, true)
     end
   end
   cx:intern_region(region)
@@ -1431,7 +1419,7 @@ function type_check.expr_partition(cx, node)
   local colors_type = colors and std.check_read(cx, colors)
 
   -- Note: This test can't fail because disjointness is tested in the parser.
-  assert(disjointness == std.disjoint or disjointness == std.aliased)
+  assert(disjointness:is(ast.disjointness_kind))
 
   if not std.is_region(region_type) then
     log.error(node, "type mismatch in argument 2: expected region but got " ..
@@ -1682,11 +1670,10 @@ function type_check.expr_image(cx, node)
 
   -- Check that partition's parent region is a subregion of region.
   do
-    local constraint = {
-      lhs = partition_type.parent_region_symbol,
-      rhs = region_symbol,
-      op = "<="
-    }
+    local constraint = std.constraint(
+      partition_type.parent_region_symbol,
+      region_symbol,
+      std.subregion)
     if not std.check_constraint(cx, constraint) then
       log.error(node, "invalid image missing constraint " ..
                   tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
@@ -1696,11 +1683,10 @@ function type_check.expr_image(cx, node)
 
   -- Check that parent is a subregion of the field bounds.
   for _, bound_symbol in ipairs(field_type.bounds_symbols) do
-    local constraint = {
-      lhs = parent_symbol,
-      rhs = bound_symbol,
-      op = "<="
-    }
+    local constraint = std.constraint(
+      parent_symbol,
+      bound_symbol,
+      std.subregion)
     if not std.check_constraint(cx, constraint) then
       log.error(node, "invalid image missing constraint " ..
                   tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
@@ -1777,11 +1763,10 @@ function type_check.expr_preimage(cx, node)
 
   -- Check that parent is a subregion of region.
   do
-    local constraint = {
-      lhs = parent_symbol,
-      rhs = region_symbol,
-      op = "<="
-    }
+    local constraint = std.constraint(
+      parent_symbol,
+      region_symbol,
+      std.subregion)
     if not std.check_constraint(cx, constraint) then
       log.error(node, "invalid image missing constraint " ..
                   tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
@@ -1791,11 +1776,10 @@ function type_check.expr_preimage(cx, node)
 
   -- Check that partitions's parent is a subregion of the field bounds.
   for _, bound_symbol in ipairs(field_type.bounds_symbols) do
-    local constraint = {
-      lhs = partition_type.parent_region_symbol,
-      rhs = bound_symbol,
-      op = "<="
-    }
+    local constraint = std.constraint(
+      partition_type.parent_region_symbol,
+      bound_symbol,
+      std.subregion)
     if not std.check_constraint(cx, constraint) then
       log.error(node, "invalid image missing constraint " ..
                   tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
@@ -1918,8 +1902,8 @@ function type_check.expr_list_duplicate_partition(cx, node)
       partition_type:parent_region():fspace()),
     partition_type)
 
-  std.add_privilege(cx, "reads", expr_type, data.newtuple())
-  std.add_privilege(cx, "writes", expr_type, data.newtuple())
+  std.add_privilege(cx, std.reads, expr_type, data.newtuple())
+  std.add_privilege(cx, std.writes, expr_type, data.newtuple())
   -- Freshly created regions are, by definition, disjoint from all
   -- other regions.
   for other_region, _ in pairs(cx.region_universe) do
@@ -1927,7 +1911,7 @@ function type_check.expr_list_duplicate_partition(cx, node)
     -- But still, don't bother litering the constraint space with
     -- trivial constraints.
     if std.type_maybe_eq(expr_type:fspace(), other_region:fspace()) then
-      std.add_constraint(cx, expr_type, other_region, "*", true)
+      std.add_constraint(cx, expr_type, other_region, std.disjointness, true)
     end
   end
   cx:intern_region(expr_type)
@@ -1961,7 +1945,7 @@ function type_check.expr_list_cross_product(cx, node)
     expr_type = std.list(std.list(rhs_type:subregion_dynamic(), nil, 1), nil, 1)
   end
 
-  std.add_constraint(cx, expr_type, rhs_type, "<=", false)
+  std.add_constraint(cx, expr_type, rhs_type, std.subregion, false)
 
   return ast.typed.expr.ListCrossProduct {
     lhs = lhs,
@@ -1989,7 +1973,7 @@ function type_check.expr_list_cross_product_complete(cx, node)
     std.list(product_type:subregion_dynamic(), nil, 1),
     nil, 1)
 
-  std.add_constraint(cx, expr_type, product_type, "<=", false)
+  std.add_constraint(cx, expr_type, product_type, std.subregion, false)
 
   return ast.typed.expr.ListCrossProductComplete {
     lhs = lhs,
@@ -2069,6 +2053,22 @@ function type_check.expr_list_range(cx, node)
   return ast.typed.expr.ListRange {
     start = start,
     stop = stop,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_ispace(cx, node)
+  local ispace = type_check.expr(cx, node.ispace)
+  local ispace_type = std.check_read(cx, ispace)
+  if not std.is_ispace(ispace_type) then
+    log.error(node, "type mismatch in argument 1: expected an ispace but got " .. tostring(ispace_type))
+  end
+  local expr_type = std.list(ispace_type.index_type)
+
+  return ast.typed.expr.ListIspace {
+    ispace = ispace,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,
@@ -2208,11 +2208,11 @@ function type_check.expr_copy(cx, node)
     local value = condition.value
     local value_type = std.check_read(cx, value)
     for _, condition_kind in ipairs(condition.conditions) do
-      if condition_kind == std.awaits and
+      if condition_kind:is(ast.condition_kind.Awaits) and
         value_type:list_depth() > dst_type:list_depth()
       then
         log.error(node, "copy must await list of same or less depth than destination")
-      elseif condition_kind == std.arrives and
+      elseif condition_kind:is(ast.condition_kind.Arrives) and
         value_type:list_depth() > dst_type:list_depth()
       then
         log.error(node, "copy must arrive list of same or less depth than destination")
@@ -2754,6 +2754,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListRange) then
     return type_check.expr_list_range(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListIspace) then
+    return type_check.expr_list_ispace(cx, node)
 
   elseif node:is(ast.specialized.expr.PhaseBarrier) then
     return type_check.expr_phase_barrier(cx, node)

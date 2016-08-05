@@ -771,6 +771,13 @@ typedef long long int coord_t;
                                    legion_domain_t domain);
 
   /**
+   * @see Legion::Runtime::has_multiple_domains().
+   */
+  bool
+  legion_index_space_has_multiple_domains(legion_runtime_t runtime,
+                                          legion_index_space_t handle);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Runtime::get_index_space_domain()
@@ -1228,6 +1235,13 @@ typedef long long int coord_t;
   legion_color_t
   legion_logical_region_get_color(legion_runtime_t runtime,
                                   legion_logical_region_t handle);
+
+  /**
+   * @see Legion::Runtime::get_logical_region_color_point()
+   */
+  legion_domain_point_t
+  legion_logical_region_get_color_domain_point(legion_runtime_t runtime_,
+                                               legion_logical_region_t handle_);
 
   /**
    * @see Legion::Runtime::has_parent_logical_partition()

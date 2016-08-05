@@ -5397,17 +5397,19 @@ class Operation(object):
                 point.op.print_op_mapping_decisions(depth)
             return
         # Print our mapping decisions
+        prefix = ''
+        for idx in range(depth):
+            prefix += '  '
+        print prefix+'-------------------------------------------------'
+        print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
+
+        if self.kind == SINGLE_TASK_KIND and self.task is not None:
+            print prefix+'  Task Mapped to ' + str(self.task.processor)
+            assert self.task.variant
+            print prefix+'  Task Variant %d (inner=%s,leaf=%s)' % (self.task.variant.vid,
+                    'Yes' if self.task.variant.inner else 'No',
+                    'Yes' if self.task.variant.leaf else 'No')
         if self.mappings is not None:
-            prefix = ''
-            for idx in range(depth):
-                prefix += '  '
-            print prefix+'-------------------------------------------------'
-            print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
-
-            if self.kind == SINGLE_TASK_KIND and self.task is not None:
-                self.task.print_task_mapping_decisions()
-                print prefix+'  Task Mapped to ' + str(self.task.processor)
-
             for index,mappings in self.mappings.iteritems():
                 assert index in self.reqs
                 req = self.reqs[index]
@@ -5416,8 +5418,8 @@ class Operation(object):
                 for fid,inst in mappings.iteritems():
                     field = req.field_space.get_field(fid)
                     print prefix+'    '+str(field)+': '+str(inst)
-            print prefix+' End '+str(self)+' (depth='+str(depth)+')'
-            print prefix+'-------------------------------------------------'
+        print prefix+' End '+str(self)+' (depth='+str(depth)+')'
+        print prefix+'-------------------------------------------------'
         # If we are a single task recurse
         if self.kind == SINGLE_TASK_KIND and self.task is not None:
             self.task.print_task_mapping_decisions()
@@ -5640,12 +5642,28 @@ class Operation(object):
         else:
             replay_file.write(struct.pack('I',0))
 
+class Variant(object):
+    __slots__ = ['state', 'vid', 'inner', 'leaf', 'idempotent', 'name']
+    def __init__(self, state, vid):
+        self.state = state
+        self.vid = vid
+        self.inner = False
+        self.leaf = False
+        self.idempotent = False
+        self.name = None
+
+    def initialize(self, inner, leaf, idempotent, name):
+        self.inner = inner
+        self.leaf = leaf
+        self.idempotent = idempotent
+        self.name = name
+
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'restrictions', 'dumb_acquisitions', 
                  'used_instances', 'virtual_indexes', 'processor', 'priority', 
                  'premappings', 'postmappings', 'tunables', 
-                 'operation_indexes', 'close_indexes']
+                 'operation_indexes', 'close_indexes', 'variant']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -5666,6 +5684,7 @@ class Task(object):
         self.tunables = None
         self.operation_indexes = None
         self.close_indexes = None
+        self.variant = None
 
     def __str__(self):
         return str(self.op)
@@ -5685,6 +5704,10 @@ class Task(object):
     def set_processor(self, processor):
         assert not self.processor
         self.processor = processor
+
+    def set_variant(self, variant):
+        assert not self.variant
+        self.variant = variant
 
     def add_premapping(self, index):
         if not self.premappings:
@@ -5782,6 +5805,10 @@ class Task(object):
             self.close_indexes = other.close_indexes
         else:
             assert not other.close_indexes
+        if not self.variant:
+            self.variant = other.variant
+        else:
+            assert not other.variant
 
     def perform_logical_dependence_analysis(self, perform_checks):
         # If we don't have any operations we are done
@@ -8227,6 +8254,9 @@ empty_index_space_pat    = re.compile(
 # Patterns for operations
 task_name_pat            = re.compile(
     prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+task_variant_pat         = re.compile(
+    prefix+"Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<inner>[0-1]) "+
+    "(?P<leaf>[0-1]) (?P<idem>[0-1]+) (?P<name>[-$()\w. ]+)")
 top_task_pat             = re.compile(
     prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
 single_task_pat          = re.compile(
@@ -8329,6 +8359,8 @@ alignment_constraint_pat = re.compile(
 offset_constraint_pat = re.compile(
     prefix+"Instance Offset Constraint (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) "
            "(?P<offset>[0-9]+)")
+variant_decision_pat    = re.compile(
+    prefix+"Variant Decision (?P<uid>[0-9]+) (?P<vid>[0-9]+)")
 mapping_decision_pat    = re.compile(
     prefix+"Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
            "(?P<iid>[0-9a-f]+)")
@@ -8630,6 +8662,12 @@ def parse_legion_spy_line(line, state):
         inst.add_offset_constraint(int(m.group('fid')),
             int(m.group('offset')))
         return True
+    m = variant_decision_pat.match(line)
+    if m is not None:
+        task = state.get_task(int(m.group('uid')))
+        variant = state.get_variant(int(m.group('vid')))
+        task.set_variant(variant)
+        return True
     m = mapping_decision_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
@@ -8676,6 +8714,12 @@ def parse_legion_spy_line(line, state):
     m = task_name_pat.match(line)
     if m is not None:
         state.task_names[int(m.group('tid'))] = m.group('name')
+        return True
+    m = task_variant_pat.match(line)
+    if m is not None:
+        variant = state.get_variant(int(m.group('vid')))
+        variant.initialize(int(m.group('inner')), int(m.group('leaf')),
+                           int(m.group('idem')), m.group('name'))
         return True
     m = top_task_pat.match(line)
     if m is not None:
@@ -9024,10 +9068,11 @@ class State(object):
     __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
                  'processor_kinds', 'memory_kinds', 'index_spaces', 'index_partitions',
                  'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
-                 'ops', 'tasks', 'task_names', 'has_mapping_deps', 'instances', 'events', 
-                 'copies', 'fills', 'phase_barriers', 'no_event', 'slice_index', 
-                 'slice_slice', 'point_slice', 'next_generation', 'next_realm_num',
-                 'detailed_graphs', 'assert_on_fail']
+                 'ops', 'tasks', 'task_names', 'variants', 'has_mapping_deps', 
+                 'instances', 'events', 'copies', 'fills', 'phase_barriers', 
+                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 
+                 'next_generation', 'next_realm_num', 'detailed_graphs', 
+                 'assert_on_fail']
     def __init__(self, verbose, details, fail):
         self.verbose = verbose
         self.detailed_graphs = details
@@ -9051,6 +9096,7 @@ class State(object):
         self.ops = dict()
         self.tasks = dict()
         self.task_names = dict()
+        self.variants = dict()
         self.has_mapping_deps = False
         # Physical things 
         self.instances = dict()
@@ -9560,6 +9606,13 @@ class State(object):
         op.set_op_kind(SINGLE_TASK_KIND)
         result = Task(self, op)
         self.tasks[op] = result
+        return result
+
+    def get_variant(self, vid):
+        if vid in self.variants:
+            return self.variants[vid]
+        result = Variant(self, vid)
+        self.variants[vid] = result
         return result
 
     def get_instance(self, iid):

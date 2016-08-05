@@ -200,6 +200,14 @@ namespace Legion {
         log_spy.print("Task ID Name %d %s", task_id, name);
       }
 
+      static inline void log_task_variant(TaskID task_id, unsigned variant_id,
+                                          bool inner, bool leaf, 
+                                          bool idempotent, const char *name)
+      {
+        log_spy.print("Task Variant %d %d %d %d %d %s", task_id, variant_id,
+                                               inner, leaf, idempotent, name);
+      }
+
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
                                             UniqueID unique_id,
                                             const char *name)
@@ -372,8 +380,8 @@ namespace Legion {
           unsigned coherence, unsigned redop, IDType parent_index)
       {
         log_spy.print("Logical Requirement %llu %u %u " IDFMT " %u %u "
-		      "%u %u %u " IDFMT, unique_id, index, region, index_component,
-		      field_component, tree_id,
+		      "%u %u %u " IDFMT, unique_id, index, region, 
+                      index_component, field_component, tree_id,
 		      privilege, coherence, redop, parent_index);
       }
 
@@ -418,7 +426,7 @@ namespace Legion {
       static inline void log_physical_instance_field(IDType inst_id,
                                                      FieldID field_id)
       {
-        log_spy.print("Physical Instance Field " IDFMT " %d", inst_id, field_id);
+        log_spy.print("Physical Instance Field " IDFMT " %d", inst_id,field_id);
       }
 
       static inline void log_physical_instance_creator(IDType inst_id, 
@@ -506,6 +514,11 @@ namespace Legion {
       }
 
       // Logger calls for mapping decisions
+      static inline void log_variant_decision(UniqueID unique_id, unsigned vid)
+      {
+        log_spy.print("Variant Decision %llu %u", unique_id, vid);
+      }
+
       static inline void log_mapping_decision(UniqueID unique_id, 
                                   unsigned index, FieldID fid, IDType inst_id)
       {

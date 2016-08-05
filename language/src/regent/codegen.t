@@ -1727,6 +1727,25 @@ function codegen.expr_field_access(cx, node)
         bounds,
         expr_type),
       expr_type)
+  elseif std.is_ispace(value_type) and field_name == "volume" then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local expr_type = std.as_read(node.expr_type)
+
+    local volume = terralib.newsymbol(expr_type, "volume")
+    local actions = quote
+      [value.actions]
+      [emit_debuginfo(node)]
+
+      -- Currently doesn't support index spaces with multiple domains.
+      regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [value.value].impl),
+        "\"volume\" field isn't supported on index spaces with multiple domains")
+      var [volume] = c.legion_domain_get_volume(
+        c.legion_index_space_get_domain([cx.runtime], [value.value].impl))
+    end
+    return values.value(
+      node,
+      expr.just(actions, volume),
+      expr_type)
   elseif std.is_partition(value_type) and field_name == "colors" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
@@ -3743,7 +3762,7 @@ end
 function codegen.expr_cross_product_array(cx, node)
   local lhs = codegen.expr(cx, node.lhs):read(cx)
   local colorings = codegen.expr(cx, node.colorings):read(cx)
-  local disjoint = node.disjointness == std.disjoint
+  local disjoint = node.disjointness:is(ast.disjointness_kind.Disjoint)
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
@@ -3810,6 +3829,15 @@ function codegen.expr_cross_product_array(cx, node)
     expr_type)
 end
 
+-- Returns Terra expression for subregion of partition of specified color.
+-- The color space can be either structured or unstructured.
+local function get_partition_subregion(cx, partition, color)
+  local partition_type = partition.value.type
+  local part_color_type = partition_type:colors().index_type
+  return `(c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+    [cx.runtime], [partition.value].impl, [part_color_type]([color]):to_domain_point()))
+end
+
 function codegen.expr_list_slice_partition(cx, node)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
@@ -3848,8 +3876,7 @@ function codegen.expr_list_slice_partition(cx, node)
 
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
-      var r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+      var r = [get_partition_subregion(cx, partition, color)]
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
@@ -3910,8 +3937,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
-      var orig_r = c.legion_logical_partition_get_logical_subregion_by_color(
-        [cx.runtime], [partition.value].impl, color)
+      var orig_r = [get_partition_subregion(cx, partition, color)]
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
       var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
@@ -4262,6 +4288,35 @@ function codegen.expr_list_phase_barriers(cx, node)
     expr_type)
 end
 
+-- Returns Terra expression for color as an index_type (e.g. int2d).
+local function get_logical_region_color(cx, region, color_type)
+  assert(std.is_index_type(color_type))
+  local domain_pt_expr =
+    `(c.legion_logical_region_get_color_domain_point([cx.runtime], region))
+  return `([color_type.from_domain_point](domain_pt_expr))
+end
+
+-- Returns Terra expression for offset of `point` in a rectangle.
+local function get_offset_in_rect(point, rect_size)
+  local point_type = point.type
+  local rect_size_type = rect_size.type
+  assert(std.is_index_type(point_type))
+  assert(std.type_eq(point_type, rect_size_type))
+
+  local fields = point_type.fields
+  if fields then
+    local offset = `0
+    local multiplicand = `1
+    for _, field in ipairs(fields) do
+      offset = `([offset] + [point].__ptr.[field] * [multiplicand])
+      multiplicand = `([multiplicand] * [rect_size].__ptr.[field])
+    end
+    return offset
+  else
+    return `([point].__ptr)
+  end
+end
+
 function codegen.expr_list_invert(cx, node)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local rhs = codegen.expr(cx, node.rhs):read(cx, rhs_type)
@@ -4275,6 +4330,11 @@ function codegen.expr_list_invert(cx, node)
     [product.actions]
     [barriers.actions]
     [emit_debuginfo(node)]
+  end
+
+  local color_type = rhs_type:partition():colors().index_type
+  if color_type:is_opaque() then  -- Treat `ptr` as `int1d`.
+    color_type = int1d
   end
 
   local result = terralib.newsymbol(expr_type, "result")
@@ -4299,19 +4359,22 @@ function codegen.expr_list_invert(cx, node)
       -- 1. Compute an index from colors to rhs index.
 
       -- Determine the range of colors in rhs.
-      var min_color : c.legion_color_t = 0
-      var max_color : c.legion_color_t = 0
+      var min_color : color_type
+      var max_color : color_type
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
         if i == 0 then
           min_color, max_color = rhs_color, rhs_color
         else
-          min_color, max_color = std.fmin(min_color, rhs_color), std.fmax(max_color, rhs_color)
+          min_color, max_color =
+            [color_type.elem_min](min_color, rhs_color),
+            [color_type.elem_max](max_color, rhs_color)
         end
       end
-      var num_colors = max_color - min_color + 1
+      var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
+      var colors_size = colors_rect:size()
+      var num_colors = colors_rect:volume()
       regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
 
       -- Build the index.
@@ -4325,13 +4388,17 @@ function codegen.expr_list_invert(cx, node)
 
       for i = 0, [rhs.value].__size do
         var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], rhs_elt)
+        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
 
+        var delta = rhs_color - min_color
+        var color_index = [get_offset_in_rect(delta, colors_size)]
         regentlib.assert(
-          color_to_index[rhs_color - min_color] == -1,
+          (0 <= color_index) and (color_index < num_colors),
+          "color index out of bounds in list_invert")
+        regentlib.assert(
+          color_to_index[color_index] == -1,
           "duplicate colors in list_invert")
-        color_to_index[rhs_color - min_color] = i
+        color_to_index[color_index] = i
       end
 
       -- 2. Compute sublists sizes.
@@ -4357,9 +4424,9 @@ function codegen.expr_list_invert(cx, node)
             inner = parent
           end
 
-          var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
-          var i = color_to_index[inner_color - min_color]
+          var inner_color = [get_logical_region_color(cx, inner, color_type)]
+          var delta = inner_color - min_color
+          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
           [expr_type:data(result)][i].__size =
             [expr_type:data(result)][i].__size + 1
         end
@@ -4401,9 +4468,9 @@ function codegen.expr_list_invert(cx, node)
             inner = parent
           end
 
-          var inner_color = c.legion_logical_region_get_color(
-            [cx.runtime], inner)
-          var i = color_to_index[inner_color - min_color]
+          var inner_color = [get_logical_region_color(cx, inner, color_type)]
+          var delta = inner_color - min_color
+          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
           regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
                            "overflowed sublist in list_invert")
           [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
@@ -4453,6 +4520,79 @@ function codegen.expr_list_range(cx, node)
     for i = [start.value], [stop.value] do
       [expr_type:data(result)][i - [start.value] ] = i
     end
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_list_ispace(cx, node)
+  local ispace_type = std.as_read(node.ispace.expr_type)
+  local ispace = codegen.expr(cx, node.ispace):read(cx, ispace_type)
+  local expr_type = std.as_read(node.expr_type)
+
+  local result = terralib.newsymbol(expr_type, "result") -- Resulting list.
+  local result_len = terralib.newsymbol(uint64, "result_len")
+
+  -- Construct AST that populates the `result` list with indices from `ispace`.
+  --
+  -- Loop variable: `for p in ispace do`
+  local bound
+  if node.ispace:is(ast.typed.expr.ID) then
+    bound = node.ispace.value
+  else
+    bound = std.newsymbol(ispace_type)
+  end
+  local p_symbol = std.newsymbol(
+    ispace_type.index_type(bound),
+    "p")
+  -- Index in list: `result[i] = p; i += 1`.
+  local i = terralib.newsymbol(int, "i")
+
+  local loop_body = ast.typed.stat.Internal {
+    actions = quote
+      regentlib.assert((i >= 0) and (i < [result_len]), "list index out of bounds in list_ispace")
+      [expr_type:data(result)][ [i] ] = [p_symbol:getsymbol()];
+      [i] = [i] + 1
+    end,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+  local populate_list_loop = ast.typed.stat.ForList {
+    symbol = p_symbol,
+    value = node.ispace,
+    block = ast.typed.Block {
+      stats = terralib.newlist({loop_body}),
+      span = node.span,
+    },
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+
+  local actions = quote
+    [ispace.actions]
+    [emit_debuginfo(node)]
+
+    -- Compute size of resulting list.
+    -- Currently doesn't support index spaces with multiple domains.
+    regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [ispace.value].impl),
+      "list_ispace doesn't support index spaces with multiple domains")
+    var ispace_domain = c.legion_index_space_get_domain([cx.runtime], [ispace.value].impl)
+    var [result_len] = c.legion_domain_get_volume(ispace_domain)
+
+    -- Allocate list.
+    var data = c.malloc(terralib.sizeof([expr_type.element_type]) * [result_len])
+    regentlib.assert(data ~= nil, "malloc failed in list_ispace")
+    var [result] = expr_type {
+      __size = [result_len],
+      __data = data
+    }
+
+    -- Populate list with indices from index space.
+    var [i] = 0;
+    [codegen.stat(cx, populate_list_loop)]
   end
 
   return values.value(
@@ -5925,6 +6065,9 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.ListRange) then
     return codegen.expr_list_range(cx, node)
 
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return codegen.expr_list_ispace(cx, node)
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return codegen.expr_phase_barrier(cx, node)
 
@@ -5994,6 +6137,11 @@ local function cleanup_after(cx, block)
   local result = terralib.newlist({quote [block] end})
   result:insert(cx:get_cleanup_items())
   return quote [result] end
+end
+
+function codegen.stat_internal(cx, node)
+  assert(terralib.isquote(node.actions))
+  return node.actions
 end
 
 function codegen.stat_if(cx, node)
@@ -7254,7 +7402,10 @@ function codegen.stat_raw_delete(cx, node)
 end
 
 function codegen.stat(cx, node)
-  if node:is(ast.typed.stat.If) then
+  if node:is(ast.typed.stat.Internal) then
+    return codegen.stat_internal(cx, node)
+
+  elseif node:is(ast.typed.stat.If) then
     return codegen.stat_if(cx, node)
 
   elseif node:is(ast.typed.stat.While) then

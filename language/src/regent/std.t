@@ -14,6 +14,7 @@
 
 -- Regent Standard Library
 
+local ast = require("regent/ast")
 local base = require("regent/std_base")
 local config = require("regent/config")
 local data = require("regent/data")
@@ -89,11 +90,107 @@ terra std.domain_from_bounds_3d(start : c.legion_point_3d_t,
 end
 
 -- #####################################
--- ## Privilege Helpers
+-- ## Kinds
+-- #################
+
+-- Privileges
+
+std.reads = ast.privilege_kind.Reads {}
+std.writes = ast.privilege_kind.Writes {}
+function std.reduces(op)
+  local ops = {
+    ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true,
+    ["max"] = true, ["min"] = true,
+  }
+  assert(ops[op])
+  return ast.privilege_kind.Reduces { op = op }
+end
+
+function std.is_reduce(privilege)
+  return privilege:is(ast.privilege_kind.Reduces)
+end
+
+-- Coherence Modes
+
+std.exclusive = ast.coherence_kind.Exclusive {}
+std.atomic = ast.coherence_kind.Atomic {}
+std.simultaneous = ast.coherence_kind.Simultaneous {}
+std.relaxed = ast.coherence_kind.Relaxed {}
+
+-- Flags
+
+std.no_access_flag = ast.flag_kind.NoAccessFlag {}
+
+-- Conditions
+
+std.arrives = ast.condition_kind.Arrives {}
+std.awaits = ast.condition_kind.Awaits {}
+
+-- Constraints
+
+std.subregion = ast.constraint_kind.Subregion {}
+std.disjointness = ast.constraint_kind.Disjointness {}
+
+-- #####################################
+-- ## Privileges
+-- #################
+
+function std.privilege(privilege, region, field_path)
+  assert(privilege:is(ast.privilege_kind), "privilege expected argument 1 to be a privilege kind")
+  assert(std.is_symbol(region), "privilege expected argument 2 to be a symbol")
+
+  if field_path == nil then
+    field_path = data.newtuple()
+  elseif type(field_path) == "string" then
+    field_path = data.newtuple(field_path)
+  end
+  assert(data.is_tuple(field_path), "privilege expected argument 3 to be a field")
+
+  return ast.privilege.Privilege {
+    region = region,
+    field_path = field_path,
+    privilege = privilege,
+  }
+end
+
+function std.privileges(privilege, regions_fields)
+  local privileges = terralib.newlist()
+  for _, region_fields in ipairs(regions_fields) do
+    local region, fields
+    if std.is_symbol(region_fields) then
+      region = region_fields
+      fields = terralib.newlist({data.newtuple()})
+    else
+      region = region_fields.region
+      fields = region_fields.fields
+    end
+    assert(std.is_symbol(region) and terralib.islist(fields))
+    for _, field in ipairs(fields) do
+      privileges:insert(std.privilege(privilege, region, field))
+    end
+  end
+  return privileges
+end
+
+-- #####################################
+-- ## Constraints
+-- #################
+
+function std.constraint(lhs, rhs, op)
+  assert(op:is(ast.constraint_kind))
+  return ast.constraint.Constraint {
+    lhs = lhs,
+    rhs = rhs,
+    op = op,
+  }
+end
+
+-- #####################################
+-- ## Privilege and Constraint Helpers
 -- #################
 
 function std.add_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   if not cx.privileges[privilege] then
@@ -142,7 +239,7 @@ end
 function std.add_constraints(cx, constraints)
   for _, constraint in ipairs(constraints) do
     local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
-    local symmetric = op == "*"
+    local symmetric = op == std.disjointness
     std.add_constraint(cx, lhs:gettype(), rhs:gettype(), op, symmetric)
   end
 end
@@ -157,8 +254,8 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
   end
   visited[region] = true
 
-  if cx.constraints["<="] and cx.constraints["<="][region] then
-    for subregion, _ in pairs(cx.constraints["<="][region]) do
+  if cx.constraints[std.subregion] and cx.constraints[std.subregion][region] then
+    for subregion, _ in pairs(cx.constraints[std.subregion][region]) do
       local result = std.search_constraint_predicate(
         cx, subregion, visited, predicate)
       if result then return result end
@@ -168,7 +265,7 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
 end
 
 function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   return std.search_constraint_predicate(
@@ -181,7 +278,7 @@ function std.search_privilege(cx, privilege, region, field_path, visited)
 end
 
 function std.check_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
@@ -279,8 +376,8 @@ function std.check_constraint(cx, constraint)
   }
   return std.search_constraint(
     cx, constraint.lhs, constraint, {},
-    constraint.op == "<=" --[[ reflexive ]],
-    constraint.op == "*" --[[ symmetric ]])
+    constraint.op == std.subregion --[[ reflexive ]],
+    constraint.op == std.disjointness --[[ symmetric ]])
 end
 
 function std.check_constraints(cx, constraints, mapping)
@@ -300,6 +397,21 @@ function std.check_constraints(cx, constraints, mapping)
   end
   return true
 end
+
+
+-- #####################################
+-- ## Physical Privilege Helpers
+-- #################
+
+-- Physical privileges describe the privileges used by the actual
+-- Legion runtime, rather than the privileges used by Regent (as
+-- above). Some important differences from normal privileges:
+--
+--  * Physical privileges are strings (at least for the moment)
+--  * Unlike normal privileges, physical privileges form a lattice
+--    (with a corresponding meet operator)
+--  * "reads_writes" is a physical privilege (not a normal privilege),
+--    and is the top of the physical privilege lattice
 
 function std.meet_privilege(a, b)
   if a == b then
@@ -342,10 +454,12 @@ function std.meet_flag(a, b)
 end
 
 function std.is_reduction_op(privilege)
+  assert(type(privilege) == "string")
   return string.sub(privilege, 1, string.len("reduces ")) == "reduces "
 end
 
 function std.get_reduction_op(privilege)
+  assert(type(privilege) == "string")
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
@@ -360,7 +474,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
         field_path:starts_with(privilege.field_path)
       then
         field_privilege = std.meet_privilege(field_privilege,
-                                             privilege.privilege)
+                                             tostring(privilege.privilege))
       end
     end
   end
@@ -369,7 +483,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   if coherence_modes[region_type] then
     for prefix, coherence in coherence_modes[region_type]:items() do
       if field_path:starts_with(prefix) then
-        coherence_mode = coherence
+        coherence_mode = tostring(coherence)
       end
     end
   end
@@ -379,7 +493,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
     for prefix, flag_fields in flags[region_type]:items() do
       if field_path:starts_with(prefix) then
         for _, flag_kind in flag_fields:keys() do
-          flag = std.meet_flag(flag, flag_kind)
+          flag = std.meet_flag(flag, tostring(flag_kind))
         end
       end
     end
@@ -1547,13 +1661,13 @@ do
   local next_id = 1
   function std.newsymbol(symbol_type, symbol_name)
     -- Swap around the arguments to allow either one to be optional.
-    if type(symbol_type) == "string" then
+    if type(symbol_type) == "string" and symbol_name == nil then
       symbol_type, symbol_name = nil, symbol_type
-    elseif terralib.types.istype(symbol_name) then
+    elseif symbol_type == nil and terralib.types.istype(symbol_name) then
       symbol_type, symbol_name = symbol_name, nil
     end
-    assert(symbol_type == nil or terralib.types.istype(symbol_type))
-    assert(symbol_name == nil or type(symbol_name) == "string")
+    assert(symbol_type == nil or terralib.types.istype(symbol_type), "newsymbol expected argument 1 to be a type")
+    assert(symbol_name == nil or type(symbol_name) == "string", "newsymbol expected argument 2 to be a string")
 
     local id = next_id
     next_id = next_id + 1
@@ -1652,6 +1766,83 @@ end
 
 function rquote:__tostring()
   return self.ast:tostring(true)
+end
+
+-- #####################################
+-- ## Codegen Helpers
+-- #################
+
+local gen_optimal = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      if [std.quote_binary_op(op, lhs, rhs)] then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
+std.fmax = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+std.fmin = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+function std.quote_unary_op(op, rhs)
+  if op == "-" then
+    return `(-[rhs])
+  elseif op == "not" then
+    return `(not [rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+function std.quote_binary_op(op, lhs, rhs)
+  if op == "*" then
+    return `([lhs] * [rhs])
+  elseif op == "/" then
+    return `([lhs] / [rhs])
+  elseif op == "%" then
+    return `([lhs] % [rhs])
+  elseif op == "+" then
+    return `([lhs] + [rhs])
+  elseif op == "-" then
+    return `([lhs] - [rhs])
+  elseif op == "<" then
+    return `([lhs] < [rhs])
+  elseif op == ">" then
+    return `([lhs] > [rhs])
+  elseif op == "<=" then
+    return `([lhs] <= [rhs])
+  elseif op == ">=" then
+    return `([lhs] >= [rhs])
+  elseif op == "==" then
+    return `([lhs] == [rhs])
+  elseif op == "~=" then
+    return `([lhs] ~= [rhs])
+  elseif op == "and" then
+    return `([lhs] and [rhs])
+  elseif op == "or" then
+    return `([lhs] or [rhs])
+  elseif op == "max" then
+    return `([std.fmax]([lhs], [rhs]))
+  elseif op == "min" then
+    return `([std.fmin]([lhs], [rhs]))
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
 end
 
 -- #####################################
@@ -2033,6 +2224,19 @@ std.rect_type = terralib.memoize(function(index_type)
     return self.hi - self.lo + [st.index_type:const(1)]
   end
 
+  if index_type.fields then
+    terra st:volume()
+      var size = self:size()
+      return [data.reduce(
+        function(result, field) return `([result] * ([size].__ptr.[field])) end,
+        index_type.fields, `(1))]
+    end
+  else
+    terra st:volume()
+      return int(self:size().__ptr)
+    end
+  end
+
   return st
 end)
 function std.index_type(base_type, displayname)
@@ -2142,6 +2346,36 @@ function std.index_type(base_type, displayname)
     return [make_domain_point(self)]
   end
 
+  -- Generate `from_domain_point` function.
+  local function make_from_domain_point(pt_expr)
+    local fields = st.fields
+
+    local dimensionality_match_cond
+    if st.dim <= 1 then  -- We regard 0-dim and 1-dim points as interchangeable.
+      dimensionality_match_cond = `([pt_expr].dim <= 1)
+    else
+      dimensionality_match_cond = `([pt_expr].dim == [st.dim])
+    end
+    local error_message =
+      "from_domain_point (" .. tostring(st) .. "): dimensionality mismatch"
+
+    if fields then
+      return quote
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type] {
+          [data.mapi(function(i) return `([pt_expr].point_data[ [i-1] ]) end, st.fields)] } }
+      end
+    else
+      return quote
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type]([pt_expr].point_data[0]) }
+      end
+    end
+  end
+  terra st.from_domain_point(pt : c.legion_domain_point_t)
+    [make_from_domain_point(pt)]
+  end
+
   for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
     st.metamethods[method_name] = method
   end
@@ -2157,6 +2391,26 @@ function std.index_type(base_type, displayname)
         end
       })
   end
+
+  -- Makes a Terra function that performs an operation element-wise on two
+  -- values of this index type.
+  local function make_element_wise_op(op)
+    local fields = st.fields
+    if fields then
+      return terra(i1 : st, i2 : st)
+        var p1, p2 = i1.__ptr, i2.__ptr
+        return [st] { __ptr = [st.impl_type]
+          { [fields:map(function(field) return `([op](p1.[field], p2.[field])) end)] } }
+      end
+    else
+      return terra(i1 : st, i2 : st)
+        return [st] { __ptr = [st.impl_type]([op](i1.__ptr, i2.__ptr)) }
+      end
+    end
+  end
+  -- Element-wise min and max.
+  st.elem_min = make_element_wise_op(std.fmin)
+  st.elem_max = make_element_wise_op(std.fmax)
 
   return setmetatable(st, index_type)
 end
@@ -2294,8 +2548,8 @@ end
 
 std.wild = std.newsymbol(std.untyped, "wild")
 
-std.disjoint = terralib.types.newstruct("disjoint")
-std.aliased = terralib.types.newstruct("aliased")
+std.disjoint = ast.disjointness_kind.Disjoint {}
+std.aliased = ast.disjointness_kind.Aliased {}
 
 function std.partition(disjointness, region_symbol, colors_symbol)
   if colors_symbol == nil then
@@ -2305,7 +2559,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
     colors_symbol = std.newsymbol(colors_symbol)
   end
 
-  assert(disjointness == std.disjoint or disjointness == std.aliased,
+  assert(disjointness:is(ast.disjointness_kind),
          "Partition type requires disjointness to be one of disjoint or aliased")
   assert(std.is_symbol(region_symbol),
          "Partition type requires region to be a symbol")
@@ -2334,7 +2588,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   st.subregions = {}
 
   function st:is_disjoint()
-    return self.disjointness == std.disjoint
+    return self.disjointness:is(ast.disjointness_kind.Disjoint)
   end
 
   function st:partition()
@@ -2999,84 +3253,6 @@ do
 end
 
 -- #####################################
--- ## Privileges
--- #################
-
-std.reads = "reads"
-std.writes = "writes"
-function std.reduces(op)
-  local ops = {
-    ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true,
-    ["max"] = true, ["min"] = true,
-  }
-  assert(ops[op])
-  return "reduces " .. tostring(op)
-end
-
-function std.is_reduce(privilege)
-  local base = "reduces "
-  return string.sub(privilege, 1, string.len(base)) == base
-end
-
-function std.privilege(privilege, regions_fields)
-  local privileges = terralib.newlist()
-  for _, region_fields in ipairs(regions_fields) do
-    local region, fields
-    if std.is_symbol(region_fields) then
-      region = region_fields
-      fields = terralib.newlist({data.newtuple()})
-    else
-      region = region_fields.region
-      fields = region_fields.fields
-    end
-    assert(std.is_symbol(region) and terralib.islist(fields))
-    for _, field in ipairs(fields) do
-      privileges:insert(data.map_from_table {
-        node_type = "privilege",
-        region = region,
-        field_path = field,
-        privilege = privilege,
-      })
-    end
-  end
-  return privileges
-end
-
--- #####################################
--- ## Coherence Modes
--- #################
-
-std.exclusive = "exclusive"
-std.atomic = "atomic"
-std.simultaneous = "simultaneous"
-std.relaxed = "relaxed"
-
--- #####################################
--- ## Flags
--- #################
-
-std.no_access_flag = "no_access_flag"
-
--- #####################################
--- ## Conditions
--- #################
-
-std.arrives = "arrives"
-std.awaits = "awaits"
-
--- #####################################
--- ## Constraints
--- #################
-
-function std.constraint(lhs, rhs, op)
-  return {
-    lhs = lhs,
-    rhs = rhs,
-    op = op,
-  }
-end
-
--- #####################################
 -- ## Tasks
 -- #################
 
@@ -3167,83 +3343,6 @@ function std.newfspace(node, name, has_params)
     fs = fs()
   end
   return fs
-end
-
--- #####################################
--- ## Codegen Helpers
--- #################
-
-local gen_optimal = terralib.memoize(
-  function(op, lhs_type, rhs_type)
-    return terra(lhs : lhs_type, rhs : rhs_type)
-      if [std.quote_binary_op(op, lhs, rhs)] then
-        return lhs
-      else
-        return rhs
-      end
-    end
-  end)
-
-std.fmax = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-std.fmin = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-function std.quote_unary_op(op, rhs)
-  if op == "-" then
-    return `(-[rhs])
-  elseif op == "not" then
-    return `(not [rhs])
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
-function std.quote_binary_op(op, lhs, rhs)
-  if op == "*" then
-    return `([lhs] * [rhs])
-  elseif op == "/" then
-    return `([lhs] / [rhs])
-  elseif op == "%" then
-    return `([lhs] % [rhs])
-  elseif op == "+" then
-    return `([lhs] + [rhs])
-  elseif op == "-" then
-    return `([lhs] - [rhs])
-  elseif op == "<" then
-    return `([lhs] < [rhs])
-  elseif op == ">" then
-    return `([lhs] > [rhs])
-  elseif op == "<=" then
-    return `([lhs] <= [rhs])
-  elseif op == ">=" then
-    return `([lhs] >= [rhs])
-  elseif op == "==" then
-    return `([lhs] == [rhs])
-  elseif op == "~=" then
-    return `([lhs] ~= [rhs])
-  elseif op == "and" then
-    return `([lhs] and [rhs])
-  elseif op == "or" then
-    return `([lhs] or [rhs])
-  elseif op == "max" then
-    return `([std.fmax]([lhs], [rhs]))
-  elseif op == "min" then
-    return `([std.fmin]([lhs], [rhs]))
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
 end
 
 -- #####################################
