@@ -136,9 +136,15 @@ std.disjointness = ast.constraint_kind.Disjointness {}
 -- #################
 
 function std.privilege(privilege, region, field_path)
-  assert(privilege:is(ast.privilege_kind))
-  assert(std.is_symbol(region))
-  assert(data.is_tuple(field_path))
+  assert(privilege:is(ast.privilege_kind), "privilege expected argument 1 to be a privilege kind")
+  assert(std.is_symbol(region), "privilege expected argument 2 to be a symbol")
+
+  if field_path == nil then
+    field_path = data.newtuple()
+  elseif type(field_path) == "string" then
+    field_path = data.newtuple(field_path)
+  end
+  assert(data.is_tuple(field_path), "privilege expected argument 3 to be a field")
 
   return ast.privilege.Privilege {
     region = region,
@@ -1655,13 +1661,13 @@ do
   local next_id = 1
   function std.newsymbol(symbol_type, symbol_name)
     -- Swap around the arguments to allow either one to be optional.
-    if type(symbol_type) == "string" then
+    if type(symbol_type) == "string" and symbol_name == nil then
       symbol_type, symbol_name = nil, symbol_type
-    elseif terralib.types.istype(symbol_name) then
+    elseif symbol_type == nil and terralib.types.istype(symbol_name) then
       symbol_type, symbol_name = symbol_name, nil
     end
-    assert(symbol_type == nil or terralib.types.istype(symbol_type))
-    assert(symbol_name == nil or type(symbol_name) == "string")
+    assert(symbol_type == nil or terralib.types.istype(symbol_type), "newsymbol expected argument 1 to be a type")
+    assert(symbol_name == nil or type(symbol_name) == "string", "newsymbol expected argument 2 to be a string")
 
     local id = next_id
     next_id = next_id + 1

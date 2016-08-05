@@ -424,6 +424,17 @@ function parser.disjointness_kind(p)
   end
 end
 
+function parser.effect(p)
+  local start = ast.save(p)
+  p:expect("[")
+  local effect_expr = p:luaexpr()
+  p:expect("]")
+  return ast.unspecialized.Effect {
+    expr = effect_expr,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.expr_prefix(p)
   local start = ast.save(p)
   if p:nextif("(") then
@@ -1051,14 +1062,26 @@ function parser.field(p)
   elseif p:nextif("[") then
     local name_expr = p:luaexpr()
     p:expect("]")
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = name_expr,
-      value = value,
-      annotations = ast.default_annotations(),
-      span = ast.span(start, p),
-    }
+    if p:nextif("=") then
+      local value = p:expr()
+      return ast.unspecialized.expr.CtorRecField {
+        name_expr = name_expr,
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    else
+      local value = ast.unspecialized.expr.Escape {
+        expr = name_expr,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+      return ast.unspecialized.expr.CtorListField {
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    end
 
   else
     local value = p:expr()
@@ -1771,27 +1794,25 @@ function parser.top_task_return(p)
 end
 
 function parser.top_task_effects(p)
-  local privileges = terralib.newlist()
-  local coherence_modes = terralib.newlist()
-  local flags = terralib.newlist()
-  local conditions = terralib.newlist()
-  local constraints = terralib.newlist()
+  local effect_exprs = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+      if p:matches("[") then
+        effect_exprs:insert(p:effect())
+      elseif p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
         local privilege, coherence, flag = p:privilege_coherence_flags()
-        privileges:insert(privilege)
-        coherence_modes:insert(coherence)
-        flags:insert(flag)
+        effect_exprs:insert(privilege)
+        effect_exprs:insert(coherence)
+        effect_exprs:insert(flag)
       elseif p:is_condition_kind() then
-        conditions:insert(p:condition())
+        effect_exprs:insert(p:condition())
       else
-        constraints:insert(p:constraint())
+        effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, flags, conditions, constraints
+  return effect_exprs
 end
 
 function parser.top_task(p, annotations)
@@ -1800,8 +1821,7 @@ function parser.top_task(p, annotations)
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local privileges, coherence_modes, flags, conditions, constraints =
-    p:top_task_effects()
+  local effects = p:top_task_effects()
   local body = p:block()
   p:expect("end")
 
@@ -1809,11 +1829,7 @@ function parser.top_task(p, annotations)
     name = name,
     params = params,
     return_type_expr = return_type,
-    privileges = privileges,
-    coherence_modes = coherence_modes,
-    flags = flags,
-    conditions = conditions,
-    constraints = constraints,
+    effect_exprs = effects,
     body = body,
     annotations = annotations,
     span = ast.span(start, p),
