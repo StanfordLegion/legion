@@ -881,13 +881,14 @@ function specialize.expr_ctor_rec_field(cx, node, allow_lists)
     assert("expected a string or symbol but found " .. tostring(type(name)))
   end
 
-  return terralib.newlist(
+  return terralib.newlist({
     ast.specialized.expr.CtorRecField {
       name = name,
       value = specialize.expr(cx, node.value),
       annotations = node.annotations,
       span = node.span,
-    })
+    }
+  })
 end
 
 function specialize.expr_ctor_field(cx, node, allow_lists)
