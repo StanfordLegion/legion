@@ -675,8 +675,7 @@ function specialize.effect_expr(cx, node)
     return terralib.newlist({make_field(field_path, 1)})
   end
 
-  local value = node.expr(cx.env:env())
-  if value:is(ast.privilege.Privilege) then
+  local function make_privilege(value)
     return ast.specialized.Privilege {
       privileges = terralib.newlist({value.privilege}),
       regions = terralib.newlist({
@@ -688,6 +687,20 @@ function specialize.effect_expr(cx, node)
       }),
       span = span,
     }
+  end
+
+  local value = node.expr(cx.env:env())
+  if terralib.islist(value) then
+    return value:map(
+      function(v)
+        if v:is(ast.privilege.Privilege) then
+          return make_privilege(v)
+        else
+          assert(false, "unexpected value type " .. tostring(value:type()))
+        end
+      end)
+  elseif value:is(ast.privilege.Privilege) then
+    return make_privilege(value)
   else
     assert(false, "unexpected value type " .. tostring(value:type()))
   end
@@ -719,19 +732,25 @@ function specialize.effects(cx, node)
   local conditions = terralib.newlist()
 
   for _, effect_expr in ipairs(node) do
-    local effect = specialize.effect(cx, effect_expr)
-    if effect:is(ast.specialized.Constraint) then
-      constraints:insert(effect)
-    elseif effect:is(ast.specialized.Privilege) then
-      privileges:insert(effect)
-    elseif effect:is(ast.specialized.Coherence) then
-      coherence_modes:insert(effect)
-    elseif effect:is(ast.specialized.Flag) then
-      flags:insert(effect)
-    elseif effect:is(ast.specialized.Condition) then
-      conditions:insert(effect)
-    else
-      assert(false, "unexpected node type " .. tostring(node:type()))
+    local effects = specialize.effect(cx, effect_expr)
+    if not terralib.islist(effects) then
+      effects = terralib.newlist({effects})
+    end
+
+    for _, effect in ipairs(effects) do
+      if effect:is(ast.specialized.Constraint) then
+        constraints:insert(effect)
+      elseif effect:is(ast.specialized.Privilege) then
+        privileges:insert(effect)
+      elseif effect:is(ast.specialized.Coherence) then
+        coherence_modes:insert(effect)
+      elseif effect:is(ast.specialized.Flag) then
+        flags:insert(effect)
+      elseif effect:is(ast.specialized.Condition) then
+        conditions:insert(effect)
+      else
+        assert(false, "unexpected node type " .. tostring(node:type()))
+      end
     end
   end
 
@@ -854,27 +873,39 @@ function specialize.expr_call(cx, node, allow_lists)
 end
 
 function specialize.expr_ctor_list_field(cx, node, allow_lists)
-  return ast.specialized.expr.CtorListField {
-    value = specialize.expr(cx, node.value),
-    annotations = node.annotations,
-    span = node.span,
-  }
+  local value = specialize.expr(cx, node.value, true)
+
+  local results = terralib.newlist()
+  if terralib.islist(value) then
+    results:insertall(value)
+  else
+    results:insert(value)
+  end
+
+  return results:map(
+    function(result)
+      return ast.specialized.expr.CtorListField {
+        value = result,
+        annotations = node.annotations,
+        span = node.span,
+      }
+    end)
 end
 
 function specialize.expr_ctor_rec_field(cx, node, allow_lists)
   local name = node.name_expr(cx.env:env())
-  if terralib.issymbol(name) then
-    name = name.displayname
-  elseif not type(name) == "string" then
-    assert("expected a string or symbol but found " .. tostring(type(name)))
+  if type(name) ~= "string" then
+    log.error(node, "expected a string but found " .. tostring(type(name)))
   end
 
-  return ast.specialized.expr.CtorRecField {
-    name = name,
-    value = specialize.expr(cx, node.value),
-    annotations = node.annotations,
-    span = node.span,
-  }
+  return terralib.newlist({
+    ast.specialized.expr.CtorRecField {
+      name = name,
+      value = specialize.expr(cx, node.value),
+      annotations = node.annotations,
+      span = node.span,
+    }
+  })
 end
 
 function specialize.expr_ctor_field(cx, node, allow_lists)
@@ -883,24 +914,28 @@ function specialize.expr_ctor_field(cx, node, allow_lists)
   elseif node:is(ast.unspecialized.expr.CtorRecField) then
     return specialize.expr_ctor_rec_field(cx, node)
   else
+    assert(false)
   end
 end
 
 function specialize.expr_ctor(cx, node, allow_lists)
-  local fields = node.fields:map(
-    function(field) return specialize.expr_ctor_field(cx, field) end)
+  local fields = data.flatmap(
+    function(field) return specialize.expr_ctor_field(cx, field) end,
+    node.fields)
 
   -- Validate that fields are either all named or all unnamed.
   local all_named = false
   local all_unnamed = false
   for _, field in ipairs(fields) do
     if field:is(ast.specialized.expr.CtorRecField) then
-      assert(not all_unnamed,
-             "some entries in constructor are named while others are not")
+      if all_unnamed then
+        log.error(node, "some entries in constructor are named while others are not")
+      end
       all_named = true
     elseif field:is(ast.specialized.expr.CtorListField) then
-      assert(not all_named,
-             "some entries in constructor are named while others are not")
+      if all_named then
+        log.error(node, "some entries in constructor are named while others are not")
+      end
       all_unnamed = true
     else
       assert(false)

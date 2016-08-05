@@ -180,7 +180,7 @@ end
 
 local function get_intersection(rect_type)
   return terra(r1 : rect_type, r2 : rect_type) : rect_type
-    var r : std.rect2d
+    var r : rect_type
     r.lo = [ max_points[rect_type.index_type] ](r1.lo, r2.lo)
     r.hi = [ min_points[rect_type.index_type] ](r1.hi, r2.hi)
     return r
