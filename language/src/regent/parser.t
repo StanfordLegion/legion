@@ -1062,14 +1062,26 @@ function parser.field(p)
   elseif p:nextif("[") then
     local name_expr = p:luaexpr()
     p:expect("]")
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = name_expr,
-      value = value,
-      annotations = ast.default_annotations(),
-      span = ast.span(start, p),
-    }
+    if p:nextif("=") then
+      local value = p:expr()
+      return ast.unspecialized.expr.CtorRecField {
+        name_expr = name_expr,
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    else
+      local value = ast.unspecialized.expr.Escape {
+        expr = name_expr,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+      return ast.unspecialized.expr.CtorListField {
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    end
 
   else
     local value = p:expr()
