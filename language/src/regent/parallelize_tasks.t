@@ -1365,21 +1365,6 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
       args:insert(
         mk_expr_index_access(partition_expr, color_expr, subregion_type))
       caller_cx:update_constraint(args[#args])
-      ---- In debug mode, emit a code that checks if partitions have
-      ---- the same color space.
-      --if std.config["debug"] and partition_symbol ~= pp then
-      --  local color_space_type = partition_symbol:gettype():colors()
-      --  local colors_expr =
-      --    mk_expr_field_access(partition_expr, "colors", color_space_type)
-      --  local bounds_expr =
-      --    mk_expr_field_access(colors_expr, "bounds",
-      --      std.rect_type(color_space_type.index_type))
-      --  stats:insert(mk_stat_expr(
-      --   mk_expr_call(std.assert, terralib.newlist {
-      --     mk_expr_binary("==", launch_bounds_expr, bounds_expr),
-      --     mk_expr_constant("launch domain mismatches", rawstring),
-      --   })))
-      --end
     else
       args:insert(expr.args[idx])
     end
@@ -1468,6 +1453,12 @@ local function normalize_calls(parallelizable, call_stats)
     elseif (node:is(ast.typed.stat.Assignment) or
             node:is(ast.typed.stat.Reduce)) and
            data.any(unpack(node.rhs:map(parallelizable))) then
+      if node:is(ast.typed.stat.Reduce) and
+         parallelizable(node.rhs[1]).cx.reduction_info.op == node.op and
+         #node.rhs == 1 then
+        call_stats[node] = true
+        return node
+      end
       local normalized, new_node = normalize(node, "rhs")
       normalized:map(function(stat) call_stats[stat] = true end)
       normalized:insert(new_node)
@@ -1661,15 +1652,25 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
         stats:insertall(
           create_indexspace_launch(parallelizable, caller_cx, node.expr))
       else
-        assert(node:is(ast.typed.stat.Var))
-        local expr = node.values[1]
+        local expr
+        local lhs
+        if node:is(ast.typed.stat.Var) then
+          expr = node.values[1]
+          lhs = mk_expr_id(node.symbols[1],
+                           std.rawref(&std.as_read(node.symbols[1]:gettype())))
+        elseif node:is(ast.typed.stat.Reduce) then
+          expr = node.rhs[1]
+          lhs = node.lhs[1]
+        else
+          assert(false, "unreachable")
+        end
+
         local reduction_info = parallelizable(expr).cx.reduction_info
-        stats:insert(node {
-          values = terralib.newlist {reduction_info.init_expr},
-        })
-        local lhs =
-          mk_expr_id(node.symbols[1],
-          std.rawref(&std.as_read(node.symbols[1]:gettype())))
+        if node:is(ast.typed.stat.Var) then
+          stats:insert(node {
+            values = terralib.newlist {reduction_info.init_expr},
+          })
+        end
         stats:insertall(
           create_indexspace_launch(parallelizable, caller_cx, expr, lhs))
       end
