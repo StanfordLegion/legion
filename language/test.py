@@ -48,6 +48,7 @@ def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
             ([] if verbose else ['-level', '5']))
+    if verbose: print('Running', ' '.join(args))
     proc = regent.regent(
         args,
         stdout=None if verbose else subprocess.PIPE,
