@@ -147,30 +147,33 @@ namespace Legion {
     public:
       inline bool empty(void) const 
         { return single && (versions.single_version == NULL); }
-      inline const FieldMask& get_valid_fields(void) const 
+      inline const FieldMask& get_valid_mask(void) const 
         { return valid_fields; }
     public:
       FieldMask& operator[](VersionState *state);
       const FieldMask& operator[](VersionState *state) const;
     public:
       void insert(VersionState *state, const FieldMask &mask, 
-                  ReferenceMutator *mutator = NULL);
+                  ReferenceMutator *mutator = NULL); 
       void erase(VersionState *to_erase);
       void clear(void);
       size_t size(void) const;
     public:
       std::pair<VersionState*,FieldMask>* next(VersionState *current) const;
     public:
+      void move(VersioningSet &other);
+    public:
       iterator begin(void) const;
       inline iterator end(void) const { return iterator(this, NULL, true); }
     public:
       template<ReferenceSource ARG_KIND>
-      void merge(const FieldMask &merge_mask, 
-                 VersioningSet<ARG_KIND> &new_states,ReferenceMutator *mutator);
+      void reduce(const FieldMask &merge_mask, 
+                  VersioningSet<ARG_KIND> &new_states,
+                  ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
-    public:
+    protected:
       // Fun with C, keep these two fields first and in this order
       // so that a 
       // VersioningSet of size 1 looks the same as an entry
@@ -654,7 +657,7 @@ namespace Legion {
       inline bool is_captured(void) const { return captured; }
       void capture_state(void);
       inline bool has_advance_states(void) const 
-        { return (advance_states.versions.single_version != NULL); } 
+        { return (!advance_states.empty()); } 
       void apply_state(AddressSpaceID target, 
                        std::set<RtEvent> &applied_conditions) const; 
       void filter_open_children(const FieldMask &filter_mask);
@@ -682,7 +685,7 @@ namespace Legion {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     protected:
-      typedef VersioningSet<> PhysicalVersions;
+      typedef VersioningSet<PHYSICAL_STATE_REF> PhysicalVersions;
       PhysicalVersions version_states;
       PhysicalVersions advance_states;
     protected:
