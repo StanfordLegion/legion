@@ -50,6 +50,7 @@ def test(root_dir, debug, spy, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
+    inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
 
     subprocess.check_call(
         ['time', './install.py', '--rdir=auto'] + threads + terra + debug_flag,
@@ -57,12 +58,12 @@ def test(root_dir, debug, spy, env):
         cwd = root_dir)
     if not spy:
         subprocess.check_call(
-            ['time', './test.py', '-q'] + threads + debug_flag,
+            ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
             env = env,
             cwd = root_dir)
     if spy:
         subprocess.check_call(
-            ['time', './test.py', '-q', '--spy'] + threads,
+            ['time', './test.py', '-q', '--spy'] + threads + inner_flag,
             env = env,
             cwd = root_dir)
 

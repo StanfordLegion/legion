@@ -675,8 +675,7 @@ function specialize.effect_expr(cx, node)
     return terralib.newlist({make_field(field_path, 1)})
   end
 
-  local value = node.expr(cx.env:env())
-  if value:is(ast.privilege.Privilege) then
+  local function make_privilege(value)
     return ast.specialized.Privilege {
       privileges = terralib.newlist({value.privilege}),
       regions = terralib.newlist({
@@ -688,6 +687,20 @@ function specialize.effect_expr(cx, node)
       }),
       span = span,
     }
+  end
+
+  local value = node.expr(cx.env:env())
+  if terralib.islist(value) then
+    return value:map(
+      function(v)
+        if v:is(ast.privilege.Privilege) then
+          return make_privilege(v)
+        else
+          assert(false, "unexpected value type " .. tostring(value:type()))
+        end
+      end)
+  elseif value:is(ast.privilege.Privilege) then
+    return make_privilege(value)
   else
     assert(false, "unexpected value type " .. tostring(value:type()))
   end
@@ -719,19 +732,25 @@ function specialize.effects(cx, node)
   local conditions = terralib.newlist()
 
   for _, effect_expr in ipairs(node) do
-    local effect = specialize.effect(cx, effect_expr)
-    if effect:is(ast.specialized.Constraint) then
-      constraints:insert(effect)
-    elseif effect:is(ast.specialized.Privilege) then
-      privileges:insert(effect)
-    elseif effect:is(ast.specialized.Coherence) then
-      coherence_modes:insert(effect)
-    elseif effect:is(ast.specialized.Flag) then
-      flags:insert(effect)
-    elseif effect:is(ast.specialized.Condition) then
-      conditions:insert(effect)
-    else
-      assert(false, "unexpected node type " .. tostring(node:type()))
+    local effects = specialize.effect(cx, effect_expr)
+    if not terralib.islist(effects) then
+      effects = terralib.newlist({effects})
+    end
+
+    for _, effect in ipairs(effects) do
+      if effect:is(ast.specialized.Constraint) then
+        constraints:insert(effect)
+      elseif effect:is(ast.specialized.Privilege) then
+        privileges:insert(effect)
+      elseif effect:is(ast.specialized.Coherence) then
+        coherence_modes:insert(effect)
+      elseif effect:is(ast.specialized.Flag) then
+        flags:insert(effect)
+      elseif effect:is(ast.specialized.Condition) then
+        conditions:insert(effect)
+      else
+        assert(false, "unexpected node type " .. tostring(node:type()))
+      end
     end
   end
 

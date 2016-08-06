@@ -4528,12 +4528,14 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
-    def get_physical_reachable(self, reachable, forward, origin = None):
-        if self is origin:
+    def get_physical_reachable(self, reachable, forward, 
+                               origin = None, skip_first = False):
+        if self is origin and not skip_first:
             return True
         if self in reachable:
             return False
-        reachable.add(self)
+        if not skip_first:
+            reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
                 if op.get_physical_reachable(reachable, True, origin):
@@ -7701,20 +7703,22 @@ class RealmBase(object):
         traverser.visit_event(self.start_event)
         return traverser.cycle
 
-    def get_physical_reachable(self, reachable, forward, origin = None):
+    def get_physical_reachable(self, reachable, forward, 
+                               origin = None, skip_first = False):
         # Check for cycles
-        if self is origin:
+        if self is origin and not skip_first:
             return True
         if self in reachable:
             return False 
-        reachable.add(self)
+        if not skip_first:
+            reachable.add(self)
         if forward:
             for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True):
+                if op.get_physical_reachable(reachable, True, origin):
                     return True
         else:
             for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False):
+                if op.get_physical_reachable(reachable, False, origin):
                     return True
         return False
 
@@ -9296,7 +9300,7 @@ class State(object):
                 if not next_vert in actual_out:
                     continue
                 reachable = set()
-                if next_vert.get_physical_reachable(reachable, True, next_vert):
+                if next_vert.get_physical_reachable(reachable, True, next_vert, True):
                     print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
                     print "  This usually indicates a runtime bug and should be reported."
                     print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"

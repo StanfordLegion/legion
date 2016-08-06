@@ -12,16 +12,32 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_call_parallel.rg:25: option __demand(__parallel) is not permitted
---   __demand(__parallel, f())
---                          ^
-
 import "regent"
 
-task f() end
+struct s { a : int }
 
-task g()
-  __demand(__parallel, f())
+local r = regentlib.newsymbol(region(s), "r")
+local reads_r_a = regentlib.privilege(regentlib.reads, r, "a")
+local writes_r_a = regentlib.privilege(regentlib.writes, r, "a")
+local reads_writes_r_a = terralib.newlist({reads_r_a, writes_r_a})
+
+task f([r])
+where [reads_writes_r_a] do
+  for i in r do
+    i.a += 1
+  end
 end
-g:compile()
+
+task main()
+  var r = region(ispace(ptr, 5), s)
+  new(ptr(s, r), 3)
+  fill(r.a, 10)
+  f(r)
+
+  var t = 0
+  for i in r do
+    t += i.a
+  end
+  regentlib.assert(t == 33, "test failed")
+end
+regentlib.start(main)

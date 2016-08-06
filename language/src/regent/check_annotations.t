@@ -68,7 +68,7 @@ local function check_annotations_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.Call) then
-      check(cx, node, data.set({"inline"}))
+      check(cx, node, data.set({"parallel", "inline"}))
 
     elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
