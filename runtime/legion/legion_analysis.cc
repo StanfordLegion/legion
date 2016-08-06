@@ -412,6 +412,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
+    size_t VersioningSet<REF_KIND>::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (versions.single_version == NULL)
+          return 0;
+        else
+          return 1;
+      }
+      else
+        return versions.multi_versions->size(); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<ReferenceSource REF_KIND>
     std::pair<VersionState*,FieldMask>* 
                       VersioningSet<REF_KIND>::next(VersionState *current) const
     //--------------------------------------------------------------------------

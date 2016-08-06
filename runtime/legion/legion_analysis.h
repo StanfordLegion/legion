@@ -157,6 +157,7 @@ namespace Legion {
                   ReferenceMutator *mutator = NULL);
       void erase(VersionState *to_erase);
       void clear(void);
+      size_t size(void) const;
     public:
       std::pair<VersionState*,FieldMask>* next(VersionState *current) const;
     public:
@@ -170,7 +171,8 @@ namespace Legion {
       void sanity_check(void) const;
 #endif
     public:
-      // Fun with C, keep these two fields first so that a 
+      // Fun with C, keep these two fields first and in this order
+      // so that a 
       // VersioningSet of size 1 looks the same as an entry
       // in the STL Map in the multi-version case, 
       // provides goodness for the iterator
