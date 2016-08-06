@@ -50,7 +50,7 @@ def test(root_dir, debug, spy, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
-    inner_flag = ['--extra=-flegion-inner', '-extra=0'] if 'DISABLE_INNER' in env else []
+    inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
 
     subprocess.check_call(
         ['time', './install.py', '--rdir=auto'] + threads + terra + debug_flag,
