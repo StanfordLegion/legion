@@ -3619,8 +3619,8 @@ function std.setup(main_task, extra_setup_thunk)
         var [layout_constraints] = c.legion_task_layout_constraint_set_create()
         [layout_constraint_actions]
         var options = c.legion_task_config_options_t {
-          leaf = options.leaf,
-          inner = options.inner,
+          leaf = [ options.leaf and std.config["legion-leaf"] ],
+          inner = [ options.inner and std.config["legion-inner"] ],
           idempotent = options.idempotent,
         }
 
