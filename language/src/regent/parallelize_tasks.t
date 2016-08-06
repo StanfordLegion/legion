@@ -942,7 +942,7 @@ end
 
 caller_context.__index = caller_context
 
-function caller_context.new()
+function caller_context.new(constraints)
   local param = parallel_param.new(std.config["parallelize-dop"])
   local cx = {
     __param_stack = terralib.newlist { param },
@@ -960,6 +960,8 @@ function caller_context.new()
     __ghost_partitions = {},
     -- keep parent-child relationship in region tree
     __parent_region = {},
+    -- the constraint graph to update for later stages
+    constraints = constraints,
   }
   return setmetatable(cx, caller_context)
 end
@@ -1044,6 +1046,16 @@ function caller_context:find_parent_region(region)
   return self.__parent_region[region]
 end
 
+function caller_context:update_constraint(expr)
+  assert(expr:is(ast.typed.expr.IndexAccess))
+  local value_type = expr.value.expr_type
+  local partition = value_type:partition()
+  local parent = value_type:parent_region()
+  local subregion = expr.expr_type
+  std.add_constraint(self, partition, parent, std.subregion, false)
+  std.add_constraint(self, subregion, partition, std.subregion, false)
+end
+
 -- #####################################
 -- ## Task parallelizability checker
 -- #################
@@ -1084,7 +1096,7 @@ local function create_equal_partition(region_symbol, dop)
   local color_space_expr = mk_expr_ispace(index_type, extent_expr)
   local color_space_symbol = get_new_tmp_var(color_space_expr.expr_type)
   local partition_type =
-    std.partition(disjoint, region_symbol, color_space_symbol)
+    std.partition(disjoint, region_symbol, color_space_symbol:gettype())
   local partition_symbol = get_new_tmp_var(partition_type)
 
   local stats = terralib.newlist { mk_stat_var(
@@ -1104,7 +1116,7 @@ end
 --                         stencil(primary_partition[c].bounds)))
 --   var ghost_partition = partition(disjoint, primary_region, coloring)
 --
-local function create_image_partition(pr, pp, stencil)
+local function create_image_partition(caller_cx, pr, pp, stencil)
   local pr_type = std.as_read(pr:gettype())
   local pr_index_type = pr_type:ispace().index_type
   local pr_rect_type = std.rect_type(pr_index_type)
@@ -1129,8 +1141,9 @@ local function create_image_partition(pr, pp, stencil)
   local loop_body = terralib.newlist()
   local pr_expr = mk_expr_id(pr)
   local pp_expr = mk_expr_id(pp)
-  local sr_expr =
-    mk_expr_index_access(pp_expr, color_expr, copy_region_type(pr_type))
+  local sr_type = pp:gettype():subregion_dynamic()
+  local sr_expr = mk_expr_index_access(pp_expr, color_expr, sr_type)
+  caller_cx:update_constraint(sr_expr)
   local pr_bounds_expr = mk_expr_bounds_access(pr_expr)
   local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
   local sr_lo_expr = mk_expr_field_access(sr_bounds_expr, "lo", pr_index_type)
@@ -1184,7 +1197,7 @@ end
 --                           primary_partition[c].bounds)
 --   var subset_partition = partition(*, subregion, coloring)
 --
-local function create_subset_partition(sr, pp)
+local function create_subset_partition(caller_cx, sr, pp)
   local sr_type = std.as_read(sr:gettype())
   local sr_index_type = sr_type:ispace().index_type
   local sr_rect_type = std.rect_type(sr_index_type)
@@ -1210,9 +1223,9 @@ local function create_subset_partition(sr, pp)
   local loop_body = terralib.newlist()
   local sr_expr = mk_expr_id(sr)
   local pp_expr = mk_expr_id(pp)
-  local srpp_expr =
-    mk_expr_index_access(pp_expr, color_expr,
-      copy_region_type(pp:gettype():parent_region()))
+  local srpp_type = pp:gettype():subregion_dynamic()
+  local srpp_expr = mk_expr_index_access(pp_expr, color_expr, srpp_type)
+  caller_cx:update_constraint(srpp_expr)
   local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
   local srpp_bounds_expr = mk_expr_bounds_access(srpp_expr)
   local intersect_expr =
@@ -1266,7 +1279,7 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   assert(pp)
   local pp_color_space_type = pp:gettype():colors()
   local pp_color_type =
-    pp_color_space_type.index_type(std.newsymbol(pp_color_space_type))
+    pp_color_space_type.index_type(pp:gettype().colors_symbol)
   local color_symbol = get_new_tmp_var(pp_color_type)
   local color_expr = mk_expr_id(color_symbol)
   local pp_expr = mk_expr_id(pp)
@@ -1288,9 +1301,10 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
         caller_cx:find_primary_partition_by_call(expr, region_symbol)
       local partition_expr = mk_expr_id(partition_symbol)
       assert(partition_symbol)
+      local subregion_type = partition_symbol:gettype():subregion_dynamic()
       args:insert(
-        mk_expr_index_access(partition_expr, color_expr,
-          copy_region_type(region_symbol:gettype())))
+        mk_expr_index_access(partition_expr, color_expr, subregion_type))
+      caller_cx:update_constraint(args[#args])
       -- In debug mode, emit a code that checks if partitions have
       -- the same color space.
       if std.config["debug"] and partition_symbol ~= pp then
@@ -1303,7 +1317,7 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
         stats:insert(mk_stat_expr(
          mk_expr_call(std.assert, terralib.newlist {
            mk_expr_binary("==", launch_bounds_expr, bounds_expr),
-           mk_expr_constant("launch domain mismathces", rawstring),
+           mk_expr_constant("launch domain mismatches", rawstring),
          })))
       end
     else
@@ -1314,9 +1328,9 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   for idx = 1, #task_cx.stencils do
     local gp = caller_cx:find_ghost_partition(expr, task_cx.stencils[idx])
     local pr_type = gp:gettype().parent_region_symbol:gettype()
-    args:insert(
-      mk_expr_index_access(mk_expr_id(gp), color_expr,
-                           copy_region_type(pr_type)))
+    local sr_type = gp:gettype():subregion_dynamic()
+    args:insert(mk_expr_index_access(mk_expr_id(gp), color_expr, sr_type))
+    caller_cx:update_constraint(args[#args])
   end
   -- Append the original region-typed arguments at the end
   for idx = 1, #expr.args do
@@ -1332,9 +1346,14 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   else
     call_stat = mk_stat_expr(expr)
   end
-  stats:insert(
-    mk_stat_for_list(color_symbol, pp_colors_expr, mk_block(call_stat)))
-
+  local index_launch =
+    mk_stat_for_list(color_symbol, pp_colors_expr, mk_block(call_stat))
+  --index_launch = index_launch {
+  --  annotations = index_launch.annotations {
+  --    parallel = ast.annotation.Demand
+  --  }
+  --}
+  stats:insert(index_launch)
   return stats
 end
 
@@ -1463,7 +1482,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           end
           if parent_partition then
             local partition_symbol, partition_stats =
-              create_subset_partition(region, parent_partition)
+              create_subset_partition(caller_cx, region, parent_partition)
             caller_cx:add_primary_partition(region, pparam, partition_symbol)
             stats:insertall(partition_stats)
           else
@@ -1533,7 +1552,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
             caller_cx:find_primary_partition(pparam, range_symbol)
           assert(partition_symbol)
           local partition_symbol, partition_stats =
-            create_image_partition(range_symbol, partition_symbol,
+            create_image_partition(caller_cx, range_symbol, partition_symbol,
                                    stencil:index())
           ghost_partition_symbols:insert(partition_symbol)
           stats:insertall(partition_stats)
@@ -1644,7 +1663,7 @@ function parallelize_task_calls.top_task(global_cx, node)
       body)
 
   -- Second, group task calls by reaching region declarations
-  local caller_cx = caller_context.new()
+  local caller_cx = caller_context.new(node.prototype:get_constraints())
   ast.traverse_node_continuation(
     collect_calls(caller_cx, parallelizable),
     normalized)
