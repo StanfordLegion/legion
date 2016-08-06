@@ -3357,22 +3357,13 @@ namespace Legion {
       // since it is on the critical path, but if not we give it the 
       // normal priority so that we can balance doing logical analysis
       // and actually mapping and running tasks
-      if (currently_active_context)
-      {
-        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                        HLR_TRIGGER_DEPENDENCE_ID, 
-                                        HLR_THROUGHPUT_PRIORITY, op,
-                                        dependence_precondition);
-        dependence_precondition = next;
-      }
-      else
-      {
-        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                        HLR_TRIGGER_DEPENDENCE_ID, 
-                                        HLR_LATENCY_PRIORITY, op,
-                                        dependence_precondition);
-        dependence_precondition = next;
-      }
+      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                      HLR_TRIGGER_DEPENDENCE_ID, 
+                                      currently_active_context ? 
+                                        HLR_THROUGHPUT_PRIORITY :
+                                        HLR_DEFERRED_THROUGHPUT_PRIORITY, 
+                                      op, dependence_precondition);
+      dependence_precondition = next;
       // Now we can release the lock
       op_lock.release();
     }

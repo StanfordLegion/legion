@@ -88,35 +88,97 @@ namespace Legion {
     };
 
     /**
-     * \struct VersionStates
+     * \struct VersioningSet
      * A small helper class for tracking collections of 
      * version state objects and their sets of fields
      * This is the same as the above class, but specialized
      * for VersionState objects explicitly
      */
-    struct VersionStates {
+    template<ReferenceSource REF_SRC = LAST_SOURCE_REF>
+    class VersioningSet {
     public:
-      VersionStates(void);
-#ifdef DEBUG_LEGION
-      ~VersionStates(void);
-#endif
+      class iterator : public std::iterator<std::input_iterator_tag,
+                              std::pair<VersionState*,FieldMask> > {
+      public:
+        iterator(const VersioningSet *_set, 
+            std::pair<VersionState*,FieldMask> *_result, bool _single)
+          : set(_set), result(_result), single(_single) { }
+      public:
+        iterator(const iterator &rhs)
+          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+        ~iterator(void) { }
+      public:
+        inline iterator& operator=(const iterator &rhs)
+          { set = rhs.set; result = rhs.result; 
+            single = rhs.single; return *this; }
+      public:
+        inline bool operator==(const iterator &rhs) const
+          { return (set == rhs.set) && (result == rhs.result) && 
+                    (single == rhs.single); }
+        inline bool operator!=(const iterator &rhs) const
+          { return (set != rhs.set) || (result != rhs.result) || 
+                    (single != rhs.single); }
+      public:
+        inline std::pair<VersionState*,FieldMask> operator*(void) 
+          { return *result; }
+        inline std::pair<VersionState*,FieldMask>* operator->(void)
+          { return result; }
+        inline iterator& operator++(/*prefix*/void)
+          { if (single) result = NULL; 
+            else result = set->next(result->first); return *this; }
+        inline iterator operator++(/*postfix*/int)
+          { iterator copy(*this); 
+            if (single) result = NULL; 
+            else result = set->next(result->first); return copy; }
+      public:
+        inline operator bool(void) const
+          { return (result != NULL); }
+      private:
+        const VersioningSet *set;
+        std::pair<VersionState*,FieldMask> *result;
+        bool single;
+      };
+    public:
+      VersioningSet(void);
+      VersioningSet(const VersioningSet &rhs);
+      ~VersioningSet(void);
+    public:
+      VersioningSet& operator=(const VersioningSet &rhs);
     public:
       inline bool empty(void) const 
         { return single && (versions.single_version == NULL); }
+      inline const FieldMask& get_valid_fields(void) const 
+        { return valid_fields; }
     public:
-      void insert(VersionState *state, const FieldMask &mask);
-      // Only add a reference if it is not already in the set
-      void insert(VersionState *state, const FieldMask &mask,
-                  ReferenceSource ref_kind, ReferenceMutator *mutator);
+      FieldMask& operator[](VersionState *state);
+      const FieldMask& operator[](VersionState *state) const;
     public:
-      void merge(const FieldMask &merge_mask, VersionStates &new_states,
-                 ReferenceSource ref_kind, ReferenceMutator *mutator);
+      void insert(VersionState *state, const FieldMask &mask, 
+                  ReferenceMutator *mutator = NULL);
+      void erase(VersionState *to_erase);
+      void clear(void);
     public:
-      FieldMask valid_fields;
+      std::pair<VersionState*,FieldMask>* next(VersionState *current) const;
+    public:
+      iterator begin(void) const;
+      inline iterator end(void) const { return iterator(this, NULL, true); }
+    public:
+      template<ReferenceSource ARG_KIND>
+      void merge(const FieldMask &merge_mask, 
+                 VersioningSet<ARG_KIND> &new_states,ReferenceMutator *mutator);
+#ifdef DEBUG_LEGION
+      void sanity_check(void) const;
+#endif
+    public:
+      // Fun with C, keep these two fields first so that a 
+      // VersioningSet of size 1 looks the same as an entry
+      // in the STL Map in the multi-version case, 
+      // provides goodness for the iterator
       union {
         VersionState *single_version;
         LegionMap<VersionState*,FieldMask>::aligned *multi_versions;
       } versions;
+      FieldMask valid_fields;
       bool single;
     };
 
@@ -618,8 +680,9 @@ namespace Legion {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     protected:
-      VersionStates version_states;
-      VersionStates advance_states;
+      typedef VersioningSet<> PhysicalVersions;
+      PhysicalVersions version_states;
+      PhysicalVersions advance_states;
     protected:
       bool captured;
     };
@@ -686,11 +749,13 @@ namespace Legion {
                             ProjectionEpochID advance_epoch = 0);
       void update_child_versions(SingleTask *context,
                                  const ColorPoint &child_color,
-                                 VersionStates &new_states,
+                                 VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
+      template<ReferenceSource REF_SRC>
       static void filter_version_info(const FieldMask &invalidate_mask,
-               LegionMap<VersionID,VersionStates>::aligned &to_filter);
+            typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned 
+                                                                &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -723,9 +788,10 @@ namespace Legion {
     public:
       void pack_response(Serializer &rez, AddressSpaceID target,
                          const FieldMask &request_mask);
+      template<ReferenceSource REF_SRC>
       static void find_send_infos(
-          LegionMap<VersionID,VersionStates>::aligned& version_infos, 
-          const FieldMask &request_mask, 
+          typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned& 
+            version_infos, const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
       static void pack_send_infos(Serializer &rez, const
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
@@ -736,8 +802,10 @@ namespace Legion {
       static void unpack_send_infos(Deserializer &derez,
           LegionMap<VersionState*,FieldMask>::aligned &infos,
           Runtime *runtime, std::set<RtEvent> &preconditions);
+      template<ReferenceSource REF_SRC>
       static void merge_send_infos(
-          LegionMap<VersionID,VersionStates>::aligned &target_infos, 
+          typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned 
+            &target_infos, 
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
           ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
@@ -756,8 +824,9 @@ namespace Legion {
       bool is_owner;
       AddressSpaceID owner_space;
     protected:
-      LegionMap<VersionID,VersionStates>::aligned current_version_infos;
-      LegionMap<VersionID,VersionStates>::aligned previous_version_infos;
+      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
+      LegionMap<VersionID,ManagerVersions>::aligned current_version_infos;
+      LegionMap<VersionID,ManagerVersions>::aligned previous_version_infos;
     protected:
       // On the owner node this is the set of fields for which there are
       // remote copies. On remote nodes this is the set of fields which
@@ -854,7 +923,7 @@ namespace Legion {
                                 bool need_lock = true);
       void update_open_children(const ColorPoint &child_color,
                                 const FieldMask &update_mask,
-                                VersionStates &new_states,
+                                VersioningSet<> &new_states,
                                 std::set<RtEvent> &applied_events);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -914,7 +983,8 @@ namespace Legion {
       FieldMask reduction_mask;
       // State of any child nodes
       ChildState children;
-      LegionMap<ColorPoint,VersionStates>::aligned open_children;
+      typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
+      LegionMap<ColorPoint,StateVersions>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
