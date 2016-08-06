@@ -169,20 +169,20 @@ class Counter:
         self.failed = 0
 
 
-def get_test_specs(include_spy):
+def get_test_specs(include_spy, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
          )),
-        ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
+        ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
          )),
-        ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
+        ('run_pass', (test_run_pass, ([] + extra_flags, {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
@@ -190,7 +190,7 @@ def get_test_specs(include_spy):
          )),
     ]
     spy = [
-        ('spy', (test_spy, ([], {})),
+        ('spy', (test_spy, ([] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
@@ -202,12 +202,12 @@ def get_test_specs(include_spy):
     else:
         return base
 
-def run_all_tests(thread_count, debug, spy, verbose, quiet):
+def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(spy)
+    tests = get_test_specs(spy, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -304,6 +304,12 @@ def test_driver(argv):
                         action='store_true',
                         help='enable Legion Spy mode',
                         dest='spy')
+    parser.add_argument('--extra',
+                        action='append',
+                        required=False,
+                        default=[],
+                        help='extra flags to use for each test',
+                        dest='extra_flags')
     parser.add_argument('-v',
                         action='store_true',
                         help='display verbose output',
@@ -318,6 +324,7 @@ def test_driver(argv):
         args.thread_count,
         args.debug,
         args.spy,
+        args.extra_flags,
         args.verbose,
         args.quiet)
 
