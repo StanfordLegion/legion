@@ -104,20 +104,13 @@ def test_compile_fail(filename, debug, verbose, flags, env):
         for params in runs_with:
             run(filename, debug, False, flags + params, env)
     except TestFailure as e:
-        lines = (line.strip() for line in e.output.strip().split('\n')
-                 if len(line.strip()) > 0)
-        lines = itertools.dropwhile(
-            (lambda line: 'Errors reported during' in line),
-            lines)
-        lines = itertools.takewhile(
-            (lambda line: line != 'stack traceback:' and
-             'Caught a fatal signal:' not in line and
-             '----------' not in line),
-            lines)
-        lines = OrderedDict((line, True) for line in lines).keys()
-        failure = '\n'.join(lines)
-        if failure != expected_failure:
-            raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
+        failure = e.output
+        lines = set(line.strip() for line in failure.strip().split('\n')
+                    if len(line.strip()) > 0)
+        expected_lines = expected_failure.split('\n')
+        for expected_line in expected_lines:
+            if expected_line not in lines:
+                raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
     else:
         raise Exception('Expected failure, but test passed')
 
