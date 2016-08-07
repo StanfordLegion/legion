@@ -260,6 +260,7 @@ namespace Legion {
       HLR_PENDING_CHILD_TASK_ID,
       HLR_DECREMENT_PENDING_TASK_ID,
       HLR_SEND_VERSION_STATE_UPDATE_TASK_ID,
+      HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       HLR_ADD_TO_DEP_QUEUE_TASK_ID,
       HLR_WINDOW_WAIT_TASK_ID,
       HLR_ISSUE_FRAME_TASK_ID,
@@ -333,6 +334,7 @@ namespace Legion {
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
         "Send Version State Update",                              \
+        "Update Version State Reduce",                            \
         "Add to Dependence Queue",                                \
         "Window Wait",                                            \
         "Issue Frame",                                            \
@@ -848,10 +850,6 @@ namespace Legion {
       REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
       REGION_NODE_SIPHON_LOGICAL_PROJECTION_CALL,
       REGION_NODE_PERFORM_LOGICAL_CLOSES_CALL,
-      REGION_NODE_CLOSE_PHYSICAL_NODE_CALL,
-      REGION_NODE_SIPHON_PHYSICAL_CHILDREN_CALL,
-      REGION_NODE_CLOSE_COMPOSITE_NODE_CALL,
-      REGION_NODE_SIPHON_COMPOSITE_CHILDREN_CALL,
       REGION_NODE_FIND_VALID_INSTANCE_VIEWS_CALL,
       REGION_NODE_FIND_VALID_REDUCTION_VIEWS_CALL,
       REGION_NODE_ISSUE_UPDATE_COPIES_CALL,
@@ -1020,10 +1018,6 @@ namespace Legion {
       "Region Node Siphon Logical Children",                          \
       "Region Node Siphon Logical Projection",                        \
       "Region Node Perform Logical Closes",                           \
-      "Region Node Close Physical Node",                              \
-      "Region Node Siphon Physical Children",                         \
-      "Region Node Close Composite Node",                             \
-      "Region Node Siphon Composite Children",                        \
       "Region Node Find Valid Instance Views",                        \
       "Region Node Find Valid Reduction Views",                       \
       "Region Node Issue Update Copies",                              \
@@ -1217,7 +1211,6 @@ namespace Legion {
     struct PhysicalUser;
     struct TraceInfo;
     class LogicalCloser;
-    class CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;

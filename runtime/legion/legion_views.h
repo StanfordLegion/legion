@@ -811,9 +811,6 @@ namespace Legion {
       virtual void collect_users(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
-      virtual DeferredView* simplify(CompositeCloser &closer, 
-                                      const FieldMask &capture_mask) = 0;
-    public:
       void issue_deferred_copies(const TraversalInfo &info,
                                  MaterializedView *dst,
                                  const FieldMask &copy_mask);
@@ -890,14 +887,16 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info, 
-                    bool register_now);
+                    CompositeVersionInfo *info, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
       CompositeView& operator=(const CompositeView &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      void set_translation_context(SingleTask *context);
+      void update_composite_view(VersionState *state, const FieldMask &mask);
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
@@ -910,9 +909,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
-    public:
-      virtual DeferredView* simplify(CompositeCloser &closer, 
-                                     const FieldMask &capture_mask);
     public:
       virtual bool need_temporary_instance(MaterializedView *dst,
                                            const FieldMask &copy_mask,
@@ -932,6 +928,7 @@ namespace Legion {
     public:
       // The root node for this composite view
       CompositeNode *const root;
+      // TODO: delete this
       CompositeVersionInfo *const version_info;
     };
 
@@ -956,19 +953,6 @@ namespace Legion {
       void update_child(CompositeNode *child, const FieldMask &mask);
       void finalize(FieldMask &final_mask);
       void set_owner_did(DistributedID own_did);
-    public:
-      void capture_physical_state(CompositeCloser &closer, 
-                                  PhysicalState *state, 
-                                  const FieldMask &close_mask,
-                                  const FieldMask &capture_dirty,
-                                  const FieldMask &capture_reduc);
-      bool capture_instances(CompositeCloser &closer, 
-                             const FieldMask &capture_mask,
-                     const LegionMap<LogicalView*,FieldMask>::aligned *views);
-      void capture_reductions(const FieldMask &capture_mask,
-                     const LegionMap<ReductionView*,FieldMask>::aligned *views);
-      bool simplify(CompositeCloser &closer, FieldMask &capture_mask,
-                    CompositeNode *new_parent);
     public:
       bool need_temporary_instance(MaterializedView *dst,
                                    const FieldMask &copy_mask,
@@ -1067,9 +1051,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
-    public:
-      virtual DeferredView* simplify(CompositeCloser &closer, 
-                                     const FieldMask &capture_mask);
     public:
       virtual bool need_temporary_instance(MaterializedView *dst,
                                            const FieldMask &copy_mask,

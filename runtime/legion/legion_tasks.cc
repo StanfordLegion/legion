@@ -6565,20 +6565,10 @@ namespace Legion {
 #endif
           const InstanceRef &ref = physical_instances[idx].get_composite_ref();
           CompositeView *composite_view = ref.get_composite_view();
-          // First get any events necessary to make this view local
           // If we locally mapped and are now remote, we need to translate
           // this composite instance so that its views are specific to 
           // our context
-          if (is_locally_mapped() && is_remote())
-          {
-            CompositeCloser closer(context.get_id(),get_version_info(idx),this);
-            DeferredView *translated_view = 
-              composite_view->simplify(closer, ref.get_valid_fields());
-#ifdef DEBUG_LEGION
-            assert(translated_view->is_composite_view());
-#endif
-            composite_view = translated_view->as_composite_view();
-          }
+          composite_view->set_translation_context(this);
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx], 
               this, idx, composite_view);

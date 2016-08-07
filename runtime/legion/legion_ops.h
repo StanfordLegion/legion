@@ -1095,10 +1095,6 @@ namespace Legion {
     protected:
       Mapper::CloseProfilingInfo  profiling_results;
       RtUserEvent                 profiling_reported;
-    protected:
-      // TODO: delete these
-      LegionMap<ColorPoint,FieldMask>::aligned target_children;
-      std::set<ColorPoint> next_children;
     };
     
     /**

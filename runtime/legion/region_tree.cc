@@ -765,9 +765,6 @@ namespace Legion {
         FieldMask user_mask;
         user_mask.set_bit(field_space->get_field_index(field_id));
         ColorPoint child_color(itr.p);
-        // Open up the child on the partition node
-        projection_node->open_physical_child(ctx.get_id(), child_color, 
-                                             user_mask, version_info);
         RegionNode *child_node = projection_node->get_child(child_color);
         // Get the field data on this child node
         RegionUsage usage(req);
@@ -2388,8 +2385,6 @@ namespace Legion {
     ApEvent RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
                       const RegionRequirement &req, VersionInfo &version_info,
                       Operation *op, unsigned index, int composite_idx,
-                      const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
-                      const std::set<ColorPoint> &next_children,
                       ApEvent term_event, std::set<RtEvent> &map_applied,
                       const InstanceSet &targets
 #ifdef DEBUG_LEGION
@@ -2408,18 +2403,10 @@ namespace Legion {
       RegionTreeNode *close_node = (req.handle_type == PART_PROJECTION) ?
                   static_cast<RegionTreeNode*>(get_node(req.partition)) : 
                   static_cast<RegionTreeNode*>(get_node(req.region));
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/,
-                                     true/*closing*/, false/*logical*/,
-                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), closing_mask);
-#endif
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                                        to_close, next_children, closing_mask,
-                                        version_info, op->get_parent());
+                                closing_mask, version_info, op->get_parent());
       PhysicalState *physical_state = NULL;
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
       bool need_valid = true;
@@ -2461,13 +2448,6 @@ namespace Legion {
       ApEvent closed;
       if (!closed_events.empty())
         closed = Runtime::merge_events(closed_events);
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/,
-                                     true/*closing*/, false/*logical*/,
-               FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), closing_mask);
-#endif
       return closed;
     }
 
@@ -12364,253 +12344,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                      const std::set<ColorPoint> &next_children,
-                                      const FieldMask &closing_mask,
-                              VersionInfo &version_info, SingleTask *target_ctx)
+                                                const FieldMask &closing_mask,
+                                                VersionInfo &version_info, 
+                                                SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
+      DistributedID did = context->runtime->get_available_distributed_id(false);
+      const AddressSpace local_space = context->runtime->address_space;
+      CompositeView *result = legion_new<CompositeView>(context, did,
+          local_space, this, local_space, 
+          legion_new<CompositeNode>(this, (CompositeNode*)NULL),
+          (CompositeVersionInfo*)NULL, true/*register now*/);
       PhysicalState *state = get_physical_state(version_info);
-      CompositeCloser closer(ctx_id, version_info, target_ctx);
-      // Make the root node before traversing
-      CompositeNode *root = closer.get_composite_node(this, true/*root*/);
-      // Keep track of which fields are complete
-      FieldMask complete_below;
-      // Capture down the tree first and then capture at our local node
-      // if necessary
-      siphon_physical_children(closer, state, closing_mask, complete_below);
-      // We are the top node, so we need to capture any field that is not 
-      // complete regardless of whether it is dirty or not
-      // as well as any reduction instances at this level
-      FieldMask capture_dirty = closing_mask - complete_below; 
-      FieldMask capture_reduc = closing_mask & state->reduction_mask;
-      if (!!capture_dirty || !!capture_reduc)
-        closer.capture_physical_state(root, this, state, closing_mask,
-                                      capture_dirty, capture_reduc);    
-      return closer.create_valid_view(state, root, closing_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::close_physical_node(CompositeCloser &closer,
-                                             const FieldMask &closing_mask,
-                                             FieldMask &complete_below)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime,REGION_NODE_CLOSE_COMPOSITE_NODE_CALL);
-      PhysicalState *state = get_physical_state(closer.version_info);
-      // Close down the tree and then determine if we have to capture locally 
-      // We don't need to capture data for any fields that are complete below
-      siphon_physical_children(closer, state, closing_mask, complete_below);
-      // We only need to capture instances for fields which are dirty and 
-      // not complete below
-      FieldMask dirty_close = closing_mask & state->dirty_mask;
-      // We always need to capture reductions for the fields we have
-      FieldMask reduc_close = closing_mask & state->reduction_mask;
-      // Quick out if there is nothing to capture
-      if (!dirty_close && !reduc_close)
-        return;
-      // We only need to capture fields which are dirty and not already complete
-      // but we must always capture any reduction fields that we have
-      if (!!dirty_close && !!complete_below)
-      {
-        FieldMask dirty_capture = dirty_close - complete_below;
-        if (!!dirty_capture || !!reduc_close)
-        {
-          CompositeNode *node = closer.get_composite_node(this);
-          closer.capture_physical_state(node, this, state, closing_mask, 
-                                        dirty_capture, reduc_close);
-        }
-      }
-      else
-      {
-        CompositeNode *node = closer.get_composite_node(this);
-        closer.capture_physical_state(node, this, state, closing_mask,
-                                      dirty_close, reduc_close);
-      }
-      // Invalidate any state for which we were doing a close
-      if (!!dirty_close)
-      {
-        invalidate_instance_views(state, dirty_close);
-        state->dirty_mask -= dirty_close;
-        // Update our complete mask with what we have captured
-        complete_below |= dirty_close;
-      }
-      if (!!reduc_close)
-      {
-        invalidate_reduction_views(state, reduc_close);
-        state->reduction_mask -= reduc_close;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::siphon_physical_children(CompositeCloser &closer,
-                                                  PhysicalState *state,
-                                                  const FieldMask &closing_mask,
-                                                  FieldMask &complete_mask)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime,   
-                        REGION_NODE_SIPHON_COMPOSITE_CHILDREN_CALL);
-#ifdef DEBUG_LEGION
-      assert(state->node == this);
-#endif
-      // First check, if all the fields are disjoint, then we're done
-      if (state->children.valid_fields * closing_mask)
-        return;
-      // Keep track of two sets of fields
-      // 1. The set of fields for which all children are complete
-      // 2. The set of fields for which any children are complete
-      // Optionally in the future we can make this more precise to 
-      // track when we've written to enough children to dominate
-      // this node and therefore be complete
-      const bool local_complete = this->is_complete();
-      FieldMask all_children;
-      if (local_complete)
-        all_children = closing_mask;
-      bool changed = false;
-      std::vector<ColorPoint> to_delete;
-      // Otherwise go through all of the children and 
-      // see which ones we need to clean up
-      for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-            state->children.open_children.begin(); it !=
-            state->children.open_children.end(); it++)
-      {
-        FieldMask overlap = it->second & closing_mask;
-        if (!overlap)
-        {
-          // Filter the all-children mask to be empty
-          if (local_complete)
-            all_children.clear();
-          continue;
-        }
-        FieldMask child_complete_mask;
-        std::set<ColorPoint> empty_next_children;
-        bool child_complete = close_physical_child(closer, state, overlap,
-                     it->first, empty_next_children, child_complete_mask);
-        if (local_complete)
-          all_children &= child_complete_mask;
-        // Any children which are complete and have complete fields
-        // automatically make us complete here too
-        if (child_complete)
-          complete_mask |= child_complete_mask;
-        changed = true;
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      if (local_complete && !!all_children &&
-          (state->children.open_children.size() == get_num_children()))
-        complete_mask |= all_children;
-      // Delete any closed children
-      if (!to_delete.empty())
-      {
-        for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-        {
-          state->children.open_children.erase(*it);
-        }
-      }
-      // Rebuild the valid mask if anything changed
-      if (changed)
-      {
-        FieldMask next_valid;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              state->children.open_children.begin(); it !=
-              state->children.open_children.end(); it++)
-        {
-          next_valid |= it->second;
-        }
-        state->children.valid_fields = next_valid;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeNode::close_physical_child(CompositeCloser &closer,
-                                              PhysicalState *state,
-                                              const FieldMask &closing_mask,
-                                              const ColorPoint &target_child,
-                                      const std::set<ColorPoint> &next_children,
-                                              FieldMask &complete_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(state->node == this);
-#endif
-      // See if we can find the child
-      LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-        state->children.open_children.find(target_child);
-      if (finder == state->children.open_children.end())
-        return false;
-      // Check field disjointness
-      if (finder->second * closing_mask)
-        return false;
-      // Check for child disjointness
-      if (!next_children.empty())
-      {
-        bool all_disjoint = true;
-        for (std::set<ColorPoint>::const_iterator it = 
-              next_children.begin(); it != next_children.end(); it++)
-        {
-          if (!are_children_disjoint(finder->first, *it))
-          {
-            all_disjoint = false;
-            break;
-          }
-        }
-        if (all_disjoint)
-          return false;
-      }
-      FieldMask close_mask = finder->second & closing_mask;
-      // Need to get this value before the iterator is invalidated
-      RegionTreeNode *child_node = get_tree_child(finder->first);
-      child_node->close_physical_node(closer, close_mask, complete_mask);
-      if (!!complete_mask)
-        return child_node->is_complete();
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::open_physical_child(ContextID ctx_id,
-                                             const ColorPoint &child_color,
-                                             const FieldMask &open_mask,
-                                             VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalState *state = get_physical_state(version_info);
-      state->children.valid_fields |= open_mask;
-      LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-                          state->children.open_children.find(child_color);
-      if (finder == state->children.open_children.end())
-        state->children.open_children[child_color] = open_mask;
-      else
-        finder->second |= open_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::siphon_physical_children(ReductionCloser &closer,
-                                                  PhysicalState *state)
-    //--------------------------------------------------------------------------
-    {
-      if (state->children.valid_fields * closer.close_mask)
-        return;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            state->children.open_children.begin(); it !=
-            state->children.open_children.end(); it++)
-      {
-        if (closer.close_mask * it->second)
-          continue;
-        RegionTreeNode *child = get_tree_child(it->first);
-        child->close_physical_node(closer);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::close_physical_node(ReductionCloser &closer)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalState *state = get_physical_state(closer.version_info);
-      closer.issue_close_reductions(this, state);
-      siphon_physical_children(closer, state);
+      state->initialize_composite_instance(result, closing_mask);
+      update_valid_views(state, closing_mask, true/*dirty*/, result);  
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -14964,23 +14712,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
-      PhysicalState *state = get_physical_state(version_info);
-      // Figure out which children we need to close
-      LegionMap<ColorPoint,FieldMask>::aligned targets;
-      std::set<ColorPoint> next;
-      if (!(virtual_mask * state->children.valid_fields))
-      {
-        LegionMap<ColorPoint,FieldMask>::aligned &open_children = 
-          state->children.open_children;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              open_children.begin(); it != open_children.end(); it++)
-        {
-          if (it->second * virtual_mask)
-            continue;
-          targets[it->first] = FieldMask();
-        }
-      }
-      return create_composite_instance(ctx_id, targets, next, virtual_mask, 
+      return create_composite_instance(ctx_id, virtual_mask, 
                                        version_info, target_ctx);
     }
 
@@ -15167,12 +14899,6 @@ namespace Legion {
         else
         {
           // Write-only case
-          // Remove any open children for these fields, we don't
-          // need to traverse down the tree because we already advanced
-          // those version numbers logically so we don't need to be 
-          // updating the version states
-          if (!(info.traversal_mask * state->children.valid_fields))
-            state->filter_open_children(info.traversal_mask);
           // Remove any overlapping reducitons
           if (!(info.traversal_mask * state->reduction_mask))
             invalidate_reduction_views(state, info.traversal_mask);
@@ -15304,7 +15030,6 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
       if (IS_REDUCE(info.req))
       {
-        PhysicalState *state = get_physical_state(info.version_info);
         // Important trick: switch the user to read-only so it picks
         // up dependences on all the reductions applied to this instance
         usage.privilege = READ_ONLY;
@@ -15324,9 +15049,7 @@ namespace Legion {
           // from farther down in the tree
           ReductionCloser closer(info.ctx, target_view, user_mask, 
              info.version_info, info.op, info.index, info.map_applied_events);
-          closer.issue_close_reductions(this, state);
-          siphon_physical_children(closer, state);
-          
+          visit_node(&closer);
           ApEvent ready = target_view->add_user_fused(
                                                usage, ApEvent::NO_AP_EVENT,
                                                user_mask, info.op, info.index,
@@ -15434,9 +15157,7 @@ namespace Legion {
                              fill_value, true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any open children and any reductions
-      if (!(fill_mask * state->children.valid_fields))
-        state->filter_open_children(fill_mask); 
+      // Invalidate any reduction views
       if (!(fill_mask * state->reduction_mask))
         invalidate_reduction_views(state, fill_mask);
       update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
@@ -15492,9 +15213,7 @@ namespace Legion {
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any open children and any reductions
-      if (!(fill_mask * state->children.valid_fields))
-        state->filter_open_children(fill_mask); 
+      // Invalidate any reduction views
       if (!(fill_mask * state->reduction_mask))
         invalidate_reduction_views(state, fill_mask);
       update_valid_views(state, fill_mask, target_views, instances);

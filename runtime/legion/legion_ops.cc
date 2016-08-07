@@ -5232,8 +5232,7 @@ namespace Legion {
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/, 
-                                                composite_idx, target_children,
-                                                next_children, completion_event,
+                                                composite_idx, completion_event,
                                                 map_applied_conditions,
                                                 chosen_instances
 #ifdef DEBUG_LEGION
@@ -5251,8 +5250,7 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      version_info.apply_close(physical_ctx.get_id(), runtime->address_space,
-                               target_children, map_applied_conditions);
+      version_info.apply_mapping(runtime->address_space,map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

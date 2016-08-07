@@ -167,7 +167,7 @@ namespace Legion {
       inline iterator end(void) const { return iterator(this, NULL, true); }
     public:
       template<ReferenceSource ARG_KIND>
-      void reduce(const FieldMask &merge_mask, 
+      void reduce(const FieldMask &reduce_mask, 
                   VersioningSet<ARG_KIND> &new_states,
                   ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
@@ -221,9 +221,6 @@ namespace Legion {
       void apply_mapping(AddressSpaceID target,
                          std::set<RtEvent> &applied_conditions,
                          bool copy_through = false);
-      void apply_close(ContextID ctx, AddressSpaceID target,
-             const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
-                       std::set<RtEvent> &applied_conditions); 
       void clear(void);
       void sanity_check(unsigned depth);
     public:
@@ -660,7 +657,9 @@ namespace Legion {
         { return (!advance_states.empty()); } 
       void apply_state(AddressSpaceID target, 
                        std::set<RtEvent> &applied_conditions) const; 
-      void filter_open_children(const FieldMask &filter_mask);
+    public:
+      void initialize_composite_instance(CompositeView *view,
+                                         const FieldMask &close_mask);
     public:
       PhysicalState* clone(void) const;
     public:
@@ -675,9 +674,6 @@ namespace Legion {
       FieldMask dirty_mask;
       // Fields with outstanding reductions
       FieldMask reduction_mask;
-      // State of any child nodes
-      // TODO: We should be able to delete this
-      ChildState children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
@@ -873,6 +869,13 @@ namespace Legion {
         FieldMask *request_mask;
         RtUserEvent to_trigger;
       };
+      struct UpdateStateReduceArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *proxy_this;
+        ColorPoint child_color;
+        VersioningSet<> *children;
+      };
       struct UpdateViewReferences {
       public:
         HLRTaskID hlr_id;
@@ -926,10 +929,11 @@ namespace Legion {
                                 AddressSpaceID target,
                                 std::set<RtEvent> &applied_conditions,
                                 bool need_lock = true);
-      void update_open_children(const ColorPoint &child_color,
+      void reduce_open_children(const ColorPoint &child_color,
                                 const FieldMask &update_mask,
                                 VersioningSet<> &new_states,
-                                std::set<RtEvent> &applied_events);
+                                ReferenceMutator *mutator,
+                                bool need_lock = true);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -965,6 +969,8 @@ namespace Legion {
       void handle_version_state_update_response(RtUserEvent to_trigger, 
                           Deserializer &derez, const FieldMask &update);
     public:
+      static void process_version_state_reduction(const void *args);
+    public:
       void remove_version_state_ref(ReferenceSource ref_kind, 
                                      RtEvent done_event);
       static void process_remove_version_state_ref(const void *args);
@@ -986,8 +992,6 @@ namespace Legion {
       FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
-      // State of any child nodes
-      ChildState children;
       typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
       LegionMap<ColorPoint,StateVersions>::aligned open_children;
       // The valid instance views
@@ -1201,7 +1205,7 @@ namespace Legion {
      * \class ReductionCloser
      * A class for performing reduciton close operations
      */
-    class ReductionCloser {
+    class ReductionCloser : public NodeTraverser {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
@@ -1211,8 +1215,12 @@ namespace Legion {
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
+      virtual bool visit_only_valid(void) const { return true; }
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    public:
       ReductionCloser& operator=(const ReductionCloser &rhs);
-      void issue_close_reductions(RegionTreeNode *node, PhysicalState *state);
+      void issue_close_reductions(RegionTreeNode *node);
     public:
       const ContextID ctx;
       ReductionView *const target;
@@ -1401,45 +1409,6 @@ namespace Legion {
     protected:
       TraversalInfo *const info;
       InstanceSet *const targets;
-    };
-
-    /**
-     * \struct CompositeCloser
-     * Class for helping with closing of physical trees to composite instances
-     */
-    class CompositeCloser {
-    public:
-      CompositeCloser(ContextID ctx, 
-                      VersionInfo &version_info, SingleTask *target_ctx);
-      CompositeCloser(const CompositeCloser &rhs);
-      ~CompositeCloser(void);
-    public:
-      CompositeCloser& operator=(const CompositeCloser &rhs);
-    public:
-      CompositeNode* get_composite_node(RegionTreeNode *tree_node,
-                                        bool root = false);
-      CompositeView* create_valid_view(PhysicalState *state,
-                                      CompositeNode *root,
-                                      const FieldMask &valid_mask);
-      void capture_physical_state(CompositeNode *target,
-                                  RegionTreeNode *node,
-                                  PhysicalState *state,
-                                  const FieldMask &close_mask,
-                                  const FieldMask &dirty_mask,
-                                  const FieldMask &reduc_mask);
-    public:
-      void update_capture_mask(RegionTreeNode *node,
-                               const FieldMask &capture_mask);
-      bool filter_capture_mask(RegionTreeNode *node,
-                               FieldMask &capture_mask);
-    public:
-      const ContextID ctx;
-      VersionInfo &version_info;
-      SingleTask *const target_ctx;
-    public:
-      std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
-      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**

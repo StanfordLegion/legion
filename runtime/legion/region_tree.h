@@ -369,10 +369,9 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
                                      int composite_index,
-                    const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
-                    const std::set<ColorPoint> &next_children,
-                    ApEvent term_event, std::set<RtEvent> &map_applied,
-                    const InstanceSet &targets
+                                     ApEvent term_event, 
+                                     std::set<RtEvent> &map_applied,
+                                     const InstanceSet &targets
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
@@ -1443,33 +1442,9 @@ namespace Legion {
     public:
       // Physical traversal operations
       CompositeView* create_composite_instance(ContextID ctx_id,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                     const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
                                      SingleTask *target_ctx);
-      void close_physical_node(CompositeCloser &closer,
-                               const FieldMask &closing_mask,
-                               FieldMask &complete_mask);
-      void siphon_physical_children(CompositeCloser &closer,
-                                    PhysicalState *state,
-                                    const FieldMask &closing_mask,
-                                    FieldMask &complete_mask);
-      bool close_physical_child(CompositeCloser &closer,
-                                PhysicalState *state,
-                                const FieldMask &closing_mask,
-                                const ColorPoint &target_child,
-                                const std::set<ColorPoint> &next_children,
-                                FieldMask &complete_mask);
-      void open_physical_child(ContextID ctx_id,
-                               const ColorPoint &child_color,
-                               const FieldMask &open_mask,
-                               VersionInfo &version_info);
-      // A special version of siphon physical region for closing
-      // to a reduction instance at the end of a task
-      void siphon_physical_children(ReductionCloser &closer,
-                                    PhysicalState *state);
-      void close_physical_node(ReductionCloser &closer);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
