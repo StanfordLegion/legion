@@ -5,9 +5,10 @@
 # Global variables (will be set in every job):
 variables:
   LLVM_CONFIG: "llvm-config-3.5"
+  WARN_AS_ERROR: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
 
-# Local variables (included in a case-by-case basis in each job):
+# Local variables (included on a case-by-case basis in each job):
 .gcc49: &gcc48
   CXX: "g++-4.8"
 .gcc49: &gcc49
