@@ -11072,10 +11072,10 @@ namespace Legion {
       {
         ApEvent wait_on = precondition.impl->get_ready_event();
         DeferredExecuteArgs args;
-        args.hlr_id = HLR_DEFERRED_EXECUTE_ID;
+        args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_EXECUTE_ID,
+                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                          HLR_LATENCY_PRIORITY, this, 
                                          Runtime::protect_event(wait_on));
       }
