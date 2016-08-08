@@ -40,10 +40,15 @@ void top_level_task(const Task *task,
   int num_points = 4;
   // See how many points to run
   const InputArgs &command_args = Runtime::get_input_args();
-  if (command_args.argc > 1)
-  {
-    num_points = atoi(command_args.argv[1]);
+  for (int i = 1; i < command_args.argc; i++) {
+    if (command_args.argv[i][0] == '-') {
+      i++;
+      continue;
+    }
+
+    num_points = atoi(command_args.argv[i]);
     assert(num_points > 0);
+    break;
   }
   printf("Running hello world redux for %d points...\n", num_points);
 

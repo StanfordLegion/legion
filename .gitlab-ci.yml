@@ -1,10 +1,13 @@
-# Variables:
-#  - Global:
+###
+### Variables
+###
+
+# Global variables (will be set in every job):
 variables:
   LLVM_CONFIG: "llvm-config-3.5"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
 
-#  - Local:
+# Local variables (included in a case-by-case basis in each job):
 .gcc49: &gcc49
   CXX: "g++-4.9"
 .clang35: &clang35
@@ -23,7 +26,11 @@ variables:
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
 
-# This set of commands will run before each job.
+###
+### Setup
+###
+
+# These commands will run before each job.
 before_script:
   - uname -a
   - export THREADS=$(nproc --all)
@@ -39,11 +46,19 @@ before_script:
       popd
     fi
 
-# Define Docker image to use.
+###
+### Docker Image
+###
+
+# Each job will run in a fresh container with this image.
 .image: &image
   image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 
-# Define tests to run.
+###
+### Tests
+###
+
+# Each job will run this set of tests.
 .tests: &tests
   script:
     - ./language/travis.py
@@ -85,39 +100,44 @@ before_script:
         make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
       fi
 
-# Define the list of jobs to run.
-#  - GCC
-gcc_cxx98_release:
+###
+### Jobs
+###
+
+# Each item below defines a job.
+
+# GCC 4.9
+gcc49_cxx98_release:
   <<: [*image, *tests]
   variables:
     <<: [*gcc49, *release, *cxx98_normal]
-gcc_cxx98_debug_checks:
+gcc49_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
     <<: [*gcc49, *debug, *cxx98_checks]
-gcc_cxx98_debug_spy:
+gcc49_cxx98_debug_spy:
   <<: [*image, *tests]
   variables:
     <<: [*gcc49, *debug, *cxx98_spy]
-gcc_cxx11_release:
+gcc49_cxx11_release:
   <<: [*image, *tests]
   variables:
     <<: [*gcc49, *release, *cxx11_normal]
 
-# - Clang
-clang_cxx98_release:
+# Clang 3.5
+clang35_cxx98_release:
   <<: [*image, *tests]
   variables:
     <<: [*clang35, *release, *cxx98_normal]
-clang_cxx98_debug_checks:
+clang35_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
     <<: [*clang35, *debug, *cxx98_checks]
-clang_cxx98_debug_spy:
+clang35_cxx98_debug_spy:
   <<: [*image, *tests]
   variables:
     <<: [*clang35, *debug, *cxx98_spy]
-clang_cxx11_release:
+clang35_cxx11_release:
   <<: [*image, *tests]
   variables:
     <<: [*clang35, *release, *cxx11_normal]
