@@ -112,6 +112,12 @@ before_script:
 
 # Each item below defines a job.
 
+# There are two tiers of tests.
+#  1. Full test suite (small number of compilers).
+#  2. Minimal test suite (other compilers).
+
+# Run the full test suite on GCC 4.9 and Clang 3.5.
+
 # GCC 4.9
 gcc49_cxx98_release:
   <<: [*image, *tests]
@@ -148,7 +154,8 @@ clang35_cxx11_release:
   variables:
     <<: [*clang35, *release, *cxx11_normal]
 
-# Other compiler tests:
+# Run minimal tests on other compilers.
+
 gcc48_cxx98_debug_checks:
   <<: [*image, *tests]
   variables:
