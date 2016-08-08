@@ -11,7 +11,12 @@ RUN apt-get update -qq && \
     add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
-    apt-get install -qq build-essential git time wget g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev libncurses5-dev zlib1g-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy && \
+    apt-get install -qq \
+      build-essential git pypy time wget \
+      g++4.8 g++-4.9 g++-5 g++-6 \
+      clang-3.5 libclang-3.5-dev llvm-3.5-dev \
+      libncurses5-dev zlib1g-dev \
+      openmpi-bin libopenmpi-dev libblas-dev liblapack-dev && \
     apt-get clean
 
 ENV TERRA_DIR /usr/local/terra
