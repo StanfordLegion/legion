@@ -8,8 +8,14 @@ variables:
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
 
 # Local variables (included in a case-by-case basis in each job):
+.gcc49: &gcc48
+  CXX: "g++-4.8"
 .gcc49: &gcc49
   CXX: "g++-4.9"
+.gcc5: &gcc5
+  CXX: "g++-5"
+.gcc6: &gcc6
+  CXX: "g++-6"
 .clang35: &clang35
   CXX: "clang++-3.5"
 .debug: &debug
@@ -141,3 +147,17 @@ clang35_cxx11_release:
   <<: [*image, *tests]
   variables:
     <<: [*clang35, *release, *cxx11_normal]
+
+# Other compiler tests:
+gcc48_cxx98_debug_checks:
+  <<: [*image, *tests]
+  variables:
+    <<: [*gcc48, *debug, *cxx98_checks]
+gcc5_cxx98_debug_checks:
+  <<: [*image, *tests]
+  variables:
+    <<: [*gcc5, *debug, *cxx98_checks]
+gcc6_cxx98_debug_checks:
+  <<: [*image, *tests]
+  variables:
+    <<: [*gcc6, *debug, *cxx98_checks]
