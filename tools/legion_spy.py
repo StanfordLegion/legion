@@ -2300,6 +2300,8 @@ class IndexPartition(object):
                 print 'WARNING: child '+str(child)+' is not dominated by parent '+\
                         str(self.parent)+' in '+str(self)+'. This is definitely '+\
                         'an application bug.'
+                if self.node.state.assert_on_fail:
+                    assert False
         # Check disjointness
         if self.disjoint:
             previous = Shape()
@@ -2309,6 +2311,8 @@ class IndexPartition(object):
                     print 'WARNING: '+str(self)+' was logged disjoint '+\
                             'but there are overlapping children. This '+\
                             'is definitely an application bug.'
+                    if self.node.state.assert_on_fail:
+                        assert False
                     break
                 previous |= child_shape
         # TODO: Check completeness
@@ -4711,10 +4715,12 @@ class Operation(object):
         def traverse_node(node, traverser):
             if node is traverser.origin:
                 traverser.cycle = True
-                print "CYCLE DETECTED!"
+                print "WARNING: CYCLE DETECTED!"
                 for n in traverser.stack:
                     print str(n)
                 print str(node)
+                if self.state.assert_on_fail:
+                    assert False
                 return False
             if traverser.cycle:
                 return False
@@ -7539,8 +7545,12 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             print "WARNING: "+str(self)+" is an untriggered application user event"
+            if self.node.state.assert_on_fail:
+                assert False
         else:
             print "WARNING: "+str(self)+" is an untriggered runtime user event"
+            if self.node.state.assert_on_fail:
+                assert False
         print "  Incoming:"
         if self.incoming:
             for ev in self.incoming:
@@ -7681,10 +7691,12 @@ class RealmBase(object):
         def traverse_node(node, traverser):
             if node is traverser.origin:
                 traverser.cycle = True
-                print "CYCLE DETECTED!"
+                print "WARNING: CYCLE DETECTED!"
                 for n in traverser.stack:
                     print str(n)
                 print str(node)
+                if self.state.assert_on_fail:
+                    assert False
                 return False
             if traverser.cycle:
                 return False
@@ -9143,6 +9155,12 @@ class State(object):
         log.close()
         if matches == 0:
             print 'WARNING: file %s contained no valid lines!' % file_name
+            # FIXME: This causes trouble on tests that do not produce
+            # Legion Spy output---usually because they don't actually
+            # run anything. We should check this but for now turn it off.
+
+            # if self.assert_on_fail:
+            #     assert False
         if self.verbose:
             print 'Matched %d lines in %s' % (matches,file_name)
         if skipped > 0:
@@ -9206,6 +9224,9 @@ class State(object):
                 break
         if unknown is not None:
             print 'WARNING: operation %d has unknown operation kind!' % op.uid 
+            # FIXME: This fails on dynamic collectives.
+            # if self.assert_on_fail:
+            #     assert False
         # If we have any phase barriers, mark all the events of the phase barrier
         if self.phase_barriers is not None:
             for event in self.events.itervalues():
@@ -9304,7 +9325,9 @@ class State(object):
                     print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
                     print "  This usually indicates a runtime bug and should be reported."
                     print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
-                    return       
+                    if self.assert_on_fail:
+                        assert False
+                    return
                 # See which edges we can remove
                 to_remove = list()
                 for other in actual_out:
@@ -9901,28 +9924,50 @@ def main(temp_dir):
     if logical_checks and not logical_enabled:
         print "WARNING: Requested logical analysis but logging information is "+\
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
-              "validation of the runtime. Disabling logical checks." 
+              "validation of the runtime. Disabling logical checks."
+        # FIXME: This is check is buggy (logical_enabled will be false
+        # if the top-level task does not launch any suboperations), so
+        # skip the asser it if is false.
+
+        # if state.assert_on_fail:
+        #     assert False
         logical_checks = False
     if physical_checks and not physical_enabled:
         print "WARNING: Requested physical analysis but logging information is "+\
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime. Disabling physical checks."
+        if state.assert_on_fail:
+            assert False
         physical_checks = False
-    if physical_checks and sanity_checks and not logical_enabled:
+    if logical_checks and sanity_checks and not logical_enabled:
+        print "WARNING: Requested sanity checks for logical analysis but "+\
+              "logging information of logical analysis is missing. Please "+\
+              "compile the runtime with -DLEGION_SPY to enable validation "+\
+              "of the runtime. Disabling sanity checks."
+        if state.assert_on_fail:
+            assert False
+        sanity_checks = False
+    if physical_checks and sanity_checks and not physical_enabled:
         print "WARNING: Requested sanity checks for physical analysis but "+\
               "logging information of logical analysis is missing. Please "+\
               "compile the runtime with -DLEGION_SPY to enable validation "+\
               "of the runtime. Disabling sanity checks."
+        if state.assert_on_fail:
+            assert False
         sanity_checks = False
     if cycle_checks and not physical_enabled:
         print "WARNING: Requested cycle checks but logging information is "+\
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime. Disabling cycle checks."
+        if state.assert_on_fail:
+            assert False
         cycle_checks = False
     if user_event_leaks and not physical_enabled:
         print "WARNING: Requested user event leak checks but logging information "+\
               "is missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime. Disabling user event leak checks."
+        if state.assert_on_fail:
+            assert False
         user_event_leaks = False
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
