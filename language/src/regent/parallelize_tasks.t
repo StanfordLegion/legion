@@ -873,13 +873,31 @@ end
 
 parallel_task_context.__index = parallel_task_context
 
-function parallel_task_context.new_task_scope(region_params)
+function parallel_task_context.new_task_scope(params)
+  local region_params = {}
+  local region_param_map = {}
+  local region_param_indices = terralib.newlist()
+  for idx = 1, #params do
+    if std.is_region(params[idx].param_type) then
+      local symbol = params[idx].symbol
+      local region_type = symbol:gettype()
+      local name = symbol:getname()
+      local bounds_symbol = std.newsymbol(
+        std.rect_type(region_type:ispace().index_type),
+        "__" .. name .. "_bounds")
+      region_params[idx] = {
+        region = symbol,
+        bounds = bounds_symbol,
+      }
+      region_param_map[symbol] = region_params[idx]
+      region_param_indices:insert(idx)
+    end
+  end
+
   local cx = {}
   cx.region_params = region_params
-  cx.region_param_mapping = {}
-  for idx, tbl in pairs(region_params) do
-    cx.region_param_mapping[tbl.orig] = tbl.copy
-  end
+  cx.region_param_map = region_param_map
+  cx.region_param_indices = region_param_indices
   cx.field_accesses = {}
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
@@ -891,12 +909,29 @@ function parallel_task_context:is_region_param(idx)
   return self.region_params[idx] ~= nil
 end
 
-function parallel_task_context:make_param_arg_mapping(args)
+function parallel_task_context:find_metadata_parameters(region_symbol)
+  return self.region_param_map[region_symbol]
+end
+
+function parallel_task_context:insert_metadata_parameters(params)
+  for idx = 1, #self.region_param_indices do
+    local region_param =
+      self.region_params[self.region_param_indices[idx]]
+    params:insert(mk_task_param(region_param.bounds))
+  end
+end
+
+function parallel_task_context:make_param_arg_mapping(caller_cx, args)
   local mapping = {}
   for idx = 1, #args do
     if self:is_region_param(idx) then
       assert(args[idx]:is(ast.typed.expr.ID))
-      mapping[self.region_params[idx].orig] = args[idx].value
+      local orig_param = self.region_params[idx]
+      mapping[orig_param.region] = args[idx].value
+      -- TODO: Handle other metadata symbols
+      mapping[orig_param.bounds] =
+        caller_cx:find_bounds_symbol(args[idx].value)
+      assert(mapping[orig_param.bounds])
     end
   end
   return mapping
@@ -982,6 +1017,8 @@ function caller_context.new(constraints)
     __parent_region = {},
     -- the constraint graph to update for later stages
     constraints = constraints,
+    -- symbols for caching region metadata
+    __region_metadata_symbols = {},
   }
   return setmetatable(cx, caller_context)
 end
@@ -998,6 +1035,20 @@ end
 
 function caller_context:add_region_decl(symbol, stat)
   self.__region_decls[symbol] = stat
+end
+
+function caller_context:add_bounds_symbol(region_symbol, bounds_symbol)
+  if not self.__region_metadata_symbols[region_symbol] then
+    self.__region_metadata_symbols[region_symbol] = {}
+  end
+  self.__region_metadata_symbols[region_symbol] = {
+    bounds = bounds_symbol
+  }
+end
+
+function caller_context:find_bounds_symbol(region_symbol)
+  return self.__region_metadata_symbols[region_symbol] and
+         self.__region_metadata_symbols[region_symbol].bounds
 end
 
 function caller_context:add_call(expr)
@@ -1380,7 +1431,9 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   -- Append the original region-typed arguments at the end
   for idx = 1, #expr.args do
     if task_cx:is_region_param(idx) then
-      args:insert(expr.args[idx])
+      local bounds_symbol =
+        caller_cx:find_bounds_symbol(expr.args[idx].value)
+      args:insert(mk_expr_id(bounds_symbol))
     end
   end
 
@@ -1491,8 +1544,14 @@ local function collect_calls(cx, parallelizable)
         cx:pop_scope()
       elseif node:is(ast.typed.stat.Var) then
         for idx = 1, #node.symbols do
-          if std.is_region(node.symbols[idx]:gettype()) then
+          local symbol_type = node.symbols[idx]:gettype()
+          if std.is_region(symbol_type) then
             cx:add_region_decl(node.symbols[idx], node)
+            -- Reserve symbols for metadata
+            local bounds_symbol = get_new_tmp_var(
+              std.rect_type(symbol_type:ispace().index_type))
+            cx:add_bounds_symbol(node.symbols[idx], bounds_symbol)
+
             if node.values[idx]:is(ast.typed.expr.IndexAccess) then
               local partition_type =
                 std.as_read(node.values[idx].value.expr_type)
@@ -1519,6 +1578,13 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
         return std.is_region(symbol:gettype()) end, node.symbols)
 
       local stats = terralib.newlist {node}
+
+      for idx = 1, #region_symbols do
+        local bounds_symbol = caller_cx:find_bounds_symbol(region_symbols[idx])
+        stats:insert(mk_stat_var(bounds_symbol, nil,
+          mk_expr_bounds_access(region_symbols[idx])))
+      end
+
       for idx = 1, #region_symbols do
         -- First, create necessary primary partitions
         for pparam, _ in call_exprs_map:items() do
@@ -1554,7 +1620,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
         for call_expr, _ in pairs(call_exprs) do
           local task_cx = parallelizable(call_expr).cx
           local param_arg_mapping =
-            task_cx:make_param_arg_mapping(call_expr.args)
+            task_cx:make_param_arg_mapping(caller_cx, call_expr.args)
           for idx1 = 1, #task_cx.stencils do
             local orig_stencil = task_cx.stencils[idx1]
             local range = orig_stencil:range(param_arg_mapping)
@@ -1746,6 +1812,24 @@ end
 -- ## Normalizer for region accesses
 -- #################
 
+local function rewrite_metadata_access(cx)
+  return function(node, continuation)
+    if node:is(ast.typed.expr.FieldAccess) and
+       node.field_name == "bounds" and
+       std.is_region(std.as_read(node.value.expr_type)) then
+      assert(node.value:is(ast.typed.expr.ID))
+      local metadata_params = cx:find_metadata_parameters(node.value.value)
+      if metadata_params then
+        return mk_expr_id(metadata_params.bounds)
+      else
+        return continuation(node, true)
+      end
+    else
+      return continuation(node, true)
+    end
+  end
+end
+
 -- normalize field accesses; e.g.
 -- a = b.f
 -- ~>  t = b.f
@@ -1780,6 +1864,9 @@ function normalize_accesses.stat_for_list(cx, node)
   local field_reads = {}
   local field_writes = {}
   local field_reduces = {}
+
+  -- Rewrite any region metadata access with reserved parameter symbol
+  node = ast.map_node_continuation(rewrite_metadata_access(cx), node)
 
   -- Find all region accesses and reserve temporary variables
   local function find_field_access(node, continuation)
@@ -1931,8 +2018,8 @@ function stencil_analysis.explode_expr(cx, expr)
   -- where e is for-list loop symbol and r is a region
   if expr:is(ast.typed.expr.Binary) then
     if expr.op == "%" then
-      assert(expr.rhs:is(ast.typed.expr.FieldAccess) and
-             expr.rhs.field_name == "bounds")
+      assert(expr.rhs:is(ast.typed.expr.ID) and
+             std.is_rect_type(expr.rhs.expr_type))
       return stencil_analysis.explode_expr(cx, expr.lhs):map(function(lhs)
         return expr { lhs = lhs }
       end)
@@ -2022,6 +2109,7 @@ function stencil_analysis.join_stencil(s1, s2)
       stencil_analysis.join_stencil(s1:index():expr(),
                                     s2:index()(binder))
     if joined then
+      -- TODO: region symbols and fields should also be merged here
       return s1:replace_index(Lambda {
         binder = binder,
         expr = joined,
@@ -2031,14 +2119,11 @@ function stencil_analysis.join_stencil(s1, s2)
     end
   elseif ast.is_node(s1) and ast.is_node(s1) and s1:is(s2:type()) then
     if s1:is(ast.typed.expr.ID) then
-      return (s1.lhs.value == s2.lhs.value) and s1
-    elseif s1:is(ast.typed.expr.FieldAccess) then
-      return stencil_analysis.join_stencil(s1, s2) and
-             s1.field_name == "bounds" and s1
+      return (s1.value == s2.value) and s1
     elseif s1:is(ast.typed.expr.Binary) then
-      if s1.op == "%" -- TODO: and stencil_analysis.equiv(s1.rhs, s2.rhs)
-      then
-        return arg_join(stencil_analysis.join_stencil(s1.lhs, s2.lhs),
+      if s1.op == "%" then
+        return arg_join(stencil_analysis.join_stencil(s1.rhs, s2.rhs) and
+                        stencil_analysis.join_stencil(s1.lhs, s2.lhs),
                         s1, s2, "lhs")
       elseif s1.op == "+" then
         assert(s1.lhs:is(ast.typed.expr.ID) and
@@ -2112,9 +2197,6 @@ function stencil_analysis.stencils_compatible(s1, s2)
   elseif ast.is_node(s1) and ast.is_node(s1) and s1:is(s2:type()) then
     if s1:is(ast.typed.expr.ID) then
       return s1.value == s2.value
-    elseif s1:is(ast.typed.expr.FieldAccess) then
-      return s1.field_name == "bounds" and
-             stencil_analysis.stencils_compatible(s1.value, s2.value)
     elseif s1:is(ast.typed.expr.Binary) then
       return s1.op == s2.op and
              stencil_analysis.stencils_compatible(s1.lhs, s2.lhs) and
@@ -2208,8 +2290,7 @@ function parallelize_tasks.stat_for_list(cx, node)
       stats:insert(stat { values = terralib.newlist() })
       -- Cache index calculation for several comparisions later
       local access_info = cx.field_accesses[stat.values[1]]
-      local index_expr =
-        access_info.stencil:subst(cx.region_param_mapping):index()(loop_var)
+      local index_expr = access_info.stencil:index()
       local index_symbol = get_new_tmp_var(loop_var:gettype().index_type)
       local index_symbol_expr = mk_expr_id(index_symbol)
       stats:insert(mk_stat_var(index_symbol, nil, index_expr))
@@ -2307,20 +2388,8 @@ function parallelize_tasks.top_task_body(cx, node)
 end
 
 function parallelize_tasks.top_task(global_cx, node)
-  -- Replicate all region-typed parameters to refer to the original values
-  local region_params = {}
-  for idx = 1, #node.params do
-    if std.is_region(node.params[idx].param_type) then
-      local symbol = node.params[idx].symbol
-      region_params[idx] = {
-        orig = symbol,
-        copy = copy_region_symbol(symbol, "__" .. symbol:getname())
-      }
-    end
-  end
-
   -- Analyze loops in the task
-  local cx = parallel_task_context.new_task_scope(region_params)
+  local cx = parallel_task_context.new_task_scope(node.params)
   local normalized = normalize_accesses.top_task_body(cx, node.body)
   reduction_analysis.top_task(cx, node)
   stencil_analysis.top(cx)
@@ -2340,12 +2409,8 @@ function parallelize_tasks.top_task(global_cx, node)
     cx.ghost_symbols:insert(ghost_symbol)
     params:insert(mk_task_param(cx.ghost_symbols[idx]))
   end
-  -- append replicated parameters at the end
-  for idx = 1, #node.params do
-    if region_params[idx] then
-      params:insert(mk_task_param(region_params[idx].copy))
-    end
-  end
+  -- Append parameters reserved for the metadata of original region parameters
+  cx:insert_metadata_parameters(params)
 
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), node.return_type, false)
