@@ -7121,6 +7121,26 @@ namespace Legion {
       }
     }
 
+    /////////////////////////////////////////////////////////////
+    // VersioningInvalidator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool VersioningInvalidator::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->invalidate_version_managers();
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersioningInvalidator::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      node->invalidate_version_managers();
+      return true;
+    }
+
   }; // namespace Internal 
 }; // namespace Legion
 

@@ -1457,6 +1457,21 @@ namespace Legion {
       InstanceSet restricted_instances;
     };
 
+    /**
+     * \class VersioningInvalidator
+     * A class for reseting the versioning managers for 
+     * a deleted region (sub)-tree so that version states
+     * and the things they point to can be cleaned up
+     * by the garbage collector. The better long term
+     * answer is to have individual contexts do this.
+     */
+    class VersioningInvalidator : public NodeTraverser {
+    public:
+      virtual bool visit_only_valid(void) const { return true; }
+      virtual bool visit_region(RegionNode *node);
+      virtual bool visit_partition(PartitionNode *node);
+    };
+
   }; // namespace Internal 
 }; // namespace Legion
 

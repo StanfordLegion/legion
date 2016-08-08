@@ -5994,20 +5994,24 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
-      AutoLock n_lock(node_lock);
-      if (!destroyed)
+      std::set<RegionNode*> to_destroy;
       {
-        destroyed = true;
-        if (!creation_set.empty())
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
         {
-          DestructionFunctor functor(handle, context->runtime);
-          creation_set.map(functor);
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_destroy = logical_nodes;
         }
-        for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
-              it != logical_nodes.end(); it++)
-        {
-          (*it)->destroy_node(source);
-        }
+      }
+      for (std::set<RegionNode*>::const_iterator it = to_destroy.begin();
+            it != to_destroy.end(); it++)
+      {
+        (*it)->destroy_node(source);
       }
     }
 
@@ -7408,20 +7412,25 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
-      AutoLock n_lock(node_lock);
-      if (!destroyed)
+      std::set<PartitionNode*> to_destroy;
       {
-        destroyed = true;
-        if (!creation_set.empty())
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
         {
-          DestructionFunctor functor(handle, context->runtime);
-          creation_set.map(functor);
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_destroy = logical_nodes;
+          
         }
-        for (std::set<PartitionNode*>::const_iterator it = 
-              logical_nodes.begin(); it != logical_nodes.end(); it++)
-        {
-          (*it)->destroy_node(source);
-        }
+      }
+      for (std::set<PartitionNode*>::const_iterator it = 
+            to_destroy.begin(); it != to_destroy.end(); it++)
+      {
+        (*it)->destroy_node(source);
       }
     }
 
@@ -13617,6 +13626,17 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.reset();
     }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_version_managers(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned ctx = 0; ctx < current_versions.max_entries(); ctx++)
+      {
+        if (current_versions.has_entry(ctx))
+          invalidate_version_state(ctx);
+      }
+    }
     
     //--------------------------------------------------------------------------
     bool RegionTreeNode::register_instance_view(PhysicalManager *manager,
@@ -14164,11 +14184,13 @@ namespace Legion {
       if (destroyed)
         return;
       bool release_tree_instances = false;
+      bool perform_invalidations = false;
       {
         AutoLock n_lock(node_lock);
         if (!destroyed)
         {
           destroyed = true;
+          perform_invalidations = true;
           // If we are the top of the region tree, tell the
           // memories that they can remove any pinned references
           // for any instances in this region tree
@@ -14180,6 +14202,15 @@ namespace Legion {
             creation_set.map(functor);
           }
         }
+      }
+      if (perform_invalidations)
+      {
+        // TODO: Make this more precise so that it happens on 
+        // a per context basis rather than only when the node 
+        // itself is destroyed, and can also deal with individual
+        // field deletions
+        VersioningInvalidator invalidator; 
+        visit_node(&invalidator);
       }
       if (release_tree_instances)
         context->runtime->release_tree_instances(handle.get_tree_id());
@@ -15968,15 +15999,28 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
-      AutoLock n_lock(node_lock);
-      if (!destroyed)
+      bool perform_invalidations = false;
       {
-        destroyed = true;
-        if (!creation_set.empty())
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
         {
-          DestructionFunctor functor(handle, context->runtime);
-          creation_set.map(functor);
+          destroyed = true;
+          perform_invalidations = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
         }
+      }
+      if (perform_invalidations)
+      {
+        // TODO: Make this more precise so that it happens on 
+        // a per context basis rather than only when the node 
+        // itself is destroyed, and can also deal with individual
+        // field deletions
+        VersioningInvalidator invalidator; 
+        visit_node(&invalidator);
       }
     }
 
