@@ -44,10 +44,15 @@ void top_level_task(const Task *task,
   // available through the runtime 'get_input_args' call.  We'll 
   // use this to get the number of Fibonacci numbers to compute.
   const InputArgs &command_args = Runtime::get_input_args();
-  if (command_args.argc > 1)
-  {
-    num_fibonacci = atoi(command_args.argv[1]);
+  for (int i = 1; i < command_args.argc; i++) {
+    if (command_args.argv[i][0] == '-') {
+      i++;
+      continue;
+    }
+
+    num_fibonacci = atoi(command_args.argv[i]);
     assert(num_fibonacci >= 0);
+    break;
   }
   printf("Computing the first %d Fibonacci numbers...\n", num_fibonacci);
 
