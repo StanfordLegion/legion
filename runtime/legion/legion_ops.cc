@@ -11152,6 +11152,7 @@ namespace Legion {
     Future TimingOp::initialize(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = ABSOLUTE_MEASUREMENT;
       precondition = pre; 
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
@@ -11164,6 +11165,7 @@ namespace Legion {
     Future TimingOp::initialize_microseconds(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = MICROSECOND_MEASUREMENT;
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
@@ -11176,6 +11178,7 @@ namespace Legion {
     Future TimingOp::initialize_nanoseconds(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = NANOSECOND_MEASUREMENT;
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
