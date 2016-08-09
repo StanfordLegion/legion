@@ -13093,6 +13093,8 @@ namespace Legion {
       FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
                               get_available_distributed_id(true),
                               address_space, address_space, ctx);
+      // Make this here to get a local reference on it now
+      Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs args;
       args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
@@ -13106,7 +13108,7 @@ namespace Legion {
       issue_runtime_meta_task(&args, sizeof(args),
                               HLR_SELECT_TUNABLE_TASK_ID, 
                               HLR_LATENCY_PRIORITY, ctx);
-      return Future(result);
+      return result_future;
     }
 
     //--------------------------------------------------------------------------
