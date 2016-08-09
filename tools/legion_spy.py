@@ -201,7 +201,7 @@ class Point(object):
     def __eq__(self, point):
         assert self.dim == point.dim
         for i in range(self.dim):
-            if self.vals[i] <> point.vals[i]:
+            if self.vals[i] != point.vals[i]:
                 return False
         return True
 
@@ -2210,7 +2210,7 @@ class IndexSpace(object):
         if self.name is not None:
             label = self.name + ' (ID: '+str(self.uid) + ')'
         else:
-            if self.parent == None:
+            if self.parent is None:
                 label = 'index space '+hex(self.uid)
             else:
                 
@@ -2738,7 +2738,7 @@ class LogicalRegion(object):
         if self.name is not None:
             label = self.name+' ('+self.gen_id()+')'
         else:
-            if self.parent == None:
+            if self.parent is None:
                 label = 'region ('+self.gen_id()+')'
             else:
                 label = 'subregion ('+self.gen_id()+')'
@@ -3066,7 +3066,7 @@ class LogicalState(object):
             if register_user:
                 self.current_epoch_users.append((op,req))
                 # Record if we have outstanding reductions
-                if req.redop <> 0:
+                if req.redop != 0:
                     self.current_redop = req.redop                
         return True
 
@@ -3133,7 +3133,7 @@ class LogicalState(object):
     def siphon_logical_children(self, op, req, next_child, 
                                 previous_deps, perform_checks):
         # First see if we have any reductions to flush
-        if self.current_redop <> 0 and self.current_redop <> req.redop:
+        if self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = dict()
             permit_leave_open = False # Never allowed to leave anything open here
             # Flushing reductions close all children no matter what
@@ -3234,7 +3234,7 @@ class LogicalState(object):
                 # See how many interfering children there are in the same mode
                 other_children = set()
                 for child,redop in self.open_redop.iteritems():
-                    if redop <> req.redop:
+                    if redop != req.redop:
                         continue
                     if self.node.are_children_disjoint(child,next_child):
                         continue
@@ -3251,7 +3251,7 @@ class LogicalState(object):
                 else:
                     # Just single reduce mode
                     self.open_children[next_child] = OPEN_SINGLE_REDUCE
-                assert req.redop <> 0
+                assert req.redop != 0
                 self.open_redop[next_child] = req.redop
             else:
                 # Normal read-write case is easy
@@ -3379,11 +3379,11 @@ class LogicalState(object):
         # Find the close operation first
         close = self.find_close_operation(op, req, perform_checks, error_str)
         # Make sure it is the right kind
-        if read_only_close and close.kind <> READ_ONLY_CLOSE_OP_KIND:
+        if read_only_close and close.kind != READ_ONLY_CLOSE_OP_KIND:
             if self.node.state.assert_on_fail:
                 assert False
             return False
-        if not read_only_close and close.kind <> INTER_CLOSE_OP_KIND:
+        if not read_only_close and close.kind != INTER_CLOSE_OP_KIND:
             if self.node.state.assert_on_fail:
                 assert False
             return False
@@ -3512,7 +3512,7 @@ class Restriction(object):
 
     def find_restrictions(self, node, field, req):
         # If the tree IDs are different then we are done
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         # If the fields aren't the same then we are done
         if field is not self.field:
@@ -3538,7 +3538,7 @@ class Restriction(object):
         return True
 
     def add_acquisition(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3558,7 +3558,7 @@ class Restriction(object):
         return True
 
     def remove_acquisition(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3574,7 +3574,7 @@ class Restriction(object):
         return False
 
     def add_restrict(self, node, field, inst):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3591,7 +3591,7 @@ class Restriction(object):
         return False
 
     def remove_restrict(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3602,7 +3602,7 @@ class Restriction(object):
         return False
 
     def matches(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3632,7 +3632,7 @@ class Acquisition(object):
         return False
 
     def add_acquisition(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3649,7 +3649,7 @@ class Acquisition(object):
         return False
 
     def remove_acquisition(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3660,7 +3660,7 @@ class Acquisition(object):
         return False
 
     def add_restrict(self, node, field, inst):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3679,13 +3679,13 @@ class Acquisition(object):
         self.restrictions.append(Restriction(node, field, inst))
 
     def remove_restrict(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
 
     def matches(self, node, field):
-        if self.node.tree_id <> node.tree_id:
+        if self.node.tree_id != node.tree_id:
             return False
         if field is not self.field:
             return False
@@ -3712,7 +3712,7 @@ class PhysicalState(object):
     def initialize_physical_state(self, inst):
         if inst.is_virtual():
             assert not isinstance(inst, Instance)
-        if inst.redop <> 0:
+        if inst.redop != 0:
             self.reduction_instances.add(inst)
             self.redop = inst.redop
         else:
@@ -3749,7 +3749,7 @@ class PhysicalState(object):
             restricted_inst = req.restricted_fields[self.field]
         if req.is_reduce():
             # It's a runtime bug if this is a non-reduction instance
-            assert inst.redop <> 0
+            assert inst.redop != 0
             # Add it to the list of reduction instances if we are not restricted
             if not restricted:
                 self.reduction_instances.add(inst)
@@ -3790,7 +3790,7 @@ class PhysicalState(object):
                                                      op, req, perform_checks, True):
                     return False
                 # Issue any reduction updates too
-                if self.redop <> 0:
+                if self.redop != 0:
                     assert self.reduction_instances
                     error_str = "region requirement "+str(req.index)+" of "+str(op)
                     if not self.issue_update_reductions(inst, 
@@ -3816,14 +3816,14 @@ class PhysicalState(object):
             return False
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
-        if restricted and req.priv <> READ_ONLY:
+        if restricted and req.priv != READ_ONLY:
             # We only need to do something if the instances are not the same 
             if inst is not restricted_inst:
                 error_str = "restricted region requirement "+\
                         str(req.index)+" of "+str(op)
                 # We need to issue a copy or a reduction back to the 
                 # restricted instance in order to have the proper semantics
-                if inst.redop <> 0:
+                if inst.redop != 0:
                     # Have to perform a reduction back
                     reductions = set()
                     reductions.add(inst)
@@ -3935,7 +3935,7 @@ class PhysicalState(object):
             if target.is_virtual():
                 already_captured = set()
                 target.capture(self, already_captured)
-            elif self.redop <> 0:
+            elif self.redop != 0:
                 assert self.reduction_instances
                 error_str = "region requirement "+str(req.index)+" of "+str(op)
                 if not self.issue_update_reductions(target, self.reduction_instances,
@@ -3951,7 +3951,7 @@ class PhysicalState(object):
 
     def find_valid_instances(self):
         # We can't go up anymore when we are dirty or there is no parent
-        if self.dirty or self.redop <> 0 or self.parent is None:
+        if self.dirty or self.redop != 0 or self.parent is None:
             # Make sure to make a copy
             result = self.valid_instances.copy()
             return result
@@ -4059,7 +4059,7 @@ class PhysicalState(object):
         assert dst 
         if perform_checks:
             for src in reductions:
-                assert src.redop <> 0
+                assert src.redop != 0
                 if src is dst:
                     continue
                 reduction = op.find_generated_copy(self.field, self.node, dst, src.redop)
@@ -4107,7 +4107,7 @@ class PhysicalState(object):
         else:
             # flush all the reductions to the destination 
             for src in reductions:
-                assert src.redop <> 0
+                assert src.redop != 0
                 # Make a realm copy from the source to the dst for this field   
                 reduction = self.node.state.create_copy(op)
                 reduction.set_region(self.node)
@@ -4373,7 +4373,7 @@ class Operation(object):
 
     def set_task_id(self, task_id):
         assert self.kind == SINGLE_TASK_KIND or self.kind == INDEX_TASK_KIND
-        if self.task_id <> -1:
+        if self.task_id != -1:
             assert task_id == self.task_id
         else:
             self.task_id = task_id
@@ -4386,7 +4386,7 @@ class Operation(object):
         self.close_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
-            assert self.kind <> POST_CLOSE_OP_KIND
+            assert self.kind != POST_CLOSE_OP_KIND
             creator.add_close_operation(self)
         else:
             assert self.kind == POST_CLOSE_OP_KIND
@@ -4407,7 +4407,7 @@ class Operation(object):
         if self.inter_close_ops is None:
             return None
         for close in self.inter_close_ops:
-            if close.close_idx <> req.index:
+            if close.close_idx != req.index:
                 continue
             assert len(close.reqs) == 1
             close_req = close.reqs[0]
@@ -4553,7 +4553,7 @@ class Operation(object):
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
-        elif other.kind <> NO_OP_KIND:
+        elif other.kind != NO_OP_KIND:
             assert self.kind == other.kind
         if self.context is None:
             self.context = other.context
@@ -4587,7 +4587,7 @@ class Operation(object):
             assert not other.realm_fills
         if self.task_id == -1:
             self.task_id = other.task_id
-        elif other.task_id <> -1:
+        elif other.task_id != -1:
             assert self.task_id == other.task_id
         # Should only be called on point tasks
         assert not self.points
@@ -4633,7 +4633,7 @@ class Operation(object):
                 continue 
             if dst not in copy.dsts:
                 continue
-            if redop <> 0 and redop not in copy.redops:
+            if redop != 0 and redop not in copy.redops:
                 continue
             if intersect is not None or copy.intersect is not None:
                 if copy.intersect is not None:
@@ -4672,7 +4672,7 @@ class Operation(object):
                 continue
             if dst_inst is not copy.dsts[index]:
                 continue
-            if redop <> copy.redops[index]:
+            if redop != copy.redops[index]:
                 continue
             if intersect is not None or copy.intersect is not None:
                 if copy.intersect is not None:
@@ -4984,7 +4984,7 @@ class Operation(object):
                 continue # No overlapping fields so we can keep going
             # Check to see if they are in different region trees in 
             # which case there can be no aliasing
-            if req.tid <> next_req.tid:
+            if req.tid != next_req.tid:
                 continue
             if not req.index_node.intersects(next_req.index_node):
                 continue
@@ -5043,7 +5043,7 @@ class Operation(object):
                 continue
             # Don't register if we are a task
             if not req.logical_node.perform_physical_analysis(depth, field, self, 
-                        req, inst, perform_checks, self.kind <> SINGLE_TASK_KIND):
+                        req, inst, perform_checks, self.kind != SINGLE_TASK_KIND):
                 return False
         return True
 
@@ -5091,7 +5091,7 @@ class Operation(object):
             # Now we issue the copy across
             # See if we are doing a reduction or a normal copy
             if is_reduce:
-                assert dst_req.redop <> 0
+                assert dst_req.redop != 0
                 # Reduction case
                 if src_inst.is_virtual():
                     # This is a runtime bug, there should never be any reductions across
@@ -5775,11 +5775,11 @@ class Task(object):
     def merge(self, other):
         if self.op.task_id == -1:
             self.op.task_id = other.op.task_id
-        elif other.op.task_id <> -1:
+        elif other.op.task_id != -1:
             assert self.op.task_id == other.op.task_id
         if self.point.dim == 0:
             self.point = other.point
-        elif other.point.dim <> 0:
+        elif other.point.dim != 0:
             assert self.point == other.point
         if not self.operations:
             self.operations = other.operations
@@ -5984,7 +5984,7 @@ class Task(object):
             # Find all the backwards reachable operations
             current_op = self.operations[idx]
             # No need to do anything if there are no region requirements
-            if not current_op.reqs and current_op.kind <> FENCE_OP_KIND:
+            if not current_op.reqs and current_op.kind != FENCE_OP_KIND:
                 continue
             reachable = set()
             current_op.get_logical_reachable(reachable, False) 
@@ -6586,7 +6586,7 @@ class Instance(object):
             # but from a different region requirement then we can 
             # skip the dependence because we'll catch it implicitly
             # as part of the dependences through other region requirements
-            if logical_op is user.logical_op and req.index <> user.index:
+            if logical_op is user.logical_op and req.index != user.index:
                 continue
             if user.region.intersects(req.logical_node):
                 # If we have intersections we can also check those
@@ -6615,7 +6615,7 @@ class Instance(object):
         if reading:
             assert redop == 0
             inst = InstanceUser(None, index, region, READ_ONLY, EXCLUSIVE, 0)
-        elif redop <> 0:
+        elif redop != 0:
             inst = InstanceUser(None, index, region, REDUCE, EXCLUSIVE, redop)
         else:
             inst = InstanceUser(None, index, region, READ_WRITE, EXCLUSIVE, 0)
@@ -6630,7 +6630,7 @@ class Instance(object):
             # see if is another user or a copy operation, users from a
             # different region requirement can be skipped, otherwise
             # we can avoid WAR and WAW dependences, but not true RAW dependences
-            if logical_op is user.logical_op and index <> user.index:
+            if logical_op is user.logical_op and index != user.index:
                 if not user.is_realm_op() or not reading or user.is_read_only():
                     continue
             if user.region.intersects(region):
@@ -6685,7 +6685,7 @@ class Instance(object):
             assert redop == 0
             users[field].append(InstanceUser(op, index, region,
                                  READ_ONLY, EXCLUSIVE, 0, shape, intersect))
-        elif redop <> 0:
+        elif redop != 0:
             users[field].append(InstanceUser(op, index, region,
                                  REDUCE, EXCLUSIVE, redop, shape, intersect))
         else:
@@ -6967,7 +6967,7 @@ class CompositeNode(object):
         if isinstance(self.node, LogicalRegion):
             return True
         # Partition nodes are only sound if they have all the fields
-        if len(self.children) <> self.node.get_num_children():
+        if len(self.children) != self.node.get_num_children():
             return False
         return True
 
@@ -7176,7 +7176,7 @@ class CompositeInstance(object):
 
     def capture(self, state, already_captured):
         # Do the capture if we are dirty or have reductions or we are the root
-        if state.dirty or state.redop <> 0 or state.node is self.root:
+        if state.dirty or state.redop != 0 or state.node is self.root:
             new_state = self.get_node(state.node)
             # See if we can avoid capturing the instances
             already_complete = False 
@@ -7323,7 +7323,7 @@ class CompositeInstance(object):
         if self.reductions:
             if perform_checks:
                 for reduction_inst,reduction_region in self.reductions.iteritems():
-                    assert reduction_inst.redop <> 0
+                    assert reduction_inst.redop != 0
                     # No need to reduce back to the original instance
                     if reduction_inst is dst:
                         continue
@@ -7421,7 +7421,7 @@ class CompositeInstance(object):
                                 reading=False, redop=reduction_inst.redop)
             else:
                 for reduction_inst,reduction_region in self.reductions.iteritems():
-                    assert reduction_inst.redop <> 0
+                    assert reduction_inst.redop != 0
                     if region.intersects(reduction_region):
                         # Make a reduction copy 
                         reduction = self.state.create_copy(op)
@@ -7490,7 +7490,7 @@ class EventHandle(object):
     __repr__ = __str__
 
     def exists(self):
-        return (self.uid <> 0)
+        return (self.uid != 0)
 
 class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
@@ -7860,12 +7860,12 @@ class RealmCopy(RealmBase):
                 redop = self.redops[fidx]
                 line = []
                 if src_field == dst_field:
-                    if redop <> 0:
+                    if redop != 0:
                         line.append(str(src_field)+' Redop='+str(redop))
                     else:
                         line.append(str(src_field))
                 else:
-                    if redop <> 0:
+                    if redop != 0:
                         line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
                     else:
                         line.append(str(src_field)+':'+str(dst_field))
@@ -7877,7 +7877,7 @@ class RealmCopy(RealmBase):
                 lines.append(line)
         color = 'darkgoldenrod1'
         for redop in self.redops:
-            if redop <> 0:
+            if redop != 0:
                 color = 'tomato'
                 break
         size = 14
@@ -9800,7 +9800,7 @@ def perform_geometry_test(dim, max_size=100):
     actual_points = 0
     for rect in result.rects:
         actual_points += rect.volume()
-    if actual_points <> total_points:
+    if actual_points != total_points:
         print "Point total mismatch! exp="+str(total_points)+" != act="+str(actual_points)
         print_bad_geometry_result(dim, first_rect, second_rect, result)
         return False
