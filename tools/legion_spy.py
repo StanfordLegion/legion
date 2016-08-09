@@ -9821,6 +9821,15 @@ def main(temp_dir):
         '-c', '--cycle', dest='cycle_checks', action='store_true',
         help='check for cycles')
     parser.add_argument(
+        '-s', '--sanity', dest='sanity_checks', action='store_true',
+        help='check basic properties of the dataflow and event graphs')
+    parser.add_argument(
+        '-w', '--leaks', dest='user_event_leaks', action='store_true',
+        help='check for user event leaks')
+    parser.add_argument(
+        '-g', '--geometry', dest='test_geometry', action='store_true',
+        help='check computational geometry')
+    parser.add_argument(
         '-r', '--region', dest='region_tree_graphs', action='store_true',
         help='draw region tree graphs')
     parser.add_argument(
@@ -9832,6 +9841,13 @@ def main(temp_dir):
     parser.add_argument(
         '-e', '--event', dest='event_graphs', action='store_true',
         help='draw physical event graphs')
+    parser.add_argument(
+        '-z', '--detail', dest='detailed_graphs', action='store_true',
+        help='include extra detail (such as field names) in graphs')
+    parser.add_argument(
+        '-u', '--unsimplified', dest='simplify_graphs',
+        action='store_false', # Note that this defaults to true
+        help='keep redundant edges in graphs')
     parser.add_argument(
         '-i', '--instance', dest='instance_descriptions', action='store_true',
         help='print instance descriptions')
@@ -9845,30 +9861,14 @@ def main(temp_dir):
         '-y', '--replay', dest='replay_file', action='store_true',
         help='generate mapper replay file')
     parser.add_argument(
-        '-z', '--detail', dest='detailed_graphs', action='store_true',
-        help='add extra detail to graphs')
-    parser.add_argument(
-        '-s', '--sanity', dest='sanity_checks', action='store_true',
-        help='perform sanity checks on logical and physical analysis')
-    parser.add_argument(
-        '-w', '--leaks', dest='user_event_leaks', action='store_true',
-        help='check for user event leaks')
-    parser.add_argument(
         '-k', '--temporaries', dest='keep_temp_files', action='store_true',
         help='keep temporary generated files')
-    parser.add_argument(
-        '-u', '--unsimplified', dest='simplify_graphs',
-        action='store_false', # Note that this defaults to true
-        help='keep redundant edges in graphs')
     parser.add_argument(
         '-v', '--verbose', dest='verbose', action='store_true',
         help='verbose output')
     parser.add_argument(
         '-a', '--assert-fail', dest='assert_on_fail', action='store_true',
         help='assert on analysis failure')
-    parser.add_argument(
-        '-g', '--geometry', dest='test_geometry', action='store_true',
-        help='check computational geometry')
     parser.add_argument(
         dest='filenames', action='append',
         help='input legion spy log filenames')
