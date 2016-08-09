@@ -20,7 +20,7 @@ import sys, os, re, gc, shutil, copy
 import string, struct
 import tempfile
 import random
-from getopt import getopt,GetoptError
+import argparse
 from array import *
 from collections import deque
 
@@ -9718,30 +9718,6 @@ class State(object):
         # Definitely run the garbage collector here
         gc.collect()
 
-def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -t -y -z -s -w -k -u -v -a -g] "+\
-          "<file_name(s)>+"
-    print "  -l : perform logical checks"
-    print "  -p : perform physical checks"
-    print "  -c : check for cycles"
-    print "  -r : make region tree graphs"
-    print "  -m : make machine graphs"
-    print "  -d : make dataflow graphs"
-    print "  -e : make event graphs"
-    print "  -i : print instance descriptions"
-    print "  -q : print mapping decisions"
-    print "  -t : print index and region trees"
-    print "  -y : generate mapper replay file"
-    print "  -z : add extra detail to graphs"
-    print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
-    print "  -w : perform user event leak check"
-    print "  -k : keep temporary files"
-    print "  -u : keep graphs unsimplified (maintains all redundant edges)"
-    print "  -v : verbose"
-    print "  -a : assert on analysis failure (useful for self-debugging)"
-    print "  -g : test computational geometry"
-    sys.exit(1)
-
 def generate_random_intersecting_rects(dim, max_size):
     lo1 = Point(dim)
     hi1 = Point(dim)
@@ -9820,92 +9796,92 @@ def run_geometry_tests(num_tests=10000):
     return success
 
 def main(temp_dir):
-    if len(sys.argv) < 2:
-        usage()
-    try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeiqtsyzkuvagw')
-    except GetoptError as err:
-        print "ERROR: "+str(err)
-        sys.exit(1)
-    opts = dict(opts)
-    file_names = args
+    parser = argparse.ArgumentParser(
+        description='Legion Spy runtime analysis and verification')
+    parser.add_argument(
+        '-l', '--logical', dest='logical_checks', action='store_true',
+        help='check logical analysis')
+    parser.add_argument(
+        '-p', '--physical', dest='physical_checks', action='store_true',
+        help='check physical analysis')
+    parser.add_argument(
+        '-c', '--cycle', dest='cycle_checks', action='store_true',
+        help='check for cycles')
+    parser.add_argument(
+        '-r', '--region', dest='region_tree_graphs', action='store_true',
+        help='draw region tree graphs')
+    parser.add_argument(
+        '-m', '--machine', dest='machine_graphs', action='store_true',
+        help='draw machine graphs')
+    parser.add_argument(
+        '-d', '--dataflow', dest='dataflow_graphs', action='store_true',
+        help='draw logical dataflow graphs')
+    parser.add_argument(
+        '-e', '--event', dest='event_graphs', action='store_true',
+        help='draw physical event graphs')
+    parser.add_argument(
+        '-i', '--instance', dest='instance_descriptions', action='store_true',
+        help='print instance descriptions')
+    parser.add_argument(
+        '-q', '--mapping', dest='mapping_decisions', action='store_true',
+        help='print mapping decisions')
+    parser.add_argument(
+        '-t', '--trees', dest='print_trees', action='store_true',
+        help='print index and region trees')
+    parser.add_argument(
+        '-y', '--replay', dest='replay_file', action='store_true',
+        help='generate mapper replay file')
+    parser.add_argument(
+        '-z', '--detail', dest='detailed_graphs', action='store_true',
+        help='add extra detail to graphs')
+    parser.add_argument(
+        '-s', '--sanity', dest='sanity_checks', action='store_true',
+        help='perform sanity checks on logical and physical analysis')
+    parser.add_argument(
+        '-w', '--leaks', dest='user_event_leaks', action='store_true',
+        help='check for user event leaks')
+    parser.add_argument(
+        '-k', '--temporaries', dest='keep_temp_files', action='store_true',
+        help='keep temporary generated files')
+    parser.add_argument(
+        '-u', '--unsimplified', dest='simplify_graphs',
+        action='store_false', # Note that this defaults to true
+        help='keep redundant edges in graphs')
+    parser.add_argument(
+        '-v', '--verbose', dest='verbose', action='store_true',
+        help='verbose output')
+    parser.add_argument(
+        '-a', '--assert-fail', dest='assert_on_fail', action='store_true',
+        help='assert on analysis failure')
+    parser.add_argument(
+        '-g', '--geometry', dest='test_geometry', action='store_true',
+        help='check computational geometry')
+    parser.add_argument(
+        dest='filenames', action='append',
+        help='input legion spy log filenames')
+    args = parser.parse_args()
 
-    logical_checks = False
-    physical_checks = False
-    cycle_checks = False
-    region_tree_graphs = False
-    machine_graphs = False
-    dataflow_graphs = False
-    event_graphs = False
-    instance_descriptions = False
-    mapping_decisions = False
-    print_trees = False
-    replay_file = False
-    detailed_graphs = False
-    sanity_checks = False
-    user_event_leaks = False
-    keep_temp_files = False
-    simplify_graphs = True # Note that this defaults to true
-    verbose = False
-    assert_on_fail = False
-    test_geometry = False
-    for opt in opts:
-        if opt == '-l':
-            logical_checks = True
-            continue
-        if opt == '-p':
-            physical_checks = True
-            continue
-        if opt == '-c':
-            cycle_checks = True
-        if opt == '-r':
-            region_tree_graphs = True
-            continue
-        if opt == '-m':
-            machine_graphs = True
-            continue
-        if opt == '-d':
-            dataflow_graphs = True
-            continue
-        if opt == '-e':
-            event_graphs = True
-            continue;
-        if opt == '-i':
-            instance_descriptions = True
-            continue
-        if opt == '-q':
-            mapping_decisions = True
-            continue
-        if opt == '-t':
-            print_trees = True
-            continue
-        if opt == '-y':
-            replay_file = True
-            continue
-        if opt == '-z':
-            detailed_graphs = True
-            continue
-        if opt == '-s':
-            sanity_checks = True
-            continue
-        if opt == '-w':
-            user_event_leaks = True
-            continue
-        if opt == '-k':
-            keep_temp_files = True
-            continue
-        if opt == '-u':
-            simplify_graphs = False
-            continue
-        if opt == '-v':
-            verbose = True
-            continue
-        if opt == '-a':
-            assert_on_fail = True
-            continue
-        if opt == '-g':
-            test_geometry = True
-            continue
+    file_names = args.filenames
+
+    logical_checks = args.logical_checks
+    physical_checks = args.physical_checks
+    cycle_checks = args.cycle_checks
+    region_tree_graphs = args.region_tree_graphs
+    machine_graphs = args.machine_graphs
+    dataflow_graphs = args.dataflow_graphs
+    event_graphs = args.event_graphs
+    instance_descriptions = args.instance_descriptions
+    mapping_decisions = args.mapping_decisions
+    print_trees = args.print_trees
+    replay_file = args.replay_file
+    detailed_graphs = args.detailed_graphs
+    sanity_checks = args.sanity_checks
+    user_event_leaks = args.user_event_leaks
+    keep_temp_files = args.keep_temp_files
+    simplify_graphs = args.simplify_graphs
+    verbose = args.verbose
+    assert_on_fail = args.assert_on_fail
+    test_geometry = args.test_geometry
 
     if test_geometry:
         run_geometry_tests()
