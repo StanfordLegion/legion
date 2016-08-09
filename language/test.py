@@ -62,7 +62,14 @@ def run(filename, debug, verbose, flags, env):
 
 def run_spy(logfile, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
-           '-clpa', logfile]
+           '--logical',
+           '--physical',
+           '--cycle',
+           # '--sanity', # FIXME: This breaks on several test cases.
+           '--leaks',
+           # '--geometry', # FIXME: This is *very* slow.
+           '--assert',
+           logfile]
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
