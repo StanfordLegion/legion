@@ -15,14 +15,20 @@
 # limitations under the License.
 #
 
-import subprocess
-import sys, os, re, gc, shutil, copy
-import string, struct
-import tempfile
-import random
 import argparse
 import array
 import collections
+import copy
+import gc
+import os
+import random
+import re
+import shutil
+import string
+import struct
+import subprocess
+import sys
+import tempfile
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
