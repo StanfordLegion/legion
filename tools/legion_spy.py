@@ -21,7 +21,7 @@ import string, struct
 import tempfile
 import random
 import argparse
-from array import *
+import array
 from collections import deque
 
 # These are imported from legion_types.h
@@ -170,7 +170,7 @@ class Point(object):
     __slots__ = ['dim', 'vals']
     def __init__(self, dim):
         self.dim = dim
-        self.vals = array('i', (0,)*dim)
+        self.vals = array.array('i', (0,)*dim)
 
     def mk_string(self, start, delim, end):
         result = start
