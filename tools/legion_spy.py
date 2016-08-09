@@ -22,7 +22,7 @@ import tempfile
 import random
 import argparse
 import array
-from collections import deque
+import collections
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
@@ -4953,7 +4953,7 @@ class Operation(object):
             self.transitive_warning_issued = True
         next_gen = self.state.get_next_traversal_generation()
         self.generation = next_gen
-        queue = deque()
+        queue = collections.deque()
         queue.append(self)
         while queue:
             current = queue.popleft()
@@ -6737,7 +6737,7 @@ class Instance(object):
         assert self.creator_regions
         replay_file.write(struct.pack('I',len(self.creator_regions)))
         for region in self.creator_regions:
-            path = deque()         
+            path = collections.deque()
             temp = region
             while temp.parent:
                 path.appendleft(temp.index_space.color)
