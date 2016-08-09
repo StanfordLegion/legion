@@ -417,7 +417,7 @@ class Shape(object):
         return result
 
     def rect_sub_helper(self, rect, other, to_add):
-        #print(str(rect)+' - '+str(other))
+        #print('%s - %s' % (rect, other))
         # We are guaranteed to intersect but not dominate
         if rect.lo.dim == 1:
             # 3 cases: 2 edges, 1 center 
@@ -2080,7 +2080,7 @@ class IndexSpace(object):
         if self.shape is None or self.shape.empty():
             return
         if self.state.verbose:
-            print('    Reducing index sub-space '+str(self))
+            print('    Reducing index sub-space %s' % self)
         local_points = self.shape.copy()
         new_sets = dict()
         del_sets = list()
@@ -2149,7 +2149,7 @@ class IndexSpace(object):
         if self.shape is None or self.shape.empty():
             return
         if self.state.verbose:
-            print('Reducing '+str(self)+'...')
+            print('Reducing %s ...' % self)
         if self.shape.get_dim() not in dim_sets:
             dim_sets[self.shape.get_dim()] = dict()
         self.update_index_sets(dim_sets[self.shape.get_dim()])
@@ -2164,13 +2164,13 @@ class IndexSpace(object):
 
     def get_shape(self):
         if self.shape is None:
-            print("No shape for "+str(self))
+            print("No shape for %s" % self)
         assert self.shape is not None
         return self.shape
 
     def get_point_set(self):
         if self.point_set is None:
-            print("No Point set for "+str(self))
+            print("No Point set for %s" % self)
         assert self.point_set is not None
         return self.point_set
 
@@ -2243,12 +2243,12 @@ class IndexSpace(object):
     def print_tree(self):
         if self.depth == 0:
             print("---------------------------------------")
-            print(str(self))
+            print(self)
         else:
             prefix = ''
             for i in range(self.depth):
                 prefix += '  '
-            print(prefix+str(self)+' Color: '+self.color.to_string())
+            print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
         if self.depth == 0:
@@ -2305,9 +2305,9 @@ class IndexPartition(object):
         # Check for dominance of children by parent
         for child in self.children.itervalues():
             if not self.parent.dominates(child):
-                print('WARNING: child '+str(child)+' is not dominated by parent '+
-                        str(self.parent)+' in '+str(self)+'. This is definitely '+
-                        'an application bug.')
+                print('WARNING: child % is not dominated by parent %s in %s. '+
+                      'This is definitely an application bug.' %
+                      (child, self.parent, self))
                 if self.node.state.assert_on_fail:
                     assert False
         # Check disjointness
@@ -2316,9 +2316,9 @@ class IndexPartition(object):
             for child in self.children.itervalues():
                 child_shape = child.get_shape()
                 if not (child_shape & previous).empty():
-                    print('WARNING: '+str(self)+' was logged disjoint '+
+                    print('WARNING: %s was logged disjoint '+
                             'but there are overlapping children. This '+
-                            'is definitely an application bug.')
+                            'is definitely an application bug.' % self)
                     if self.node.state.assert_on_fail:
                         assert False
                     break
@@ -2428,7 +2428,7 @@ class IndexPartition(object):
         prefix = ''
         for i in range(self.depth):
             prefix += '  '
-        print(prefix+str(self)+' Color: '+self.color.to_string())
+        print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
 
@@ -2775,12 +2775,12 @@ class LogicalRegion(object):
     def print_tree(self):
         if self.index_space.depth == 0:
             print("---------------------------------------")
-            print(str(self))
+            print(self)
         else:
             prefix = ''
             for i in range(self.index_space.depth):
                 prefix += '  '
-            print(prefix+str(self)+' Color: '+self.index_space.color.to_string())
+            print('%s%s Color: %s' % (prefix, self, self.index_space.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
         if self.index_space.depth == 0:
@@ -3040,7 +3040,7 @@ class LogicalPartition(object):
         prefix = ''
         for i in range(self.index_partition.depth):
             prefix += '  '
-        print(prefix+str(self)+' Color: '+self.index_partition.color.to_string())
+        print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
 
@@ -3102,9 +3102,8 @@ class LogicalState(object):
                 if not found:
                     found = op.has_transitive_mapping_dependence(prev_op)
                 if not found:
-                    print("ERROR: missing logical fence dependence between "+
-                          str(prev_op)+" (UID "+str(prev_op.uid)+") and "+
-                          str(op)+" (UID "+str(op.uid)+")")
+                    print("ERROR: missing logical fence dependence between %s "+
+                          "(UID %s) and %s (UID %s)" % (prev_op, prev_op.uid, op, op.uid))
                     if self.node.state.assert_on_fail:
                         assert False
                     return False
@@ -3302,14 +3301,15 @@ class LogicalState(object):
         close = op.get_close_operation(req, self.node, self.field)
         if close is None:
             if perform_checks:
-                print("ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+
-                    "a close operation for field "+str(self.field)+" of region "+
-                    "requirement "+str(req.index)+" at "+str(self.node)+error_str)
+                print("ERROR: %s (UID=%s) failed to generate "+
+                      "a close operation for field %s of region "+
+                      "requirement %s at %s%s" %
+                      (op, op.uid, self.field, req.index, self.node, error_str))
             else:
-                print("ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+
-                    "a close operation that we normally would have expected. This "+
-                    "is likely a runtime bug. Re-run with logical checks "+
-                    "to confirm.")
+                print("ERROR: %s (UID=%s) failed to generate "+
+                      "a close operation that we normally would have expected. This "+
+                      "is likely a runtime bug. Re-run with logical checks "+
+                      "to confirm." % (op, op.uid))
             if self.node.state.assert_on_fail:
                 assert False
         return close
@@ -3334,11 +3334,12 @@ class LogicalState(object):
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only() 
                                   else TRUE_DEPENDENCE, self.field):
-                print("ERROR: close operation "+str(close)+" generated by "+
-                      "field "+str(self.field)+" of region requirement "+
-                      str(req.index)+" of "+str(op)+" failed to find a "+
+                print("ERROR: close operation %s generated by "+
+                      "field %s of region requirement "+
+                      "%s of %s failed to find a "+
                       "mapping dependence on previous operation "+
-                      str(prev_op)+"in sub-tree being closed"+error_str)
+                      "%s in sub-tree being closed%s" %
+                      (close, self.field, req.index, op, prev_op, error_str))
                 if self.node.state.assert_on_fail:
                     assert False
                 return False
@@ -3356,11 +3357,12 @@ class LogicalState(object):
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only()
                                   else TRUE_DEPENDENCE, self.field):
-                print("ERROR: close operation "+str(close)+" generated by "+
-                      "field "+str(self.field)+" of region requirement "+
-                      str(req.index)+" of "+str(op)+" failed to find a "+
+                print("ERROR: close operation %s generated by "+
+                      "field %s of region requirement "+
+                      "%s of %s failed to find a "+
                       "mapping dependence on previous operation "+
-                      str(prev_op)+" from higher in the region tree")
+                      "%s from higher in the region tree" %
+                      (close, self.field, req.index, op, prev_op))
                 if self.node.state.assert_on_fail:
                     assert False
                 return False
