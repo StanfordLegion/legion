@@ -68,7 +68,8 @@ def run_spy(logfile, verbose):
            # '--sanity', # FIXME: This breaks on several test cases.
            '--leaks',
            # '--geometry', # FIXME: This is *very* slow.
-           '--assert',
+           '--assert-error',
+           '--assert-warning',
            logfile]
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
