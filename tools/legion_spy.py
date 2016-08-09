@@ -9101,7 +9101,7 @@ class State(object):
                  'instances', 'events', 'copies', 'fills', 'phase_barriers', 
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 
                  'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_error']
+                 'assert_on_error', 'assert_on_warning']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.verbose = verbose
         self.detailed_graphs = details
