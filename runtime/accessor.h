@@ -278,6 +278,15 @@ namespace LegionRuntime {
 	  Typed() : Untyped() {}
           CUDAPREFIX
 	  Typed(void *_internal, off_t _field_offset = 0) : Untyped(_internal, _field_offset) {}
+	  CUDAPREFIX
+	  Typed(const Typed& other): Untyped(other.internal, other.field_offset) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
           bool valid(void) const { return internal != 0; }
 
@@ -608,6 +617,15 @@ namespace LegionRuntime {
 	  Typed() : Untyped() {}
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
+	  CUDAPREFIX
+	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS) 
           inline void set_region(void *r) { this->region = r; }
@@ -718,7 +736,14 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 	  CUDAPREFIX
-	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {}
+	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 	  CUDAPREFIX
 	  Typed &operator=(const Typed& rhs) {
 	    *static_cast<Untyped *>(this) = *static_cast<const Untyped *>(&rhs);
@@ -835,6 +860,18 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride, size_t _block_size, size_t _block_stride)
 	    : Untyped(_base, _stride, _block_size, _block_stride) {}
+	  CUDAPREFIX
+          Typed(const Typed& other)
+            : Untyped(other.base, other.Stride<STRIDE>::value,
+                      other.BlockSize<BLOCK_SIZE>::value,
+                      other.BlockStride<BLOCK_STRIDE>::value) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
           inline void set_region(void *r) { this->region = r; }
@@ -933,6 +970,15 @@ namespace LegionRuntime {
 	struct Typed : public Untyped {
           CUDAPREFIX
 	  Typed(void) : Untyped() {}
+	  CUDAPREFIX
+          Typed(const Typed& other) : Untyped(other) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
           CUDAPREFIX
 	  inline T& ref(const Point<DIM>& p)
@@ -1002,6 +1048,15 @@ namespace LegionRuntime {
 	  Typed(void) : Untyped() {}
           CUDAPREFIX
 	  Typed(void *_base) : Untyped(_base) {}
+	  CUDAPREFIX
+          Typed(const Typed& other) : Untyped(other.base) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
           inline void set_region(void *r) { this->region = r; }
@@ -1083,6 +1138,15 @@ namespace LegionRuntime {
 	struct Typed : protected Untyped {
 	  Typed(void) : Untyped() {}
 	  Typed(void *_base, ptr_t *_next_entry) : Untyped(_base, _next_entry) {}
+	  CUDAPREFIX
+          Typed(const Typed& other) : Untyped(other.base, other.next_entry) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
         inline void set_region(void *r) { this->region = r; } 
