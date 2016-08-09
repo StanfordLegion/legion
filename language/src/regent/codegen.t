@@ -7967,6 +7967,7 @@ function codegen.top_task(cx, node)
     [preamble]; -- Semicolon required. This is not an array access.
     [body]
   end
+  proto:setname(tostring(task:getname()))
   task:setdefinition(proto)
 
   return task
