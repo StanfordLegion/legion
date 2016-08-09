@@ -3358,19 +3358,21 @@ class LogicalState(object):
                 return False
         return True
 
-    def record_close_dependences(self, close, closed_users, previous_deps):
+    def record_close_dependences(self, close, closed_users, op, req, previous_deps):
         assert 0 in close.reqs
         close_req = close.reqs[0]
         for prev_op,prev_req in closed_users:
-            dep = MappingDependence(prev_op, close, prev_req.index, 
-                                    close_req.index, TRUE_DEPENDENCE)
-            prev_op.add_outgoing(dep)
-            close.add_incoming(dep)
+            if op != prev_op and req.index != prev_req.index:
+                dep = MappingDependence(prev_op, close, prev_req.index, 
+                                        close_req.index, TRUE_DEPENDENCE)
+                prev_op.add_outgoing(dep)
+                close.add_incoming(dep)
         for prev_op,prev_req in previous_deps:
-            dep = MappingDependence(prev_op, close, prev_req.index,
-                                    close_req.index, TRUE_DEPENDENCE)
-            prev_op.add_outgoing(dep)
-            close.add_incoming(dep)
+            if op != prev_op and req.index != prev_req.index:
+                dep = MappingDependence(prev_op, close, prev_req.index,
+                                        close_req.index, TRUE_DEPENDENCE)
+                prev_op.add_outgoing(dep)
+                close.add_incoming(dep)
 
     def perform_close_operation(self, children_to_close, read_only_close, op, req,
                                 previous_deps, perform_checks):
@@ -3397,7 +3399,8 @@ class LogicalState(object):
                                                  previous_deps, error_str):
                     return False
             else:
-                self.record_close_dependences(close, closed_users, previous_deps)
+                self.record_close_dependences(close, closed_users, op, req,
+                                              previous_deps)
             # Remove the child if necessary
             if permit_leave_open:
                 assert req.is_read_only()
