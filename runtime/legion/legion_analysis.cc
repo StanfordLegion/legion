@@ -136,51 +136,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // FieldVersions 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    FieldVersions::FieldVersions(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldVersions::FieldVersions(const FieldVersions &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldVersions::~FieldVersions(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldVersions& FieldVersions::operator=(const FieldVersions &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldVersions::add_field_version(VersionID vid, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-        field_versions.find(vid);
-      if (finder == field_versions.end())
-        field_versions[vid] = mask;
-      else
-        finder->second |= mask;
-    }
-
-    /////////////////////////////////////////////////////////////
     // VersioningSet
     /////////////////////////////////////////////////////////////
 
@@ -621,9 +576,6 @@ namespace Legion {
         field_versions(rhs.field_versions), split_masks(rhs.split_masks)
     //--------------------------------------------------------------------------
     {
-      // Add references to any field versions
-      for (unsigned idx = 0; idx < field_versions.size(); idx++)
-        field_versions[idx]->add_reference();
       physical_states.resize(rhs.physical_states.size()); 
       for (unsigned idx = 0; idx < physical_states.size(); idx++)
         physical_states[idx] = rhs.physical_states[idx]->clone();
@@ -647,9 +599,6 @@ namespace Legion {
 #endif
       upper_bound_node = rhs.upper_bound_node;
       field_versions = rhs.field_versions;
-      // Add references to any field versions
-      for (unsigned idx = 0; idx < field_versions.size(); idx++)
-        field_versions[idx]->add_reference();
       physical_states.resize(rhs.physical_states.size()); 
       for (unsigned idx = 0; idx < physical_states.size(); idx++)
         physical_states[idx] = rhs.physical_states[idx]->clone();
@@ -732,12 +681,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       upper_bound_node = NULL;
-      for (std::vector<FieldVersions*>::const_iterator it = 
-            field_versions.begin(); it != field_versions.end(); it++)
-      {
-        if ((*it)->remove_reference())
-          delete *it;
-      }
       field_versions.clear();
       for (std::vector<PhysicalState*>::const_iterator it = 
             physical_states.begin(); it != physical_states.end(); it++)
@@ -752,13 +695,10 @@ namespace Legion {
     {
       if (depth >= field_versions.size())
         return;
-      FieldVersions *version_numbers = field_versions[depth];
-      assert(version_numbers != NULL);
-      const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
-        version_numbers->get_field_versions();
+      const FieldVersions &versions = field_versions[depth];
       FieldMask previous_fields;
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            field_versions.begin(); it != field_versions.end(); it++)
+            versions.begin(); it != versions.end(); it++)
       {
         assert(previous_fields * it->second);
         previous_fields |= it->second;
@@ -849,14 +789,8 @@ namespace Legion {
       rez.serialize<size_t>(field_versions.size());
       for (unsigned idx = 0; idx < field_versions.size(); idx++)
       {
-        FieldVersions *versions = field_versions[idx];
-        if (versions == NULL)
-        {
-          rez.serialize<size_t>(0);
-          continue;
-        }
         const LegionMap<VersionID,FieldMask>::aligned &fields = 
-          versions->get_field_versions();
+          field_versions[idx];
         rez.serialize<size_t>(fields.size());
         for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
               fields.begin(); it != fields.end(); it++)
@@ -875,18 +809,15 @@ namespace Legion {
       unpack_upper_bound_node(derez, forest);
       size_t depth;
       derez.deserialize(depth);
-      field_versions.resize(depth,NULL);
+      field_versions.resize(depth);
       for (unsigned idx = 0; idx < depth; idx++)
       {
         size_t num_versions;
         derez.deserialize(num_versions);
         if (num_versions == 0)
           continue;
-        FieldVersions *versions = new FieldVersions();
-        versions->add_reference();
-        field_versions[idx] = versions;
         LegionMap<VersionID,FieldMask>::aligned &fields = 
-          versions->get_mutable_field_versions();
+          field_versions[idx];
         for (unsigned idx2 = 0; idx2 < num_versions; idx2++)
         {
           VersionID vid;

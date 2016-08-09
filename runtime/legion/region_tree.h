@@ -1487,7 +1487,7 @@ namespace Legion {
                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                 const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                                const VersionInfo &src_version_info,
+                                VersionTracker *version_tracker,
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL);
@@ -1496,7 +1496,7 @@ namespace Legion {
           LegionList<EventSet>::aligned &event_sets);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
-                                   const VersionInfo &version_info,
+                                   VersionInfo &version_info,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op, unsigned index,
                                    std::set<RtEvent> &map_applied_events);

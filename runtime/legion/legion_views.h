@@ -868,7 +868,7 @@ namespace Legion {
      * operations by representing a valid version of a single
      * logical region with a bunch of different instances.
      */
-    class CompositeView : public DeferredView {
+    class CompositeView : public DeferredView, VersionTracker {
     public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
@@ -923,6 +923,12 @@ namespace Legion {
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
+    public:
+      // From VersionTracker
+      virtual bool is_upper_bound_node(RegionTreeNode *node) const;
+      virtual const FieldVersions& get_field_versions(RegionTreeNode *node);
+      virtual const FieldMask& get_split_mask(RegionTreeNode *node, 
+                                              bool &is_split) const;
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);

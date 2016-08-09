@@ -985,8 +985,12 @@ namespace Legion {
       UniqueID op_id = op->get_unique_op_id();
       bool need_version_update = false;
       if (IS_WRITE(usage))
-        need_version_update = update_version_numbers(user_mask, versions,
+      {
+        const FieldVersions &field_versions = 
+          versions->get_field_versions(logical_node);
+        need_version_update = update_version_numbers(user_mask, field_versions,
                                                      source, applied_events);
+      }
       // Go up the tree if necessary 
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -1024,8 +1028,12 @@ namespace Legion {
     {
       bool need_update_above = false;
       if (need_version_update)
-        need_update_above = update_version_numbers(user_mask, versions,
+      {
+        const FieldVersions &field_versions = 
+          versions->get_field_versions(logical_node);
+        need_update_above = update_version_numbers(user_mask, field_versions,
                                                    source, applied_events);
+      }
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -1140,8 +1148,12 @@ namespace Legion {
           versions, op_id, index, user_mask, wait_on_events, applied_events);
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
-        need_version_update = update_version_numbers(user_mask, versions,
+      {
+        const FieldVersions &field_versions = 
+          versions->get_field_versions(logical_node);
+        need_version_update = update_version_numbers(user_mask, field_versions,
                                                      source, applied_events);
+      }
       // Go up the tree if necessary
       if ((parent != NULL) && versions->is_upper_bound_node(logical_node))
       {
@@ -1192,8 +1204,12 @@ namespace Legion {
           op_id, index, user_mask, preconditions, applied_events);
       bool need_update_above = false;
       if (need_version_update)
-        need_update_above = update_version_numbers(user_mask, versions,
+      {
+        const FieldVersions &field_versions = 
+          versions->get_field_versions(logical_node);
+        need_update_above = update_version_numbers(user_mask, field_versions,
                                                    source, applied_events);
+      }
       // Go up the tree if we have to
       if ((parent != NULL) && versions->is_upper_bound_node(logical_node))
       {
@@ -3473,7 +3489,7 @@ namespace Legion {
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
         {
-          dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+          dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, local_space, 
                              info.map_applied_events);
@@ -3486,7 +3502,7 @@ namespace Legion {
       else if (!already_valid)
       {
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                     copy_mask, info.version_info, 
+                                     copy_mask, &info.version_info, 
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, 
                                      preconditions, info.map_applied_events);
@@ -3497,7 +3513,7 @@ namespace Legion {
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
         {
-          dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+          dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, local_space, 
                              info.map_applied_events);
@@ -3758,8 +3774,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL);
       LegionMap<ApEvent,FieldMask>::aligned postreductions;
-      root->issue_deferred_copies(info, dst, copy_mask, 
-                                  version_info->get_version_info(), 
+      root->issue_deferred_copies(info, dst, copy_mask, this, 
                                   preconditions, postconditions, 
                                   postreductions, across_helper);
       if (!postreductions.empty())
@@ -4174,7 +4189,7 @@ namespace Legion {
           {
             // Have this path fall through to catch the reductions   
             // but don't traverse the children since we're already doing it
-            child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
+            child->issue_deferred_copies(info, dst, copy_mask, src_versions,
                                   preconditions, local_postconditions, 
                                   postreductions, across_helper,
                                   true/*check root*/);
@@ -4182,7 +4197,7 @@ namespace Legion {
           }
           else // This is the common case
           {
-            child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
+            child->issue_deferred_copies(info, dst, copy_mask, src_versions,
                                   preconditions, postconditions, postreductions,
                                   across_helper, true/*check root*/);
             return;
@@ -4202,13 +4217,13 @@ namespace Legion {
             // in our local postcondition
             if (children.empty() && reduction_views.empty())
             {
-              issue_update_copies(info, dst, copy_mask, src_version_info,
+              issue_update_copies(info, dst, copy_mask, src_versions,
                           preconditions, postconditions, all_valid_views, 
                           across_helper);
               return;
             }
             else
-              issue_update_copies(info, dst, copy_mask, src_version_info,
+              issue_update_copies(info, dst, copy_mask, src_versions,
                     preconditions, local_postconditions, all_valid_views, 
                     across_helper);
           }
@@ -4227,12 +4242,12 @@ namespace Legion {
             // in our local postcondition
             if (children.empty() && reduction_views.empty())
             {
-              issue_update_copies(info, dst, update_mask, src_version_info,
+              issue_update_copies(info, dst, update_mask, src_versions,
                   preconditions, postconditions, valid_views, across_helper);
               return;
             }
             else
-              issue_update_copies(info, dst, update_mask, src_version_info,
+              issue_update_copies(info, dst, update_mask, src_versions,
                preconditions, local_postconditions, valid_views, across_helper);
           }
         }
@@ -4293,7 +4308,7 @@ namespace Legion {
               local_preconditions = &preconditions;
           }
           // Now traverse the child
-          it->first->issue_deferred_copies(info, dst, overlap, src_version_info,
+          it->first->issue_deferred_copies(info, dst, overlap, src_versions,
                             *local_preconditions, local_postconditions, 
                             postreductions, across_helper, false/*check root*/);
         }
@@ -4302,18 +4317,18 @@ namespace Legion {
       if (!reduction_views.empty())
       {
         if (local_preconditions != NULL)
-          issue_update_reductions(info, dst, copy_mask, src_version_info,
+          issue_update_reductions(info, dst, copy_mask, src_versions,
               *local_preconditions, postreductions, across_helper);
         else if (!local_postconditions.empty())
         {
           temp_preconditions = local_postconditions;
           temp_preconditions.insert(preconditions.begin(),
                                     preconditions.end());
-          issue_update_reductions(info, dst, copy_mask, src_version_info,
+          issue_update_reductions(info, dst, copy_mask, src_versions,
               temp_preconditions, postreductions, across_helper);
         }
         else
-          issue_update_reductions(info, dst, copy_mask, src_version_info,
+          issue_update_reductions(info, dst, copy_mask, src_versions,
               preconditions, postreductions, across_helper);
       }
       // Quick out if we don't have any postconditions
@@ -4532,7 +4547,7 @@ namespace Legion {
               it = src_instances.begin(); it != src_instances.end(); it++)
         {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             it->second, src_version_info,
+                                             it->second, src_versions,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
                                              src_preconditions,
@@ -4557,7 +4572,7 @@ namespace Legion {
         // We are the intersect
         dst->logical_node->issue_grouped_copies(info, dst, src_preconditions,
                                  actual_copy_mask, src_instances, 
-                                 src_version_info, postconditions, 
+                                 src_versions, postconditions, 
                                  across_helper, logical_node);
       }
       if (!deferred_instances.empty())
@@ -4603,7 +4618,7 @@ namespace Legion {
           continue;
         // Perform the reduction
         ApEvent reduce_event = it->first->perform_deferred_reduction(dst,
-            overlap, src_version_info, local_preconditions, info.op,
+            overlap, src_versions, local_preconditions, info.op,
             info.index, across_helper, 
             (dst->logical_node == it->first->logical_node) ?
               NULL : it->first->logical_node, info.map_applied_events);
@@ -5086,10 +5101,10 @@ namespace Legion {
       this->reduce_from(manager->redop, reduce_mask, src_fields);
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       target->find_copy_preconditions(manager->redop, false/*reading*/, 
-              reduce_mask, version_info, op->get_unique_op_id(), index, 
+              reduce_mask, versions, op->get_unique_op_id(), index, 
               local_space, preconditions, map_applied_events);
       this->find_copy_preconditions(manager->redop, true/*reading*/, 
-           reduce_mask, version_info, op->get_unique_op_id(), index, 
+           reduce_mask, versions, op->get_unique_op_id(), index, 
            local_space, preconditions, map_applied_events);
       std::set<ApEvent> event_preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
@@ -5103,10 +5118,10 @@ namespace Legion {
                                                    reduce_pre,
                                                    fold, true/*precise*/,
                                                    NULL/*intersect*/);
-      target->add_copy_user(manager->redop, reduce_post, version_info,
+      target->add_copy_user(manager->redop, reduce_post, versions,
                            op->get_unique_op_id(), index, reduce_mask, 
                            false/*reading*/, local_space, map_applied_events);
-      this->add_copy_user(manager->redop, reduce_post, version_info,
+      this->add_copy_user(manager->redop, reduce_post, versions,
                          op->get_unique_op_id(), index, reduce_mask, 
                          true/*reading*/, local_space, map_applied_events);
     } 
@@ -5134,7 +5149,7 @@ namespace Legion {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                              version_info, op->get_unique_op_id(), index, 
+                              versions, op->get_unique_op_id(), index, 
                               local_space, src_pre, map_applied_events);
       std::set<ApEvent> preconditions = pre;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
@@ -5149,7 +5164,7 @@ namespace Legion {
                                             manager->redop, fold);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, version_info,
+      add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
                     true/*reading*/, local_space, map_applied_events);
       return reduce_post;
@@ -5178,7 +5193,7 @@ namespace Legion {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                              version_info, op->get_unique_op_id(), index, 
+                              versions, op->get_unique_op_id(), index, 
                               local_space, src_pre, map_applied_events);
       std::set<ApEvent> preconditions = preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
@@ -5193,7 +5208,7 @@ namespace Legion {
                                                    target->logical_node);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, version_info,
+      add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
                     true/*reading*/, local_space, map_applied_events);
       return reduce_post;
