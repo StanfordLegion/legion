@@ -194,7 +194,7 @@ namespace Legion {
     public:
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
-      ~VersionInfo(void);
+      virtual ~VersionInfo(void);
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
@@ -205,6 +205,8 @@ namespace Legion {
                                const FieldMask &state_mask, bool path_only);
       void add_field_versions(unsigned depth, FieldVersions* versions);
     public:
+      inline bool is_upper_bound_set(void) const 
+        { return (upper_bound_node != NULL); }
       virtual bool is_upper_bound_node(RegionTreeNode *node) const
         { return (node == upper_bound_node); }
       inline RegionTreeNode* get_upper_bound_node(void) const 
@@ -222,6 +224,8 @@ namespace Legion {
                          bool copy_through = false);
       void clear(void);
       void sanity_check(unsigned depth);
+      void clone_logical(const VersionInfo &rhs, const FieldMask &mask);
+      void move_to(VersionInfo &rhs);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -570,6 +574,7 @@ namespace Legion {
                               const FieldMask &mask, bool read_only);
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
+                                       const VersionInfo &version_info,
                                        const TraceInfo &trace_info);
       void perform_dependence_analysis(const LogicalUser &current,
                                        const FieldMask &open_below,

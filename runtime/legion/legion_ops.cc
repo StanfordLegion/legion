@@ -5129,6 +5129,7 @@ namespace Legion {
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
                   const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
                                   LegionTrace *trace, int close_idx, 
+                                  const VersionInfo &clone_info,
                                   const FieldMask &close_m, 
                                   const FieldMask &leave_m, Operation *creator)
     //--------------------------------------------------------------------------
@@ -5138,6 +5139,7 @@ namespace Legion {
       close_mask = close_m;
       leave_open_mask = leave_m;
       parent_req_index = creator->find_parent_index(close_idx);
+      version_info.clone_logical(clone_info, close_m);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)

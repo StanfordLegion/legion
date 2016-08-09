@@ -1621,9 +1621,14 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+      // We still need a version info to track in case we end up needing
+      // to do any close operations
+      VersionInfo version_info;
+      version_info.set_upper_bound_node(parent_node);
       // Do the traversal
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
-                                             path, restrict_info, trace_info);
+                                             path, restrict_info, 
+                                             version_info, trace_info);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -10282,7 +10287,8 @@ namespace Legion {
         if (closer.has_close_operations())
         {
           // Generate the close operations         
-          closer.initialize_close_operations(this, user.op, trace_info);
+          closer.initialize_close_operations(this, user.op, 
+                                             version_info, trace_info);
           // Perform dependence analysis for all the close operations
           closer.perform_dependence_analysis(user, open_below,
                                              state.curr_epoch_users,
@@ -11812,6 +11818,7 @@ namespace Legion {
                                                    const FieldMask &check_mask,
                                                    RegionTreePath &path,
                                                    RestrictInfo &restrict_info,
+                                                   VersionInfo &version_info,
                                                    const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -11838,7 +11845,8 @@ namespace Legion {
           {
             // Generate the close operations         
             // We need to record the version numbers for this node as well
-            closer.initialize_close_operations(this, user.op, trace_info);
+            closer.initialize_close_operations(this, user.op, 
+                                               version_info, trace_info);
             // Perform dependence analysis for all the close operations
             closer.perform_dependence_analysis(user, open_below,
                                                state.curr_epoch_users,
@@ -11871,11 +11879,15 @@ namespace Legion {
                          open_below, false/*validates*/);
           }
         }
+        // If we have any split fields we have to record them
+        FieldMask split_fields = state.dirty_below & user.field_mask;
+        if (!!split_fields)
+          version_info.record_split_fields(this, split_fields);
         // Continue the traversal
         RegionTreeNode *child = get_tree_child(next_child);
         // Only continue checking the fields that are open below
         child->register_logical_deletion(ctx, user, open_below, path,
-                                         restrict_info, trace_info);
+                                         restrict_info,version_info,trace_info);
       }
       else
       {
@@ -12358,12 +12370,17 @@ namespace Legion {
                                                 SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(version_info.is_upper_bound_set());
+#endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
       const AddressSpace local_space = context->runtime->address_space;
+      VersionInfo *view_info = new VersionInfo();
+      version_info.move_to(*view_info);
       CompositeView *result = legion_new<CompositeView>(context, did,
           local_space, this, local_space, 
           legion_new<CompositeNode>(this, (CompositeNode*)NULL),
-          (CompositeVersionInfo*)NULL, true/*register now*/);
+          view_info, true/*register now*/);
       PhysicalState *state = get_physical_state(version_info);
       state->initialize_composite_instance(result, closing_mask);
       update_valid_views(state, closing_mask, true/*dirty*/, result);  

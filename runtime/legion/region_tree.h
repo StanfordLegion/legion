@@ -1394,6 +1394,7 @@ namespace Legion {
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
                                      RestrictInfo &restrict_info,
+                                     VersionInfo &version_info,
                                      const TraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    CurrentState &state,

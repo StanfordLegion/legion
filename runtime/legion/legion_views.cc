@@ -3625,11 +3625,10 @@ namespace Legion {
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, CompositeNode *r,
-                              CompositeVersionInfo *info, bool register_now)
+                              VersionInfo *info, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
                      node, register_now), root(r), version_info(info)
     {
-      version_info->add_reference();
       root->set_owner_did(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %ld %d", 
@@ -3653,9 +3652,8 @@ namespace Legion {
     {
       // Delete our root
       legion_delete(root);
-      // See if we can delete our version info
-      if (version_info->remove_reference())
-        delete version_info;
+      // Delete our version info
+      delete version_info;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3733,8 +3731,7 @@ namespace Legion {
           rez.serialize(logical_node->as_region_node()->handle);
         else
           rez.serialize(logical_node->as_partition_node()->handle);
-        VersionInfo &info = version_info->get_version_info();
-        info.pack_version_numbers(rez);
+        version_info->pack_version_numbers(rez);
         root->pack_composite_tree(rez, target);
       }
       runtime->send_composite_view(target, rez);
@@ -3833,9 +3830,8 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      CompositeVersionInfo *version_info = new CompositeVersionInfo();
-      VersionInfo &info = version_info->get_version_info();
-      info.unpack_version_numbers(derez, runtime->forest);
+      VersionInfo *version_info = new VersionInfo();
+      version_info->unpack_version_numbers(derez, runtime->forest);
       CompositeNode *root = legion_new<CompositeNode>(target_node, 
                                                       (CompositeNode*)NULL);
       std::map<LogicalView*,std::pair<RtEvent,unsigned> > pending_refs;

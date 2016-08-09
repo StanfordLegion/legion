@@ -885,13 +885,13 @@ namespace Legion {
         AddressSpaceID owner;
         RegionTreeNode *target_node;
         CompositeNode *root;
-        CompositeVersionInfo *version_info;
+        VersionInfo *version_info;
       };
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *info, bool register_now);
+                    VersionInfo *info, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -938,8 +938,7 @@ namespace Legion {
     public:
       // The root node for this composite view
       CompositeNode *const root;
-      // TODO: delete this
-      CompositeVersionInfo *const version_info;
+      VersionInfo *const version_info;
     };
 
     /**

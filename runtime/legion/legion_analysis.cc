@@ -706,6 +706,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionInfo::clone_logical(const VersionInfo &rhs, 
+                                    const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(upper_bound_node == NULL);
+      assert(physical_states.empty());
+      assert(field_versions.empty());
+      assert(split_masks.empty());
+#endif
+      // Only need to copy over the upper bound and split masks that
+      // are computed as part of the logical analysis
+      upper_bound_node = rhs.upper_bound_node;
+      split_masks.resize(rhs.split_masks.size());
+      for (unsigned idx = 0; idx < split_masks.size(); idx++)
+        split_masks[idx] = rhs.split_masks[idx] & mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::move_to(VersionInfo &rhs)
+    //--------------------------------------------------------------------------
+    {
+      rhs.upper_bound_node = upper_bound_node;
+      rhs.physical_states = physical_states;
+      rhs.field_versions = field_versions;
+      rhs.split_masks = split_masks;
+      upper_bound_node = NULL;
+      physical_states.clear();
+      field_versions.clear();
+      split_masks.clear();
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalState* VersionInfo::find_physical_state(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
@@ -2766,6 +2799,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(RegionTreeNode *target, 
                                                    Operation *creator,
+                                                   const VersionInfo &ver_info,
                                                    const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -2795,7 +2829,8 @@ namespace Legion {
         // Now initialize the operation
         normal_close_op->initialize(creator->get_parent(), req, closed_nodes,
                                     trace_info.trace, trace_info.req_idx, 
-                                    normal_close_mask, leave_open_mask,creator);
+                                    ver_info, normal_close_mask, 
+                                    leave_open_mask,creator);
       }
       if (!!read_only_close_mask)
       {
@@ -2824,7 +2859,7 @@ namespace Legion {
         flush_nodes[root_node] = flush_only_close_mask;
         FieldMask empty_leave_open;
         flush_only_close_op->initialize(creator->get_parent(), req, 
-            flush_nodes, trace_info.trace, trace_info.req_idx, 
+            flush_nodes, trace_info.trace, trace_info.req_idx, ver_info, 
             flush_only_close_mask, empty_leave_open, creator);
       }
     }

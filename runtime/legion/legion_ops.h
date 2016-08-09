@@ -1058,6 +1058,7 @@ namespace Legion {
       void initialize(SingleTask *ctx, const RegionRequirement &req,
           const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
                       LegionTrace *trace, int close_idx, 
+                      const VersionInfo &version_info,
                       const FieldMask &close_mask, 
                       const FieldMask &leave_open, Operation *create_op);
     public:
