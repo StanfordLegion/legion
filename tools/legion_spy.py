@@ -2308,7 +2308,7 @@ class IndexPartition(object):
                 print('WARNING: child % is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.' %
                       (child, self.parent, self))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_warning:
                     assert False
         # Check disjointness
         if self.disjoint:
@@ -2319,7 +2319,7 @@ class IndexPartition(object):
                     print('WARNING: %s was logged disjoint '+
                             'but there are overlapping children. This '+
                             'is definitely an application bug.' % self)
-                    if self.node.state.assert_on_fail:
+                    if self.node.state.assert_on_warning:
                         assert False
                     break
                 previous |= child_shape
@@ -3104,7 +3104,7 @@ class LogicalState(object):
                 if not found:
                     print("ERROR: missing logical fence dependence between %s "+
                           "(UID %s) and %s (UID %s)" % (prev_op, prev_op.uid, op, op.uid))
-                    if self.node.state.assert_on_fail:
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
         else:
@@ -3310,7 +3310,7 @@ class LogicalState(object):
                       "a close operation that we normally would have expected. This "+
                       "is likely a runtime bug. Re-run with logical checks "+
                       "to confirm." % (op, op.uid))
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_error:
                 assert False
         return close
 
@@ -3340,7 +3340,7 @@ class LogicalState(object):
                       "mapping dependence on previous operation "+
                       "%s in sub-tree being closed%s" %
                       (close, self.field, req.index, op, prev_op, error_str))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         for prev_op,prev_req in previous_deps:
@@ -3363,7 +3363,7 @@ class LogicalState(object):
                       "mapping dependence on previous operation "+
                       "%s from higher in the region tree" %
                       (close, self.field, req.index, op, prev_op))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -3392,11 +3392,11 @@ class LogicalState(object):
         close = self.find_close_operation(op, req, perform_checks, error_str)
         # Make sure it is the right kind
         if read_only_close and close.kind != READ_ONLY_CLOSE_OP_KIND:
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_error:
                 assert False
             return False
         if not read_only_close and close.kind != INTER_CLOSE_OP_KIND:
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_error:
                 assert False
             return False
         for child,permit_leave_open in children_to_close.iteritems():
@@ -3558,7 +3558,7 @@ class Restriction(object):
         if not self.node.dominates(node):
             if self.node.intersects(node):
                 print("ERROR: Illegal partial acquire")
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
             return False
         if self.acquires:
@@ -3599,7 +3599,7 @@ class Restriction(object):
                     return True
         # Interference if we get here
         print("ERROR: Interfering restrictions performed")
-        if self.node.state.assert_on_fail:
+        if self.node.state.assert_on_error:
             assert False
         return False
 
@@ -3657,7 +3657,7 @@ class Acquisition(object):
                     return True
         # Interference if we get here
         print("ERROR: Interfering acquires performed")
-        if self.node.state.assert_on_fail:
+        if self.node.state.assert_on_error:
             assert False
         return False
 
@@ -3680,7 +3680,7 @@ class Acquisition(object):
         if not self.node.dominates(node):
             if self.node.intersects(node):
                 print("ERROR: Illegal partial restriction")
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
             return False
         if self.restrictions:
@@ -3862,7 +3862,7 @@ class PhysicalState(object):
                 print("ERROR: Missing use precondition for field "+str(self.field)+
                       " of region requirement "+str(req.index)+" of "+str(op)+
                       " (UID "+str(op.uid)+") on previous "+str(bad))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         else:
@@ -4003,7 +4003,7 @@ class PhysicalState(object):
             if copy is None:
                 print("ERROR: Missing copy operation to update "+str(dst)+
                       " for field "+str(self.field)+" by "+error_str)
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             assert self.field in copy.dst_fields
@@ -4014,7 +4014,7 @@ class PhysicalState(object):
                 print("ERROR: Copy operation by "+error_str+" to update "+str(dst)+
                       " is from source "+str(src)+" which is not in the set of "+
                       "valid instances.")
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             # Now check for event preconditions 
@@ -4029,7 +4029,7 @@ class PhysicalState(object):
             if bad is not None:
                 print("ERROR: Missing source copy precondition for "+str(copy)+
                       " of field "+str(self.field)+" issued by "+error_str+" on "+str(bad))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             bad = check_preconditions(dst_preconditions, copy)
@@ -4037,7 +4037,7 @@ class PhysicalState(object):
                 print("ERROR: Missing destination copy precondition for "+str(copy)+
                       " of field "+str(self.field)+" issued by "+error_str+
                       " on "+str(bad))
-                if self.node.state.assert_on_fail:
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         else:
@@ -4079,7 +4079,7 @@ class PhysicalState(object):
                 if reduction is None:
                     print("ERROR: Missing reduction copy operation to update "+str(dst)+
                           " for field "+str(self.field)+" from "+str(src)+" by "+error_str)
-                    if self.node.state.assert_on_fail:
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 assert self.field in reduction.dst_fields
@@ -4099,7 +4099,7 @@ class PhysicalState(object):
                 if bad is not None:
                     print("ERROR: Missing source copy precondition for reduction of field "+
                           str(self.field)+" issued by "+erro_str+" on "+str(bad))
-                    if self.node.state.assert_on_fail:
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
@@ -4109,7 +4109,7 @@ class PhysicalState(object):
                 if bad is not None:
                     print("ERROR: Missing destination copy precondition for reduction "+
                           "of field "+str(self.field)+" issued by "+error_str+" on "+str(bad))
-                    if self.node.state.assert_on_fail:
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 # Register the users
@@ -4732,7 +4732,7 @@ class Operation(object):
                 for n in traverser.stack:
                     print(str(n))
                 print(str(node))
-                if self.state.assert_on_fail:
+                if self.state.assert_on_warning:
                     assert False
                 return False
             if traverser.cycle:
@@ -4858,7 +4858,7 @@ class Operation(object):
                 if self.context.current_fence not in self.logical_incoming: 
                     print("ERROR: missing logical fence dependence between "+
                           str(self.context.current_fence)+" and "+str(self))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
             else:
@@ -4901,7 +4901,7 @@ class Operation(object):
                           "failed to replay successfully. This is most likely "+
                           "a conceptual bug in the analysis and not an "+
                           "implementation bug.")
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
         # See if our operation had any bearing on the restricted
@@ -4948,7 +4948,7 @@ class Operation(object):
               "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
               str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
               str(self)+" (UID "+str(self.uid)+")")
-        if self.state.assert_on_fail:
+        if self.state.assert_on_error:
             assert False
         return False
 
@@ -4987,7 +4987,7 @@ class Operation(object):
                 if not self in reachable:
                     print("ERROR: Failed logical sanity check. No mapping dependence "+
                           "between previous "+str(self)+" and later "+str(next_op))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
             return True
@@ -5015,7 +5015,7 @@ class Operation(object):
                 req.print_requirement()
                 print("  Second Requirement:")
                 next_req.print_requirement()
-                if self.state.assert_on_fail:
+                if self.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -5124,7 +5124,7 @@ class Operation(object):
                                   str(src_field)+" to field "+str(dst_field)+" between region "+
                                   "requirements "+str(src_index)+" and "+str(dst_index)+" of "+
                                   str(self))
-                            if self.state.assert_on_fail:
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         # Have to fill out the reachable cache
@@ -5137,7 +5137,7 @@ class Operation(object):
                                   "from field "+str(src_field)+" to field "+str(dst_field)+
                                   "between region requirements "+str(src_index)+" and "+
                                   str(dst_index)+" of "+str(self))
-                            if self.state.assert_on_fail:
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         bad = check_preconditions(dst_preconditions, reduction)
@@ -5146,7 +5146,7 @@ class Operation(object):
                                   "across from field "+str(src_field)+" to field "+
                                   str(dst_field)+"between region requirements "+str(src_index)+
                                   " and "+str(dst_index)+" of "+str(self))
-                            if self.state.assert_on_fail:
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                     else:
@@ -5199,7 +5199,7 @@ class Operation(object):
                                   str(src_field)+" to field "+str(dst_field)+" between region "+
                                   "requirements "+str(src_index)+" and "+str(dst_index)+" of "+
                                   str(self))
-                            if self.state.assert_on_fail:
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         # Have to fill in the copy reachable cache
@@ -5212,7 +5212,7 @@ class Operation(object):
                                   "field "+str(src_field)+" to field "+str(dst_field)+
                                   "between region requirements "+str(src_index)+" and "+
                                   str(dst_index)+" of "+str(self))
-                            if self.state.assert_on_fail:
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         bad = check_preconditions(dst_preconditions, copy)
@@ -5935,7 +5935,7 @@ class Task(object):
                         break
             if not success:
                 print("ERROR: Invalid release operation")
-                if self.op.state.assert_on_fail:
+                if self.op.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -5978,7 +5978,7 @@ class Task(object):
                         break
             if not success:
                 print("ERROR: Illegal detach with no matching restriction")
-                if self.op.state.assert_on_fail:
+                if self.op.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -6008,7 +6008,7 @@ class Task(object):
                         print("ERROR: Failed logical sanity check. No mapping "+
                               "dependence between previous "+str(prev)+" and "+
                               "later "+str(current_op))
-                        if self.op.state.assert_on_fail:
+                        if self.op.state.assert_on_error:
                             assert False
                         return False
             else: # The normal path
@@ -6816,12 +6816,12 @@ class FillInstance(object):
                 if actually_across:
                     print("ERROR: Unable to find fill across operation generated to "+
                           str(dst)+" for field "+str(self.field)+" by "+error_str)
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                 else:
                     print("ERROR: Unable to find fill operation generated to "+str(dst)+
                           " for field "+str(self.field)+" by "+error_str)
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                 return False
             if fill.reachable_cache is None:
@@ -6833,13 +6833,13 @@ class FillInstance(object):
                     print("ERROR: Missing fill across precondition to "+str(dst)+
                           " for field "+str(self.field)+" issued by "+error_str+
                           " on "+str(bad))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                 else:
                     print("ERROR: Missing fill precondition to "+str(dst)+" for fill "+
                           "of field "+str(self.field)+" issued by "+error_str+
                           " on "+str(bad))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                 return False
         else:
@@ -7049,13 +7049,13 @@ class CompositeNode(object):
                                 print("ERROR: Missing intersection copy across from "+
                                       "composite instance to update "+str(dst)+
                                       " for field "+str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing intersection copy from "+
                                       "composite instance to update "+str(dst)+
                                       " for field "+str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                         src = copy.find_src_inst(self.owner.field)
@@ -7079,14 +7079,14 @@ class CompositeNode(object):
                                       str(bad)+" for "+str(copy)+" across from "+
                                       "composite instance to update "+str(dst)+
                                       " for field "+str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing source precondition on "+
                                       str(bad)+" for "+str(copy)+" from composite "+
                                       "instance to update "+str(dst)+" for field "+
                                       str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                         bad = check_preconditions(dst_preconditions, copy)
@@ -7096,14 +7096,14 @@ class CompositeNode(object):
                                       str(bad)+" for "+str(copy)+"  across from "+
                                       "composite instance to update "+str(dst)+
                                       " for field "+str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing destination precondition on "+
                                       str(bad)+" for "+str(copy)+" from composite "+
                                       "instance to update "+str(dst)+" for field "+
                                       str(dst_field)+" by "+error_str)
-                                if self.owner.state.assert_on_fail:
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                     else:
@@ -7256,7 +7256,7 @@ class CompositeInstance(object):
                 print("ERROR: Missing temporary instance creation for "+
                       str(self.field)+" of target instance "+str(dst)+
                       " by "+error_str)
-                if self.state.assert_on_fail:
+                if self.state.assert_on_error:
                     assert False
                 return False
             # Issue the copies to the temporary instance and then
@@ -7271,7 +7271,7 @@ class CompositeInstance(object):
                     print("ERROR: Missing copy from temporary instance "+
                           str(temp_inst)+" to "+str(dst)+" for "+str(self.field)+
                           " by "+error_str)
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
                 # Fill in the reachable cache
@@ -7287,7 +7287,7 @@ class CompositeInstance(object):
                     print("ERROR: Missing source copy precondition for temporary "+
                           "instance copy "+str(copy)+" of field "+str(self.field)+
                           " issued by "+error_str+" on "+str(bad))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
                 dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
@@ -7298,7 +7298,7 @@ class CompositeInstance(object):
                     print("ERROR: Missing destination precondition for temporary "+
                           "instance copy "+str(copy)+" of field "+str(self.field)+
                           " issued by "+error_str+" on "+str(bad))
-                    if self.state.assert_on_fail:
+                    if self.state.assert_on_error:
                         assert False
                     return False
             else:
@@ -7355,13 +7355,13 @@ class CompositeInstance(object):
                                 print("ERROR: Missing reduction across copy operation "+
                                       "from composite instance to update "+str(dst)+
                                       " for field "+str(self.field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing reduction copy operation from "+
                                       "composite instance to update "+str(dst)+" for "+
                                       "field "+str(self.field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7384,13 +7384,13 @@ class CompositeInstance(object):
                                 print("ERROR: Missing source reduction precondition for "+
                                       "reduction across from composite instance to "+
                                       str(dst)+" for field "+str(self.field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing source reduction precondition for "+
                                       "reduction from composite instance to "+str(dst)+
                                       "for field "+str(self.field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7409,13 +7409,13 @@ class CompositeInstance(object):
                                 print("ERROR: Missing destination reduction precondition "+
                                       "for reduction across from composite instance to "+
                                       str(dst)+" for field "+str(dst_field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             else:
                                 print("ERROR: Missing destination reduction precondition "+
                                       "for reduction from composite instance to "+str(dst)+
                                       "for field "+str(dst_field)+" by "+error_str)
-                                if self.state.assert_on_fail:
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7558,11 +7558,11 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             print("WARNING: "+str(self)+" is an untriggered application user event")
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_warning:
                 assert False
         else:
             print("WARNING: "+str(self)+" is an untriggered runtime user event")
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_warning:
                 assert False
         print("  Incoming:")
         if self.incoming:
@@ -7708,7 +7708,7 @@ class RealmBase(object):
                 for n in traverser.stack:
                     print(str(n))
                 print(str(node))
-                if self.state.assert_on_fail:
+                if self.state.assert_on_warning:
                     assert False
                 return False
             if traverser.cycle:
@@ -9101,11 +9101,12 @@ class State(object):
                  'instances', 'events', 'copies', 'fills', 'phase_barriers', 
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 
                  'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_fail']
-    def __init__(self, verbose, details, fail):
+                 'assert_on_error']
+    def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.verbose = verbose
         self.detailed_graphs = details
-        self.assert_on_fail = fail
+        self.assert_on_error = assert_on_error
+        self.assert_on_warning = assert_on_warning
         self.top_level_uid = None
         self.traverser_gen = 1
         # Machine things
@@ -9172,7 +9173,7 @@ class State(object):
             # Legion Spy output---usually because they don't actually
             # run anything. We should check this but for now turn it off.
 
-            # if self.assert_on_fail:
+            # if self.assert_on_warning:
             #     assert False
         if self.verbose:
             print('Matched %d lines in %s' % (matches,file_name))
@@ -9238,7 +9239,7 @@ class State(object):
         if unknown is not None:
             print('WARNING: operation %d has unknown operation kind!' % op.uid)
             # FIXME: This fails on dynamic collectives.
-            # if self.assert_on_fail:
+            # if self.assert_on_warning:
             #     assert False
         # If we have any phase barriers, mark all the events of the phase barrier
         if self.phase_barriers is not None:
@@ -9338,7 +9339,7 @@ class State(object):
                     print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
                     print("  This usually indicates a runtime bug and should be reported.")
                     print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
-                    if self.assert_on_fail:
+                    if self.assert_on_warning:
                         assert False
                     return
                 # See which edges we can remove
@@ -9867,8 +9868,11 @@ def main(temp_dir):
         '-v', '--verbose', dest='verbose', action='store_true',
         help='verbose output')
     parser.add_argument(
-        '-a', '--assert-fail', dest='assert_on_fail', action='store_true',
-        help='assert on analysis failure')
+        '-a', '--assert-error', dest='assert_on_error', action='store_true',
+        help='assert on errors')
+    parser.add_argument(
+        '--assert-warning', dest='assert_on_warning', action='store_true',
+        help='assert on warnings (implies -a)')
     parser.add_argument(
         dest='filenames', action='append',
         help='input legion spy log filenames')
@@ -9893,13 +9897,14 @@ def main(temp_dir):
     keep_temp_files = args.keep_temp_files
     simplify_graphs = args.simplify_graphs
     verbose = args.verbose
-    assert_on_fail = args.assert_on_fail
+    assert_on_error = args.assert_on_error
+    assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
 
     if test_geometry:
         run_geometry_tests()
 
-    state = State(verbose, detailed_graphs, assert_on_fail)
+    state = State(verbose, detailed_graphs, assert_on_error, assert_on_warning)
     total_matches = 0 
     for file_name in file_names:
         total_matches += state.parse_log_file(file_name)
@@ -9918,14 +9923,14 @@ def main(temp_dir):
         # if the top-level task does not launch any suboperations), so
         # skip the asser it if is false.
 
-        # if state.assert_on_fail:
+        # if state.assert_on_warning:
         #     assert False
         logical_checks = False
     if physical_checks and not physical_enabled:
         print("WARNING: Requested physical analysis but logging information is "+
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling physical checks.")
-        if state.assert_on_fail:
+        if state.assert_on_warning:
             assert False
         physical_checks = False
     if logical_checks and sanity_checks and not logical_enabled:
@@ -9933,7 +9938,7 @@ def main(temp_dir):
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with -DLEGION_SPY to enable validation "+
               "of the runtime. Disabling sanity checks.")
-        if state.assert_on_fail:
+        if state.assert_on_warning:
             assert False
         sanity_checks = False
     if physical_checks and sanity_checks and not physical_enabled:
@@ -9941,21 +9946,21 @@ def main(temp_dir):
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with -DLEGION_SPY to enable validation "+
               "of the runtime. Disabling sanity checks.")
-        if state.assert_on_fail:
+        if state.assert_on_warning:
             assert False
         sanity_checks = False
     if cycle_checks and not physical_enabled:
         print("WARNING: Requested cycle checks but logging information is "+
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling cycle checks.")
-        if state.assert_on_fail:
+        if state.assert_on_warning:
             assert False
         cycle_checks = False
     if user_event_leaks and not physical_enabled:
         print("WARNING: Requested user event leak checks but logging information "+
               "is missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling user event leak checks.")
-        if state.assert_on_fail:
+        if state.assert_on_warning:
             assert False
         user_event_leaks = False
     # If we are doing logical checks or the user asked for the dataflow
