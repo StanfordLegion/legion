@@ -783,18 +783,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldVersions* VersionInfo::get_versions(RegionTreeNode *node) const
+    const FieldVersions& VersionInfo::get_field_versions(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < field_versions.size());
 #endif
-      FieldVersions *result = field_versions[depth];
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result;
+      return field_versions[depth];
     }
 
     //--------------------------------------------------------------------------

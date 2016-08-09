@@ -17,6 +17,7 @@
 #define __LEGION_VIEWS_H__
 
 #include "legion_types.h"
+#include "legion_analysis.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
@@ -124,14 +125,14 @@ namespace Legion {
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
                      LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events) = 0;
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                 const VersionInfo &version_info,
+                                 VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
@@ -141,19 +142,19 @@ namespace Legion {
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events) = 0;
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
-                            const VersionInfo &version_info,
+                            VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events) = 0;
       // This is a fused version of the above two methods
       virtual ApEvent add_user_fused(const RegionUsage &user,
                                    ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info,
+                                   VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
                                    bool update_versions = true) = 0;
@@ -195,7 +196,8 @@ namespace Legion {
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event) = 0;
       virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source) = 0;
+                                         AddressSpaceID source,
+                                         RegionTreeForest *forest) = 0;
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              RtUserEvent done_event) = 0;
     public:
@@ -287,7 +289,7 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
@@ -297,7 +299,7 @@ namespace Legion {
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
+                                         VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
@@ -306,7 +308,7 @@ namespace Legion {
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
+                                         VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                                          const AddressSpaceID source,
@@ -314,7 +316,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
     public:
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                 const VersionInfo &version_info,
+                                 VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
@@ -323,7 +325,7 @@ namespace Legion {
     protected:
       void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
                                const ColorPoint &child_color,
-                               const VersionInfo &version_info,
+                               VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
@@ -332,7 +334,7 @@ namespace Legion {
       void add_local_copy_user(const RegionUsage &usage, 
                                ApEvent copy_term, bool base_user,
                                const ColorPoint &child_color,
-                               const VersionInfo &version_info,
+                               VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index,
                                const FieldMask &copy_mask,
@@ -343,13 +345,13 @@ namespace Legion {
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events);
     protected:
       void find_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
+                                         VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          const FieldMask &user_mask,
@@ -358,7 +360,7 @@ namespace Legion {
       void find_local_user_preconditions(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
+                                         VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          const FieldMask &user_mask,
@@ -368,12 +370,12 @@ namespace Legion {
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
-                            const VersionInfo &version_info,
+                            VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events);
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
-                          const VersionInfo &version_info,
+                          VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const bool need_version_update,
@@ -381,7 +383,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
-                          const VersionInfo &version_info,
+                          VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const AddressSpaceID source,
@@ -392,14 +394,14 @@ namespace Legion {
                                    ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info,
+                                   VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
                                    bool update_versions = true);
     protected:
       void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
                                 const ColorPoint &child_color,
-                                const VersionInfo &version_info,
+                                VersionTracker *version_tracker,
                                 const UniqueID op_id,
                                 const unsigned index,
                                 const FieldMask &user_mask,
@@ -428,7 +430,7 @@ namespace Legion {
       // These methods must be called while holding the lock
       // in non-exclusive and exclusive mode respectively
       void find_version_updates(const FieldMask &user_mask,
-                                const VersionInfo &version_info,
+                                VersionTracker *version_tracker,
                                 FieldMask &write_skip_mask,
                                 FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
@@ -441,7 +443,7 @@ namespace Legion {
       // This method does one phase update and advance for users
       // This one will take it's own lock
       bool update_version_numbers(const FieldMask &user_mask,
-                                  const VersionInfo &version_info,
+                                  const FieldVersions &field_versions,
                                   const AddressSpaceID source,
                                   std::set<RtEvent> &applied_events);
     protected:
@@ -524,11 +526,11 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
     public:
       void perform_remote_valid_check(const FieldMask &check_mask,
-                                      const VersionInfo &version_info,
+                                      VersionTracker *version_tracker,
                                       bool reading,
                                       std::set<RtEvent> *wait_on = NULL);
       void perform_read_invalidations(const FieldMask &check_mask,
-                                      const VersionInfo &version_info,
+                                      VersionTracker *version_tracker,
                                       const AddressSpaceID source,
                                       std::set<RtEvent> &applied_events);
       void send_invalidations(const FieldMask &invalidate_mask,
@@ -540,7 +542,8 @@ namespace Legion {
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event);
       virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source);
+                                         AddressSpaceID source,
+                                         RegionTreeForest *forest);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              RtUserEvent done_event);
     public:
@@ -642,12 +645,12 @@ namespace Legion {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
-                             const VersionInfo &version_info, 
+                             VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
                              std::set<RtEvent> &map_applied_events);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
-                                        const VersionInfo &version_info,
+                                        VersionTracker *version_tracker,
                                         const std::set<ApEvent> &preconditions,
                                         Operation *op, unsigned index,
                                         CopyAcrossHelper *helper,
@@ -657,7 +660,7 @@ namespace Legion {
                                               FieldID dst_field,
                                               FieldID src_field,
                                               unsigned src_index,
-                                       const VersionInfo &version_info,
+                                              VersionTracker *version_tracker,
                                        const std::set<ApEvent> &preconditions,
                                        Operation *op, unsigned index,
                                        RegionTreeNode *intersect,
@@ -675,14 +678,14 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            const FieldMask &copy_mask,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                                            const AddressSpaceID source,
                          LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                            std::set<RtEvent> &applied_events);
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                 const VersionInfo &version_info,
+                                 VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading,
@@ -692,18 +695,18 @@ namespace Legion {
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
-                                           const VersionInfo &version_info,
+                                           VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events);
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
-                            const VersionInfo &version_info,
+                            VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events);
       // This is a fused version of the above two methods
       virtual ApEvent add_user_fused(const RegionUsage &user,ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info,
+                                   VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
                                    bool update_versions = true);
@@ -753,7 +756,8 @@ namespace Legion {
       virtual void process_update_response(Deserializer &derez,
                                            RtUserEvent done_event);
       virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source);
+                                         AddressSpaceID source,
+                                         RegionTreeForest *forest);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              RtUserEvent done_event);
     public:
@@ -962,7 +966,7 @@ namespace Legion {
       void issue_deferred_copies(const TraversalInfo &info, 
                                  MaterializedView *dst,
                                  const FieldMask &copy_mask,
-                                 const VersionInfo &src_version_info,
+                                 VersionTracker *src_version_tracker,
               const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
@@ -973,7 +977,7 @@ namespace Legion {
       void find_valid_views(const FieldMask &search_mask,
                       LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
       void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
-                       FieldMask copy_mask, const VersionInfo &src_version_info,
+                       FieldMask copy_mask, VersionTracker *src_version_tracker,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     const LegionMap<LogicalView*,FieldMask>::aligned &views,
@@ -981,7 +985,7 @@ namespace Legion {
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
                                    const FieldMask &copy_mask,
-                                   const VersionInfo &src_version_info,
+                                   VersionTracker *src_version_tracker,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                           CopyAcrossHelper *helper) const;

@@ -69,24 +69,6 @@ namespace Legion {
       static const int TIMEOUT = DEFAULT_LOGICAL_USER_TIMEOUT;
     };
 
-    class FieldVersions : public Collectable {
-    public:
-      FieldVersions(void);
-      FieldVersions(const FieldVersions &rhs);
-      ~FieldVersions(void);
-    public:
-      FieldVersions& operator=(const FieldVersions &rhs);
-    public:
-      inline const LegionMap<VersionID,FieldMask>::aligned& 
-            get_field_versions(void) const { return field_versions; }
-      inline LegionMap<VersionID,FieldMask>::aligned& 
-            get_mutable_field_versions(void) { return field_versions; }
-    public:
-      void add_field_version(VersionID vid, const FieldMask &mask);
-    private:
-      LegionMap<VersionID,FieldMask>::aligned field_versions;
-    };
-
     /**
      * \struct VersioningSet
      * A small helper class for tracking collections of 
@@ -187,11 +169,28 @@ namespace Legion {
       bool single;
     };
 
+    // Small typedef to define field versions
+    typedef LegionMap<VersionID,FieldMask>::aligned FieldVersions;
+    /**
+     * \class VersionTracker
+     * This class provides a single abstract method for getting
+     * the version numbers associated with a given node in the 
+     * region tree. It is implemented by the VersionInfo class
+     * and by the CompositeView class.
+     */
+    class VersionTracker {
+    public:
+      virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
+      virtual const FieldVersions& get_field_versions(RegionTreeNode *node) = 0;
+      virtual const FieldMask& get_split_mask(RegionTreeNode *node,
+                                              bool &is_split) const = 0;
+    };
+
     /**
      * \class VersionInfo
      * A class for tracking version information about region usage
      */
-    class VersionInfo {
+    class VersionInfo : public VersionTracker {
     public:
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
@@ -206,7 +205,7 @@ namespace Legion {
                                const FieldMask &state_mask, bool path_only);
       void add_field_versions(unsigned depth, FieldVersions* versions);
     public:
-      inline bool is_upper_bound_node(RegionTreeNode *node) const
+      virtual bool is_upper_bound_node(RegionTreeNode *node) const
         { return (node == upper_bound_node); }
       inline RegionTreeNode* get_upper_bound_node(void) const 
         { return upper_bound_node; }
@@ -225,10 +224,11 @@ namespace Legion {
       void sanity_check(unsigned depth);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
-      FieldVersions* get_versions(RegionTreeNode *node) const;
       const FieldMask& get_split_mask(unsigned depth) const;
-      const FieldMask& get_split_mask(RegionTreeNode *node, 
-                                      bool &is_split) const;
+      virtual const FieldMask& get_split_mask(RegionTreeNode *node, 
+                                              bool &is_split) const;
+    public:
+      virtual const FieldVersions& get_field_versions(RegionTreeNode *node);
     public:
       void pack_version_info(Serializer &rez);
       void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
@@ -239,10 +239,10 @@ namespace Legion {
       void unpack_upper_bound_node(Deserializer &derez, 
                                    RegionTreeForest *forest);
     protected:
-      RegionTreeNode *upper_bound_node;
+      RegionTreeNode                   *upper_bound_node;
       // All of these are indexed by depth in the region tree
-      std::vector<PhysicalState*> physical_states;
-      std::vector<FieldVersions*> field_versions;
+      std::vector<PhysicalState*>      physical_states;
+      std::vector<FieldVersions>       field_versions;
       LegionVector<FieldMask>::aligned split_masks;
     }; 
 
