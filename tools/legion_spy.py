@@ -9897,7 +9897,7 @@ def main(temp_dir):
     keep_temp_files = args.keep_temp_files
     simplify_graphs = args.simplify_graphs
     verbose = args.verbose
-    assert_on_error = args.assert_on_error
+    assert_on_error = args.assert_on_error or args.assert_on_warning
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
 
