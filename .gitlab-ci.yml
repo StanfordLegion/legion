@@ -4,7 +4,6 @@
 
 # Global variables (will be set in every job):
 variables:
-  LLVM_CONFIG: "llvm-config-3.5"
   WARN_AS_ERROR: "1"
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
@@ -18,12 +17,24 @@ variables:
   CXX: "g++-5"
 .gcc6: &gcc6
   CXX: "g++-6"
+
 .clang35: &clang35
   CXX: "clang++-3.5"
+.clang38: &clang38
+  CXX: "clang++-3.8"
+
+.terra35: &terra35
+  LLVM_CONFIG: "llvm-config-3.5"
+  TERRA_DIR: "/usr/local/terra35"
+.terra38: &terra38
+  LLVM_CONFIG: "llvm-config-3.8"
+  TERRA_DIR: "/usr/local/terra38"
+
 .debug: &debug
   DEBUG: "1"
 .release: &release
   DEBUG: "0"
+
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
 .cxx98_checks: &cxx98_checks
@@ -53,6 +64,17 @@ before_script:
       make -j$THREADS
       popd
     fi
+
+###
+### Tags
+###
+
+.linux: &linux
+  tags:
+    - linux
+.macos: &macos
+  tags:
+    - macos
 
 ###
 ### Docker Image
@@ -121,52 +143,65 @@ before_script:
 # Run the full test suite on GCC 4.9 and Clang 3.5.
 
 # GCC 4.9
-gcc49_cxx98_release:
-  <<: [*image, *tests]
+linux_gcc49_terra35_cxx98_release:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *release, *cxx98_normal]
-gcc49_cxx98_debug_checks:
-  <<: [*image, *tests]
+    <<: [*gcc49, *terra35, *release, *cxx98_normal]
+linux_gcc49_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *debug, *cxx98_checks]
-gcc49_cxx98_debug_spy:
-  <<: [*image, *tests]
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks]
+linux_gcc49_terra35_cxx98_debug_spy:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *debug, *cxx98_spy]
-gcc49_cxx11_release:
-  <<: [*image, *tests]
+    <<: [*gcc49, *terra35, *debug, *cxx98_spy]
+linux_gcc49_terra35_cxx11_release:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *release, *cxx11_normal]
+    <<: [*gcc49, *terra35, *release, *cxx11_normal]
 
 # Clang 3.5
-clang35_cxx98_release:
-  <<: [*image, *tests]
+linux_clang35_terra35_cxx98_release:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang35, *release, *cxx98_normal]
-clang35_cxx98_debug_checks:
-  <<: [*image, *tests]
+    <<: [*clang35, *terra35, *release, *cxx98_normal]
+linux_clang35_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks]
+linux_clang35_terra35_cxx98_debug_spy:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_spy]
+linux_clang35_terra35_cxx11_release:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *release, *cxx11_normal]
+
+# macOS with Clang 3.5
+macos_clang35_terra35_cxx98_debug_checks:
+  <<: [*macos, *tests]
   variables:
     <<: [*clang35, *debug, *cxx98_checks]
-clang35_cxx98_debug_spy:
-  <<: [*image, *tests]
-  variables:
-    <<: [*clang35, *debug, *cxx98_spy]
-clang35_cxx11_release:
-  <<: [*image, *tests]
-  variables:
-    <<: [*clang35, *release, *cxx11_normal]
 
 # Run minimal tests on other compilers.
 
-gcc48_cxx98_debug_checks:
-  <<: [*image, *tests]
+# GCC 4.8, 5, 6
+linux_gcc48_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc48, *debug, *cxx98_checks]
-gcc5_cxx98_debug_checks:
-  <<: [*image, *tests]
+    <<: [*gcc48, *terra35, *debug, *cxx98_checks]
+linux_gcc5_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc5, *debug, *cxx98_checks]
-gcc6_cxx98_debug_checks:
-  <<: [*image, *tests]
+    <<: [*gcc5, *terra35, *debug, *cxx98_checks]
+linux_gcc6_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc6, *debug, *cxx98_checks]
+    <<: [*gcc6, *terra35, *debug, *cxx98_checks]
+
+# Clang 3.8
+linux_clang38_terra38_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks]

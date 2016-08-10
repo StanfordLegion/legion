@@ -15,14 +15,23 @@
 # limitations under the License.
 #
 
-import subprocess
-import sys, os, re, gc, shutil, copy
-import string, struct
-import tempfile
+from __future__ import print_function
+
+import argparse
+import array
+import collections
+import copy
+import gc
+import itertools
+import os
 import random
-from getopt import getopt,GetoptError
-from array import *
-from collections import deque
+import re
+import shutil
+import string
+import struct
+import subprocess
+import sys
+import tempfile
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
@@ -170,19 +179,10 @@ class Point(object):
     __slots__ = ['dim', 'vals']
     def __init__(self, dim):
         self.dim = dim
-        self.vals = array('i', (0,)*dim)
+        self.vals = array.array('i', (0,)*dim)
 
     def mk_string(self, start, delim, end):
-        result = start
-        first = True
-        for i in range(self.dim):
-            if not first:
-                result = result + delim
-            else:
-                first = False
-            result = result + str(self.vals[i])
-        result = result + end
-        return result
+        return '%s%s%s' % (start, delim.join(map(str, self.vals)), end)
 
     def to_string(self):
         return self.mk_string("(", ",", ")")
@@ -220,7 +220,7 @@ class Rect(object):
         self.hi = hi
 
     def __str__(self):
-        return str(self.lo) + "-" + str(self.hi)
+        return '%s-%s' % (self.lo, self.hi)
 
     __repr__ = __str__
 
@@ -313,21 +313,7 @@ class Shape(object):
             return next(iter(self.rects)).dim
 
     def __str__(self):
-        result = ''
-        first = True
-        for point in self.points:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(point)
-        for rect in self.rects:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(rect)
-        return result
+        return ' '.join(map(str, itertools.chain(self.points, self.rects)))
 
     __repr__ = __str__
 
@@ -409,7 +395,7 @@ class Shape(object):
         return result
 
     def rect_sub_helper(self, rect, other, to_add):
-        #print str(rect)+' - '+str(other)
+        #print('%s - %s' % (rect, other))
         # We are guaranteed to intersect but not dominate
         if rect.lo.dim == 1:
             # 3 cases: 2 edges, 1 center 
@@ -436,7 +422,7 @@ class Shape(object):
             if other.lo.vals[0] <= rect.lo.vals[0]:
                 if other.lo.vals[1] <= rect.lo.vals[1]:
                     # Lower-left corner
-                    #print "Lower left"
+                    #print("Lower left")
                     if other.hi.vals[0] >= rect.hi.vals[0]:
                         # Just have above
                         lo = Point(2)
@@ -464,7 +450,7 @@ class Shape(object):
                         to_add.append(Rect(lo,hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
                     # Upper-left corner (can't overlap lower-level corner)
-                    #print "Upper left"
+                    #print("Upper left")
                     if other.hi.vals[0] >= rect.hi.vals[0]:
                         # Overlap with upper right,  only have below
                         hi = Point(2)
@@ -483,7 +469,7 @@ class Shape(object):
                         to_add.append(Rect(rect.lo,hi))
                 else:
                     # Left edge but neither of the two left corners
-                    #print "Left edge"
+                    #print("Left edge")
                     lo = Point(2)
                     lo.vals[0] = rect.lo.vals[0]
                     lo.vals[1] = other.hi.vals[1]+1
@@ -504,7 +490,7 @@ class Shape(object):
                         to_add.append(Rect(lo,hi))
             elif other.hi.vals[0] >= rect.hi.vals[0]:
                 if other.lo.vals[1] <= rect.lo.vals[1]:
-                    #print "Lower right"
+                    #print("Lower right")
                     # Lower-right corner (can't overlap with any left corners)
                     hi = Point(2)
                     hi.vals[0] = other.lo.vals[0]-1
@@ -517,7 +503,7 @@ class Shape(object):
                         lo.vals[1] = other.hi.vals[1]+1
                         to_add.append(Rect(lo,rect.hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
-                    #print "Upper right"
+                    #print("Upper right")
                     # Upper-right corner (can't overlap with any other corners)
                     hi = Point(2)
                     hi.vals[0] = other.lo.vals[0]-1
@@ -531,7 +517,7 @@ class Shape(object):
                     hi.vals[1] = other.lo.vals[1]-1
                     to_add.append(Rect(lo,hi))
                 else:
-                    #print "Right edge"
+                    #print("Right edge")
                     # Right edge (no overlap with left edge)
                     hi = Point(2)
                     hi.vals[0] = rect.hi.vals[0]
@@ -550,7 +536,7 @@ class Shape(object):
                     to_add.append(Rect(lo,hi))
             else:
                 if other.lo.vals[1] <= rect.lo.vals[1]:
-                    #print "Bottom edge"
+                    #print("Bottom edge")
                     # Bottom edge
                     hi = Point(2)
                     hi.vals[0] = other.lo.vals[0]-1
@@ -571,7 +557,7 @@ class Shape(object):
                         hi.vals[1] = rect.hi.vals[1]
                         to_add.append(Rect(lo,hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
-                    #print "Top edge"
+                    #print("Top edge")
                     # Top edge (can't overlap with bottom edge)
                     hi = Point(2)
                     hi.vals[0] = other.lo.vals[0]-1
@@ -589,7 +575,7 @@ class Shape(object):
                     hi.vals[1] = other.lo.vals[1]-1
                     to_add.append(Rect(lo,hi))
                 else:
-                    #print "Center"
+                    #print("Center")
                     # Center (with no overlaps)
                     hi = Point(2)
                     hi.vals[0] = other.lo.vals[0]-1
@@ -619,7 +605,7 @@ class Shape(object):
                 if other.lo.vals[1] <= rect.lo.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
                         # Front lower-left corner
-                        #print "Front lower left corner"
+                        #print("Front lower left corner")
                         if other.hi.vals[0] >= rect.hi.vals[0]:
                             # Front lower-right corner
                             if other.hi.vals[1] >= rect.hi.vals[1]:
@@ -729,7 +715,7 @@ class Shape(object):
                                     hi.vals[2] = rect.hi.vals[2]
                                     to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back lower left corner"
+                        #print("Back lower left corner")
                         # Back lower-left corner (no overlap with any front corners)
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -774,7 +760,7 @@ class Shape(object):
                                 hi.vals[2] = rect.hi.vals[2]
                                 to_add.append(Rect(lo,hi))
                     else:
-                        #print "Lower left z edge"
+                        #print("Lower left z edge")
                         # Lower-left z edge
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -835,7 +821,7 @@ class Shape(object):
                                 to_add.append(Rect(lo,hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front upper left corner"
+                        #print("Front upper left corner")
                         # Front upper-left corner 
                         # No overlap with any lower corners
                         if other.hi.vals[0] >= rect.hi.vals[0]:
@@ -893,7 +879,7 @@ class Shape(object):
                                 hi.vals[2] = rect.hi.vals[2]
                                 to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back upper left corner"
+                        #print("Back upper left corner")
                         # Back upper-left corner (can overlap with back upper right)
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -917,7 +903,7 @@ class Shape(object):
                             lo.vals[2] = other.lo.vals[2]
                             to_add.append(Rect(lo,rect.hi))
                     else:
-                        #print "Upper left z edge"
+                        #print("Upper left z edge")
                         # Upper-left z edge
                         # No overlap with lower-left z edge
                         hi = Point(3)
@@ -955,7 +941,7 @@ class Shape(object):
                             to_add.append(Rect(lo,hi))
                 else:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front left y edge"
+                        #print("Front left y edge")
                         # Front-left y edge
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -1015,7 +1001,7 @@ class Shape(object):
                                 hi.vals[2] = other.hi.vals[2]
                                 to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back left y edge"
+                        #print("Back left y edge")
                         # Back-left y edge, no intersect with front-left
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -1059,7 +1045,7 @@ class Shape(object):
                             hi.vals[2] = rect.hi.vals[2]
                             to_add.append(Rect(lo,hi))
                     else: 
-                        #print "Left face"
+                        #print("Left face")
                         # Left face
                         hi = Point(3)
                         hi.vals[0] = rect.hi.vals[0]
@@ -1104,7 +1090,7 @@ class Shape(object):
             elif other.hi.vals[0] >= rect.hi.vals[0]:
                 if other.lo.vals[1] <= rect.lo.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front lower-right corner"
+                        #print("Front lower-right corner")
                         # Front lower-right corner
                         hi = Point(3)
                         hi.vals[0] = other.lo.vals[0]-1
@@ -1148,7 +1134,7 @@ class Shape(object):
                                 hi.vals[2] = rect.hi.vals[2]
                                 to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back lower-right corner"
+                        #print("Back lower-right corner")
                         # Back lower-right corner
                         # No intersection with front lower-right
                         # of back lower-left
@@ -1174,7 +1160,7 @@ class Shape(object):
                             lo.vals[2] = other.lo.vals[2]
                             to_add.append(Rect(lo,rect.hi))
                     else:
-                        #print "Lower right z edge"
+                        #print("Lower right z edge")
                         # Lower-right z edge
                         # No intersect with lower-left z-edge
                         hi = Point(3)
@@ -1210,7 +1196,7 @@ class Shape(object):
                             to_add.append(Rect(lo,hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front upper right corner"
+                        #print("Front upper right corner")
                         # Front upper-right corner
                         # No intersect with other front corners
                         hi = Point(3)
@@ -1236,7 +1222,7 @@ class Shape(object):
                             lo.vals[2] = other.hi.vals[2]+1
                             to_add.append(Rect(lo,rect.hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back upper right corner"
+                        #print("Back upper right corner")
                         # Back upper-right corner
                         # No intersect with any other corners
                         hi = Point(3)
@@ -1263,7 +1249,7 @@ class Shape(object):
                         hi.vals[2] = rect.hi.vals[2]
                         to_add.append(Rect(lo,hi))
                     else:
-                        #print "Upper right z edge"
+                        #print("Upper right z edge")
                         # Upper-right z edge
                         # No intersect with other z edges
                         hi = Point(3)
@@ -1296,7 +1282,7 @@ class Shape(object):
                         to_add.append(Rect(lo,hi))
                 else:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front right y edge"
+                        #print("Front right y edge")
                         # Front-right y edge
                         # No intersect with front-left y edge
                         hi = Point(3)
@@ -1331,7 +1317,7 @@ class Shape(object):
                             hi.vals[2] = rect.hi.vals[2]
                             to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back right y edge"
+                        #print("Back right y edge")
                         # Back-right y edge
                         # No intesect with other y edges
                         hi = Point(3)
@@ -1363,7 +1349,7 @@ class Shape(object):
                         hi.vals[2] = other.lo.vals[2]-1
                         to_add.append(Rect(lo,hi))
                     else:
-                        #print "Right face"
+                        #print("Right face")
                         # Right face
                         # No intersect with left face
                         hi = Point(3)
@@ -1406,7 +1392,7 @@ class Shape(object):
             else:
                 if other.lo.vals[1] <= rect.lo.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front bottom x edge"
+                        #print("Front bottom x edge")
                         # Front bottom x edge
                         hi = Point(3)
                         hi.vals[0] = other.lo.vals[0]-1
@@ -1466,7 +1452,7 @@ class Shape(object):
                                 hi.vals[2] = rect.hi.vals[2]
                                 to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back bottom x edge"
+                        #print("Back bottom x edge")
                         # Back bottom x edge
                         # No intersection with front bottom x edge
                         hi = Point(3)
@@ -1500,7 +1486,7 @@ class Shape(object):
                             hi.vals[2] = rect.hi.vals[2]
                             to_add.append(Rect(lo,hi))
                     else:
-                        #print "Bottom face"
+                        #print("Bottom face")
                         # Bottom face
                         hi = Point(3)
                         hi.vals[0] = other.lo.vals[0]-1
@@ -1544,7 +1530,7 @@ class Shape(object):
                             to_add.append(Rect(lo,hi))
                 elif other.hi.vals[1] >= rect.hi.vals[1]:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front top x edge"
+                        #print("Front top x edge")
                         # Front top x edge
                         # No overlap with bottom x edges
                         hi = Point(3)
@@ -1579,7 +1565,7 @@ class Shape(object):
                             hi.vals[2] = rect.hi.vals[2]
                             to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back top x edge"
+                        #print("Back top x edge")
                         # Back top x edge
                         # Cannot intersect with any other edges
                         hi = Point(3)
@@ -1611,7 +1597,7 @@ class Shape(object):
                         hi.vals[2] = other.lo.vals[2]-1
                         to_add.append(Rect(lo,hi))
                     else:
-                        #print "Top face"
+                        #print("Top face")
                         # Top face
                         # No intersect with bottom face
                         hi = Point(3)
@@ -1653,7 +1639,7 @@ class Shape(object):
                         to_add.append(Rect(lo,hi))
                 else:
                     if other.lo.vals[2] <= rect.lo.vals[2]:
-                        #print "Front face"
+                        #print("Front face")
                         # Front face
                         hi = Point(3)
                         hi.vals[0] = other.lo.vals[0]-1
@@ -1696,7 +1682,7 @@ class Shape(object):
                             hi.vals[2] = rect.hi.vals[2]
                             to_add.append(Rect(lo,hi))
                     elif other.hi.vals[2] >= rect.hi.vals[2]:
-                        #print "Back face"
+                        #print("Back face")
                         # Back face
                         # No intersect with front face
                         hi = Point(3)
@@ -1737,7 +1723,7 @@ class Shape(object):
                         hi.vals[2] = other.lo.vals[2]-1
                         to_add.append(Rect(lo,hi))
                     else:
-                        #print "Center"
+                        #print("Center")
                         # Center
                         hi = Point(3)
                         hi.vals[0] = other.lo.vals[0]-1
@@ -1786,7 +1772,7 @@ class Shape(object):
                         hi.vals[2] = rect.hi.vals[2]
                         to_add.append(Rect(lo,hi))
         else:
-            print 'ERROR: Need support for >3 dimensions!'
+            print('ERROR: Need support for >3 dimensions!')
             assert False   
 
     def __isub__(self, other):
@@ -1846,15 +1832,7 @@ class PointSet(object):
         self.points = set()
 
     def __str__(self):
-        result = ''
-        first = True
-        for point in self.points:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(point)
-        return result
+        return ' '.join(map(str, self.points))
 
     __repr__ = __str__
 
@@ -1925,7 +1903,7 @@ class Processor(object):
         self.kind = "Unknown"
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
-        self.node_name = 'proc_node_'+str(uid)
+        self.node_name = 'proc_node_%s' % uid
 
     def __str__(self):
         return self.kind + " Processor " + hex(self.uid)
@@ -1939,17 +1917,17 @@ class Processor(object):
         self.mem_bandwidth[mem] = bandwidth
 
     def print_node(self, printer):
-        label = str(self)
-        printer.println(self.node_name+' [label="'+label+
-            '",shape=oval,fontsize=14,'+
-            'fontcolor=black,fontname="Helvetica"];')
+        label = self
+        printer.println(
+            '%s [label="%s",shape=oval,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+            (self.node_name, label))
 
     def print_mem_edges(self, printer):
         for mem,band in self.mem_bandwidth.iteritems():
-            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
-            printer.println(self.node_name+' -> ' + mem.node_name+ 
-                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
-        
+            label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
+            printer.println(
+                '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
+                (self.node_name, mem.node_name, label))
 
 class Memory(object):
     __slots__ = ['state', 'uid', 'kind_num', 'kind', 'capacity', 'proc_latency',
@@ -1964,10 +1942,10 @@ class Memory(object):
         self.proc_bandwidth = dict()
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
-        self.node_name = 'mem_node_'+str(uid)
+        self.node_name = 'mem_node_%s' % uid
 
     def __str__(self):
-        return self.kind + " Memory " + hex(self.uid)
+        return "%s Memory %s" % (self.kind, hex(self.uid))
 
     __repr__ = __str__
 
@@ -1988,16 +1966,17 @@ class Memory(object):
         self.mem_bandwidth[mem] = bandwidth
 
     def print_node(self, printer):
-        label = str(self) 
-        printer.println(self.node_name+' [label="'+label+
-            '",shape=box,fontsize=14,'+
-            'fontcolor=black,fontname="Helvetica"];')
+        label = self
+        printer.println(
+            '%s [label="%s",shape=box,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+            (self.node_name, label))
 
     def print_mem_edges(self, printer):
         for mem,band in self.mem_bandwidth.iteritems():
-            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
-            printer.println(self.node_name+' -> ' + mem.node_name+ 
-                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
+            label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
+            printer.println(
+                '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
+                (self.node_name, mem.node_name, label))
 
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
@@ -2015,7 +1994,7 @@ class IndexSpace(object):
         self.depth = 0
         self.shape = None
         self.point_set = None
-        self.node_name = 'index_space_node_'+str(uid)
+        self.node_name = 'index_space_node_%s' % uid
         self.intersections = dict() 
         self.dominated = dict()
 
@@ -2072,7 +2051,7 @@ class IndexSpace(object):
         if self.shape is None or self.shape.empty():
             return
         if self.state.verbose:
-            print '    Reducing index sub-space '+str(self)
+            print('    Reducing index sub-space %s' % self)
         local_points = self.shape.copy()
         new_sets = dict()
         del_sets = list()
@@ -2126,9 +2105,9 @@ class IndexSpace(object):
 
     def __str__(self):
         if self.name is None:
-            return "Index Space "+str(self.uid)
+            return "Index Space %s" % self.uid
         else:
-          return self.name + ' ('+str(self.uid)+')'
+          return '%s (%s)' % (self.name, self.uid)
 
     __repr__ = __str__
 
@@ -2141,7 +2120,7 @@ class IndexSpace(object):
         if self.shape is None or self.shape.empty():
             return
         if self.state.verbose:
-            print 'Reducing '+str(self)+'...'
+            print('Reducing %s ...' % self)
         if self.shape.get_dim() not in dim_sets:
             dim_sets[self.shape.get_dim()] = dict()
         self.update_index_sets(dim_sets[self.shape.get_dim()])
@@ -2156,13 +2135,13 @@ class IndexSpace(object):
 
     def get_shape(self):
         if self.shape is None:
-            print "No shape for "+str(self)
+            print("No shape for %s" % self)
         assert self.shape is not None
         return self.shape
 
     def get_point_set(self):
         if self.point_set is None:
-            print "No Point set for "+str(self)
+            print("No Point set for %s" % self)
         assert self.point_set is not None
         return self.point_set
 
@@ -2208,13 +2187,13 @@ class IndexSpace(object):
 
     def print_graph(self, printer):
         if self.name is not None:
-            label = self.name + ' (ID: '+str(self.uid) + ')'
+            label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space '+hex(self.uid)
+                label = 'index space %s' % hex(self.uid)
             else:
                 
-                label = 'subspace '+str(self.uid)
+                label = 'subspace %s' % self.uid
         if self.parent is not None:
             color = None
             for c, child in self.parent.children.iteritems():
@@ -2222,10 +2201,9 @@ class IndexSpace(object):
                     color = c
                     break
             assert color is not None
-            label += ' (color: ' + str(color) +')'
-        printer.println(self.node_name+' [label="'+label+
-                '",shape=plaintext,fontsize=14,'+
-                'fontcolor=black,fontname="Helvetica"];')
+            label += ' (color: %s)' % color
+        printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+                        (self.node_name, label))
         # print links to children
         for child in self.children.itervalues():
             child.print_link_to_parent(printer, self.node_name)
@@ -2234,17 +2212,17 @@ class IndexSpace(object):
 
     def print_tree(self):
         if self.depth == 0:
-            print "---------------------------------------"
-            print str(self)
+            print("---------------------------------------")
+            print(self)
         else:
             prefix = ''
             for i in range(self.depth):
                 prefix += '  '
-            print prefix+str(self)+' Color: '+self.color.to_string()
+            print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
         if self.depth == 0:
-            print "---------------------------------------"
+            print("---------------------------------------")
 
 class IndexPartition(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 
@@ -2263,7 +2241,7 @@ class IndexPartition(object):
         self.depth = None
         self.shape = None
         self.point_set = None
-        self.node_name = 'index_part_node_'+str(uid)
+        self.node_name = 'index_part_node_%s' % uid
         self.intersections = dict()
         self.dominated = dict()
 
@@ -2287,9 +2265,9 @@ class IndexPartition(object):
 
     def __str__(self):
         if self.name is None:
-            return "Index Partition: "+str(self.uid)
+            return "Index Partition: %s" % self.uid
         else:
-            return self.name + ' ('+str(self.uid)+')'
+            return '%s (%s)' % (self.name, self.uid)
 
     __repr__ = __str__
 
@@ -2297,10 +2275,10 @@ class IndexPartition(object):
         # Check for dominance of children by parent
         for child in self.children.itervalues():
             if not self.parent.dominates(child):
-                print 'WARNING: child '+str(child)+' is not dominated by parent '+\
-                        str(self.parent)+' in '+str(self)+'. This is definitely '+\
-                        'an application bug.'
-                if self.node.state.assert_on_fail:
+                print('WARNING: child % is not dominated by parent %s in %s. '+
+                      'This is definitely an application bug.' %
+                      (child, self.parent, self))
+                if self.node.state.assert_on_warning:
                     assert False
         # Check disjointness
         if self.disjoint:
@@ -2308,10 +2286,10 @@ class IndexPartition(object):
             for child in self.children.itervalues():
                 child_shape = child.get_shape()
                 if not (child_shape & previous).empty():
-                    print 'WARNING: '+str(self)+' was logged disjoint '+\
-                            'but there are overlapping children. This '+\
-                            'is definitely an application bug.'
-                    if self.node.state.assert_on_fail:
+                    print('WARNING: %s was logged disjoint '+
+                            'but there are overlapping children. This '+
+                            'is definitely an application bug.' % self)
+                    if self.node.state.assert_on_warning:
                         assert False
                     break
                 previous |= child_shape
@@ -2360,7 +2338,7 @@ class IndexPartition(object):
             return None 
         self.intersections[other] = intersection
         return intersection
-        
+
     def intersects(self, other):
         if self is other:
             return True
@@ -2404,12 +2382,11 @@ class IndexPartition(object):
                 color = c
                 break
         assert color is not None
-        label += ' (color: ' + str(color) + ')'
-        label += '\nDisjoint=' + ('True' if self.disjoint else 'False')
-        label += ', Complete=' + ('True' if self.is_complete() else 'False')
-        printer.println(self.node_name+' [label="'+label+
-                '",shape=plaintext,fontsize=14,'+
-                'fontcolor=black,fontname="times italic"];')
+        label += ' (color: %s)' % color
+        label += '\nDisjoint=%s, Complete=%s' % (self.disjoint, self.is_complete())
+        printer.println(
+            '%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="times italic"];' %
+            (self.node_name, label))
         # print links to children
         for child in self.children.itervalues():
             child.print_link_to_parent(printer, self.node_name)
@@ -2417,10 +2394,8 @@ class IndexPartition(object):
             child.print_graph(printer)
 
     def print_tree(self):
-        prefix = ''
-        for i in range(self.depth):
-            prefix += '  '
-        print prefix+str(self)+' Color: '+self.color.to_string()
+        prefix = '  ' * self.depth
+        print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
 
@@ -2766,17 +2741,17 @@ class LogicalRegion(object):
 
     def print_tree(self):
         if self.index_space.depth == 0:
-            print "---------------------------------------"
-            print str(self)
+            print("---------------------------------------")
+            print(self)
         else:
             prefix = ''
             for i in range(self.index_space.depth):
                 prefix += '  '
-            print prefix+str(self)+' Color: '+self.index_space.color.to_string()
+            print('%s%s Color: %s' % (prefix, self, self.index_space.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
         if self.index_space.depth == 0:
-            print "---------------------------------------"
+            print("---------------------------------------")
 
 class LogicalPartition(object):
     __slots__ = ['state', 'index_partition', 'field_space', 'tree_id', 'children',
@@ -3032,7 +3007,7 @@ class LogicalPartition(object):
         prefix = ''
         for i in range(self.index_partition.depth):
             prefix += '  '
-        print prefix+str(self)+' Color: '+self.index_partition.color.to_string()
+        print('%s%s Color: %s' % (prefix, self, self.index_partition.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
 
@@ -3094,10 +3069,9 @@ class LogicalState(object):
                 if not found:
                     found = op.has_transitive_mapping_dependence(prev_op)
                 if not found:
-                    print "ERROR: missing logical fence dependence between "+\
-                          str(prev_op)+" (UID "+str(prev_op.uid)+") and "+\
-                          str(op)+" (UID "+str(op.uid)+")"
-                    if self.node.state.assert_on_fail:
+                    print("ERROR: missing logical fence dependence between %s "+
+                          "(UID %s) and %s (UID %s)" % (prev_op, prev_op.uid, op, op.uid))
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
         else:
@@ -3294,15 +3268,16 @@ class LogicalState(object):
         close = op.get_close_operation(req, self.node, self.field)
         if close is None:
             if perform_checks:
-                print "ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+\
-                    "a close operation for field "+str(self.field)+" of region "+\
-                    "requirement "+str(req.index)+" at "+str(self.node)+error_str
+                print("ERROR: %s (UID=%s) failed to generate "+
+                      "a close operation for field %s of region "+
+                      "requirement %s at %s%s" %
+                      (op, op.uid, self.field, req.index, self.node, error_str))
             else:
-                print "ERROR: "+str(op)+" (UID="+str(op.uid)+") failed to generate "+\
-                    "a close operation that we normally would have expected. This "+\
-                    "is likely a runtime bug. Re-run with logical checks "+\
-                    "to confirm."
-            if self.node.state.assert_on_fail:
+                print("ERROR: %s (UID=%s) failed to generate "+
+                      "a close operation that we normally would have expected. This "+
+                      "is likely a runtime bug. Re-run with logical checks "+
+                      "to confirm." % (op, op.uid))
+            if self.node.state.assert_on_error:
                 assert False
         return close
 
@@ -3326,12 +3301,13 @@ class LogicalState(object):
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only() 
                                   else TRUE_DEPENDENCE, self.field):
-                print "ERROR: close operation "+str(close)+" generated by "+\
-                      "field "+str(self.field)+" of region requirement "+\
-                      str(req.index)+" of "+str(op)+" failed to find a "+\
-                      "mapping dependence on previous operation "+\
-                      str(prev_op)+"in sub-tree being closed"+error_str
-                if self.node.state.assert_on_fail:
+                print("ERROR: close operation %s generated by "+
+                      "field %s of region requirement "+
+                      "%s of %s failed to find a "+
+                      "mapping dependence on previous operation "+
+                      "%s in sub-tree being closed%s" %
+                      (close, self.field, req.index, op, prev_op, error_str))
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         for prev_op,prev_req in previous_deps:
@@ -3348,29 +3324,32 @@ class LogicalState(object):
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only()
                                   else TRUE_DEPENDENCE, self.field):
-                print "ERROR: close operation "+str(close)+" generated by "+\
-                      "field "+str(self.field)+" of region requirement "+\
-                      str(req.index)+" of "+str(op)+" failed to find a "+\
-                      "mapping dependence on previous operation "+\
-                      str(prev_op)+" from higher in the region tree"
-                if self.node.state.assert_on_fail:
+                print("ERROR: close operation %s generated by "+
+                      "field %s of region requirement "+
+                      "%s of %s failed to find a "+
+                      "mapping dependence on previous operation "+
+                      "%s from higher in the region tree" %
+                      (close, self.field, req.index, op, prev_op))
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         return True
 
-    def record_close_dependences(self, close, closed_users, previous_deps):
+    def record_close_dependences(self, close, closed_users, op, req, previous_deps):
         assert 0 in close.reqs
         close_req = close.reqs[0]
         for prev_op,prev_req in closed_users:
-            dep = MappingDependence(prev_op, close, prev_req.index, 
-                                    close_req.index, TRUE_DEPENDENCE)
-            prev_op.add_outgoing(dep)
-            close.add_incoming(dep)
+            if op != prev_op and req.index != prev_req.index:
+                dep = MappingDependence(prev_op, close, prev_req.index, 
+                                        close_req.index, TRUE_DEPENDENCE)
+                prev_op.add_outgoing(dep)
+                close.add_incoming(dep)
         for prev_op,prev_req in previous_deps:
-            dep = MappingDependence(prev_op, close, prev_req.index,
-                                    close_req.index, TRUE_DEPENDENCE)
-            prev_op.add_outgoing(dep)
-            close.add_incoming(dep)
+            if op != prev_op and req.index != prev_req.index:
+                dep = MappingDependence(prev_op, close, prev_req.index,
+                                        close_req.index, TRUE_DEPENDENCE)
+                prev_op.add_outgoing(dep)
+                close.add_incoming(dep)
 
     def perform_close_operation(self, children_to_close, read_only_close, op, req,
                                 previous_deps, perform_checks):
@@ -3380,11 +3359,11 @@ class LogicalState(object):
         close = self.find_close_operation(op, req, perform_checks, error_str)
         # Make sure it is the right kind
         if read_only_close and close.kind != READ_ONLY_CLOSE_OP_KIND:
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_error:
                 assert False
             return False
         if not read_only_close and close.kind != INTER_CLOSE_OP_KIND:
-            if self.node.state.assert_on_fail:
+            if self.node.state.assert_on_error:
                 assert False
             return False
         for child,permit_leave_open in children_to_close.iteritems():
@@ -3397,7 +3376,8 @@ class LogicalState(object):
                                                  previous_deps, error_str):
                     return False
             else:
-                self.record_close_dependences(close, closed_users, previous_deps)
+                self.record_close_dependences(close, closed_users, op, req,
+                                              previous_deps)
             # Remove the child if necessary
             if permit_leave_open:
                 assert req.is_read_only()
@@ -3544,8 +3524,8 @@ class Restriction(object):
             return False
         if not self.node.dominates(node):
             if self.node.intersects(node):
-                print "ERROR: Illegal partial acquire"
-                if self.node.state.assert_on_fail:
+                print("ERROR: Illegal partial acquire")
+                if self.node.state.assert_on_error:
                     assert False
             return False
         if self.acquires:
@@ -3585,8 +3565,8 @@ class Restriction(object):
                 if acquire.add_restrict(node, field, inst):
                     return True
         # Interference if we get here
-        print "ERROR: Interfering restrictions performed"
-        if self.node.state.assert_on_fail:
+        print("ERROR: Interfering restrictions performed")
+        if self.node.state.assert_on_error:
             assert False
         return False
 
@@ -3643,8 +3623,8 @@ class Acquisition(object):
                 if restrict.add_acquisition(node, field):
                     return True
         # Interference if we get here
-        print "ERROR: Interfering acquires performed"
-        if self.node.state.assert_on_fail:
+        print("ERROR: Interfering acquires performed")
+        if self.node.state.assert_on_error:
             assert False
         return False
 
@@ -3666,8 +3646,8 @@ class Acquisition(object):
             return False
         if not self.node.dominates(node):
             if self.node.intersects(node):
-                print "ERROR: Illegal partial restriction"
-                if self.node.state.assert_on_fail:
+                print("ERROR: Illegal partial restriction")
+                if self.node.state.assert_on_error:
                     assert False
             return False
         if self.restrictions:
@@ -3846,10 +3826,10 @@ class PhysicalState(object):
         if perform_checks:
             bad = check_preconditions(preconditions, op)
             if bad is not None:
-                print "ERROR: Missing use precondition for field "+str(self.field)+\
-                      " of region requirement "+str(req.index)+" of "+str(op)+\
-                      " (UID "+str(op.uid)+") on previous "+str(bad)
-                if self.node.state.assert_on_fail:
+                print("ERROR: Missing use precondition for field "+str(self.field)+
+                      " of region requirement "+str(req.index)+" of "+str(op)+
+                      " (UID "+str(op.uid)+") on previous "+str(bad))
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         else:
@@ -3988,9 +3968,9 @@ class PhysicalState(object):
                 # actually generated by the parent region
                 copy = op.find_generated_copy(self.field, self.node.parent, dst, 0)
             if copy is None:
-                print "ERROR: Missing copy operation to update "+str(dst)+\
-                      " for field "+str(self.field)+" by "+error_str
-                if self.node.state.assert_on_fail:
+                print("ERROR: Missing copy operation to update "+str(dst)+
+                      " for field "+str(self.field)+" by "+error_str)
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             assert self.field in copy.dst_fields
@@ -3998,10 +3978,10 @@ class PhysicalState(object):
             assert copy.dsts[copy_index] is dst
             src = copy.srcs[copy_index]
             if src not in valid:
-                print "ERROR: Copy operation by "+error_str+" to update "+str(dst)+\
-                      " is from source "+str(src)+" which is not in the set of "+\
-                      "valid instances."
-                if self.node.state.assert_on_fail:
+                print("ERROR: Copy operation by "+error_str+" to update "+str(dst)+
+                      " is from source "+str(src)+" which is not in the set of "+
+                      "valid instances.")
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             # Now check for event preconditions 
@@ -4014,23 +3994,23 @@ class PhysicalState(object):
                 copy.get_physical_reachable(copy.reachable_cache, False)
             bad = check_preconditions(src_preconditions, copy)
             if bad is not None:
-                print "ERROR: Missing source copy precondition for "+str(copy)+\
-                      " of field "+str(self.field)+" issued by "+error_str+" on "+str(bad)
-                if self.node.state.assert_on_fail:
+                print("ERROR: Missing source copy precondition for "+str(copy)+
+                      " of field "+str(self.field)+" issued by "+error_str+" on "+str(bad))
+                if self.node.state.assert_on_error:
                     assert False
                 return False
             bad = check_preconditions(dst_preconditions, copy)
             if bad is not None:
-                print "ERROR: Missing destination copy precondition for "+str(copy)+\
-                      " of field "+str(self.field)+" issued by "+error_str+\
-                      " on "+str(bad)
-                if self.node.state.assert_on_fail:
+                print("ERROR: Missing destination copy precondition for "+str(copy)+
+                      " of field "+str(self.field)+" issued by "+error_str+
+                      " on "+str(bad))
+                if self.node.state.assert_on_error:
                     assert False
                 return False
         else:
             # Figure out which instance to copy from
             if len(valid) > 1:
-                print "INFO: Multiple valid instances to choose from... picking one" 
+                print("INFO: Multiple valid instances to choose from... picking one")
             src = next(iter(valid)) 
             src_preconditions = src.find_copy_dependences(depth=self.depth, 
                 field=self.field, op=op, index=index, region=self.node, 
@@ -4064,9 +4044,9 @@ class PhysicalState(object):
                     continue
                 reduction = op.find_generated_copy(self.field, self.node, dst, src.redop)
                 if reduction is None:
-                    print "ERROR: Missing reduction copy operation to update "+str(dst)+\
-                          " for field "+str(self.field)+" from "+str(src)+" by "+error_str
-                    if self.node.state.assert_on_fail:
+                    print("ERROR: Missing reduction copy operation to update "+str(dst)+
+                          " for field "+str(self.field)+" from "+str(src)+" by "+error_str)
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 assert self.field in reduction.dst_fields
@@ -4084,9 +4064,9 @@ class PhysicalState(object):
                     reduction.get_physical_reachable(reduction.reachable_cache, False)
                 bad = check_preconditions(src_preconditions, reduction)
                 if bad is not None:
-                    print "ERROR: Missing source copy precondition for reduction of field "+\
-                          str(self.field)+" issued by "+erro_str+" on "+str(bad)
-                    if self.node.state.assert_on_fail:
+                    print("ERROR: Missing source copy precondition for reduction of field "+
+                          str(self.field)+" issued by "+erro_str+" on "+str(bad))
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
@@ -4094,9 +4074,9 @@ class PhysicalState(object):
                     reading=False, redop=src.redop, precise=True)
                 bad = check_preconditions(dst_preconditions, reduction)
                 if bad is not None:
-                    print "ERROR: Missing destination copy precondition for reduction "+\
-                          "of field "+str(self.field)+" issued by "+error_str+" on "+str(bad)
-                    if self.node.state.assert_on_fail:
+                    print("ERROR: Missing destination copy precondition for reduction "+
+                          "of field "+str(self.field)+" issued by "+error_str+" on "+str(bad))
+                    if self.node.state.assert_on_error:
                         assert False
                     return False
                 # Register the users
@@ -4154,11 +4134,11 @@ class Requirement(object):
 
     def print_requirement(self):
         if self.is_reg:
-            print "        Logical Region Requirement ("+hex(self.index_node)+","+\
-                  str(self.field_space)+","+str(self.tid)+")"
+            print("        Logical Region Requirement ("+hex(self.index_node)+","+
+                  str(self.field_space)+","+str(self.tid)+")")
         else:
-            print "        Logical Partition Requirement ("+str(self.index_node)+","+\
-                  str(self.field_space)+","+str(self.tid)+")"
+            print("        Logical Partition Requirement ("+str(self.index_node)+","+
+                  str(self.field_space)+","+str(self.tid)+")")
         field_str = "          Fields: "
         first = True
         for f in self.fields:
@@ -4167,9 +4147,9 @@ class Requirement(object):
                 first = False
             else:
                 field_str = field_str+", "+str(f)
-        print field_str
-        print "        Privilege: "+self.get_privilege()
-        print "        Coherence: "+self.get_coherence()
+        print(field_str)
+        print("        Privilege: "+self.get_privilege())
+        print("        Coherence: "+self.get_coherence())
 
     def add_field(self, fid):
         field = self.field_space.get_field(fid)
@@ -4211,14 +4191,14 @@ class Requirement(object):
 
     def to_string(self):
         if self.is_reg:
-            print "Region Requirement for ("+hex(self.ispace)+","+\
-                  str(self.fspace)+","+str(self.tid)+")"
+            print("Region Requirement for ("+hex(self.ispace)+","+
+                  str(self.fspace)+","+str(self.tid)+")")
         else:
-            print "Partition Requirement for ("+str(self.ispace)+","+\
-                  str(self.fspace)+","+str(self.tid)+")"
-        print "    Privilege: "+self.get_privilege()
-        print "    Coherence: "+self.get_coherence()
-        print "    Fields: "+" ".join(self.get_field_names())
+            print("Partition Requirement for ("+str(self.ispace)+","+
+                  str(self.fspace)+","+str(self.tid)+")")
+        print("    Privilege: "+self.get_privilege())
+        print("    Coherence: "+self.get_coherence())
+        print("    Fields: "+" ".join(self.get_field_names()))
 
     def get_privilege(self):
         if self.priv == NO_ACCESS:
@@ -4715,11 +4695,11 @@ class Operation(object):
         def traverse_node(node, traverser):
             if node is traverser.origin:
                 traverser.cycle = True
-                print "WARNING: CYCLE DETECTED!"
+                print("WARNING: CYCLE DETECTED!")
                 for n in traverser.stack:
-                    print str(n)
-                print str(node)
-                if self.state.assert_on_fail:
+                    print(str(n))
+                print(str(node))
+                if self.state.assert_on_warning:
                     assert False
                 return False
             if traverser.cycle:
@@ -4843,9 +4823,9 @@ class Operation(object):
         if self.context.current_fence is not None:
             if perform_checks:
                 if self.context.current_fence not in self.logical_incoming: 
-                    print "ERROR: missing logical fence dependence between "+\
-                          str(self.context.current_fence)+" and "+str(self)
-                    if self.state.assert_on_fail:
+                    print("ERROR: missing logical fence dependence between "+
+                          str(self.context.current_fence)+" and "+str(self))
+                    if self.state.assert_on_error:
                         assert False
                     return False
             else:
@@ -4883,12 +4863,12 @@ class Operation(object):
                                                         perform_checks, field):
                     return False
                 if self.need_logical_replay:
-                    print "ERROR: Replay failed! This is really bad! "+\
-                          "Region requirement "+str(idx)+" of "+str(self)+\
-                          "failed to replay successfully. This is most likely "+\
-                          "a conceptual bug in the analysis and not an "+\
-                          "implementation bug."
-                    if self.state.assert_on_fail:
+                    print("ERROR: Replay failed! This is really bad! "+
+                          "Region requirement "+str(idx)+" of "+str(self)+
+                          "failed to replay successfully. This is most likely "+
+                          "a conceptual bug in the analysis and not an "+
+                          "implementation bug.")
+                    if self.state.assert_on_error:
                         assert False
                     return False
         # See if our operation had any bearing on the restricted
@@ -4931,11 +4911,11 @@ class Operation(object):
         # No need to look for it transitively since this analysis should exactly
         # match the analysis done by the runtime
         # Issue the error and return false
-        print "ERROR: Missing mapping dependence on "+str(field)+" between region "+\
-              "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+\
-              str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+\
-              str(self)+" (UID "+str(self.uid)+")"
-        if self.state.assert_on_fail:
+        print("ERROR: Missing mapping dependence on "+str(field)+" between region "+
+              "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
+              str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
+              str(self)+" (UID "+str(self.uid)+")")
+        if self.state.assert_on_error:
             assert False
         return False
 
@@ -4945,12 +4925,12 @@ class Operation(object):
         # for reductions. The runtime will group them all together while
         # Legion Spy is smart enough to keep them separate.
         if not self.transitive_warning_issued:
-            print "INFO: Falling back to transitive mapping dependences for "+str(self)+\
-                  " due to either imprecision in the runtime analysis or a bug."
+            print("INFO: Falling back to transitive mapping dependences for "+str(self)+
+                  " due to either imprecision in the runtime analysis or a bug.")
             self.transitive_warning_issued = True
         next_gen = self.state.get_next_traversal_generation()
         self.generation = next_gen
-        queue = deque()
+        queue = collections.deque()
         queue.append(self)
         while queue:
             current = queue.popleft()
@@ -4972,9 +4952,9 @@ class Operation(object):
                 # If we've got a fence operation, it should have a transitive
                 # dependence on all operations that came before it
                 if not self in reachable:
-                    print "ERROR: Failed logical sanity check. No mapping dependence "+\
-                          "between previous "+str(self)+" and later "+str(next_op)
-                    if self.state.assert_on_fail:
+                    print("ERROR: Failed logical sanity check. No mapping dependence "+
+                          "between previous "+str(self)+" and later "+str(next_op))
+                    if self.state.assert_on_error:
                         assert False
                     return False
             return True
@@ -4994,15 +4974,15 @@ class Operation(object):
             # Otherwise they do interfere, check to see if this node is
             # in the previous set, if not, that is not good
             if self not in reachable:
-                print "ERROR: Failed logical sanity check. No mapping dependence "+\
-                      "path exists between region requirement "+str(req.index)+\
-                      " of "+str(self)+" and region requirement "+str(next_req.index)+\
-                      " of "+str(next_op)
-                print "  First Requirement:"
+                print("ERROR: Failed logical sanity check. No mapping dependence "+
+                      "path exists between region requirement "+str(req.index)+
+                      " of "+str(self)+" and region requirement "+str(next_req.index)+
+                      " of "+str(next_op))
+                print("  First Requirement:")
                 req.print_requirement()
-                print "  Second Requirement:"
+                print("  Second Requirement:")
                 next_req.print_requirement()
-                if self.state.assert_on_fail:
+                if self.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -5032,9 +5012,9 @@ class Operation(object):
         for field in req.fields:
             # Find the instance that we chose to map this field to
             if field.fid not in mappings:
-                print "Missing mapping decision for field "+str(field)+" of "+\
-                      "requirement requirement "+str(index)+" of "+str(self)
-                print "This is a runtime logging bug, please report it."
+                print("Missing mapping decision for field "+str(field)+" of "+
+                      "requirement requirement "+str(index)+" of "+str(self))
+                print("This is a runtime logging bug, please report it.")
             assert field.fid in mappings
             inst = mappings[field.fid]
             if inst.is_virtual():
@@ -5107,11 +5087,11 @@ class Operation(object):
                         reduction = self.find_generated_copy_across(src_field, dst_field,
                                       dst_req.logical_node, src_inst, dst_inst, dst_req.redop)
                         if reduction is None:
-                            print "ERROR: Missing reduction across operation from field "+\
-                                  str(src_field)+" to field "+str(dst_field)+" between region "+\
-                                  "requirements "+str(src_index)+" and "+str(dst_index)+" of "+\
-                                  str(self)
-                            if self.state.assert_on_fail:
+                            print("ERROR: Missing reduction across operation from field "+
+                                  str(src_field)+" to field "+str(dst_field)+" between region "+
+                                  "requirements "+str(src_index)+" and "+str(dst_index)+" of "+
+                                  str(self))
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         # Have to fill out the reachable cache
@@ -5120,20 +5100,20 @@ class Operation(object):
                             reduction.get_physical_reachable(reduction.reachable_cache, False)
                         bad = check_preconditions(src_preconditions, reduction)
                         if bad is not None:
-                            print "ERROR: Missing source precondition for reduction across "+\
-                                  "from field "+str(src_field)+" to field "+str(dst_field)+\
-                                  "between region requirements "+str(src_index)+" and "+\
-                                  str(dst_index)+" of "+str(self)
-                            if self.state.assert_on_fail:
+                            print("ERROR: Missing source precondition for reduction across "+
+                                  "from field "+str(src_field)+" to field "+str(dst_field)+
+                                  "between region requirements "+str(src_index)+" and "+
+                                  str(dst_index)+" of "+str(self))
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         bad = check_preconditions(dst_preconditions, reduction)
                         if bad is not None:
-                            print "ERROR: Missing destination precondition for reduction "+\
-                                  "across from field "+str(src_field)+" to field "+\
-                                  str(dst_field)+"between region requirements "+str(src_index)+\
-                                  " and "+str(dst_index)+" of "+str(self)
-                            if self.state.assert_on_fail:
+                            print("ERROR: Missing destination precondition for reduction "+
+                                  "across from field "+str(src_field)+" to field "+
+                                  str(dst_field)+"between region requirements "+str(src_index)+
+                                  " and "+str(dst_index)+" of "+str(self))
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                     else:
@@ -5182,11 +5162,11 @@ class Operation(object):
                         copy = self.find_generated_copy_across(src_field, dst_field,
                                               dst_req.logical_node, src_inst, dst_inst)
                         if copy is None:
-                            print "ERROR: Missing copy across operation from field "+\
-                                  str(src_field)+" to field "+str(dst_field)+" between region "+\
-                                  "requirements "+str(src_index)+" and "+str(dst_index)+" of "+\
-                                  str(self)
-                            if self.state.assert_on_fail:
+                            print("ERROR: Missing copy across operation from field "+
+                                  str(src_field)+" to field "+str(dst_field)+" between region "+
+                                  "requirements "+str(src_index)+" and "+str(dst_index)+" of "+
+                                  str(self))
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         # Have to fill in the copy reachable cache
@@ -5195,19 +5175,19 @@ class Operation(object):
                             copy.get_physical_reachable(copy.reachable_cache, False)
                         bad = check_preconditions(src_preconditions, copy)
                         if bad is not None:
-                            print "ERROR: Missing source precondition for copy across from "+\
-                                  "field "+str(src_field)+" to field "+str(dst_field)+\
-                                  "between region requirements "+str(src_index)+" and "+\
-                                  str(dst_index)+" of "+str(self)
-                            if self.state.assert_on_fail:
+                            print("ERROR: Missing source precondition for copy across from "+
+                                  "field "+str(src_field)+" to field "+str(dst_field)+
+                                  "between region requirements "+str(src_index)+" and "+
+                                  str(dst_index)+" of "+str(self))
+                            if self.state.assert_on_error:
                                 assert False
                             return False
                         bad = check_preconditions(dst_preconditions, copy)
                         if bad is not None:
-                            print "ERROR: Missing destination precondition for copy across "+\
-                                  "from field "+str(src_field)+" to field "+str(dst_field)+\
-                                  "between region requirements "+str(src_index)+" and "+\
-                                  str(dst_index)+" of "+str(self)
+                            print("ERROR: Missing destination precondition for copy across "+
+                                  "from field "+str(src_field)+" to field "+str(dst_field)+
+                                  "between region requirements "+str(src_index)+" and "+
+                                  str(dst_index)+" of "+str(self))
                             return False
                     else:
                         # Otherwise make the copy across and record the dependences
@@ -5254,8 +5234,8 @@ class Operation(object):
             for idx in range(depth):
                 prefix += '  '
             for close in self.inter_close_ops:
-                print prefix+"Performing physical dependence analysis for "+\
-                      str(close)+" generated by "+str(self)
+                print(prefix+"Performing physical dependence analysis for "+
+                      str(close)+" generated by "+str(self))
                 if not close.perform_physical_close_analysis(depth, perform_checks):
                     return False
         # If we are an index space task, only do our points
@@ -5268,8 +5248,8 @@ class Operation(object):
         prefix = ''
         for idx in range(depth):
             prefix += '  '
-        print prefix+"Performing physical dependence analysis "+\
-                     "for %s (UID %d)..." % (str(self),self.uid)
+        print(prefix+"Performing physical dependence analysis "+
+                     "for %s (UID %d)..." % (str(self),self.uid))
         # If this is a close operation itself do the close analysis
         if self.is_close():
             return self.perform_physical_close_analysis(depth, perform_checks)
@@ -5350,9 +5330,9 @@ class Operation(object):
             mappings = self.find_mapping(0, req.parent)
         for field in req.fields:
             if field.fid not in mappings:
-                print "Missing mapping decision for field "+str(field)+" of "+\
-                      "requirement requirement "+str(index)+" of "+str(self)
-                print "This is a runtime logging bug, please report it."
+                print("Missing mapping decision for field "+str(field)+" of "+
+                      "requirement requirement "+str(index)+" of "+str(self))
+                print("This is a runtime logging bug, please report it.")
             assert field.fid in mappings
             inst = mappings[field.fid]
             # If this is a virtual mapping then we can skip it if we
@@ -5374,11 +5354,11 @@ class Operation(object):
                 # Clear out the reachable caches to help the garbage collector
                 copy.reachable_cache = None
             if perform_checks and count > 0:
-                print "WARNING: "+str(self)+" generated "+str(count)+\
-                      " unnecessary Realm copies"
+                print("WARNING: "+str(self)+" generated "+str(count)+
+                      " unnecessary Realm copies")
                 for copy in self.realm_copies:
                     if not copy.analyzed:
-                        print '    '+str(copy)+' was unnecessary'
+                        print('    '+str(copy)+' was unnecessary')
         if self.realm_fills:
             count = 0
             for fill in self.realm_fills:
@@ -5387,11 +5367,11 @@ class Operation(object):
                 # Clear out the reachable caches to help the garbage collector
                 fill.reachable_cache = None
             if perform_checks and count > 0:
-                print "WARNING: "+str(self)+" generated "+str(count)+\
-                      " unnecessary Realm fills"
+                print("WARNING: "+str(self)+" generated "+str(count)+\
+                      " unnecessary Realm fills")
                 for fill in self.realm_fills:
                     if not fill.analyzed:
-                        print '    '+str(fill)+' was unnecessary'
+                        print('    '+str(fill)+' was unnecessary')
 
     def print_op_mapping_decisions(self, depth):
         if self.inter_close_ops:
@@ -5408,26 +5388,26 @@ class Operation(object):
         prefix = ''
         for idx in range(depth):
             prefix += '  '
-        print prefix+'-------------------------------------------------'
-        print prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')'
+        print(prefix+'-------------------------------------------------')
+        print(prefix+' Mapping Decisions for '+str(self)+' (depth='+str(depth)+')')
 
         if self.kind == SINGLE_TASK_KIND and self.task is not None:
-            print prefix+'  Task Mapped to ' + str(self.task.processor)
+            print(prefix+'  Task Mapped to ' + str(self.task.processor))
             assert self.task.variant
-            print prefix+'  Task Variant %d (inner=%s,leaf=%s)' % (self.task.variant.vid,
+            print(prefix+'  Task Variant %d (inner=%s,leaf=%s)' % (self.task.variant.vid,
                     'Yes' if self.task.variant.inner else 'No',
-                    'Yes' if self.task.variant.leaf else 'No')
+                    'Yes' if self.task.variant.leaf else 'No'))
         if self.mappings is not None:
             for index,mappings in self.mappings.iteritems():
                 assert index in self.reqs
                 req = self.reqs[index]
-                print prefix+'  Region Requirement '+str(index)+' Region=('+\
-                    str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')'
+                print(prefix+'  Region Requirement '+str(index)+' Region=('+
+                      str(req.index_node)+','+str(req.field_space)+','+str(req.tid)+')')
                 for fid,inst in mappings.iteritems():
                     field = req.field_space.get_field(fid)
-                    print prefix+'    '+str(field)+': '+str(inst)
-        print prefix+' End '+str(self)+' (depth='+str(depth)+')'
-        print prefix+'-------------------------------------------------'
+                    print(prefix+'    '+str(field)+': '+str(inst))
+        print(prefix+' End '+str(self)+' (depth='+str(depth)+')')
+        print(prefix+'-------------------------------------------------')
         # If we are a single task recurse
         if self.kind == SINGLE_TASK_KIND and self.task is not None:
             self.task.print_task_mapping_decisions()
@@ -5827,9 +5807,9 @@ class Task(object):
         if self.depth == 0:
             assert len(self.operations) == 1
             return True
-        print 'Performing logical dependence analysis for %s...' % str(self)
+        print('Performing logical dependence analysis for %s...' % str(self))
         if self.op.state.verbose:
-            print '  Analyzing %d operations...' % len(self.operations)
+            print('  Analyzing %d operations...' % len(self.operations))
         # See if we have any restrictions that we need to care about
         if self.op.reqs:
             for idx,req in self.op.reqs.iteritems():
@@ -5858,7 +5838,7 @@ class Task(object):
         # We can clear this out now since we don't need them anymore
         self.restrictions = None 
         self.dumb_acquisitions = None
-        print "Pass" if success else "FAIL"
+        print("Pass" if success else "FAIL")
         return success
 
     def check_restricted_coherence(self, op, req):
@@ -5883,8 +5863,8 @@ class Task(object):
 
     def add_acquisition(self, req):
         if not self.restrictions:
-            print "WARNING: Unnecessary acquire in "+str(self)+\
-                  " with no restrictions"
+            print("WARNING: Unnecessary acquire in "+str(self)+
+                  " with no restrictions")
             if not self.dumb_acquisitions:
                 self.dumb_acquisitions = list()
             for field in req.fields:
@@ -5897,7 +5877,7 @@ class Task(object):
                     success = True
                     break
             if not success:
-                print "WARNING: Unnecessary acquire in "+str(self)
+                print("WARNING: Unnecessary acquire in "+str(self))
                 if not self.dumb_acquisitions:
                     self.dumb_acquisitions = list()
                 self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
@@ -5921,8 +5901,8 @@ class Task(object):
                         success = True
                         break
             if not success:
-                print "ERROR: Invalid release operation"
-                if self.op.state.assert_on_fail:
+                print("ERROR: Invalid release operation")
+                if self.op.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -5964,8 +5944,8 @@ class Task(object):
                         success = True
                         break
             if not success:
-                print "ERROR: Illegal detach with no matching restriction" 
-                if self.op.state.assert_on_fail:
+                print("ERROR: Illegal detach with no matching restriction")
+                if self.op.state.assert_on_error:
                     assert False
                 return False
         return True
@@ -5977,7 +5957,7 @@ class Task(object):
         # really tell us what it means if something goes wrong
         if not self.operations or len(self.operations) < 2:
             return True
-        print 'Performing logical sanity analysis for %s...' % str(self)
+        print('Performing logical sanity analysis for %s...' % str(self))
         # Iterate over all operations from 1 to N and check all their
         # dependences against all the previous operations in the context
         for idx in range(1, len(self.operations)):
@@ -5992,19 +5972,19 @@ class Task(object):
             if current_op.kind == FENCE_OP_KIND: # special path for fences
                 for prev in range(idx):
                     if not prev in reachable:
-                        print "ERROR: Failed logical sanity check. No mapping "+\
-                              "dependence between previous "+str(prev)+" and "+\
-                              "later "+str(current_op)
-                        if self.op.state.assert_on_fail:
+                        print("ERROR: Failed logical sanity check. No mapping "+
+                              "dependence between previous "+str(prev)+" and "+
+                              "later "+str(current_op))
+                        if self.op.state.assert_on_error:
                             assert False
                         return False
             else: # The normal path
                 for prev in range(idx):
                     if not current_op.analyze_logical_interference(
                                   self.operations[prev], reachable):
-                        print "FAIL"
+                        print("FAIL")
                         return False
-        print "Pass"
+        print("Pass")
         return True
 
     def record_instance_use(self, inst, fid, node):
@@ -6125,7 +6105,7 @@ class Task(object):
             op.print_dataflow_node(printer)
         # Simplify our graph if necessary
         if simplify_graphs:
-            print "Simplifying dataflow graph for "+str(self)+"..."
+            print("Simplifying dataflow graph for "+str(self)+"...")
             all_ops = list()
             for op in self.operations:
                 # Add any close operations first
@@ -6165,7 +6145,7 @@ class Task(object):
                 for dst in actual_out:
                     printer.println(src.node_name+' -> '+dst.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
-            print "Done"
+            print("Done")
         else:
             previous_pairs = set()
             for op in self.operations:
@@ -6734,7 +6714,7 @@ class Instance(object):
         assert self.creator_regions
         replay_file.write(struct.pack('I',len(self.creator_regions)))
         for region in self.creator_regions:
-            path = deque()         
+            path = collections.deque()
             temp = region
             while temp.parent:
                 path.appendleft(temp.index_space.color)
@@ -6755,7 +6735,7 @@ class FillInstance(object):
         self.field = field
 
     def __str__(self):
-        print "Fill Instance of "+str(self.field)+" at "+str(self.region)
+        return "Fill Instance of "+str(self.field)+" at "+str(self.region)
 
     __repr__ = __str__
       
@@ -6801,14 +6781,14 @@ class FillInstance(object):
                 fill = op.find_generated_fill(dst_field, region, dst)
             if fill is None:
                 if actually_across:
-                    print "ERROR: Unable to find fill across operation generated to "+\
-                          str(dst)+" for field "+str(self.field)+" by "+error_str
-                    if self.state.assert_on_fail:
+                    print("ERROR: Unable to find fill across operation generated to "+
+                          str(dst)+" for field "+str(self.field)+" by "+error_str)
+                    if self.state.assert_on_error:
                         assert False
                 else:
-                    print "ERROR: Unable to find fill operation generated to "+str(dst)+\
-                          " for field "+str(self.field)+" by "+error_str
-                    if self.state.assert_on_fail:
+                    print("ERROR: Unable to find fill operation generated to "+str(dst)+
+                          " for field "+str(self.field)+" by "+error_str)
+                    if self.state.assert_on_error:
                         assert False
                 return False
             if fill.reachable_cache is None:
@@ -6817,16 +6797,16 @@ class FillInstance(object):
             bad = check_preconditions(preconditions, fill)
             if bad is not None:
                 if actually_across:
-                    print "ERROR: Missing fill across precondition to "+str(dst)+\
-                          " for field "+str(self.field)+" issued by "+error_str+\
-                          " on "+str(bad)
-                    if self.state.assert_on_fail:
+                    print("ERROR: Missing fill across precondition to "+str(dst)+
+                          " for field "+str(self.field)+" issued by "+error_str+
+                          " on "+str(bad))
+                    if self.state.assert_on_error:
                         assert False
                 else:
-                    print "ERROR: Missing fill precondition to "+str(dst)+" for fill "+\
-                          "of field "+str(self.field)+" issued by "+error_str+\
-                          " on "+str(bad)
-                    if self.state.assert_on_fail:
+                    print("ERROR: Missing fill precondition to "+str(dst)+" for fill "+
+                          "of field "+str(self.field)+" issued by "+error_str+
+                          " on "+str(bad))
+                    if self.state.assert_on_error:
                         assert False
                 return False
         else:
@@ -7033,16 +7013,16 @@ class CompositeNode(object):
                                                           region, dst)
                         if copy is None:
                             if actually_across:
-                                print "ERROR: Missing intersection copy across from "+\
-                                      "composite instance to update "+str(dst)+\
-                                      " for field "+str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing intersection copy across from "+
+                                      "composite instance to update "+str(dst)+
+                                      " for field "+str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing intersection copy from "+\
-                                      "composite instance to update "+str(dst)+\
-                                      " for field "+str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing intersection copy from "+
+                                      "composite instance to update "+str(dst)+
+                                      " for field "+str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                         src = copy.find_src_inst(self.owner.field)
@@ -7062,42 +7042,42 @@ class CompositeNode(object):
                         bad = check_preconditions(src_preconditions, copy)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing source precondition on "+\
-                                      str(bad)+" for "+str(copy)+" across from "+\
-                                      "composite instance to update "+str(dst)+\
-                                      " for field "+str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing source precondition on "+
+                                      str(bad)+" for "+str(copy)+" across from "+
+                                      "composite instance to update "+str(dst)+
+                                      " for field "+str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing source precondition on "+\
-                                      str(bad)+" for "+str(copy)+" from composite "+\
-                                      "instance to update "+str(dst)+" for field "+\
-                                      str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing source precondition on "+
+                                      str(bad)+" for "+str(copy)+" from composite "+
+                                      "instance to update "+str(dst)+" for field "+
+                                      str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                         bad = check_preconditions(dst_preconditions, copy)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing destination precondition on "+\
-                                      str(bad)+" for "+str(copy)+"  across from "+\
-                                      "composite instance to update "+str(dst)+\
-                                      " for field "+str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing destination precondition on "+
+                                      str(bad)+" for "+str(copy)+"  across from "+
+                                      "composite instance to update "+str(dst)+
+                                      " for field "+str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing destination precondition on "+\
-                                      str(bad)+" for "+str(copy)+" from composite "+\
-                                      "instance to update "+str(dst)+" for field "+\
-                                      str(dst_field)+" by "+error_str
-                                if self.owner.state.assert_on_fail:
+                                print("ERROR: Missing destination precondition on "+
+                                      str(bad)+" for "+str(copy)+" from composite "+
+                                      "instance to update "+str(dst)+" for field "+
+                                      str(dst_field)+" by "+error_str)
+                                if self.owner.state.assert_on_error:
                                     assert False
                             return False
                     else:
                         # Figure out which instance to copy from
                         if len(local_valid) > 1:
-                            print "INFO: Multiple valid instances to choose from in "+\
-                                  "composite instance... picking one"
+                            print("INFO: Multiple valid instances to choose from in "+
+                                  "composite instance... picking one")
                         src = next(iter(local_valid))
                         if self.node is not region:
                             src_preconditions = src.find_copy_dependences(
@@ -7159,7 +7139,7 @@ class CompositeInstance(object):
         self.captured = set()
 
     def __str__(self):
-        print "Composite Instance of "+str(self.field)+" at "+str(self.root)
+        return "Composite Instance of "+str(self.field)+" at "+str(self.root)
 
     __repr__ = __str__
 
@@ -7240,10 +7220,10 @@ class CompositeInstance(object):
         if self.nodes[self.root].need_temporary_instance(dst, region) or \
             temp_inst is not None:
             if temp_inst is None:
-                print "ERROR: Missing temporary instance creation for "+\
-                      str(self.field)+" of target instance "+str(dst)+\
-                      " by "+error_str
-                if self.state.assert_on_fail:
+                print("ERROR: Missing temporary instance creation for "+
+                      str(self.field)+" of target instance "+str(dst)+
+                      " by "+error_str)
+                if self.state.assert_on_error:
                     assert False
                 return False
             # Issue the copies to the temporary instance and then
@@ -7255,10 +7235,10 @@ class CompositeInstance(object):
             if perform_checks:
                 copy = op.find_generated_copy(self.field, region, dst, 0)
                 if copy is None:
-                    print "ERROR: Missing copy from temporary instance "+\
-                          str(temp_inst)+" to "+str(dst)+" for "+str(self.field)+\
-                          " by "+error_str
-                    if self.state.assert_on_fail:
+                    print("ERROR: Missing copy from temporary instance "+
+                          str(temp_inst)+" to "+str(dst)+" for "+str(self.field)+
+                          " by "+error_str)
+                    if self.state.assert_on_error:
                         assert False
                     return False
                 # Fill in the reachable cache
@@ -7271,10 +7251,10 @@ class CompositeInstance(object):
                     reading=True, redop=0, precise=True)
                 bad = check_preconditions(src_preconditions, copy)
                 if bad is not None:
-                    print "ERROR: Missing source copy precondition for temporary "+\
-                          "instance copy "+str(copy)+" of field "+str(self.field)+\
-                          " issued by "+error_str+" on "+str(bad)
-                    if self.state.assert_on_fail:
+                    print("ERROR: Missing source copy precondition for temporary "+
+                          "instance copy "+str(copy)+" of field "+str(self.field)+
+                          " issued by "+error_str+" on "+str(bad))
+                    if self.state.assert_on_error:
                         assert False
                     return False
                 dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
@@ -7282,10 +7262,10 @@ class CompositeInstance(object):
                     reading=False, redop=0, precise=True)
                 bad = check_preconditions(dst_preconditions, copy)
                 if bad is not None:
-                    print "ERROR: Missing destination precondition for temporary "+\
-                          "instance copy "+str(copy)+" of field "+str(self.field)+\
-                          " issued by "+error_str+" on "+str(bad)
-                    if self.state.assert_on_fail:
+                    print("ERROR: Missing destination precondition for temporary "+
+                          "instance copy "+str(copy)+" of field "+str(self.field)+
+                          " issued by "+error_str+" on "+str(bad))
+                    if self.state.assert_on_error:
                         assert False
                     return False
             else:
@@ -7339,16 +7319,16 @@ class CompositeInstance(object):
                                           reduction_inst.redop)
                         if reduction is None:
                             if actually_across:
-                                print "ERROR: Missing reduction across copy operation "+\
-                                      "from composite instance to update "+str(dst)+\
-                                      " for field "+str(self.field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing reduction across copy operation "+
+                                      "from composite instance to update "+str(dst)+
+                                      " for field "+str(self.field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing reduction copy operation from "+\
-                                      "composite instance to update "+str(dst)+" for "+\
-                                      "field "+str(self.field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing reduction copy operation from "+
+                                      "composite instance to update "+str(dst)+" for "+
+                                      "field "+str(self.field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7368,16 +7348,16 @@ class CompositeInstance(object):
                         bad = check_preconditions(src_preconditions, reduction)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing source reduction precondition for "+\
-                                      "reduction across from composite instance to "+\
-                                      str(dst)+" for field "+str(self.field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing source reduction precondition for "+
+                                      "reduction across from composite instance to "+
+                                      str(dst)+" for field "+str(self.field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing source reduction precondition for "+\
-                                      "reduction from composite instance to "+str(dst)+\
-                                      "for field "+str(self.field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing source reduction precondition for "+
+                                      "reduction from composite instance to "+str(dst)+
+                                      "for field "+str(self.field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7393,16 +7373,16 @@ class CompositeInstance(object):
                         bad = check_preconditions(dst_preconditions, reduction)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing destination reduction precondition "+\
-                                      "for reduction across from composite instance to "+\
-                                      str(dst)+" for field "+str(dst_field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing destination reduction precondition "+
+                                      "for reduction across from composite instance to "+
+                                      str(dst)+" for field "+str(dst_field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             else:
-                                print "ERROR: Missing destination reduction precondition "+\
-                                      "for reduction from composite instance to "+str(dst)+\
-                                      "for field "+str(dst_field)+" by "+error_str
-                                if self.state.assert_on_fail:
+                                print("ERROR: Missing destination reduction precondition "+
+                                      "for reduction from composite instance to "+str(dst)+
+                                      "for field "+str(dst_field)+" by "+error_str)
+                                if self.state.assert_on_error:
                                     assert False
                             return False
                         if reduction_region is not region:
@@ -7544,39 +7524,39 @@ class Event(object):
             return
         # This is an untriggered user event, report it
         if self.ap_user_event:
-            print "WARNING: "+str(self)+" is an untriggered application user event"
-            if self.node.state.assert_on_fail:
+            print("WARNING: "+str(self)+" is an untriggered application user event")
+            if self.node.state.assert_on_warning:
                 assert False
         else:
-            print "WARNING: "+str(self)+" is an untriggered runtime user event"
-            if self.node.state.assert_on_fail:
+            print("WARNING: "+str(self)+" is an untriggered runtime user event")
+            if self.node.state.assert_on_warning:
                 assert False
-        print "  Incoming:"
+        print("  Incoming:")
         if self.incoming:
             for ev in self.incoming:
-                print "    "+str(ev)
+                print("    "+str(ev))
         if self.incoming_ops:
             for op in self.incoming_ops:
-                print "    "+str(op)
+                print("    "+str(op))
         if self.incoming_copies:
             for copy in self.incoming_copies:
-                print "    "+str(copy)
+                print("    "+str(copy))
         if self.incoming_fills:
             for fill in self.incoming_fills:
-                print "    "+str(fill)
-        print "  Outgoing:"
+                print("    "+str(fill))
+        print("  Outgoing:")
         if self.outgoing:
             for ev in self.outgoing:
-                print "    "+str(ev)
+                print("    "+str(ev))
         if self.outgoing_ops:
             for op in self.outgoing_ops:
-                print "    "+str(op)
+                print("    "+str(op))
         if self.outgoing_copies:
             for copy in self.outgoing_copies:
-                print "    "+str(copy)
+                print("    "+str(copy))
         if self.outgoing_fills:
             for fill in self.outgoing_fills:
-                print "    "+str(fill)
+                print("    "+str(fill))
 
     def add_incoming(self, prev):
         if self.incoming is None:
@@ -7691,11 +7671,11 @@ class RealmBase(object):
         def traverse_node(node, traverser):
             if node is traverser.origin:
                 traverser.cycle = True
-                print "WARNING: CYCLE DETECTED!"
+                print("WARNING: CYCLE DETECTED!")
                 for n in traverser.stack:
-                    print str(n)
-                print str(node)
-                if self.state.assert_on_fail:
+                    print(str(n))
+                print(str(node))
+                if self.state.assert_on_warning:
                     assert False
                 return False
             if traverser.cycle:
@@ -8129,19 +8109,19 @@ class GraphPrinter(object):
         pdf_file = self.name+".pdf"
         try:
             if simplify:
-                print "Simpliyfing dot file "+dot_file+" with tred..."
+                print("Simpliyfing dot file "+dot_file+" with tred...")
                 tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
-                print "Done"
-                print "Invoking dot to generate file "+pdf_file+"..."
+                print("Done")
+                print("Invoking dot to generate file "+pdf_file+"...")
                 dot = subprocess.Popen(['dot', '-Tpdf', '-o', pdf_file], stdin=tred.stdout)
-                print "Done"
+                print("Done")
                 if dot.wait() != 0:
                     raise Exception('DOT failed')
             else:
-                print "Invoking dot to generate file "+pdf_file+"..."
+                print("Invoking dot to generate file "+pdf_file+"...")
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
-            print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
+            print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def up(self):
@@ -9088,11 +9068,12 @@ class State(object):
                  'instances', 'events', 'copies', 'fills', 'phase_barriers', 
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 
                  'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_fail']
-    def __init__(self, verbose, details, fail):
+                 'assert_on_error', 'assert_on_warning']
+    def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.verbose = verbose
         self.detailed_graphs = details
-        self.assert_on_fail = fail
+        self.assert_on_error = assert_on_error
+        self.assert_on_warning = assert_on_warning
         self.top_level_uid = None
         self.traverser_gen = 1
         # Machine things
@@ -9135,12 +9116,12 @@ class State(object):
         return result
 
     def parse_log_file(self, file_name):
-        print 'Reading log file %s...' % file_name
+        print('Reading log file %s...' % file_name)
         try:
             log = open(file_name, 'r')
         except:
-            print 'ERROR: Unable to find file '+file_name
-            print 'Legion Spy will now exit'
+            print('ERROR: Unable to find file '+file_name)
+            print('Legion Spy will now exit')
             sys.exit(1)
         matches = 0
         skipped = 0
@@ -9151,24 +9132,24 @@ class State(object):
                 skipped += 1
                 # always print a skipped line if it looks like it should have been matched
                 if self.verbose or (prefix_pat.match(line) is not None):
-                    print 'Skipping line: ' + line.strip()
+                    print('Skipping line: ' + line.strip())
         log.close()
         if matches == 0:
-            print 'WARNING: file %s contained no valid lines!' % file_name
+            print('WARNING: file %s contained no valid lines!' % file_name)
             # FIXME: This causes trouble on tests that do not produce
             # Legion Spy output---usually because they don't actually
             # run anything. We should check this but for now turn it off.
 
-            # if self.assert_on_fail:
+            # if self.assert_on_warning:
             #     assert False
         if self.verbose:
-            print 'Matched %d lines in %s' % (matches,file_name)
+            print('Matched %d lines in %s' % (matches,file_name))
         if skipped > 0:
-            print 'WARNING: Skipped %d lines when reading %s' % (skipped,file_name)
+            print('WARNING: Skipped %d lines when reading %s' % (skipped,file_name))
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
-        print 'Reducing top-level index space shapes...'
+        print('Reducing top-level index space shapes...')
         # Have to do the same sets across all index spaces
         # with the same dimensions in case of copy across
         dim_sets = dict()
@@ -9183,7 +9164,7 @@ class State(object):
                 point_value += 1
                 for index in index_set:
                     index.add_refined_point(point)
-        print 'Done'
+        print('Done')
         # Find the top-level index spaces
         num_index_trees = 0
         for space in self.index_spaces.itervalues():
@@ -9223,9 +9204,9 @@ class State(object):
                 unknown = op
                 break
         if unknown is not None:
-            print 'WARNING: operation %d has unknown operation kind!' % op.uid 
+            print('WARNING: operation %d has unknown operation kind!' % op.uid)
             # FIXME: This fails on dynamic collectives.
-            # if self.assert_on_fail:
+            # if self.assert_on_warning:
             #     assert False
         # If we have any phase barriers, mark all the events of the phase barrier
         if self.phase_barriers is not None:
@@ -9258,24 +9239,24 @@ class State(object):
             if need_physical and simplify_graphs:
                 self.simplify_physical_graph()
         if self.verbose:
-            print "Found %d processors" % len(self.processors)
-            print "Found %d memories" % len(self.memories)
-            print ""
-            print "Found %d index space trees" % num_index_trees
-            print "Found %d field spaces" % len(self.field_spaces)
-            print "Found %d region trees" % len(self.trees)
-            print ""
-            print "Found %d tasks" % len(self.tasks)
-            print "Found %d operations (including tasks)" % len(self.ops)
-            print ""
-            print "Found %d instances" % len(self.instances)
-            print "Found %d events" % len(self.events)
-            print "Found %d copies" % len(self.copies)
-            print "Found %d fills" % len(self.fills)
+            print("Found %d processors" % len(self.processors))
+            print("Found %d memories" % len(self.memories))
+            print("")
+            print("Found %d index space trees" % num_index_trees)
+            print("Found %d field spaces" % len(self.field_spaces))
+            print("Found %d region trees" % len(self.trees))
+            print("")
+            print("Found %d tasks" % len(self.tasks))
+            print("Found %d operations (including tasks)" % len(self.ops))
+            print("")
+            print("Found %d instances" % len(self.instances))
+            print("Found %d events" % len(self.events))
+            print("Found %d copies" % len(self.copies))
+            print("Found %d fills" % len(self.fills))
         return logical_enabled,physical_enabled
 
     def simplify_physical_graph(self, need_cycle_check=True):
-        print "Simplifying event graph..."
+        print("Simplifying event graph...")
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
         #
@@ -9284,9 +9265,9 @@ class State(object):
         # of the full event graph
         #
         #if need_cycle_check and self.perform_cycle_checks(print_result=False):
-        #    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
-        #    print "  This usually indicates a runtime bug and should be reported."
-        #    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+        #    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+        #    print("  This usually indicates a runtime bug and should be reported.")
+        #    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
         #    return
         def traverse_node(node, traverser):
             if node not in traverser.order:
@@ -9311,7 +9292,7 @@ class State(object):
         count = 0;
         for src in topological_sorter.order:
             if self.verbose:
-                print 'Simplifying node %d of %d' % (count, len(topological_sorter.order))
+                print('Simplifying node %d of %d' % (count, len(topological_sorter.order)))
                 count += 1
             if src.physical_outgoing is None:
                 continue
@@ -9322,10 +9303,10 @@ class State(object):
                     continue
                 reachable = set()
                 if next_vert.get_physical_reachable(reachable, True, next_vert, True):
-                    print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
-                    print "  This usually indicates a runtime bug and should be reported."
-                    print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
-                    if self.assert_on_fail:
+                    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+                    print("  This usually indicates a runtime bug and should be reported.")
+                    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
+                    if self.assert_on_warning:
                         assert False
                     return
                 # See which edges we can remove
@@ -9344,7 +9325,7 @@ class State(object):
                 del to_remove
             if diff:
                 src.physical_outgoing = actual_out
-        print "Done"
+        print("Done")
 
     def alias_points(self, p1, p2):
         # These two tasks are aliased so merge them together 
@@ -9374,9 +9355,9 @@ class State(object):
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
         if not top_task.perform_task_physical_analysis(perform_checks):
-            print "FAIL"
+            print("FAIL")
             return
-        print "Pass"
+        print("Pass")
         #if sanity_checks:
             # Run dataflow checks
 
@@ -9393,7 +9374,7 @@ class State(object):
             if fill.perform_cycle_check():
                 return True
         if print_result:
-            print "No cycles detected"
+            print("No cycles detected")
         return False
 
     def perform_user_event_leak_checks(self):
@@ -9436,7 +9417,7 @@ class State(object):
         for task in self.tasks.itervalues():
             total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs)
         if self.verbose:
-            print "Made "+str(total_dataflow_graphs)+" dataflow graphs"
+            print("Made "+str(total_dataflow_graphs)+" dataflow graphs")
 
     def make_event_graph(self, path):
         # we print these recursively so we can see the hierarchy
@@ -9454,7 +9435,7 @@ class State(object):
 
     def make_replay_file(self):
         file_name = 'legion.rp'
-        print 'Emitting replay file '+file_name
+        print('Emitting replay file '+file_name)
         replay_file = open(file_name,'wb')  
         # Write out processors
         replay_file.write(struct.pack('I',len(self.processors)))
@@ -9536,14 +9517,14 @@ class State(object):
             if inst.is_virtual():
                 continue
             if inst.redop > 0:
-                print str(inst)+' (Reduction Op '+str(inst.redop)+')'
+                print(str(inst)+' (Reduction Op '+str(inst.redop)+')')
             else:
-                print str(inst)
-            print '  Memory '+str(inst.memory)
-            print '  '+str(inst.region)
-            print '  Fields:'
+                print(str(inst))
+            print('  Memory '+str(inst.memory))
+            print('  '+str(inst.region))
+            print('  Fields:')
             for field in inst.fields:
-                print '    '+str(field)
+                print('    '+str(field))
 
     def print_mapping_decisions(self):
         assert self.top_level_uid is not None
@@ -9718,30 +9699,6 @@ class State(object):
         # Definitely run the garbage collector here
         gc.collect()
 
-def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -t -y -z -s -w -k -u -v -a -g] "+\
-          "<file_name(s)>+"
-    print "  -l : perform logical checks"
-    print "  -p : perform physical checks"
-    print "  -c : check for cycles"
-    print "  -r : make region tree graphs"
-    print "  -m : make machine graphs"
-    print "  -d : make dataflow graphs"
-    print "  -e : make event graphs"
-    print "  -i : print instance descriptions"
-    print "  -q : print mapping decisions"
-    print "  -t : print index and region trees"
-    print "  -y : generate mapper replay file"
-    print "  -z : add extra detail to graphs"
-    print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
-    print "  -w : perform user event leak check"
-    print "  -k : keep temporary files"
-    print "  -u : keep graphs unsimplified (maintains all redundant edges)"
-    print "  -v : verbose"
-    print "  -a : assert on analysis failure (useful for self-debugging)"
-    print "  -g : test computational geometry"
-    sys.exit(1)
-
 def generate_random_intersecting_rects(dim, max_size):
     lo1 = Point(dim)
     hi1 = Point(dim)
@@ -9760,11 +9717,11 @@ def generate_random_intersecting_rects(dim, max_size):
     return Rect(lo1,hi1),Rect(lo2,hi2)
 
 def print_bad_geometry_result(dim, first, second, result):
-    print '  First rectangle: '+str(first)
-    print '  Second rectangle: '+str(second)
-    print '  Result rectangles:'
+    print('  First rectangle: '+str(first))
+    print('  Second rectangle: '+str(second))
+    print('  Result rectangles:')
     for rect in result.rects:
-        print '    '+str(rect)
+        print('    '+str(rect))
 
 def perform_geometry_test(dim, max_size=100):
     assert dim >= 1
@@ -9779,7 +9736,7 @@ def perform_geometry_test(dim, max_size=100):
         if second_rect.contains_point(point):
             for rect in result.rects:
                 if rect.contains_point(point):
-                    print 'Point '+str(point)+' should have been removed'
+                    print('Point '+str(point)+' should have been removed')
                     print_bad_geometry_result(dim, first_rect, second_rect, result)
                     return False
         else:
@@ -9790,18 +9747,18 @@ def perform_geometry_test(dim, max_size=100):
                     if contain_rect is None:
                         contain_rect = rect
                     else:
-                        print 'Point '+str(point)+' in duplicate result rectangles'
+                        print('Point '+str(point)+' in duplicate result rectangles')
                         print_bad_geometry_result(dim, first_rect, second_rect, result)
                         return False
             if contain_rect is None:
-                print 'Point '+str(point)+' not in result rectangles'
+                print('Point '+str(point)+' not in result rectangles')
                 print_bad_geometry_result(dim, first_rect, second_rect, result)
                 return False
     actual_points = 0
     for rect in result.rects:
         actual_points += rect.volume()
     if actual_points != total_points:
-        print "Point total mismatch! exp="+str(total_points)+" != act="+str(actual_points)
+        print("Point total mismatch! exp="+str(total_points)+" != act="+str(actual_points))
         print_bad_geometry_result(dim, first_rect, second_rect, result)
         return False
     return True
@@ -9809,9 +9766,9 @@ def perform_geometry_test(dim, max_size=100):
 def run_geometry_tests(num_tests=10000):
     success = True
     for dim in range(1,4):
-        print "Testing dimension... "+str(dim)
+        print("Testing dimension... "+str(dim))
         for i in range(num_tests):
-            print '  Running test '+str(i)
+            print('  Running test '+str(i))
             success = perform_geometry_test(dim)
             if not success:
                 break
@@ -9820,153 +9777,157 @@ def run_geometry_tests(num_tests=10000):
     return success
 
 def main(temp_dir):
-    if len(sys.argv) < 2:
-        usage()
-    try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeiqtsyzkuvagw')
-    except GetoptError as err:
-        print "ERROR: "+str(err)
-        sys.exit(1)
-    opts = dict(opts)
-    file_names = args
+    parser = argparse.ArgumentParser(
+        description='Legion Spy runtime analysis and verification')
+    parser.add_argument(
+        '-l', '--logical', dest='logical_checks', action='store_true',
+        help='check logical analysis')
+    parser.add_argument(
+        '-p', '--physical', dest='physical_checks', action='store_true',
+        help='check physical analysis')
+    parser.add_argument(
+        '-c', '--cycle', dest='cycle_checks', action='store_true',
+        help='check for cycles')
+    parser.add_argument(
+        '-s', '--sanity', dest='sanity_checks', action='store_true',
+        help='check basic properties of the dataflow and event graphs')
+    parser.add_argument(
+        '-w', '--leaks', dest='user_event_leaks', action='store_true',
+        help='check for user event leaks')
+    parser.add_argument(
+        '-g', '--geometry', dest='test_geometry', action='store_true',
+        help='check computational geometry')
+    parser.add_argument(
+        '-r', '--region', dest='region_tree_graphs', action='store_true',
+        help='draw region tree graphs')
+    parser.add_argument(
+        '-m', '--machine', dest='machine_graphs', action='store_true',
+        help='draw machine graphs')
+    parser.add_argument(
+        '-d', '--dataflow', dest='dataflow_graphs', action='store_true',
+        help='draw logical dataflow graphs')
+    parser.add_argument(
+        '-e', '--event', dest='event_graphs', action='store_true',
+        help='draw physical event graphs')
+    parser.add_argument(
+        '-z', '--detail', dest='detailed_graphs', action='store_true',
+        help='include extra detail (such as field names) in graphs')
+    parser.add_argument(
+        '-u', '--unsimplified', dest='simplify_graphs',
+        action='store_false', # Note that this defaults to true
+        help='keep redundant edges in graphs')
+    parser.add_argument(
+        '-i', '--instance', dest='instance_descriptions', action='store_true',
+        help='print instance descriptions')
+    parser.add_argument(
+        '-q', '--mapping', dest='mapping_decisions', action='store_true',
+        help='print mapping decisions')
+    parser.add_argument(
+        '-t', '--trees', dest='print_trees', action='store_true',
+        help='print index and region trees')
+    parser.add_argument(
+        '-y', '--replay', dest='replay_file', action='store_true',
+        help='generate mapper replay file')
+    parser.add_argument(
+        '-k', '--temporaries', dest='keep_temp_files', action='store_true',
+        help='keep temporary generated files')
+    parser.add_argument(
+        '-v', '--verbose', dest='verbose', action='store_true',
+        help='verbose output')
+    parser.add_argument(
+        '-a', '--assert-error', dest='assert_on_error', action='store_true',
+        help='assert on errors')
+    parser.add_argument(
+        '--assert-warning', dest='assert_on_warning', action='store_true',
+        help='assert on warnings (implies -a)')
+    parser.add_argument(
+        dest='filenames', action='append',
+        help='input legion spy log filenames')
+    args = parser.parse_args()
 
-    logical_checks = False
-    physical_checks = False
-    cycle_checks = False
-    region_tree_graphs = False
-    machine_graphs = False
-    dataflow_graphs = False
-    event_graphs = False
-    instance_descriptions = False
-    mapping_decisions = False
-    print_trees = False
-    replay_file = False
-    detailed_graphs = False
-    sanity_checks = False
-    user_event_leaks = False
-    keep_temp_files = False
-    simplify_graphs = True # Note that this defaults to true
-    verbose = False
-    assert_on_fail = False
-    test_geometry = False
-    for opt in opts:
-        if opt == '-l':
-            logical_checks = True
-            continue
-        if opt == '-p':
-            physical_checks = True
-            continue
-        if opt == '-c':
-            cycle_checks = True
-        if opt == '-r':
-            region_tree_graphs = True
-            continue
-        if opt == '-m':
-            machine_graphs = True
-            continue
-        if opt == '-d':
-            dataflow_graphs = True
-            continue
-        if opt == '-e':
-            event_graphs = True
-            continue;
-        if opt == '-i':
-            instance_descriptions = True
-            continue
-        if opt == '-q':
-            mapping_decisions = True
-            continue
-        if opt == '-t':
-            print_trees = True
-            continue
-        if opt == '-y':
-            replay_file = True
-            continue
-        if opt == '-z':
-            detailed_graphs = True
-            continue
-        if opt == '-s':
-            sanity_checks = True
-            continue
-        if opt == '-w':
-            user_event_leaks = True
-            continue
-        if opt == '-k':
-            keep_temp_files = True
-            continue
-        if opt == '-u':
-            simplify_graphs = False
-            continue
-        if opt == '-v':
-            verbose = True
-            continue
-        if opt == '-a':
-            assert_on_fail = True
-            continue
-        if opt == '-g':
-            test_geometry = True
-            continue
+    file_names = args.filenames
+
+    logical_checks = args.logical_checks
+    physical_checks = args.physical_checks
+    cycle_checks = args.cycle_checks
+    region_tree_graphs = args.region_tree_graphs
+    machine_graphs = args.machine_graphs
+    dataflow_graphs = args.dataflow_graphs
+    event_graphs = args.event_graphs
+    instance_descriptions = args.instance_descriptions
+    mapping_decisions = args.mapping_decisions
+    print_trees = args.print_trees
+    replay_file = args.replay_file
+    detailed_graphs = args.detailed_graphs
+    sanity_checks = args.sanity_checks
+    user_event_leaks = args.user_event_leaks
+    keep_temp_files = args.keep_temp_files
+    simplify_graphs = args.simplify_graphs
+    verbose = args.verbose
+    assert_on_error = args.assert_on_error or args.assert_on_warning
+    assert_on_warning = args.assert_on_warning
+    test_geometry = args.test_geometry
 
     if test_geometry:
         run_geometry_tests()
 
-    state = State(verbose, detailed_graphs, assert_on_fail)
+    state = State(verbose, detailed_graphs, assert_on_error, assert_on_warning)
     total_matches = 0 
     for file_name in file_names:
         total_matches += state.parse_log_file(file_name)
     if verbose:
-        print 'Matched %d lines across all files.' % total_matches
+        print('Matched %d lines across all files.' % total_matches)
     if total_matches == 0:
-        print 'No matches found! Exiting...'
+        print('No matches found! Exiting...')
         return
     logical_enabled,physical_enabled = state.post_parse(simplify_graphs, 
                                           physical_checks or event_graphs)
     if logical_checks and not logical_enabled:
-        print "WARNING: Requested logical analysis but logging information is "+\
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
-              "validation of the runtime. Disabling logical checks."
+        print("WARNING: Requested logical analysis but logging information is "+
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "validation of the runtime. Disabling logical checks.")
         # FIXME: This is check is buggy (logical_enabled will be false
         # if the top-level task does not launch any suboperations), so
         # skip the asser it if is false.
 
-        # if state.assert_on_fail:
+        # if state.assert_on_warning:
         #     assert False
         logical_checks = False
     if physical_checks and not physical_enabled:
-        print "WARNING: Requested physical analysis but logging information is "+\
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
-              "validation of the runtime. Disabling physical checks."
-        if state.assert_on_fail:
+        print("WARNING: Requested physical analysis but logging information is "+
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "validation of the runtime. Disabling physical checks.")
+        if state.assert_on_warning:
             assert False
         physical_checks = False
     if logical_checks and sanity_checks and not logical_enabled:
-        print "WARNING: Requested sanity checks for logical analysis but "+\
-              "logging information of logical analysis is missing. Please "+\
-              "compile the runtime with -DLEGION_SPY to enable validation "+\
-              "of the runtime. Disabling sanity checks."
-        if state.assert_on_fail:
+        print("WARNING: Requested sanity checks for logical analysis but "+
+              "logging information of logical analysis is missing. Please "+
+              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "of the runtime. Disabling sanity checks.")
+        if state.assert_on_warning:
             assert False
         sanity_checks = False
     if physical_checks and sanity_checks and not physical_enabled:
-        print "WARNING: Requested sanity checks for physical analysis but "+\
-              "logging information of logical analysis is missing. Please "+\
-              "compile the runtime with -DLEGION_SPY to enable validation "+\
-              "of the runtime. Disabling sanity checks."
-        if state.assert_on_fail:
+        print("WARNING: Requested sanity checks for physical analysis but "+
+              "logging information of logical analysis is missing. Please "+
+              "compile the runtime with -DLEGION_SPY to enable validation "+
+              "of the runtime. Disabling sanity checks.")
+        if state.assert_on_warning:
             assert False
         sanity_checks = False
     if cycle_checks and not physical_enabled:
-        print "WARNING: Requested cycle checks but logging information is "+\
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
-              "validation of the runtime. Disabling cycle checks."
-        if state.assert_on_fail:
+        print("WARNING: Requested cycle checks but logging information is "+
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "validation of the runtime. Disabling cycle checks.")
+        if state.assert_on_warning:
             assert False
         cycle_checks = False
     if user_event_leaks and not physical_enabled:
-        print "WARNING: Requested user event leak checks but logging information "+\
-              "is missing. Please compile the runtime with -DLEGION_SPY to enable "+\
-              "validation of the runtime. Disabling user event leak checks."
-        if state.assert_on_fail:
+        print("WARNING: Requested user event leak checks but logging information "+
+              "is missing. Please compile the runtime with -DLEGION_SPY to enable "+
+              "validation of the runtime. Disabling user event leak checks.")
+        if state.assert_on_warning:
             assert False
         user_event_leaks = False
     # If we are doing logical checks or the user asked for the dataflow
@@ -9974,44 +9935,44 @@ def main(temp_dir):
     need_logical = dataflow_graphs and not logical_enabled
     if logical_checks or need_logical:
         if need_logical:
-            print "INFO: No logical dependence data was found so we are running "+\
-                  "logical analysis to show the dataflow graphs that the runtime "+\
-                  "should compute. These are not the actual dataflow graphs computed."
-        print "Performing logical analysis..."
+            print("INFO: No logical dependence data was found so we are running "+
+                  "logical analysis to show the dataflow graphs that the runtime "+
+                  "should compute. These are not the actual dataflow graphs computed.")
+        print("Performing logical analysis...")
         state.perform_logical_analysis(logical_checks, sanity_checks)
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
     need_physical = event_graphs and not physical_enabled
     if physical_checks or need_physical:
         if need_physical:
-            print "INFO: No physical dependence data was found so we are running "+\
-                  "physical analysis to show the event graph that the runtime "+\
-                  "should compute. This is not the actual event graph computed."
-        print "Performing physical analysis..."
+            print("INFO: No physical dependence data was found so we are running "+
+                  "physical analysis to show the event graph that the runtime "+
+                  "should compute. This is not the actual event graph computed.")
+        print("Performing physical analysis...")
         state.perform_physical_analysis(physical_checks, sanity_checks)
         # If we generated the graph for printing, then simplify it 
         if need_physical:
             state.simplify_physical_graph(need_cycle_check=False)
     if cycle_checks:
-        print "Performing cycle checks..."
+        print("Performing cycle checks...")
         state.perform_cycle_checks()
     if user_event_leaks:
-        print "Performing user event leak checks..."
+        print("Performing user event leak checks...")
         state.perform_user_event_leak_checks()
     if region_tree_graphs:
-        print "Making region tree graphs..."
+        print("Making region tree graphs...")
         state.make_region_tree_graphs(temp_dir, False)
     if machine_graphs:
-        print "Making machine graphs..."
+        print("Making machine graphs...")
         state.make_machine_graphs(temp_dir)
     if dataflow_graphs:
-        print "Making dataflow graphs..."
+        print("Making dataflow graphs...")
         state.make_dataflow_graphs(temp_dir, simplify_graphs)
     if event_graphs:
-        print "Making event graphs..."
+        print("Making event graphs...")
         state.make_event_graph(temp_dir)
     if replay_file:
-        print "Generating mapper replay file..."
+        print("Generating mapper replay file...")
         state.make_replay_file()
     if instance_descriptions:
         state.print_instance_descriptions()
@@ -10020,12 +9981,12 @@ def main(temp_dir):
     if print_trees:
         state.print_trees()
 
-    print 'Legion Spy analysis complete.  Exiting...'
+    print('Legion Spy analysis complete.  Exiting...')
     if keep_temp_files:
         try:
             subprocess.check_call('cp '+temp_dir+'* .',shell=True)
         except:
-            print 'WARNING: Unable to copy temporary files into current directory'
+            print('WARNING: Unable to copy temporary files into current directory')
 
 if __name__ == "__main__":
     temp_dir = tempfile.mkdtemp()+'/'

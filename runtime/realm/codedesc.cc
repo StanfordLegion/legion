@@ -272,9 +272,11 @@ namespace Realm {
     const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
     for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
 	it != impls.end();
-	it++)
-      if(can_translate(typeid(**it), target_impl_type))
+	it++) {
+      CodeImplementation &impl = **it;
+      if(can_translate(typeid(impl), target_impl_type))
 	return true;
+    }
 
     return false;
   }
@@ -286,9 +288,11 @@ namespace Realm {
     const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
     for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
 	it != impls.end();
-	it++)
-      if(can_translate(typeid(**it), target_impl_type))
+	it++) {
+      CodeImplementation &impl = **it;
+      if(can_translate(typeid(impl), target_impl_type))
 	return translate(*it, target_impl_type);
+    }
 
     return 0;
   }
