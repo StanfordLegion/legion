@@ -52,7 +52,15 @@ variables:
 # These commands will run before each job.
 before_script:
   - uname -a
-  - export THREADS=$(nproc --all)
+  - |
+    if [[ "$(uname)" = "Linux" ]]; then
+      export THREADS=$(nproc --all)
+    elif [[ "$(uname)" = "Darwin" ]]; then
+      export THREADS=$(sysctl -n hw.ncpu)
+    else
+      echo "Unknown platform. Setting THREADS to 1."
+      export THREADS=1
+    fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
