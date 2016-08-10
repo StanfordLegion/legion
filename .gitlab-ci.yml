@@ -66,6 +66,17 @@ before_script:
     fi
 
 ###
+### Tags
+###
+
+.linux: &linux
+  tags:
+    - linux
+.macos: &macos
+  tags:
+    - macos
+
+###
 ### Docker Image
 ###
 
@@ -133,37 +144,37 @@ before_script:
 
 # GCC 4.9
 gcc49_terra35_cxx98_release:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx98_normal]
 gcc49_terra35_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks]
 gcc49_terra35_cxx98_debug_spy:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_spy]
 gcc49_terra35_cxx11_release:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
 
 # Clang 3.5
 clang35_terra35_cxx98_release:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx98_normal]
 clang35_terra35_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_checks]
 clang35_terra35_cxx98_debug_spy:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_spy]
 clang35_terra35_cxx11_release:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 
@@ -171,20 +182,20 @@ clang35_terra35_cxx11_release:
 
 # GCC 4.8, 5, 6
 gcc48_terra35_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc48, *terra35, *debug, *cxx98_checks]
 gcc5_terra35_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc5, *terra35, *debug, *cxx98_checks]
 gcc6_terra35_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc6, *terra35, *debug, *cxx98_checks]
 
 # Clang 3.8
 clang38_terra38_cxx98_debug_checks:
-  <<: [*image, *tests]
+  <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks]
