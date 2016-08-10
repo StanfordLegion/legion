@@ -22,6 +22,7 @@ import array
 import collections
 import copy
 import gc
+import itertools
 import os
 import random
 import re
@@ -181,16 +182,7 @@ class Point(object):
         self.vals = array.array('i', (0,)*dim)
 
     def mk_string(self, start, delim, end):
-        result = start
-        first = True
-        for i in range(self.dim):
-            if not first:
-                result = result + delim
-            else:
-                first = False
-            result = result + str(self.vals[i])
-        result = result + end
-        return result
+        return '%s%s%s' % (start, delim.join(map(str, self.vals)), end)
 
     def to_string(self):
         return self.mk_string("(", ",", ")")
@@ -228,7 +220,7 @@ class Rect(object):
         self.hi = hi
 
     def __str__(self):
-        return str(self.lo) + "-" + str(self.hi)
+        return '%s-%s' % (self.lo, self.hi)
 
     __repr__ = __str__
 
@@ -321,21 +313,7 @@ class Shape(object):
             return next(iter(self.rects)).dim
 
     def __str__(self):
-        result = ''
-        first = True
-        for point in self.points:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(point)
-        for rect in self.rects:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(rect)
-        return result
+        return ' '.join(map(str, itertools.chain(self.points, self.rects)))
 
     __repr__ = __str__
 
@@ -1854,15 +1832,7 @@ class PointSet(object):
         self.points = set()
 
     def __str__(self):
-        result = ''
-        first = True
-        for point in self.points:
-            if first:
-                first = False
-            else:
-                result += ' '
-            result += str(point)
-        return result
+        return ' '.join(map(str, self.points))
 
     __repr__ = __str__
 
@@ -1933,7 +1903,7 @@ class Processor(object):
         self.kind = "Unknown"
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
-        self.node_name = 'proc_node_'+str(uid)
+        self.node_name = 'proc_node_%s' % uid
 
     def __str__(self):
         return self.kind + " Processor " + hex(self.uid)
@@ -1947,17 +1917,17 @@ class Processor(object):
         self.mem_bandwidth[mem] = bandwidth
 
     def print_node(self, printer):
-        label = str(self)
-        printer.println(self.node_name+' [label="'+label+
-            '",shape=oval,fontsize=14,'+
-            'fontcolor=black,fontname="Helvetica"];')
+        label = self
+        printer.println(
+            '%s [label="%s",shape=oval,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+            (self.node_name, label))
 
     def print_mem_edges(self, printer):
         for mem,band in self.mem_bandwidth.iteritems():
-            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
-            printer.println(self.node_name+' -> ' + mem.node_name+ 
-                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
-        
+            label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
+            printer.println(
+                '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
+                (self.node_name, mem.node_name, label))
 
 class Memory(object):
     __slots__ = ['state', 'uid', 'kind_num', 'kind', 'capacity', 'proc_latency',
@@ -1972,10 +1942,10 @@ class Memory(object):
         self.proc_bandwidth = dict()
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
-        self.node_name = 'mem_node_'+str(uid)
+        self.node_name = 'mem_node_%s' % uid
 
     def __str__(self):
-        return self.kind + " Memory " + hex(self.uid)
+        return "%s Memory %s" % (self.kind, hex(self.uid))
 
     __repr__ = __str__
 
@@ -1996,16 +1966,17 @@ class Memory(object):
         self.mem_bandwidth[mem] = bandwidth
 
     def print_node(self, printer):
-        label = str(self) 
-        printer.println(self.node_name+' [label="'+label+
-            '",shape=box,fontsize=14,'+
-            'fontcolor=black,fontname="Helvetica"];')
+        label = self
+        printer.println(
+            '%s [label="%s",shape=box,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+            (self.node_name, label))
 
     def print_mem_edges(self, printer):
         for mem,band in self.mem_bandwidth.iteritems():
-            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
-            printer.println(self.node_name+' -> ' + mem.node_name+ 
-                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
+            label = 'bandwidth=%s,latency=%s' % (band, self.mem_latency[mem])
+            printer.println(
+                '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
+                (self.node_name, mem.node_name, label))
 
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
@@ -2023,7 +1994,7 @@ class IndexSpace(object):
         self.depth = 0
         self.shape = None
         self.point_set = None
-        self.node_name = 'index_space_node_'+str(uid)
+        self.node_name = 'index_space_node_%s' % uid
         self.intersections = dict() 
         self.dominated = dict()
 
@@ -2134,9 +2105,9 @@ class IndexSpace(object):
 
     def __str__(self):
         if self.name is None:
-            return "Index Space "+str(self.uid)
+            return "Index Space %s" % self.uid
         else:
-          return self.name + ' ('+str(self.uid)+')'
+          return '%s (%s)' % (self.name, self.uid)
 
     __repr__ = __str__
 
@@ -2216,13 +2187,13 @@ class IndexSpace(object):
 
     def print_graph(self, printer):
         if self.name is not None:
-            label = self.name + ' (ID: '+str(self.uid) + ')'
+            label = '%s (ID: %s)' % (self.name, self.uid)
         else:
             if self.parent is None:
-                label = 'index space '+hex(self.uid)
+                label = 'index space %s' % hex(self.uid)
             else:
                 
-                label = 'subspace '+str(self.uid)
+                label = 'subspace %s' % self.uid
         if self.parent is not None:
             color = None
             for c, child in self.parent.children.iteritems():
@@ -2230,10 +2201,9 @@ class IndexSpace(object):
                     color = c
                     break
             assert color is not None
-            label += ' (color: ' + str(color) +')'
-        printer.println(self.node_name+' [label="'+label+
-                '",shape=plaintext,fontsize=14,'+
-                'fontcolor=black,fontname="Helvetica"];')
+            label += ' (color: %s)' % color
+        printer.println('%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="Helvetica"];' %
+                        (self.node_name, label))
         # print links to children
         for child in self.children.itervalues():
             child.print_link_to_parent(printer, self.node_name)
@@ -2271,7 +2241,7 @@ class IndexPartition(object):
         self.depth = None
         self.shape = None
         self.point_set = None
-        self.node_name = 'index_part_node_'+str(uid)
+        self.node_name = 'index_part_node_%s' % uid
         self.intersections = dict()
         self.dominated = dict()
 
@@ -2295,9 +2265,9 @@ class IndexPartition(object):
 
     def __str__(self):
         if self.name is None:
-            return "Index Partition: "+str(self.uid)
+            return "Index Partition: %s" % self.uid
         else:
-            return self.name + ' ('+str(self.uid)+')'
+            return '%s (%s)' % (self.name, self.uid)
 
     __repr__ = __str__
 
@@ -2368,7 +2338,7 @@ class IndexPartition(object):
             return None 
         self.intersections[other] = intersection
         return intersection
-        
+
     def intersects(self, other):
         if self is other:
             return True
@@ -2412,12 +2382,11 @@ class IndexPartition(object):
                 color = c
                 break
         assert color is not None
-        label += ' (color: ' + str(color) + ')'
-        label += '\nDisjoint=' + ('True' if self.disjoint else 'False')
-        label += ', Complete=' + ('True' if self.is_complete() else 'False')
-        printer.println(self.node_name+' [label="'+label+
-                '",shape=plaintext,fontsize=14,'+
-                'fontcolor=black,fontname="times italic"];')
+        label += ' (color: %s)' % color
+        label += '\nDisjoint=%s, Complete=%s' % (self.disjoint, self.is_complete())
+        printer.println(
+            '%s [label="%s",shape=plaintext,fontsize=14,fontcolor=black,fontname="times italic"];' %
+            (self.node_name, label))
         # print links to children
         for child in self.children.itervalues():
             child.print_link_to_parent(printer, self.node_name)
@@ -2425,9 +2394,7 @@ class IndexPartition(object):
             child.print_graph(printer)
 
     def print_tree(self):
-        prefix = ''
-        for i in range(self.depth):
-            prefix += '  '
+        prefix = '  ' * self.depth
         print('%s%s Color: %s' % (prefix, self, self.color.to_string()))
         for child in self.children.itervalues():
             child.print_tree()
