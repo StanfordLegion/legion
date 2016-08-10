@@ -143,59 +143,65 @@ before_script:
 # Run the full test suite on GCC 4.9 and Clang 3.5.
 
 # GCC 4.9
-gcc49_terra35_cxx98_release:
+linux_gcc49_terra35_cxx98_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx98_normal]
-gcc49_terra35_cxx98_debug_checks:
+linux_gcc49_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks]
-gcc49_terra35_cxx98_debug_spy:
+linux_gcc49_terra35_cxx98_debug_spy:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_spy]
-gcc49_terra35_cxx11_release:
+linux_gcc49_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
 
 # Clang 3.5
-clang35_terra35_cxx98_release:
+linux_clang35_terra35_cxx98_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx98_normal]
-clang35_terra35_cxx98_debug_checks:
+linux_clang35_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_checks]
-clang35_terra35_cxx98_debug_spy:
+linux_clang35_terra35_cxx98_debug_spy:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_spy]
-clang35_terra35_cxx11_release:
+linux_clang35_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 
+# macOS with Clang 3.5
+macos_clang35_terra35_cxx98_debug_checks:
+  <<: [*macos, *tests]
+  variables:
+    <<: [*clang35, *debug, *cxx98_checks]
+
 # Run minimal tests on other compilers.
 
 # GCC 4.8, 5, 6
-gcc48_terra35_cxx98_debug_checks:
+linux_gcc48_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc48, *terra35, *debug, *cxx98_checks]
-gcc5_terra35_cxx98_debug_checks:
+linux_gcc5_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc5, *terra35, *debug, *cxx98_checks]
-gcc6_terra35_cxx98_debug_checks:
+linux_gcc6_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc6, *terra35, *debug, *cxx98_checks]
 
 # Clang 3.8
-clang38_terra38_cxx98_debug_checks:
+linux_clang38_terra38_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks]
