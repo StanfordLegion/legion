@@ -3806,6 +3806,13 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    bool CompositeView::is_upper_bound_node(RegionTreeNode *node) const
+    //--------------------------------------------------------------------------
+    {
+      return version_info->is_upper_bound_node(node);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
