@@ -22,6 +22,8 @@ variables:
   CXX: "clang++-3.5"
 .clang38: &clang38
   CXX: "clang++-3.8"
+.clang: &clang # For macOS only, because LLVM binaries have no version tag.
+  CXX: "clang++"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -187,10 +189,10 @@ linux_clang35_terra35_cxx11_release:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 
 # macOS with Clang 3.5
-macos_clang35_terra35_cxx98_debug_checks:
+macos_clang_cxx98_debug_checks:
   <<: [*macos, *tests]
   variables:
-    <<: [*clang35, *debug, *cxx98_checks]
+    <<: [*clang, *debug, *cxx98_checks]
 
 # Run minimal tests on other compilers.
 
