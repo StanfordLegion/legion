@@ -62,13 +62,11 @@ task k() : int
 
 -- KEY 3: error only occurs with an index launch - individual task launches for
 --  each subregion works fine
+    __demand(__parallel)
     -- __forbid(__parallel)
     for i = 0, 3 do
       g(p[i], 20)
     end
---    g(p[0], 20)
---    g(p[1], 20)
---    g(p[2], 20)
   end
   for y in s do
     if(@y ~= 231) then
