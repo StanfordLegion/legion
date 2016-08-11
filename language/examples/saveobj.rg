@@ -28,14 +28,18 @@ local exe = os.tmpname()
 regentlib.saveobj(main, exe, "executable")
 print("Saved executable to " .. exe)
 
+-- Hack: On macOS, the child process isn't inheriting the parent's
+-- environment, for some reason.
+local env = ""
+if os.getenv("DYLD_LIBRARY_PATH") then
+  env = "DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " "
+end
+
+assert(os.execute(env .. exe) == 0)
+
 -- If this were using regentlib.start, there's no way you'd ever call
 -- main() three times. (Legion is not re-entrant.)
 
--- Hack: On macOS, the child process isn't inheriting the parent's
--- environment, for some reason.
-
-assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
-
 -- FIXME: This freezes on multi-node.
--- assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
--- assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
+-- assert(os.execute(env .. exe) == 0)
+-- assert(os.execute(env .. exe) == 0)
