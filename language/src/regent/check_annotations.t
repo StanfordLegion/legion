@@ -28,7 +28,7 @@
 -- these properties.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local log = require("common/log")
 
 local context = {}

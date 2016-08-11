@@ -19,7 +19,7 @@
 -- directly rather than blocking in order to obtain a concrete value.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local context = {}

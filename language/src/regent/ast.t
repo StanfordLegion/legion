@@ -14,7 +14,7 @@
 
 -- Legion AST
 
-local data = require("regent/data")
+local data = require("common/data")
 
 local ast_factory = {}
 

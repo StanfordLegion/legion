@@ -15,7 +15,7 @@
 -- Regent Auto-parallelizer
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 local log = require("common/log")
 local pretty = require("regent/pretty")

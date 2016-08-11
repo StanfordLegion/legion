@@ -18,7 +18,7 @@
 --
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local log = require("common/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
