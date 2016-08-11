@@ -211,7 +211,8 @@ def get_test_specs(include_spy, extra_flags):
     else:
         return base
 
-def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet):
+def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
+                  only_patterns, skip_patterns):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
@@ -228,6 +229,10 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet):
                     if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md'))
 
         for test_path in test_paths:
+            if only_patterns and not(any(re.search(p,test_path) for p in only_patterns)):
+                continue
+            if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
+                continue
             results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
 
     thread_pool.close()
@@ -327,6 +332,16 @@ def test_driver(argv):
                         action='store_true',
                         help='suppress passing test results',
                         dest='quiet')
+    parser.add_argument('--only',
+                        action='append',
+                        default=[],
+                        help='only run tests matching pattern',
+                        dest='only_patterns')
+    parser.add_argument('--skip',
+                        action='append',
+                        default=[],
+                        help='skip tests matching pattern',
+                        dest='skip_patterns')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -335,7 +350,9 @@ def test_driver(argv):
         args.spy,
         args.extra_flags,
         args.verbose,
-        args.quiet)
+        args.quiet,
+        args.only_patterns,
+        args.skip_patterns)
 
 if __name__ == '__main__':
     test_driver(sys.argv)
