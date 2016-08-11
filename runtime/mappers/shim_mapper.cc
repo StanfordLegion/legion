@@ -1044,6 +1044,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShimMapper::select_tunable_value(const MapperContext         ctx,
+					  const Legion::Task&         task,
+					  const SelectTunableInput&   input,
+                                                SelectTunableOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Shim mapper select_tunable_value in %s", get_mapper_name());
+      // Wrap the task with one of our tasks
+      Task local_task(task, find_task_variant_collection(ctx, task.task_id,
+                                                         task.get_task_name()));
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
+      // call old version - returns int directly, but we'll store as size_t
+      //  for consistency with the new DefaultMapper tunables
+      size_t *result = (size_t*)malloc(sizeof(size_t));
+      output.value = result;
+      output.size = sizeof(size_t);
+      *result = get_tunable_value(&local_task,
+				  input.tunable_id,
+				  input.mapping_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    int ShimMapper::get_tunable_value(const Task *task, 
+				      TunableID tid, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.fatal("Shim mapper doesn't support any tunables directly!");
+      assert(0);
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::handle_message(const MapperContext ctx,
                                     const MapperMessage& message)
     //--------------------------------------------------------------------------

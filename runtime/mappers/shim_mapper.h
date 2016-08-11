@@ -289,6 +289,10 @@ namespace Legion {
                               const SliceTaskInput&           input,
                                     SliceTaskOutput&          output);
       typedef TaskSlice DomainSplit;
+      virtual void select_tunable_value(const MapperContext         ctx,
+                                        const Legion::Task&         task,
+                                        const SelectTunableInput&   input,
+                                              SelectTunableOutput&  output);
       virtual void handle_message(const MapperContext         ctx,
                                   const MapperMessage&        message);
     public:
@@ -304,6 +308,8 @@ namespace Legion {
                                 std::vector<DomainSplit> &slices);
       virtual void handle_message(Processor source, 
                                   const void *message, size_t length);
+      virtual int get_tunable_value(const Task *task, 
+				    TunableID tid, MappingTagID tag);
     protected:
       Color get_logical_region_color(LogicalRegion handle);
       bool has_parent_logical_partition(LogicalRegion handle);
