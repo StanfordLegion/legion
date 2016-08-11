@@ -196,6 +196,7 @@ def get_test_specs(include_spy, extra_flags):
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
+          os.path.join('tests', 'runtime', 'bugs'),
          )),
     ]
     spy = [
