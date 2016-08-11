@@ -73,7 +73,7 @@ local print_point = {
 -- TODO: needs to automatically generate these functions
 local function get_ghost_rect_body(res, sz, r, s, f)
   local acc = function(expr) return `([expr].[f]) end
-  if not f then acc = function(expr) return expr end end
+  if f == nil then acc = function(expr) return expr end end
   return quote
     if [acc(`([s].lo.__ptr))] == [acc(`([r].lo.__ptr))] then
       [acc(`([res].lo.__ptr))] = [acc(`([r].lo.__ptr))]
@@ -188,7 +188,7 @@ local function get_intersection(rect_type)
 end
 
 local function render(expr)
-  if not expr then return "nil" end
+  if expr == nil then return "nil" end
   if expr:is(ast.typed.expr) then
     return pretty.render.entry(nil, pretty.expr(nil, expr))
   elseif expr:is(ast.typed.stat) then
@@ -705,7 +705,8 @@ do
 
   function lambda_factory.__call(self, args)
     assert(args.expr)
-    assert(args.binder or args.binders and not (args.binder and args.binders))
+    assert((args.binder ~= nil or args.binders ~= nil) and
+           not (args.binder ~= nil and args.binders ~= nil))
     local binders = args.binders or { args.binder }
     local expr = args.expr
     for idx = #binders, 1, -1 do
@@ -1046,7 +1047,7 @@ function caller_context:add_region_decl(symbol, stat)
 end
 
 function caller_context:add_bounds_symbol(region_symbol, bounds_symbol)
-  if not self.__region_metadata_symbols[region_symbol] then
+  if self.__region_metadata_symbols[region_symbol] == nil then
     self.__region_metadata_symbols[region_symbol] = {}
   end
   self.__region_metadata_symbols[region_symbol] = {
@@ -1077,7 +1078,7 @@ function caller_context:add_call(expr)
       self.__call_exprs_by_region_decl[decl][param][expr] = true
     end
   end
-  if not self.__parallel_params[expr] then
+  if self.__parallel_params[expr] == nil then
     self.__parallel_params[expr] = param
   end
 end
@@ -1087,17 +1088,17 @@ function caller_context:get_call_exprs(decl)
 end
 
 function caller_context:add_primary_partition(region, param, partition)
-  if not self.__primary_partitions[region] then
+  if self.__primary_partitions[region] == nil then
     self.__primary_partitions[region] = data.newmap()
   end
   self.__primary_partitions[region][param] = partition
 end
 
 function caller_context:add_ghost_partition(call, stencil, partition)
-  if not self.__ghost_partitions[call] then
+  if self.__ghost_partitions[call] == nil then
     self.__ghost_partitions[call] = {}
   end
-  assert(not self.__ghost_partitions[call][stencil])
+  assert(self.__ghost_partitions[call][stencil] == nil)
   self.__ghost_partitions[call][stencil] = partition
 end
 
@@ -1106,7 +1107,7 @@ function caller_context:add_parent_region(region, parent_region)
 end
 
 function caller_context:add_color_space(param, color)
-  assert(not self.__color_spaces[param])
+  assert(self.__color_spaces[param] == nil)
   self.__color_spaces[param] = color
 end
 
@@ -1201,7 +1202,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
   caller_cx:add_primary_partition(region_symbol, pparam, partition_symbol)
 
   local color_space_symbol = caller_cx:find_color_space(pparam)
-  if not color_space_symbol then
+  if color_space_symbol == nil then
     color_space_symbol = get_new_tmp_var(partition_type:colors())
     local colors_expr = mk_expr_colors_access(partition_symbol)
     stats:insert(mk_stat_var(color_space_symbol, nil, colors_expr))
@@ -2002,7 +2003,7 @@ function reduction_analysis.top_task(cx, node)
     elseif node:is(ast.typed.stat.Reduce) then
       node.lhs:map(function(expr)
         if expr:is(ast.typed.expr.ID) and expr.value == reduction_var then
-          assert(not reduction_op or reduction_op == node.op)
+          assert(reduction_op == nil or reduction_op == node.op)
           reduction_op = node.op
         end
       end)
