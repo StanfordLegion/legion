@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 local config = require("regent/config")
-local log = require("common/log")
+local report = require("common/report")
 
 local cudahelper = {}
 cudahelper.check_cuda_available = function() return false end

@@ -12,18 +12,18 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Logging
+-- Error Reporting
 
 local ast = require("common/ast")
 
-local log = {}
+local report = {}
 
-log.warn = function(node, ...)
+report.warn = function(node, ...)
   io.stderr:write(...)
   io.stderr:write("\n")
 end
 
-log.error = function(node, ...)
+report.error = function(node, ...)
   -- This should be called with an AST node containing a span. The
   -- span is used to determine the source location of the error.
   assert(node.span:is(ast.location))
@@ -41,4 +41,4 @@ log.error = function(node, ...)
   assert(false) -- unreachable
 end
 
-return log
+return report

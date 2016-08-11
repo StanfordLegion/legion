@@ -18,7 +18,7 @@ local ast = require("regent/ast")
 local base = require("regent/std_base")
 local config = require("regent/config")
 local data = require("common/data")
-local log = require("common/log")
+local report = require("common/report")
 local pretty = require("regent/pretty")
 local cudahelper = require("regent/cudahelper")
 
@@ -1049,7 +1049,7 @@ end
 
 function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
   if (#args < #params) or (#args > #params and not isvararg) then
-    log.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
+    report.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
 
   -- FIXME: All of these calls are being done with the order backwards
@@ -1097,7 +1097,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
             param_as_arg_type = v
           end
         end
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
+        report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
       end
@@ -1109,14 +1109,14 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] = arg_type
       if not type_isomorphic(param_type, arg_type, check, mapping) then
         local param_as_arg_type = reconstruct_param_as_arg_type(param_type, mapping)
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
+        report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
       need_cast[i] = false
     elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
-      log.error(node, "type mismatch in argument " .. tostring(i) ..
+      report.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
                   " but got " .. tostring(arg_type))
     else
@@ -1344,7 +1344,7 @@ function std.check_read(cx, node)
       if not std.check_privilege(cx, std.reads, region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege reads(" ..
+        report.error(node, "invalid privilege reads(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1362,7 +1362,7 @@ function std.check_write(cx, node)
       if not std.check_privilege(cx, std.writes, region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege writes(" ..
+        report.error(node, "invalid privilege writes(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1371,7 +1371,7 @@ function std.check_write(cx, node)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error(node, "type mismatch: write expected an lvalue but got " .. tostring(t))
+    report.error(node, "type mismatch: write expected an lvalue but got " .. tostring(t))
   end
 end
 
@@ -1384,7 +1384,7 @@ function std.check_reduce(cx, op, node)
       if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
+        report.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1393,7 +1393,7 @@ function std.check_reduce(cx, op, node)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error(node, "type mismatch: reduce expected an lvalue but got " .. tostring(t))
+    report.error(node, "type mismatch: reduce expected an lvalue but got " .. tostring(t))
   end
 end
 
@@ -2052,7 +2052,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if not (terralib.types.istype(bound) and
               (std.is_ispace(bound) or std.is_region(bound)))
       then
-        log.error(nil, tostring(self.index_type) ..
+        report.error(nil, tostring(self.index_type) ..
                     " expected an ispace or region as argument " ..
                     tostring(i+1) .. ", got " .. tostring(bound))
       end
@@ -2062,7 +2062,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
               std.type_eq(bound.fspace_type, self.points_to_type.type)) or
              std.is_unpack_result(self.points_to_type))
       then
-        log.error(nil, tostring(self.index_type) .. " expected region(" ..
+        report.error(nil, tostring(self.index_type) .. " expected region(" ..
                     tostring(self.points_to_type) .. ") as argument " ..
                     tostring(i+1) .. ", got " .. tostring(bound))
       end
@@ -2071,7 +2071,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       bounds:insert(bound)
     end
     if is_ispace and is_region then
-      log.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+      report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
     end
     return bounds
   end
@@ -2821,11 +2821,11 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
+        report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region.type))
       end
       if not std.type_eq(region.fspace_type, points_to_type) then
-        log.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
+        report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
                     ", got " .. tostring(region))
       end

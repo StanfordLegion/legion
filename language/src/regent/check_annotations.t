@@ -29,7 +29,7 @@
 
 local ast = require("regent/ast")
 local data = require("common/data")
-local log = require("common/log")
+local report = require("common/report")
 
 local context = {}
 context.__index = context
@@ -58,7 +58,7 @@ local function check(cx, node, allowed_set)
     if ast.is_node(value) and not value:is(ast.annotation.Allow) and
       not allowed_set[option]
     then
-      log.error(node, "option " .. render_option(option, value) ..
+      report.error(node, "option " .. render_option(option, value) ..
                   " is not permitted")
     end
   end

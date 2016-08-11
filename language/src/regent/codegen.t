@@ -16,7 +16,7 @@
 
 local ast = require("regent/ast")
 local data = require("common/data")
-local log = require("common/log")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
@@ -7991,7 +7991,7 @@ function codegen.top(cx, node)
             cudahelper.check_cuda_available())
     then
       if node.annotations.cuda:is(ast.annotation.Demand) then
-        log.warn(node,
+        report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
