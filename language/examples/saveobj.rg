@@ -34,8 +34,8 @@ print("Saved executable to " .. exe)
 -- Hack: On macOS, the child process isn't inheriting the parent's
 -- environment, for some reason.
 
-assert(os.execute("DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " " .. exe) == 0)
+assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
 
 -- FIXME: This freezes on multi-node.
--- assert(os.execute("DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " " .. exe) == 0)
--- assert(os.execute("DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " " .. exe) == 0)
+-- assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
+-- assert(os.execute("DYLD_LIBRARY_PATH=" .. (os.getenv("DYLD_LIBRARY_PATH") or "") .. " " .. exe) == 0)
