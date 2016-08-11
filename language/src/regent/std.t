@@ -1674,7 +1674,8 @@ do
     return setmetatable({
       symbol_type = symbol_type or false,
       symbol_name = symbol_name or false,
-      symbol_value = false,
+      symbol_symbol = false,
+      symbol_label = false,
       symbol_id = id,
     }, symbol)
   end
@@ -1705,16 +1706,23 @@ end
 function symbol:settype(type)
   assert(terralib.types.istype(type))
   assert(not self.symbol_type)
-  assert(not self.symbol_value)
+  assert(not self.symbol_symbol)
   self.symbol_type = type
 end
 
 function symbol:getsymbol()
   assert(self.symbol_type)
-  if not self.symbol_value then
-    self.symbol_value = terralib.newsymbol(self.symbol_type, self.symbol_name)
+  if not self.symbol_symbol then
+    self.symbol_symbol = terralib.newsymbol(self.symbol_type, self.symbol_name)
   end
-  return self.symbol_value
+  return self.symbol_symbol
+end
+
+function symbol:getlabel()
+  if not self.symbol_label then
+    self.symbol_label = terralib.newlabel(self.symbol_name)
+  end
+  return self.symbol_label
 end
 
 function symbol:hash()

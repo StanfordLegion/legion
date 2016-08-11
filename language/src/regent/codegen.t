@@ -7538,8 +7538,8 @@ function codegen.top_task(cx, node)
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
-      local param_name = param.symbol:hasname() or tostring(param.symbol)
-      return { field = param_name, type = param.param_type }
+      local param_label = param.symbol:getlabel()
+      return { field = param_label, type = param.param_type }
     end))
 
   -- Regions require some special handling here. Specifically, field
@@ -7642,7 +7642,7 @@ function codegen.top_task(cx, node)
 
       local deser_actions, deser_value = std.deserialize(
         param_type,
-        `(&args.[param:hasname() or tostring(param)]),
+        `(&args.[param:getlabel()]),
         `(&[data_ptr]))
       local actions = quote
         var [param_symbol]
