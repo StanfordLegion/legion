@@ -22,9 +22,9 @@ log.warn = function(node, ...)
 end
 
 log.error = function(node, ...)
-  if node == nil then
-    node = { span = { source = "internal", start = { line = 0, offset = 0 } } }
-  end
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the error.
+  assert(node ~= nil)
 
   -- The compiler cannot handle running past an error anyway, so just
   -- build the diagnostics object here and don't bother reusing it.
