@@ -218,7 +218,7 @@ local function factorize(number, ways)
     factors:insert(factor)
   end
   factors:insert(number)
-  factors:sort()
+  factors:sort(function(a, b) return a > b end)
   return factors
 end
 
