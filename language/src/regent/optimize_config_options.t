@@ -25,7 +25,7 @@
 
 local ast = require("regent/ast")
 local data = require("regent/data")
-local log = require("regent/log")
+local log = require("common/log")
 local std = require("regent/std")
 
 local context = {}

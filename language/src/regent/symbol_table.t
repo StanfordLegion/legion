@@ -14,7 +14,7 @@
 
 -- Legion Symbol Table
 
-local log = require("regent/log")
+local log = require("common/log")
 
 local symbol_table = {}
 symbol_table.__index = symbol_table
