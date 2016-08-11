@@ -531,6 +531,10 @@ function optimize_index_launch.stat_for_num(cx, node)
     log_fail = log.error
   end
 
+  if node.annotations.parallel:is(ast.annotation.Forbid) then
+    return node
+  end
+
   if node.values[3] and not (
     node.values[3]:is(ast.typed.expr.Constant) and
     node.values[3].value == 1)
@@ -563,6 +567,10 @@ function optimize_index_launch.stat_for_list(cx, node)
   if node.annotations.parallel:is(ast.annotation.Demand) then
     log_pass = ignore -- log.warn
     log_fail = log.error
+  end
+
+  if node.annotations.parallel:is(ast.annotation.Forbid) then
+    return node
   end
 
   local value_type = std.as_read(node.value.expr_type)
