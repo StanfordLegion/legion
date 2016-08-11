@@ -385,6 +385,8 @@ namespace Legion {
       ProjectionFunction *projection;
       Domain projection_domain;
     protected:
+      // Use this information to deduplicate between different points
+      // trying to advance information for the same projection epoch
       LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
     };
 
@@ -498,6 +500,31 @@ namespace Legion {
     };  
 
     /**
+     * \class ProjectionEpoch
+     * This class captures the set of projection functions
+     * and domains that have performed in current open
+     * projection epoch
+     */
+    class ProjectionEpoch {
+    public:
+      ProjectionEpoch(ProjectionEpochID epoch_id,
+                      const FieldMask &mask);
+      ProjectionEpoch(const ProjectionEpoch &rhs);
+      ~ProjectionEpoch(void);
+    public:
+      ProjectionEpoch& operator=(const ProjectionEpoch &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      void insert(ProjectionFunction *function, const Domain &d);
+    public:
+      const ProjectionEpochID epoch_id;
+      FieldMask valid_fields;
+    public:
+      std::map<ProjectionFunction*,std::set<Domain> > projections;
+    };
+
+    /**
      * \class CurrentState 
      * Track all the information about the current state
      * of a logical region from a given context. This
@@ -526,6 +553,10 @@ namespace Legion {
       void advance_projection_epochs(const FieldMask &advance_mask);
       void capture_projection_epochs(const FieldMask &capture_mask,
                                      ProjectionInfo &info) const;
+      void capture_close_epochs(FieldMask capture_mask,
+                                ClosedNode *closed_node) const;
+      void update_projection_epochs(FieldMask update_mask,
+                                    const ProjectionInfo &info) const;
     public:
       RegionTreeNode *const owner;
     public:
@@ -543,10 +574,41 @@ namespace Legion {
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
       // Keep track of the current projection epoch for each field
-      LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
+      std::map<ProjectionEpochID,ProjectionEpoch*> projection_epochs;
     };
 
     typedef DynamicTableAllocator<CurrentState,10,8> CurrentStateAllocator;
+
+    /**
+     * \class ClosedNode
+     * A closed node is the type used for constructing trees that 
+     * mirror the region tree and summarize all the nodes that
+     * are captured by a close operation. They are concrete down
+     * to the level of projection functions at which point they
+     * capture the projection information.
+     */
+    class ClosedNode {
+    public:
+      ClosedNode(RegionTreeNode *node);
+      ClosedNode(const ClosedNode &rhs);
+      ~ClosedNode(void);
+    public:
+      ClosedNode& operator=(const ClosedNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      void add_child_node(ClosedNode *child);
+      void record_closed_fields(const FieldMask &closed_fields);
+      void record_projections(const ProjectionEpoch *epoch,
+                              const FieldMask &closed_fields);
+    public:
+      RegionTreeNode *const node;
+    protected:
+      FieldMask closed_fields;
+      std::map<RegionTreeNode*,ClosedNode*> children;
+      std::map<ProjectionFunction*,
+               LegionMap<Domain,FieldMask>::aligned> projections;
+    };
  
     /**
      * \struct LogicalCloser
@@ -566,10 +628,9 @@ namespace Legion {
       inline bool has_close_operations(void) const 
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
                   (!!flush_only_close_mask); }
-      void record_close_operation(RegionTreeNode *root, const FieldMask &mask, 
-                            bool leave_open, bool read_only, bool flush_only);
-      void record_closed_child(RegionTreeNode *node, const FieldMask &mask,
-                               bool read_only_close);
+      void record_close_operation(const FieldMask &mask, bool leave_open,
+                                  bool read_only, bool flush_only);
+      ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
       void initialize_close_operations(RegionTreeNode *target, 
@@ -607,8 +668,7 @@ namespace Legion {
       FieldMask leave_open_mask;
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
-      // Normal closed child nodes
-      LegionMap<RegionTreeNode*,FieldMask>::aligned closed_nodes;
+      std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
     protected:
       // At most we will ever generate three close operations at a node
       InterCloseOp *normal_close_op;
@@ -1391,29 +1451,6 @@ namespace Legion {
       } refs;
       bool single;
       mutable bool shared;
-    };
-
-    /**
-     * \class PhysicalTraverser
-     * A class for traversing the physical region tree to open up
-     * sub-trees and find valid instances for a given region requirement
-     */
-    class PhysicalTraverser : public PathTraverser {
-    public:
-      PhysicalTraverser(RegionTreePath &path, TraversalInfo *info, 
-                        InstanceSet *targets);
-      PhysicalTraverser(const PhysicalTraverser &rhs);
-      ~PhysicalTraverser(void);
-    public:
-      PhysicalTraverser& operator=(const PhysicalTraverser &rhs);
-    public:
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      bool traverse_node(RegionTreeNode *node);
-    protected:
-      TraversalInfo *const info;
-      InstanceSet *const targets;
     };
 
     /**

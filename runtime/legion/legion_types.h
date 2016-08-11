@@ -803,7 +803,6 @@ namespace Legion {
       INDEX_RETURN_SLICE_COMMIT_CALL,
       SLICE_ACTIVATE_CALL,
       SLICE_DEACTIVATE_CALL,
-      SLICE_PREWALK_CALL,
       SLICE_APPLY_VERSION_INFO_CALL,
       SLICE_DISTRIBUTE_CALL,
       SLICE_PERFORM_MAPPING_CALL,
@@ -830,8 +829,7 @@ namespace Legion {
       REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL,
       REGION_TREE_INITIALIZE_CONTEXT_CALL,
       REGION_TREE_INVALIDATE_CONTEXT_CALL,
-      REGION_TREE_PHYSICAL_TRAVERSE_CALL,
-      REGION_TREE_PHYSICAL_TRAVERSE_AND_REGISTER_CALL,
+      REGION_TREE_PREMAP_ONLY_CALL,
       REGION_TREE_MAP_VIRTUAL_CALL,
       REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL,
       REGION_TREE_PHYSICAL_REGISTER_USERS_CALL,
@@ -858,6 +856,7 @@ namespace Legion {
       REGION_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
       REGION_NODE_FLUSH_REDUCTIONS_CALL,
       REGION_NODE_MAP_VIRTUAL_CALL,
+      REGION_NODE_PREMAP_REGION_CALL,
       REGION_NODE_REGISTER_REGION_CALL,
       REGION_NODE_CLOSE_STATE_CALL,
       CURRENT_STATE_RECORD_VERSION_NUMBERS_CALL,
@@ -971,7 +970,6 @@ namespace Legion {
       "Index Return Slice Commit",                                    \
       "Slice Activate",                                               \
       "Slice Deactivate",                                             \
-      "Slice Prewalk",                                                \
       "Slice Apply Version Info",                                     \
       "Slice Distribute",                                             \
       "Slice Perform Mapping",                                        \
@@ -998,8 +996,7 @@ namespace Legion {
       "Region Tree Advance Version Numbers",                          \
       "Region Tree Initialize Context",                               \
       "Region Tree Invalidate Context",                               \
-      "Region Tree Physical Traverse",                                \
-      "Region Tree Physical Traverse and Register",                   \
+      "Region Tree Premap Only",                                      \
       "Region Tree Map Virtual",                                      \
       "Region Tree Physical Register Only",                           \
       "Region Tree Physical Register Users",                          \
@@ -1026,6 +1023,7 @@ namespace Legion {
       "Region Node Issue Update Reductions",                          \
       "Region Node Flush Reductions",                                 \
       "Region Node Map Virtual",                                      \
+      "Region Node Premap Region",                                    \
       "Region Node Register Region",                                  \
       "Region Node Close State",                                      \
       "Current State Record Verison Numbers",                         \
@@ -1159,10 +1157,8 @@ namespace Legion {
     class RegionTreePath;
     class PathTraverser;
     class NodeTraverser;
-    class PhysicalTraverser;
-    class PremapTraverser;
-    class MappingTraverser;
 
+    class ProjectionEpoch;
     class CurrentState;
     class PhysicalState;
     class VersionState;
@@ -1210,6 +1206,7 @@ namespace Legion {
     struct LogicalUser;
     struct PhysicalUser;
     struct TraceInfo;
+    class ClosedNode;
     class LogicalCloser;
     class ReductionCloser;
     class TreeCloseImpl;

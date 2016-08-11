@@ -2126,18 +2126,9 @@ namespace Legion {
         VersionInfo &version_info = get_version_info(*it);
         RestrictInfo &restrict_info = get_restrict_info(*it);
         RegionTreeContext req_ctx = get_parent_context(*it);
-        RegionTreePath &privilege_path = get_privilege_path(*it);
         // Do the premapping
-        runtime->forest->physical_traverse_path(req_ctx, privilege_path,
-                                                regions[*it],
-                                                version_info, this, *it, 
-                                                true/*find valid*/, 
-                                                applied_conditions, valid
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
+        runtime->forest->physical_premap_only(req_ctx, regions[*it],
+                                              version_info, valid);
         // If we need visible instances, filter them as part of the conversion
         if (regions[*it].is_no_access())
           prepare_for_mapping(valid, input.valid_instances[*it]);
@@ -6347,15 +6338,10 @@ namespace Legion {
         // valid instances for all the regions
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
-        runtime->forest->physical_traverse_path(enclosing_contexts[idx],
-                              path, regions[idx], get_version_info(idx), 
-                              this, idx, true/*valid*/, 
-                              map_applied_conditions, postmap_valid[idx]
-#ifdef DEBUG_LEGION
-                              , get_logging_name()
-                              , unique_op_id
-#endif
-                              );
+        runtime->forest->physical_premap_only(enclosing_contexts[idx],
+                                              regions[idx], 
+                                              get_version_info(idx),
+                                              postmap_valid[idx]);
         // No need to filter these because they are on the way out
         prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
         prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);
@@ -8976,16 +8962,8 @@ namespace Legion {
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
     {
-      runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
-                                              regions[idx], 
-                                              version_infos[idx], this, idx, 
-                                              true/*find valid*/, 
-                                              map_applied_conditions, valid
-#ifdef DEBUG_LEGION
-                                              , get_logging_name() 
-                                              , get_unique_id()
-#endif
-                                              );
+      runtime->forest->physical_premap_only(ctx, regions[idx], 
+                                            version_infos[idx], valid);
     }
 
     //--------------------------------------------------------------------------
@@ -9721,25 +9699,8 @@ namespace Legion {
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
     {
-      // We only need to traverse from the upper bound region because our
-      // slice already traversed down to the upper bound for all points
-      RegionTreePath traversal_path;
-      const RegionRequirement &orig_req = slice_owner->regions[idx];
-      if (orig_req.handle_type == PART_PROJECTION)
-        runtime->forest->initialize_path(regions[idx].region.get_index_space(),
-            orig_req.partition.get_index_partition(), traversal_path);
-      else
-        runtime->forest->initialize_path(regions[idx].region.get_index_space(),
-            orig_req.region.get_index_space(), traversal_path);
-      runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
-                                             slice_owner->get_version_info(idx),
-                                             this, idx, true/*find valid*/,
-                                             map_applied_conditions, valid
-#ifdef DEBUG_LEGION
-                                             , get_logging_name()
-                                             , get_unique_id()
-#endif
-                                             );
+      runtime->forest->physical_premap_only(ctx, regions[idx], 
+                                            version_infos[idx], valid);
     }
 
     //--------------------------------------------------------------------------
@@ -12132,38 +12093,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::prewalk_slice(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SLICE_PREWALK_CALL);
-      // Premap all regions that were not early mapped
-      std::set<RtEvent> empty_conditions;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // If we've already premapped it then we are done
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          continue;
-        RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, regions[idx]);
-        // Walk the path down to the upper bound region without getting
-        // any of the valid instances
-        InstanceSet empty_set;
-        runtime->forest->physical_traverse_path(get_parent_context(idx),
-                                        privilege_path, regions[idx],
-                                        version_infos[idx], this, idx,
-                                        false/*find valid*/, 
-                                        empty_conditions, empty_set
-#ifdef DEBUG_LEGION
-                                        , get_logging_name(), unique_op_id
-#endif
-                                        );
-      }
-#ifdef DEBUG_LEGION
-      assert(empty_conditions.empty());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::apply_local_version_infos(std::set<RtEvent> &map_conditions)
     //--------------------------------------------------------------------------
     {
@@ -12216,8 +12145,6 @@ namespace Legion {
             !version_ready_event.has_triggered())
           return defer_perform_mapping(version_ready_event, epoch_owner);
       }
-      // Walk the path down to the upper bounds for all points first
-      prewalk_slice();
       
       std::set<RtEvent> mapped_events;
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -12287,8 +12214,6 @@ namespace Legion {
           return;
         }
       }
-      // Walk the path down to the upper bounds for all points first
-      prewalk_slice();
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.
       stealable = false;

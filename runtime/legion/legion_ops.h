@@ -1056,9 +1056,8 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-          const LegionMap<RegionTreeNode*,FieldMask>::aligned &to_close,
-                      LegionTrace *trace, int close_idx, 
-                      const VersionInfo &version_info,
+                      ClosedNode *closed_tree, LegionTrace *trace, 
+                      int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, 
                       const FieldMask &leave_open, Operation *create_op);
     public:
@@ -1084,9 +1083,9 @@ namespace Legion {
                               InstanceSet &chosen_instances);
       void report_profiling_results(void);
     protected:
-      LegionMap<RegionTreeNode*,FieldMask>::aligned close_nodes;
       FieldMask leave_open_mask;
       FieldMask close_mask;
+      ClosedNode *closed_tree;
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;

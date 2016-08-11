@@ -2079,101 +2079,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_traverse_path(RegionTreeContext ctx,
-                                                 RegionTreePath &path,
-                                                 const RegionRequirement &req,
-                                                 VersionInfo &version_info,
-                                                 Operation *op, unsigned index,
-                                                 bool find_valid,
-                                                 std::set<RtEvent> &map_applied,
-                                                 InstanceSet &valid_instances
-#ifdef DEBUG_LEGION
-                                                 , const char *log_name
-                                                 , UniqueID uid
-#endif
-                                                  )
+    void RegionTreeForest::physical_premap_only(RegionTreeContext ctx,
+                                                const RegionRequirement &req,
+                                                VersionInfo &version_info,
+                                                InstanceSet &valid_instances)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_TRAVERSE_CALL);
+      DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
       // If we are a NO_ACCESS, then we are already done 
       if (IS_NO_ACCESS(req))
         return;
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
+      assert(req.handle_type != PART_PROJECTION);
 #endif
-      // Get the parent node and field mask
-      RegionNode *parent_node = get_node(req.parent);
+      RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
-        parent_node->column_source->get_field_mask(req.privilege_fields);
-      TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
-                         user_mask, map_applied);
-      // Build path traverser object
-      PhysicalTraverser traverser(path, &info, &valid_instances);
-      // Get the start node
-      RegionTreeNode *start_node;
-      if (req.handle_type == PART_PROJECTION)
-        start_node = get_node(req.partition);
-      else
-        start_node = get_node(req.region);
-      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
-        start_node = start_node->get_parent();
-#ifdef DEBUG_LEGION
-      // Little sanity checking
-      assert(start_node->get_depth() >= parent_node->get_depth());
-#endif
-
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     parent_node, ctx.get_id(), 
-                                     true/*before*/, true/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
-#endif
-      traverser.traverse(start_node);
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     parent_node, ctx.get_id(), 
-                                     false/*before*/, true/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::traverse_and_register(RegionTreeContext ctx,
-                                                 RegionTreePath &path,
-                                                 const RegionRequirement &req,
-                                                 VersionInfo &version_info,
-                                                 RestrictInfo &restrict_info,
-                                                 Operation *op, unsigned index,
-                                                 ApEvent term_event,
-                                                 bool defer_add_users,
-                                                 std::set<RtEvent> &map_applied,
-                                                 InstanceSet &targets
-#ifdef DEBUG_LEGION
-                                                 , const char *log_name
-                                                 , UniqueID uid
-#endif
-                                                 )
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, 
-                        REGION_TREE_PHYSICAL_TRAVERSE_AND_REGISTER_CALL);
-      // Just call physical traverse path with an empty InstanceSet
-      InstanceSet empty_targets;
-      physical_traverse_path(ctx, path, req, version_info, op, index, 
-                             false/*find valid*/, map_applied, empty_targets
-#ifdef DEBUG_LEGION
-                             , log_name, uid
-#endif
-                             );
-      // Now we can do the registration
-      physical_register_only(ctx, req, version_info, restrict_info, op, index,
-                             term_event, defer_add_users, map_applied, targets
-#ifdef DEBUG_LEGION
-                             , log_name, uid
-#endif
-                             );
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      region_node->premap_region(ctx.get_id(), req, user_mask, 
+                                 version_info, valid_instances);
     }
 
     //--------------------------------------------------------------------------
@@ -10399,6 +10323,10 @@ namespace Legion {
             version_info.record_split_fields(this, split_fields);
           // Record our projection epochs
           state.capture_projection_epochs(user.field_mask, proj_info);
+          // If we're writing, then record our projection info in 
+          // the current projection epoch
+          if (IS_WRITE(user.usage))
+            state.update_projection_epochs(user.field_mask, proj_info);
         }
         // Finish dependence analysis for any advance operations
         if (!advances.empty())
@@ -10607,7 +10535,14 @@ namespace Legion {
                                      state.curr_epoch_users, closing_mask);
       perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, read_only_close,
                                      state.prev_epoch_users, closing_mask);
-      
+      // If this is not a read-only close, then capture the 
+      // close information
+      ClosedNode *closed_node = NULL;
+      if (!read_only_close)
+      {
+        closed_node = closer.find_closed_node(this);
+        closed_node->record_closed_fields(closing_mask);
+      }
       // Recursively traverse any open children and close them as well
       LegionDeque<FieldState>::aligned new_states;
       for (std::list<FieldState>::iterator it = state.field_states.begin();
@@ -10632,7 +10567,12 @@ namespace Legion {
         // If this was a projection field state then we need to 
         // advance the epoch version numbers
         if (it->is_projection_state())
+        {
+          if (!read_only_close && (it->open_state != OPEN_READ_ONLY_PROJ))
+            state.capture_close_epochs(overlap, closed_node);
+          // If this is a writing or reducing 
           state.advance_projection_epochs(overlap); 
+        }
         // Remove the state if it is now empty
         if (!it->valid_fields)
           it = state.field_states.erase(it);
@@ -10948,7 +10888,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(this, overlap,                
+                  closer.record_close_operation(overlap,                
                    false/*leave open*/, true/*read only*/, false/*flush only*/);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
@@ -10973,7 +10913,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(!!overlap);
 #endif
-                closer.record_close_operation(this, overlap,
+                closer.record_close_operation(overlap,
                                   IS_READ_ONLY(closer.user.usage)/*leave open*/,
                                   false/*read only*/, false/*flush only*/);
                 // Advance the projection epochs
@@ -10999,7 +10939,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(this, overlap,
+                  closer.record_close_operation(overlap,
                    false/*leave open*/, false/*read only*/,false/*flush only*/);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
@@ -11151,7 +11091,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(this, overlap,
+                  closer.record_close_operation(overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
                   // Advance the projection epochs
@@ -11195,7 +11135,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(this, overlap,
+                  closer.record_close_operation(overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
                   // Advance the projection epochs
@@ -11222,7 +11162,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(this, overlap,
+                  closer.record_close_operation(overlap,
                                             IS_READ_ONLY(closer.user.usage),
                                             false/*read only*/, false/*flush*/);
                   // Advance the projection epochs
@@ -11315,7 +11255,7 @@ namespace Legion {
         // to be performed but only to flush the reductions
         FieldMask unflushed = reduction_flush_fields - flushed_fields;
         if (!!unflushed)
-          closer.record_close_operation(this, unflushed,
+          closer.record_close_operation(unflushed,
               false/*leave open*/, false/*read only*/, true/*flush only*/);
         // Then we can mark that these fields no longer have 
         // unflushed reductions
@@ -11379,7 +11319,7 @@ namespace Legion {
                                              read_only_close);
               if (record_close_operations)
               {
-                closer.record_close_operation(this, close_mask,
+                closer.record_close_operation(close_mask,
                     permit_leave_open, read_only_close, false/*flush only*/);
                 actually_closed = close_mask;
               }
@@ -11443,7 +11383,7 @@ namespace Legion {
                                          permit_leave_open, read_only_close);
           if (record_close_operations)
           {
-            closer.record_close_operation(this, close_mask,
+            closer.record_close_operation(close_mask,
                 permit_leave_open, read_only_close, false/*flush only*/);
             actually_closed |= close_mask;
           }
@@ -12057,7 +11997,7 @@ namespace Legion {
           case OPEN_READ_ONLY_PROJ:
             {
               // Do a read only close here 
-              closer.record_close_operation(this, overlap,
+              closer.record_close_operation(overlap,
                   false/*leave open*/, true/*read only*/, false/*flush only*/);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
@@ -12073,7 +12013,7 @@ namespace Legion {
           case OPEN_REDUCE_PROJ:
             {
               // Do the close here 
-              closer.record_close_operation(this, overlap,
+              closer.record_close_operation(overlap,
                   false/*leave open*/, false/*read only*/, false/*flush only*/);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
@@ -14762,6 +14702,58 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
       return create_composite_instance(ctx_id, virtual_mask, 
                                        version_info, target_ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::premap_region(ContextID ctx,
+                                   const RegionRequirement &req,
+                                   const FieldMask &valid_mask,
+                                   VersionInfo &version_info, 
+                                   InstanceSet &targets)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_PREMAP_REGION_CALL);
+      PhysicalState *state = get_physical_state(version_info);
+      if (!IS_REDUCE(req))
+      {
+        pull_valid_instance_views(ctx, state, 
+            valid_mask, true/*needs space*/, version_info);
+        // Record the instances and the fields for which they are valid 
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              state->valid_views.begin(); it != state->valid_views.end();it++)
+        {
+          // Skip any deferred views, they don't actually count here
+          if (it->first->is_deferred_view())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first->as_instance_view()->is_materialized_view());
+#endif
+          MaterializedView *cur_view = 
+            it->first->as_instance_view()->as_materialized_view();
+          // Check to see if it has space for any fields, if not we can skip it
+          FieldMask containing_fields = 
+           cur_view->manager->layout->allocated_fields & valid_mask;
+          if (!containing_fields)
+            continue;
+          // Now see if it has any valid fields already
+          FieldMask valid_fields = it->second & valid_mask;
+          // Save the reference
+          targets.add_instance(InstanceRef(cur_view->manager, valid_fields));
+        }
+      }
+      else
+      {
+        // See if there are any reduction instances that match locally
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & valid_mask;
+          if (!overlap)
+            continue;
+          targets.add_instance(InstanceRef(it->first->manager, overlap));
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

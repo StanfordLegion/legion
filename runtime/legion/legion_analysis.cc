@@ -2088,20 +2088,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // PhysicalTraverser 
+    // Projection Epoch
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTraverser::PhysicalTraverser(RegionTreePath &p, 
-                                         TraversalInfo *in, InstanceSet *t)
-      : PathTraverser(p), info(in), targets(t)
+    ProjectionEpoch::ProjectionEpoch(ProjectionEpochID id, const FieldMask &m)
+      : epoch_id(id), valid_fields(m)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraverser::PhysicalTraverser(const PhysicalTraverser &rhs)
-      : PathTraverser(rhs.path), info(NULL), targets(NULL)
+    ProjectionEpoch::ProjectionEpoch(const ProjectionEpoch &rhs)
+      : epoch_id(rhs.epoch_id), valid_fields(rhs.valid_fields)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2109,13 +2108,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraverser::~PhysicalTraverser(void)
+    ProjectionEpoch::~ProjectionEpoch(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalTraverser& PhysicalTraverser::operator=(const PhysicalTraverser &rs)
+    ProjectionEpoch& ProjectionEpoch::operator=(const ProjectionEpoch &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2124,72 +2123,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTraverser::visit_region(RegionNode *node)
+    void* ProjectionEpoch::operator new(size_t count)
     //--------------------------------------------------------------------------
     {
-      return traverse_node(node);
+      return legion_alloc_aligned<ProjectionEpoch,true/*bytes*/>(count);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTraverser::visit_partition(PartitionNode *node)
+    void ProjectionEpoch::operator delete(void *ptr)
     //--------------------------------------------------------------------------
     {
-      return traverse_node(node);
+      free(ptr);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalTraverser::traverse_node(RegionTreeNode *node)
+    void ProjectionEpoch::insert(ProjectionFunction *function, const Domain &d)
     //--------------------------------------------------------------------------
     {
-      if (has_child)
-        return true;
-      PhysicalState *state = node->get_physical_state(info->version_info); 
-      if (!IS_REDUCE(info->req))
-      {
-        // We're at the child node, see if we need to find the valid 
-        // instances or not, if not then we are done
-        if (targets != NULL)
-        {
-          node->pull_valid_instance_views(info->ctx, state, 
-              info->traversal_mask, true/*needs space*/, info->version_info);
-          // Record the instances and the fields for which they are valid 
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                state->valid_views.begin(); it != state->valid_views.end();it++)
-          {
-            // Skip any deferred views, they don't actually count here
-            if (it->first->is_deferred_view())
-              continue;
 #ifdef DEBUG_LEGION
-            assert(it->first->as_instance_view()->is_materialized_view());
+      assert(!!valid_fields);
 #endif
-            MaterializedView *cur_view = 
-              it->first->as_instance_view()->as_materialized_view();
-            // Check to see if it has space for any fields, if not we can skip it
-            FieldMask containing_fields = 
-             cur_view->manager->layout->allocated_fields & info->traversal_mask;
-            if (!containing_fields)
-              continue;
-            // Now see if it has any valid fields already
-            FieldMask valid_fields = it->second & info->traversal_mask;
-            // Save the reference
-            targets->add_instance(InstanceRef(cur_view->manager, valid_fields));
-          }
-        }
-      }
-      else
-      {
-        // See if there are any reduction instances that match locally
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          FieldMask overlap = it->second & info->traversal_mask;
-          if (!overlap)
-            continue;
-          targets->add_instance(InstanceRef(it->first->manager, overlap));
-        }
-      }
-      return true;
+      projections[function].insert(d);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2201,7 +2155,8 @@ namespace Legion {
       : owner(node)
     //--------------------------------------------------------------------------
     {
-      projection_epochs[0] = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      projection_epochs[0] = 
+        new ProjectionEpoch(0, FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
 
     //--------------------------------------------------------------------------
@@ -2303,8 +2258,12 @@ namespace Legion {
       dirty_below.clear();
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
+      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+        delete it->second;
       projection_epochs.clear();
-      projection_epochs[0] = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      projection_epochs[0] = 
+        new ProjectionEpoch(0, FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     } 
 
     //--------------------------------------------------------------------------
@@ -2365,52 +2324,56 @@ namespace Legion {
     void CurrentState::advance_projection_epochs(const FieldMask &advance_mask)
     //--------------------------------------------------------------------------
     {
-      LegionMap<ProjectionEpochID,FieldMask>::aligned to_add; 
+      std::map<ProjectionEpochID,ProjectionEpoch*> to_add; 
       std::set<ProjectionEpochID> to_delete;
-      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::reverse_iterator 
-            it = projection_epochs.rbegin(); 
+      for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
+            reverse_iterator it = projection_epochs.rbegin(); 
             it != projection_epochs.rend(); it++) 
       {
-        FieldMask overlap = it->second & advance_mask;
+        FieldMask overlap = it->second->valid_fields & advance_mask;
         if (!overlap)
           continue;
-        it->second -= overlap;
-        if (!it->second)
+        it->second->valid_fields -= overlap;
+        if (!it->second->valid_fields)
           to_delete.insert(it->first);
         // See if we can add it to an existing one
-        LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator finder = 
-          projection_epochs.find(it->first+1);
+        LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::iterator 
+          finder = projection_epochs.find(it->first+1);
         if (finder != projection_epochs.end())
         {
           // If we were going to erase it, then don't erase it anymore
-          if (!finder->second)
+          if (!finder->second->valid_fields)
           {
 #ifdef DEBUG_LEGION
             assert(to_delete.find(finder->first) != to_delete.end());
 #endif
             to_delete.erase(finder->first);
           }
-          finder->second |= overlap;
+          finder->second->valid_fields |= overlap;
         }
         else
-          to_add[it->first+1] = overlap;
+          to_add[it->first+1] = new ProjectionEpoch(it->first+1, overlap);
       }
       if (!to_delete.empty())
       {
         for (std::set<ProjectionEpochID>::const_iterator it = 
               to_delete.begin(); it != to_delete.end(); it++)
         {
-          // Field should be empty
+          std::map<ProjectionEpochID,ProjectionEpoch*>::iterator finder =
+            projection_epochs.find(*it);
 #ifdef DEBUG_LEGION
-          assert(!projection_epochs[*it]);
+          assert(finder != projection_epochs.end());
+          // Field should be empty
+          assert(!finder->second->valid_fields);
 #endif
-          projection_epochs.erase(*it);
+          delete finder->second;
+          projection_epochs.erase(finder);
         }
       }
       if (!to_add.empty())
       {
-        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
-              it = to_add.begin(); it != to_add.end(); it++)
+        for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
+              const_iterator it = to_add.begin(); it != to_add.end(); it++)
         {
 #ifdef DEBUG_LEGION
           assert(projection_epochs.find(it->first) == projection_epochs.end());
@@ -2425,13 +2388,50 @@ namespace Legion {
                                                  ProjectionInfo &info) const
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
-            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
+            const_iterator it = projection_epochs.begin(); it != 
+            projection_epochs.end(); it++)
       {
-        FieldMask overlap = it->second & capture_mask;
+        FieldMask overlap = it->second->valid_fields & capture_mask;
         if (!overlap)
           continue;
         info.record_projection_epoch(it->first, overlap);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentState::capture_close_epochs(FieldMask capture_mask,
+                                            ClosedNode *closed_node) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        FieldMask overlap = it->second->valid_fields & capture_mask;
+        if (!overlap)
+          continue;
+        closed_node->record_projections(it->second, overlap);
+        capture_mask -= overlap;
+        if (!capture_mask)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CurrentState::update_projection_epochs(FieldMask update_mask,
+                                               const ProjectionInfo &info) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        FieldMask overlap = it->second->valid_fields & update_mask;
+        if (!overlap)
+          continue;
+        it->second->insert(info.projection, info.projection_domain);
+        update_mask -= overlap;
+        if (!update_mask)
+          break;
       }
     }
 
@@ -2705,7 +2705,112 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Closers 
+    // Closed Node
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ClosedNode::ClosedNode(RegionTreeNode *n)
+      : node(n)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ClosedNode::ClosedNode(const ClosedNode &rhs)
+      : node(rhs.node)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ClosedNode::~ClosedNode(void)
+    //--------------------------------------------------------------------------
+    {
+      // Recursively delete the rest of the tree
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        delete it->second;
+      children.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    ClosedNode& ClosedNode::operator=(const ClosedNode &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void* ClosedNode::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<ClosedNode,true/*bytes*/>(count); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::add_child_node(ClosedNode *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(children.find(child->node) == children.end());
+#endif
+      children[child->node] = child; 
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::record_closed_fields(const FieldMask &fields)
+    //--------------------------------------------------------------------------
+    {
+      closed_fields |= fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::record_projections(const ProjectionEpoch *epoch,
+                                        const FieldMask &fields)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<ProjectionFunction*,std::set<Domain> >::const_iterator pit =
+            epoch->projections.begin(); pit != epoch->projections.end(); pit++)
+      {
+        std::map<ProjectionFunction*,LegionMap<Domain,FieldMask>::aligned>::
+          iterator finder = projections.find(pit->first);
+        if (finder != projections.end())
+        {
+          for (std::set<Domain>::const_iterator it = pit->second.begin();
+                it != pit->second.end(); it++)
+          {
+            LegionMap<Domain,FieldMask>::aligned::iterator finder2 = 
+              finder->second.find(*it);
+            if (finder2 == finder->second.end())
+              finder->second[*it] = fields;
+            else
+              finder2->second |= fields;
+          }
+        }
+        else
+        {
+          // Didn't exist before so we can just insert 
+          LegionMap<Domain,FieldMask>::aligned &doms = projections[pit->first];
+          for (std::set<Domain>::const_iterator it = pit->second.begin();
+                it != pit->second.end(); it++)
+            doms[*it] = fields;
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Logical Closer 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -2743,12 +2848,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::record_close_operation(RegionTreeNode *root, 
-        const FieldMask &mask, bool leave_open, bool read_only, bool flush_only)
+    void LogicalCloser::record_close_operation(const FieldMask &mask, 
+                               bool leave_open, bool read_only, bool flush_only)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(root == root_node);
       assert(!!mask);
       // at most one of these should be true
       assert(!leave_open && !read_only && !flush_only);
@@ -2762,19 +2866,27 @@ namespace Legion {
         normal_close_mask |= mask;
         if (leave_open)
           leave_open_mask |= mask;
-        closed_nodes[root] |= mask;
       }
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::record_closed_child(RegionTreeNode *node, 
-                                          const FieldMask &mask, bool read_only)
+    ClosedNode* LogicalCloser::find_closed_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      // Can skip read-only for now
-      if (read_only)
-        return;
-      closed_nodes[node] |= mask;
+      std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
+        closed_nodes.find(node);
+      if (finder != closed_nodes.end())
+        return finder->second;
+      // Otherwise we need to make it
+      ClosedNode *result = new ClosedNode(node);
+      closed_nodes[node] = result;
+      // Make it up the tree if necessary
+      if (node != root_node)
+      {
+        ClosedNode *parent = find_closed_node(node->get_parent());
+        parent->add_child_node(result);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2824,13 +2936,20 @@ namespace Legion {
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        // Add the root node to the set
-        closed_nodes[root_node] |= normal_close_mask;
+        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
+          closed_nodes.find(root_node);
+#ifdef DEBUG_LEGION
+        assert(finder != closed_nodes.end()); // better have a closed tree
+#endif
+        // We can update the closed fields at the root
+        finder->second->record_closed_fields(normal_close_mask);
         // Now initialize the operation
-        normal_close_op->initialize(creator->get_parent(), req, closed_nodes,
+        normal_close_op->initialize(creator->get_parent(), req, finder->second,
                                     trace_info.trace, trace_info.req_idx, 
                                     ver_info, normal_close_mask, 
                                     leave_open_mask,creator);
+        // We can clear this now
+        closed_nodes.clear();
       }
       if (!!read_only_close_mask)
       {
@@ -2855,11 +2974,11 @@ namespace Legion {
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        LegionMap<RegionTreeNode*,FieldMask>::aligned flush_nodes;
-        flush_nodes[root_node] = flush_only_close_mask;
+        // Make a closed tree of just the root node
+        ClosedNode *closed_tree = new ClosedNode(root_node);
         FieldMask empty_leave_open;
-        flush_only_close_op->initialize(creator->get_parent(), req, 
-            flush_nodes, trace_info.trace, trace_info.req_idx, ver_info, 
+        flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,
+            trace_info.trace, trace_info.req_idx, ver_info, 
             flush_only_close_mask, empty_leave_open, creator);
       }
     }

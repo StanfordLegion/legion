@@ -300,34 +300,10 @@ namespace Legion {
                               const RegionRequirement &req, 
                               RestrictInfo &restrict_info);
     public: // Physical analysis methods
-      void physical_traverse_path(RegionTreeContext ctx,
-                                  RegionTreePath &path,
-                                  const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op, unsigned index,
-                                  bool find_valid,
-                                  std::set<RtEvent> &map_applied,
-                                  InstanceSet &valid_insts
-#ifdef DEBUG_LEGION
-                                  , const char *log_name
-                                  , UniqueID uid
-#endif
-                                  );
-      void traverse_and_register(RegionTreeContext ctx,
-                                 RegionTreePath &path,
-                                 const RegionRequirement &req,
-                                 VersionInfo &version_info,
-                                 RestrictInfo &restrict_info,
-                                 Operation *op, unsigned index,
-                                 ApEvent term_event, 
-                                 bool defer_add_users,
-                                 std::set<RtEvent> &map_applied,
-                                 InstanceSet &targets
-#ifdef DEBUG_LEGION
-                                 , const char *log_name
-                                 , UniqueID uid
-#endif
-                                 );
+      void physical_premap_only(RegionTreeContext ctx,
+                                const RegionRequirement &req,
+                                VersionInfo &version_info,
+                                InstanceSet &valid_instances);
       void map_virtual_region(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               InstanceRef &composite_ref,
@@ -1778,6 +1754,11 @@ namespace Legion {
                                        const FieldMask &virtual_mask,
                                        VersionInfo &version_info,
                                        SingleTask *target_ctx);
+      void premap_region(ContextID ctx, 
+                         const RegionRequirement &req,
+                         const FieldMask &valid_mask,
+                         VersionInfo &version_info,
+                         InstanceSet &targets);
       void register_region(const TraversalInfo &info, 
                            RestrictInfo &restrict_info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
