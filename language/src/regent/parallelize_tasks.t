@@ -1483,22 +1483,7 @@ local function normalize_calls(parallelizable, call_stats)
   end
 
   return function(node, continuation)
-    if node:is(ast.typed.Block) then
-      local block = continuation(node, true)
-      if data.any(unpack(block.stats:map(terralib.islist))) then
-        -- Flatten any nested lists
-        local flattened = terralib.newlist()
-        for idx = 1, #block.stats do
-          if terralib.islist(block.stats[idx]) then
-            flattened:insertall(block.stats[idx])
-          else
-            flattened:insert(block.stats[idx])
-          end
-        end
-        block = block { stats = flattened }
-      end
-      return block
-    elseif node:is(ast.typed.stat.Var) and
+    if node:is(ast.typed.stat.Var) and
            data.any(unpack(node.values:map(parallelizable))) then
       if #node.values == 1 then
         call_stats[node] = true
@@ -1694,21 +1679,6 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
       end
 
       return stats
-    elseif node:is(ast.typed.Block) then
-      local block = continuation(node, true)
-      if data.any(unpack(block.stats:map(terralib.islist))) then
-        -- Flatten any nested lists
-        local flattened = terralib.newlist()
-        for idx = 1, #block.stats do
-          if terralib.islist(block.stats[idx]) then
-            flattened:insertall(block.stats[idx])
-          else
-            flattened:insert(block.stats[idx])
-          end
-        end
-        block = block { stats = flattened }
-      end
-      return block
     elseif call_stats[node] then
       return node
     else
@@ -1750,21 +1720,6 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
       end
 
       return stats
-    elseif node:is(ast.typed.Block) then
-      local block = continuation(node, true)
-      if data.any(unpack(block.stats:map(terralib.islist))) then
-        -- Flatten any nested lists
-        local flattened = terralib.newlist()
-        for idx = 1, #block.stats do
-          if terralib.islist(block.stats[idx]) then
-            flattened:insertall(block.stats[idx])
-          else
-            flattened:insert(block.stats[idx])
-          end
-        end
-        block = block { stats = flattened }
-      end
-      return block
     else
       return continuation(node, true)
     end
@@ -1791,7 +1746,7 @@ function parallelize_task_calls.top_task(global_cx, node)
   local body = node.body
   local call_stats = {}
   local normalized =
-    ast.map_node_continuation(
+    ast.flatmap_node_continuation(
       normalize_calls(parallelizable, call_stats),
       body)
 
@@ -1803,13 +1758,13 @@ function parallelize_task_calls.top_task(global_cx, node)
 
   -- Third, insert partition creation code when necessary
   local partition_created =
-    ast.map_node_continuation(
+    ast.flatmap_node_continuation(
       insert_partition_creation(parallelizable, caller_cx, call_stats),
       normalized)
 
   -- Finally, replace single task launches into indexspace launches
   local parallelized =
-    ast.map_node_continuation(
+    ast.flatmap_node_continuation(
       transform_task_launches(parallelizable, caller_cx, call_stats),
       partition_created)
 
@@ -1991,23 +1946,6 @@ function normalize_accesses.stat(task_cx, normalizer_cx)
         find_field_accesses(accesses_rhs), node.rhs)
       assert(data.all(unpack(accesses_lhs:map(is_centered))))
       return lift_all_accesses(task_cx, normalizer_cx, accesses_rhs, node)
-    elseif node:is(ast.typed.Block) then
-      normalizer_cx:push_scope()
-      local block = continuation(node, true)
-      normalizer_cx:pop_scope()
-      if data.any(unpack(block.stats:map(terralib.islist))) then
-        -- Flatten any nested lists
-        local flattened = terralib.newlist()
-        for idx = 1, #block.stats do
-          if terralib.islist(block.stats[idx]) then
-            flattened:insertall(block.stats[idx])
-          else
-            flattened:insert(block.stats[idx])
-          end
-        end
-        block = block { stats = flattened }
-      end
-      return block
     else
       return continuation(node, true)
     end
@@ -2020,7 +1958,7 @@ function normalize_accesses.stat_for_list(task_cx, node)
     rewrite_metadata_access(task_cx), node)
 
   local normalizer_cx = normalizer_context.new(node.symbol)
-  node = ast.map_node_continuation(
+  node = ast.flatmap_node_continuation(
     normalize_accesses.stat(task_cx, normalizer_cx), node)
 
   return node
@@ -2449,22 +2387,6 @@ function parallelize_tasks.stat(task_cx)
       end
       stats:insert(case_split_if)
       return stats
-
-    elseif node:is(ast.typed.Block) then
-      local block = continuation(node, true)
-      if data.any(unpack(block.stats:map(terralib.islist))) then
-        -- Flatten any nested lists
-        local flattened = terralib.newlist()
-        for idx = 1, #block.stats do
-          if terralib.islist(block.stats[idx]) then
-            flattened:insertall(block.stats[idx])
-          else
-            flattened:insert(block.stats[idx])
-          end
-        end
-        block = block { stats = flattened }
-      end
-      return block
     else
       return continuation(node, true)
     end
@@ -2472,7 +2394,7 @@ function parallelize_tasks.stat(task_cx)
 end
 
 function parallelize_tasks.stat_for_list(task_cx, node)
-  return ast.map_node_continuation(parallelize_tasks.stat(task_cx), node)
+  return ast.flatmap_node_continuation(parallelize_tasks.stat(task_cx), node)
 end
 
 function parallelize_tasks.top_task_body(task_cx, node)
