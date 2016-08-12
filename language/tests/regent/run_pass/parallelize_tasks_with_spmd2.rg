@@ -107,6 +107,19 @@ do
   return sum
 end
 
+__demand(__parallel)
+task copy_scalar_reduction(r : region(ispace(int2d), double), v : double)
+where reads writes(r)
+do
+  for e in r do @e = v end
+end
+
+task copy_out_result(r : region(ispace(int2d), double))
+where reads(r)
+do
+  for e in r do return @e end
+end
+
 local cmath = terralib.includec("math.h")
 
 task check(r : region(ispace(int2d), fs))
@@ -131,6 +144,8 @@ task test(size : int)
   var interior_partition = partition(disjoint, primary_region, coloring, ispace(int1d, 1))
   c.legion_domain_point_coloring_destroy(coloring)
   var interior_region = interior_partition[0]
+  var tmp_region = region(is, double)
+
   var sum : double = 0
   var cnt = 0
   var steps = 10
@@ -140,8 +155,10 @@ task test(size : int)
     sum += stencil3(primary_region)
     sum += stencil3(primary_region)
     stencil2(primary_region, interior_region)
+    copy_scalar_reduction(tmp_region, sum)
     cnt += 1
   end
+  sum = copy_out_result(tmp_region)
 
   var sum_serial : double = 0
   cnt = 0
@@ -153,9 +170,10 @@ task test(size : int)
     cnt += 1
   end
 
+  c.printf("serial: %f, parallel: %f, relative error: %.5f%%\n",
+    sum_serial, sum, cmath.fabs(sum - sum_serial) * 100 / sum_serial)
+  regentlib.assert(cmath.fabs(sum - sum_serial) / sum < 1e-4, "test failed")
   check(primary_region)
-  c.printf("%f, %f\n", sum, sum_serial)
-  regentlib.assert((sum - sum_serial) < 0.000001, "test failed")
 end
 
 task toplevel()
