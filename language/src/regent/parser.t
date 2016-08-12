@@ -16,7 +16,7 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local parser = {}

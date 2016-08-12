@@ -24,8 +24,8 @@
 -- (Currently the optimization returns false for idempotent.)
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 
 local context = {}

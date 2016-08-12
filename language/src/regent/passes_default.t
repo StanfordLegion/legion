@@ -43,4 +43,4 @@ if std.config["trace"] then passes_hooks.add_optimization(60, optimize_traces) e
 if std.config["no-dynamic-branches"] then passes_hooks.add_optimization(70, optimize_divergence) end
 if std.config["vectorize"] then passes_hooks.add_optimization(80, vectorize_loops) end
 
-if std.config["debug"] then passes_hooks.debug_optimizations() end
+passes_hooks.debug_optimizations()

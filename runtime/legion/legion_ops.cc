@@ -8334,6 +8334,13 @@ namespace Legion {
           task->target_proc = proc;
         }
       }
+      // If we have an slices we need to do our prewalks before we map points
+      if (!slice_tasks.empty())
+      {
+        for (std::set<SliceTask*>::const_iterator it = slice_tasks.begin();
+              it != slice_tasks.end(); it++)
+          (*it)->prewalk_slice();
+      }
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 

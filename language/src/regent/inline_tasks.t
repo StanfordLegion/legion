@@ -15,9 +15,9 @@
 -- Regent Task Inliner
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
-local log = require("regent/log")
+local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
 
 local inline_tasks = {}
@@ -158,14 +158,14 @@ local function check_valid_inline_task(task)
   local body = task.body
   local num_returns = count_returns(body)
   if num_returns > 1 then
-    log.error(task, "inline tasks cannot have multiple return statements")
+    report.error(task, "inline tasks cannot have multiple return statements")
   end
   if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.stat.Return) then
-    log.error(task, "the return statement in an inline task should be the last statement")
+    report.error(task, "the return statement in an inline task should be the last statement")
   end
 
   if find_self_recursion(task.prototype, body) then
-    log.error(task, "inline tasks cannot be recursive")
+    report.error(task, "inline tasks cannot be recursive")
   end
 end
 

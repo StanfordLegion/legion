@@ -7286,6 +7286,11 @@ class CompositeInstance(object):
                 for dst_op in dst_preconditions:
                     dst_op.physical_outgoing.add(copy)
                     copy.physical_incoming.add(dst_op)
+            # Add the copy users no matter what
+            temp_inst.add_copy_user(depth=dst_depth, field=self.field,
+                region=region, op=copy, index=index, reading=True, redop=0)
+            dst.add_copy_user(depth=dst_depth, field=self.field,
+                region=region, op=copy, index=index, reading=False, redop=0)
             return True
         else:
             # This is actually just a special case of issuing copies across 

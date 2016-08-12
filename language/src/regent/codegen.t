@@ -15,8 +15,8 @@
 -- Regent Code Generation
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
@@ -7538,8 +7538,8 @@ function codegen.top_task(cx, node)
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
-      local param_name = param.symbol:hasname() or tostring(param.symbol)
-      return { field = param_name, type = param.param_type }
+      local param_label = param.symbol:getlabel()
+      return { field = param_label, type = param.param_type }
     end))
 
   -- Regions require some special handling here. Specifically, field
@@ -7642,7 +7642,7 @@ function codegen.top_task(cx, node)
 
       local deser_actions, deser_value = std.deserialize(
         param_type,
-        `(&args.[param:hasname() or tostring(param)]),
+        `(&args.[param:getlabel()]),
         `(&[data_ptr]))
       local actions = quote
         var [param_symbol]
@@ -7991,7 +7991,7 @@ function codegen.top(cx, node)
             cudahelper.check_cuda_available())
     then
       if node.annotations.cuda:is(ast.annotation.Demand) then
-        log.warn(node,
+        report.warn(node,
           "ignoring demand pragma at " .. node.span.source ..
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")

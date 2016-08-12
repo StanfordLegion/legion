@@ -52,7 +52,20 @@ variables:
 # These commands will run before each job.
 before_script:
   - uname -a
-  - export THREADS=$(nproc --all)
+  - |
+    if [[ "$(uname)" = "Linux" ]]; then
+      export THREADS=$(nproc --all)
+    elif [[ "$(uname)" = "Darwin" ]]; then
+      export THREADS=$(sysctl -n hw.ncpu)
+    else
+      echo "Unknown platform. Setting THREADS to 1."
+      export THREADS=1
+    fi
+  - |
+    if [[ "$(uname)" = "Darwin" ]]; then
+      brew update
+      brew install pypy homebrew/versions/llvm35
+    fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
@@ -142,7 +155,7 @@ before_script:
 
 # Run the full test suite on GCC 4.9 and Clang 3.5.
 
-# GCC 4.9
+# Linux with GCC 4.9
 linux_gcc49_terra35_cxx98_release:
   <<: [*linux, *image, *tests]
   variables:
@@ -160,7 +173,7 @@ linux_gcc49_terra35_cxx11_release:
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
 
-# Clang 3.5
+# Linux with Clang 3.5
 linux_clang35_terra35_cxx98_release:
   <<: [*linux, *image, *tests]
   variables:
@@ -179,14 +192,14 @@ linux_clang35_terra35_cxx11_release:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 
 # macOS with Clang 3.5
-macos_clang35_terra35_cxx98_debug_checks:
+macos_clang35_cxx98_debug_checks:
   <<: [*macos, *tests]
   variables:
     <<: [*clang35, *debug, *cxx98_checks]
 
 # Run minimal tests on other compilers.
 
-# GCC 4.8, 5, 6
+# Linux with GCC 4.8, 5, 6
 linux_gcc48_terra35_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
@@ -200,7 +213,7 @@ linux_gcc6_terra35_cxx98_debug_checks:
   variables:
     <<: [*gcc6, *terra35, *debug, *cxx98_checks]
 
-# Clang 3.8
+# Linux with Clang 3.8
 linux_clang38_terra38_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:

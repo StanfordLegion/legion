@@ -16,8 +16,8 @@
 
 local alpha_convert = require("regent/alpha_convert")
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -88,7 +88,7 @@ local function convert_lua_value(cx, node, value, allow_lists)
       span = node.span,
     }
   elseif type(value) == "function" then
-    log.error(node, "unable to specialize lua function (use terralib.cast to explicitly cast it to a terra function type)")
+    report.error(node, "unable to specialize lua function (use terralib.cast to explicitly cast it to a terra function type)")
   elseif type(value) == "cdata" then
     local expr_type = guess_type_for_literal(value)
     if expr_type:isfunction() or expr_type:ispointertofunction() then
@@ -129,17 +129,17 @@ local function convert_lua_value(cx, node, value, allow_lists)
       end
       return value.expr
     elseif value:is(ast.specialized.top.QuoteStat) then
-      log.error(node, "unable to specialize quoted statement as an expression")
+      report.error(node, "unable to specialize quoted statement as an expression")
     else
-      log.error(node, "unexpected node type " .. tostring(value:type()))
+      report.error(node, "unexpected node type " .. tostring(value:type()))
     end
   elseif terralib.issymbol(value) then
-    log.error(node, "unable to specialize terra symbol " .. tostring(value))
+    report.error(node, "unable to specialize terra symbol " .. tostring(value))
   elseif terralib.isquote(value) then
-    log.error(node, "unable to specialize terra quote " .. tostring(value))
+    report.error(node, "unable to specialize terra quote " .. tostring(value))
   elseif terralib.islist(value) then
     if not allow_lists then
-      log.error(node, "unable to specialize terra list in this position")
+      report.error(node, "unable to specialize terra list in this position")
     end
     return value:map(
       function(arg) return convert_lua_value(cx, node, arg, false) end)
@@ -150,7 +150,7 @@ local function convert_lua_value(cx, node, value, allow_lists)
       span = node.span,
     }
   else
-    log.error(node, "unable to specialize value of type " .. tostring(type(value)))
+    report.error(node, "unable to specialize value of type " .. tostring(type(value)))
   end
 end
 
@@ -440,7 +440,7 @@ function specialize.field_names(cx, node)
     then
       return value
     else
-      log.error(node, "unable to specialize value of type " .. tostring(type(value)))
+      report.error(node, "unable to specialize value of type " .. tostring(type(value)))
     end
   end
 end
@@ -779,13 +779,13 @@ end
 -- assumes multi-field accesses have already been flattened by the caller
 function specialize.expr_field_access(cx, node, allow_lists)
   if #node.field_names ~= 1 then
-    log.error(node, "illegal use of multi-field access")
+    report.error(node, "illegal use of multi-field access")
   end
   local value = specialize.expr(cx, node.value)
 
   local field_names = specialize.field_names(cx, node.field_names[1])
   if #field_names ~= 1 then
-    log.error(node, "FIXME: handle specialization of multiple fields")
+    report.error(node, "FIXME: handle specialization of multiple fields")
   end
   local field_name = field_names[1]
 
@@ -840,7 +840,7 @@ function specialize.expr_call(cx, node, allow_lists)
   if not (fn:is(ast.specialized.expr.Function) or
           fn:is(ast.specialized.expr.ID))
   then
-    log.error(fn, "unable to specialize complex expression in function call position")
+    report.error(fn, "unable to specialize complex expression in function call position")
   end
 
   if terralib.isfunction(fn.value) or
@@ -850,7 +850,7 @@ function specialize.expr_call(cx, node, allow_lists)
     type(fn.value) == "cdata"
   then
     if not std.is_task(fn.value) and #node.conditions > 0 then
-      log.error(node.conditions[1],
+      report.error(node.conditions[1],
         "terra function call cannot have conditions")
     end
     return ast.specialized.expr.Call {
@@ -895,7 +895,7 @@ end
 function specialize.expr_ctor_rec_field(cx, node, allow_lists)
   local name = node.name_expr(cx.env:env())
   if type(name) ~= "string" then
-    log.error(node, "expected a string but found " .. tostring(type(name)))
+    report.error(node, "expected a string but found " .. tostring(type(name)))
   end
 
   return terralib.newlist({
@@ -929,12 +929,12 @@ function specialize.expr_ctor(cx, node, allow_lists)
   for _, field in ipairs(fields) do
     if field:is(ast.specialized.expr.CtorRecField) then
       if all_unnamed then
-        log.error(node, "some entries in constructor are named while others are not")
+        report.error(node, "some entries in constructor are named while others are not")
       end
       all_named = true
     elseif field:is(ast.specialized.expr.CtorListField) then
       if all_named then
-        log.error(node, "some entries in constructor are named while others are not")
+        report.error(node, "some entries in constructor are named while others are not")
       end
       all_unnamed = true
     else
@@ -1000,11 +1000,11 @@ end
 function specialize.expr_new(cx, node, allow_lists)
   local pointer_type = node.pointer_type_expr(cx.env:env())
   if not std.is_bounded_type(pointer_type) then
-    log.error(node, "new requires bounded type, got " .. tostring(pointer_type))
+    report.error(node, "new requires bounded type, got " .. tostring(pointer_type))
   end
   local bounds = pointer_type.bounds_symbols
   if #bounds ~= 1 then
-    log.error(node, "new requires bounded type with exactly one region, got " .. tostring(pointer_type))
+    report.error(node, "new requires bounded type with exactly one region, got " .. tostring(pointer_type))
   end
   local region = ast.specialized.expr.ID {
     value = bounds[1],
@@ -1583,7 +1583,7 @@ local function make_symbol(cx, node, var_name, var_type)
     end
   end
 
-  log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
 end
 
 function specialize.stat_for_num(cx, node)
@@ -1769,7 +1769,7 @@ end
 
 function specialize.stat_assignment_or_stat_reduce(cx, node)
   if not has_all_valid_field_accesses(node) then
-    log.error(node, "invalid use of multi-field access")
+    report.error(node, "invalid use of multi-field access")
   end
 
   local flattened_lhs = terralib.newlist()
@@ -1856,11 +1856,11 @@ function specialize.stat_escape(cx, node)
     return get_quote_contents(cx, expr)
   elseif terralib.islist(expr) then
     if not data.all(expr:map(function(v) return std.is_rquote(v) end)) then
-      log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+      report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
     end
     return data.flatmap(function(x) return get_quote_contents(cx, x) end, expr)
   else
-    log.error(node, "unable to specialize value of type " .. tostring(type(expr)))
+    report.error(node, "unable to specialize value of type " .. tostring(type(expr)))
   end
 end
 
@@ -1936,12 +1936,12 @@ local function make_symbols(cx, node, var_name)
     return terralib.newlist({{var_name, var_name}})
   elseif terralib.islist(var_name) then
     if not data.all(unpack(var_name:map(std.is_symbol))) then
-      log.error(node, "param list contains non-symbol")
+      report.error(node, "param list contains non-symbol")
     end
     return var_name:map(function(v) return {v, v} end)
   end
 
-  log.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
+  report.error(node, "unable to specialize value of type " .. tostring(type(var_name)))
 end
 
 function specialize.top_task_param(cx, node)
@@ -1960,7 +1960,7 @@ function specialize.top_task_param(cx, node)
     local param_type
     if std.is_symbol(param_name) then
       if not param_name:hastype() then
-        log.error(node, "param symbol must be typed")
+        report.error(node, "param symbol must be typed")
       end
       param_type = param_name:gettype()
     else
@@ -1968,10 +1968,10 @@ function specialize.top_task_param(cx, node)
     end
 
     if not param_type then
-      log.error(node, "param type is undefined or nil")
+      report.error(node, "param type is undefined or nil")
     end
     if not terralib.types.istype(param_type) then
-      log.error(node, "param type is not a type")
+      report.error(node, "param type is not a type")
     end
 
     if not symbol:hastype() then
@@ -2042,7 +2042,7 @@ function specialize.top_fspace_param(cx, node, mapping)
   -- Check for fields with duplicate types.
   if std.type_supports_constraints(param_type) then
     if mapping[param_type] then
-      log.error(node, "parameters " .. tostring(symbol) .. " and " ..
+      report.error(node, "parameters " .. tostring(symbol) .. " and " ..
                   tostring(mapping[param_type]) ..
                   " have the same type, but are required to be distinct")
     end
@@ -2059,14 +2059,14 @@ function specialize.top_fspace_field(cx, node, mapping)
 
   local field_type = node.type_expr(cx.env:env())
   if not field_type then
-    log.error(node, "field type is undefined or nil")
+    report.error(node, "field type is undefined or nil")
   end
   symbol:settype(field_type)
 
   -- Check for fields with duplicate types.
   if std.type_supports_constraints(field_type) then
     if mapping[field_type] then
-      log.error(node, "fields " .. tostring(symbol) .. " and " ..
+      report.error(node, "fields " .. tostring(symbol) .. " and " ..
                   tostring(mapping[field_type]) ..
                   " have the same type, but are required to be distinct")
     end

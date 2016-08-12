@@ -17,7 +17,7 @@
 local std = require("bishop/std")
 local ast = require("bishop/ast")
 local regex = require("bishop/regex")
-local data = require("regent/data")
+local data = require("common/data")
 
 local function epsilon()
   return { epsilon = true }

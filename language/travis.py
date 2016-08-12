@@ -17,35 +17,6 @@
 
 import os, platform, subprocess
 
-def install_dependencies():
-    env = dict(os.environ.iteritems())
-
-    if platform.system() == 'Darwin':
-        # root_url = 'http://llvm.org/releases/3.5.2'
-        root_url = 'http://legion.stanford.edu/~eslaught/llvm-deb-mirror/releases/3.5.2'
-        clang_tarball = 'clang+llvm-3.5.2-x86_64-apple-darwin.tar.xz'
-        clang_dir = os.path.abspath('clang+llvm-3.5.2-x86_64-apple-darwin')
-
-        print('%s/%s' % (root_url, clang_tarball))
-        subprocess.check_call(
-            ['curl', '-O', '%s/%s' % (root_url, clang_tarball)])
-        shasum = subprocess.Popen(['shasum', '-c'], stdin=subprocess.PIPE)
-        shasum.communicate(
-            '547d9a359258ce918750fd8647cd6e1b47feaa51  %s' % clang_tarball)
-        assert shasum.wait() == 0
-        subprocess.check_call(['tar', 'xfJ', clang_tarball])
-
-        env.update({
-            'PATH': ':'.join(
-                [os.path.join(clang_dir, 'bin'), os.environ['PATH']]),
-            'DYLD_LIBRARY_PATH': ':'.join(
-                [os.path.join(clang_dir, 'lib')] +
-                ([os.environ['DYLD_LIBRARY_PATH']]
-                 if 'DYLD_LIBRARY_PATH' in os.environ else [])),
-        })
-
-    return env
-
 def test(root_dir, debug, spy, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
@@ -72,7 +43,7 @@ if __name__ == '__main__':
     legion_dir = os.path.dirname(root_dir)
     runtime_dir = os.path.join(legion_dir, 'runtime')
 
-    env = install_dependencies()
+    env = dict(os.environ.iteritems())
     env.update({
         'LG_RT_DIR': runtime_dir,
         'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
