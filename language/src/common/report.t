@@ -18,7 +18,19 @@ local ast = require("common/ast")
 
 local report = {}
 
+report.info = function(node, ...)
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the warning.
+  assert(node.span:is(ast.location))
+
+  -- Right now, don't actually do anything on info messages.
+end
+
 report.warn = function(node, ...)
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the warning.
+  assert(node.span:is(ast.location))
+
   io.stderr:write(...)
   io.stderr:write("\n")
 end

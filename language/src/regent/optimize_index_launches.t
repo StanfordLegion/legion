@@ -525,9 +525,9 @@ end
 
 function optimize_index_launch.stat_for_num(cx, node)
   local report_pass = ignore
-  local report_fail = ignore
+  local report_fail = report.info
   if node.annotations.parallel:is(ast.annotation.Demand) then
-    report_pass = ignore -- report.warn
+    report_pass = ignore
     report_fail = report.error
   end
 
@@ -563,9 +563,9 @@ end
 
 function optimize_index_launch.stat_for_list(cx, node)
   local report_pass = ignore
-  local report_fail = ignore
+  local report_fail = report.info
   if node.annotations.parallel:is(ast.annotation.Demand) then
-    report_pass = ignore -- report.warn
+    report_pass = ignore
     report_fail = report.error
   end
 
