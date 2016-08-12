@@ -64,7 +64,7 @@ before_script:
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy openmpi homebrew/versions/llvm35
+      brew install pypy homebrew/versions/llvm35
     fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then

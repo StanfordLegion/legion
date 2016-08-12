@@ -38,7 +38,7 @@ before_install:
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy openmpi homebrew/versions/llvm35
+      brew install pypy homebrew/versions/llvm35
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
