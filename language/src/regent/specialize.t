@@ -948,6 +948,7 @@ end
 function specialize.expr_list_ispace(cx, node, allow_lists)
   return ast.specialized.expr.ListIspace {
     ispace = specialize.expr(cx, node.ispace),
+    mapping = node.mapping and specialize.expr(cx, node.mapping),
     annotations = node.annotations,
     span = node.span,
   }

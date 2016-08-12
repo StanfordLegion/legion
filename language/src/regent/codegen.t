@@ -4528,6 +4528,52 @@ function codegen.expr_list_range(cx, node)
     expr_type)
 end
 
+local function make_mapping_call(cx, node, p, i, domain, ispace_type)
+  local mapping = node.mapping
+  if not mapping then
+    return values.value (
+      node,
+      expr.just(quote end, `i),
+      int
+    )
+  end
+
+  assert(std.is_ispace(ispace_type))
+  local index_type = ispace_type.index_type
+  assert(index_type.dim > 0)
+
+  local get_rect = c["legion_domain_get_rect_" .. index_type.dim .. "d"]
+  assert(get_rect)
+
+  local param_p = ast.typed.expr.Internal {
+    value = values.value(node, expr.just(quote end, p), index_type),
+    expr_type = index_type,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+
+  -- TODO(zhangwen): it seems inefficient to get rectangle from domain in every iteration.
+  local rect_type = std.rect_type(index_type)
+  local param_space = ast.typed.expr.Internal {
+    value = values.value(node,
+      expr.just(quote end, `([rect_type]([get_rect]([domain])))), rect_type),
+    expr_type = rect_type,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+
+  local call = ast.typed.expr.Call {
+    fn = mapping,
+    args = terralib.newlist({ param_p, param_space }),
+    conditions = terralib.newlist({}),
+    expr_type = int,
+    annotations = ast.default_annotations(),
+    span = node.span,
+  }
+
+  return codegen.expr(cx, call)
+end
+
 function codegen.expr_list_ispace(cx, node)
   local ispace_type = std.as_read(node.ispace.expr_type)
   local ispace = codegen.expr(cx, node.ispace):read(cx, ispace_type)
@@ -4537,30 +4583,50 @@ function codegen.expr_list_ispace(cx, node)
   local result_len = terralib.newsymbol(uint64, "result_len")
 
   -- Construct AST that populates the `result` list with indices from `ispace`.
-  --
-  -- Loop variable: `for p in ispace do`
+
+  local ispace_domain = terralib.newsymbol(c.legion_domain_t, "ispace_domain")
   local bound
   if node.ispace:is(ast.typed.expr.ID) then
     bound = node.ispace.value
   else
     bound = std.newsymbol(ispace_type)
   end
-  local p_symbol = std.newsymbol(
-    ispace_type.index_type(bound),
-    "p")
-  -- Index in list: `result[i] = p; i += 1`.
+  local index_type = ispace_type.index_type(bound)
+  -- Loop variable: `for p in ispace do`
+  local p_symbol = std.newsymbol(index_type, "p")
+  -- Index for accessing list in loop.
   local i = terralib.newsymbol(int, "i")
 
+  -- Initially, each index in the index space is stored in a `KeyedIndex`
+  -- along with its sorting key returned by `mapping`.  The indices will then
+  -- be sorted and stored in the `result` list.
+  local struct KeyedIndex {
+    index : index_type;
+    key : int;
+  }
+  -- Compare function for the C qsort function.
+  terra KeyedIndex.compare(a : &opaque, b : &opaque) : int
+    return ([&KeyedIndex](a)).key - ([&KeyedIndex](b)).key
+  end
+  -- Array of (index, key) pairs.
+  local keyed_indices = terralib.newsymbol(&KeyedIndex, "keyed_indices")
+
+  local mapping_call = make_mapping_call(
+    cx, node, p_symbol:getsymbol(), i, ispace_domain, ispace_type):read(cx, int)
   local loop_body = ast.typed.stat.Internal {
     actions = quote
-      regentlib.assert((i >= 0) and (i < [result_len]), "list index out of bounds in list_ispace")
-      [expr_type:data(result)][ [i] ] = [p_symbol:getsymbol()];
+      [mapping_call.actions]
+      var key = [mapping_call.value];
+      regentlib.assert((i >= 0) and (i < [result_len]),
+        "list index out of bounds in list_ispace")
+      [keyed_indices][i] = KeyedIndex { index = [p_symbol:getsymbol()], key = key }
       [i] = [i] + 1
     end,
     annotations = ast.default_annotations(),
     span = node.span,
   }
-  local populate_list_loop = ast.typed.stat.ForList {
+
+  local loop = ast.typed.stat.ForList { -- Populates `keyed_indices` array.
     symbol = p_symbol,
     value = node.ispace,
     block = ast.typed.Block {
@@ -4579,20 +4645,28 @@ function codegen.expr_list_ispace(cx, node)
     -- Currently doesn't support index spaces with multiple domains.
     regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [ispace.value].impl),
       "list_ispace doesn't support index spaces with multiple domains")
-    var ispace_domain = c.legion_index_space_get_domain([cx.runtime], [ispace.value].impl)
-    var [result_len] = c.legion_domain_get_volume(ispace_domain)
+    var [ispace_domain] = c.legion_index_space_get_domain([cx.runtime], [ispace.value].impl)
+    var [result_len] = c.legion_domain_get_volume([ispace_domain])
 
-    -- Allocate list.
+    var [keyed_indices] = [&KeyedIndex](c.malloc(terralib.sizeof(KeyedIndex) * [result_len]))
+    regentlib.assert([keyed_indices] ~= nil, "malloc failed in list_ispace (keyed_indices)")
+    -- Populate `keyed_indices` array.
+    var [i] = 0;
+    [codegen.stat(cx, loop)]
+    regentlib.assert(i == [result_len], "list_ispace final index doesn't match list length")
+
+    c.qsort([keyed_indices], [result_len], terralib.sizeof(KeyedIndex), [KeyedIndex.compare])
+    -- Allocate and populate `result` list.
     var data = c.malloc(terralib.sizeof([expr_type.element_type]) * [result_len])
-    regentlib.assert(data ~= nil, "malloc failed in list_ispace")
+    regentlib.assert(data ~= nil, "malloc failed in list_ispace (result)")
     var [result] = expr_type {
       __size = [result_len],
       __data = data
     }
-
-    -- Populate list with indices from index space.
-    var [i] = 0;
-    [codegen.stat(cx, populate_list_loop)]
+    for j = 0, [result_len] do
+      [expr_type:data(result)][j] = [keyed_indices][j].index
+    end
+    c.free([keyed_indices])
   end
 
   return values.value(

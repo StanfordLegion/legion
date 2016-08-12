@@ -39,6 +39,7 @@ local default_options = {
   ["flow"] = os.getenv('USE_RDIR') == '1' or false,
   ["flow-spmd"] = false,
   ["flow-spmd-shardsize"] = 1,
+  ["flow-spmd-mapping"] = 0,
 
   -- Experimental auto-parallelization flags:
   ["parallelize"] = true,

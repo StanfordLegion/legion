@@ -859,9 +859,15 @@ function parser.expr_prefix(p)
   elseif p:nextif("list_ispace") then
     p:expect("(")
     local ispace = p:expr()
+    local mapping = false
+    if not p:matches(")") then
+      p:expect(",")
+      mapping = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.ListIspace {
       ispace = ispace,
+      mapping = mapping,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }

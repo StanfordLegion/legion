@@ -2067,8 +2067,52 @@ function type_check.expr_list_ispace(cx, node)
   end
   local expr_type = std.list(ispace_type.index_type)
 
+  local mapping = node.mapping
+  if mapping then
+    local index_type = ispace_type.index_type
+    -- Currently, mappings only work for structured index spaces.
+    if index_type.dim == 0 then
+      log.error(node.ispace, "the usage of a mapping requires a structured index space")
+    end
+    
+    -- Type-check `mapping`: it should be able to called with two parameters of
+    -- `index_type` and `rect_type` respectively.
+    local rect_type = std.rect_type(index_type)
+
+    local zero = index_type:zero()
+    local p = ast.specialized.expr.Constant {
+      value = zero,
+      expr_type = index_type,
+      annotations = ast.default_annotations(),
+      span = mapping.span,
+    }
+    local space = ast.specialized.expr.Constant {
+      value = `([rect_type] { lo = zero, hi = zero }),
+      expr_type = rect_type,
+      annotations = ast.default_annotations(),
+      span = mapping.span,
+    }
+    local call = ast.specialized.expr.Call {
+      fn = node.mapping,
+      args = terralib.newlist({ p, space }),
+      conditions = terralib.newlist({}),
+      annotations = ast.default_annotations(),
+      span = mapping.span,
+    }
+
+    -- It should also return a value that can be casted to an `int`.
+    local typed_call = type_check.expr(cx, call)
+    local return_type = typed_call.expr_type
+    if not std.validate_implicit_cast(typed_call.expr_type, int) then
+      log.error(mapping,
+        "expected mapping to return an integer value but got " .. tostring(return_type))
+    end
+    mapping = typed_call.fn
+  end
+
   return ast.typed.expr.ListIspace {
     ispace = ispace,
+    mapping = mapping,
     expr_type = expr_type,
     annotations = node.annotations,
     span = node.span,
@@ -2666,7 +2710,8 @@ function type_check.expr(cx, node)
     return type_check.expr_method_call(cx, node)
 
   elseif node:is(ast.specialized.expr.Call) then
-    return type_check.expr_call(cx, node)
+    local result = type_check.expr_call(cx, node)
+    return result
 
   elseif node:is(ast.specialized.expr.Cast) then
     return type_check.expr_cast(cx, node)
