@@ -164,6 +164,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -190,7 +191,6 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -202,7 +202,8 @@ local function analyze_is_side_effect_free_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 
@@ -252,6 +253,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -279,7 +281,6 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -287,7 +288,8 @@ local function analyze_is_loop_invariant_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 
