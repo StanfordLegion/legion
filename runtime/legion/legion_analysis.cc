@@ -2155,8 +2155,6 @@ namespace Legion {
       : owner(node)
     //--------------------------------------------------------------------------
     {
-      projection_epochs[0] = 
-        new ProjectionEpoch(0, FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
 
     //--------------------------------------------------------------------------
@@ -2219,7 +2217,9 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
-      assert(projection_epochs.size() == 1);
+      assert(projection_epochs.empty());
+      assert(!dirty_fields);
+      assert(!dirty_below);
 #endif
     }
 
@@ -2255,6 +2255,7 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
+      dirty_fields.clear();
       dirty_below.clear();
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
@@ -2262,8 +2263,6 @@ namespace Legion {
             projection_epochs.begin(); it != projection_epochs.end(); it++)
         delete it->second;
       projection_epochs.clear();
-      projection_epochs[0] = 
-        new ProjectionEpoch(0, FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     } 
 
     //--------------------------------------------------------------------------
@@ -2318,6 +2317,7 @@ namespace Legion {
         }
       }
       dirty_below -= deleted_mask;
+      dirty_fields -= deleted_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -2372,8 +2372,8 @@ namespace Legion {
       }
       if (!to_add.empty())
       {
-        for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
-              const_iterator it = to_add.begin(); it != to_add.end(); it++)
+        for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+              to_add.begin(); it != to_add.end(); it++)
         {
 #ifdef DEBUG_LEGION
           assert(projection_epochs.find(it->first) == projection_epochs.end());
@@ -2388,9 +2388,8 @@ namespace Legion {
                                                  ProjectionInfo &info) const
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
-            const_iterator it = projection_epochs.begin(); it != 
-            projection_epochs.end(); it++)
+      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
         FieldMask overlap = it->second->valid_fields & capture_mask;
         if (!overlap)
@@ -2413,13 +2412,13 @@ namespace Legion {
         closed_node->record_projections(it->second, overlap);
         capture_mask -= overlap;
         if (!capture_mask)
-          break;
+          return;
       }
     }
 
     //--------------------------------------------------------------------------
     void CurrentState::update_projection_epochs(FieldMask update_mask,
-                                               const ProjectionInfo &info) const
+                                                const ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
       for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
@@ -2431,8 +2430,15 @@ namespace Legion {
         it->second->insert(info.projection, info.projection_domain);
         update_mask -= overlap;
         if (!update_mask)
-          break;
+          return;
       }
+#ifdef DEBUG_LEGION
+      assert(!!update_mask);
+#endif
+      // If we get here will still have an update mask so make an epoch
+      ProjectionEpoch *new_epoch = new ProjectionEpoch(0, update_mask);
+      new_epoch->insert(info.projection, info.projection_domain);
+      projection_epochs[0] = new_epoch;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2975,6 +2981,7 @@ namespace Legion {
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
         // Make a closed tree of just the root node
+        // There are no dirty fields here since we just flushing reductions
         ClosedNode *closed_tree = new ClosedNode(root_node);
         FieldMask empty_leave_open;
         flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,

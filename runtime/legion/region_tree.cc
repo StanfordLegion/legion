@@ -10328,6 +10328,12 @@ namespace Legion {
           if (IS_WRITE(user.usage))
             state.update_projection_epochs(user.field_mask, proj_info);
         }
+        else if (IS_WRITE(user.usage))
+        {
+          // If we're not projecting and writing, indicating that
+          // we have written this logical region
+          state.dirty_fields |= user.field_mask;
+        }
         // Finish dependence analysis for any advance operations
         if (!advances.empty())
         {
@@ -10540,8 +10546,11 @@ namespace Legion {
       ClosedNode *closed_node = NULL;
       if (!read_only_close)
       {
+        // Always make the node so that we can know it was open
         closed_node = closer.find_closed_node(this);
-        closed_node->record_closed_fields(closing_mask);
+        // We only fields that we've actually fully written
+        if (!!state.dirty_fields)
+          closed_node->record_closed_fields(closing_mask & state.dirty_fields);
       }
       // Recursively traverse any open children and close them as well
       LegionDeque<FieldState>::aligned new_states;
@@ -10568,6 +10577,9 @@ namespace Legion {
         // advance the epoch version numbers
         if (it->is_projection_state())
         {
+#ifdef DEBUG_LEGION
+          assert(closed_node != NULL);
+#endif
           if (!read_only_close && (it->open_state != OPEN_READ_ONLY_PROJ))
             state.capture_close_epochs(overlap, closed_node);
           // If this is a writing or reducing 
@@ -10582,6 +10594,8 @@ namespace Legion {
       // Merge any new field states
       if (!new_states.empty())
         merge_new_field_states(state, new_states);
+      // We can clear out our dirty fields 
+      state.dirty_fields -= closing_mask;
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields

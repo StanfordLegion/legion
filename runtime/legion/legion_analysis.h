@@ -556,7 +556,7 @@ namespace Legion {
       void capture_close_epochs(FieldMask capture_mask,
                                 ClosedNode *closed_node) const;
       void update_projection_epochs(FieldMask update_mask,
-                                    const ProjectionInfo &info) const;
+                                    const ProjectionInfo &info);
     public:
       RegionTreeNode *const owner;
     public:
@@ -571,6 +571,9 @@ namespace Legion {
       FieldMask outstanding_reduction_fields;
       LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
     public:
+      // Fields that we know have been written at the current level
+      // (reductions don't count, we want to know they were actually written)
+      FieldMask dirty_fields;
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
       // Keep track of the current projection epoch for each field
