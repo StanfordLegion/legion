@@ -38,7 +38,7 @@ local level = {
 -- #################
 
 local function parse_level(options, default_min_level)
-  local line = options.level
+  local line = options.log
 
   local matches = terralib.newlist()
   if string.len(line) > 0 then
@@ -69,11 +69,12 @@ local function parse_level(options, default_min_level)
 end
 
 local default_options = terralib.newlist({
-  config.make_default_option("-flevel", "level", "string", ""),
+  config.make_default_option("-flog", "log", "string", ""),
+  config.make_default_option("-fdebug", "debug", "boolean", false),
 })
-local default_min_level = level.print
-
 local options, _ = config.args(default_options)
+
+local default_min_level = (options.debug and level.info) or level.print
 local min_level, categories = parse_level(options, default_min_level)
 
 -- #####################################

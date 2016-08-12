@@ -385,6 +385,34 @@ local function mk_expr_ctor(ls)
   }
 end
 
+local function mk_expr_cast(ty, expr)
+  return ast.typed.expr.Cast {
+    fn = ast.typed.expr.Function {
+      value = ty,
+      expr_type =
+        terralib.types.functype(terralib.newlist({std.untyped}), ty, false),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    arg = expr,
+    expr_type = ty,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function mk_expr_zeros(index_type)
+  if index_type.dim == 1 then
+    return mk_expr_constant(0, int)
+  else
+    local fields = terralib.newlist()
+    for idx = 1, index_type.dim do
+      fields:insert(mk_expr_constant(0, int))
+    end
+    return mk_expr_cast(index_type, mk_expr_ctor(fields))
+  end
+end
+
 local function mk_expr_partition(partition_type, colors, coloring)
   return ast.typed.expr.Partition {
     disjointness = partition_type.disjointness,
@@ -878,6 +906,7 @@ function parallel_task_context.new_task_scope(params)
   local region_params = {}
   local region_param_map = {}
   local region_param_indices = terralib.newlist()
+  local index_type
   for idx = 1, #params do
     if std.is_region(params[idx].param_type) then
       local symbol = params[idx].symbol
@@ -892,6 +921,9 @@ function parallel_task_context.new_task_scope(params)
       }
       region_param_map[symbol] = region_params[idx]
       region_param_indices:insert(idx)
+      assert(index_type == nil or
+             index_type == symbol:gettype():ispace().index_type)
+      index_type = symbol:gettype():ispace().index_type
     end
   end
 
@@ -899,6 +931,7 @@ function parallel_task_context.new_task_scope(params)
   cx.region_params = region_params
   cx.region_param_map = region_param_map
   cx.region_param_indices = region_param_indices
+  cx.task_point_symbol = get_new_tmp_var(index_type)
   cx.field_accesses = {}
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
@@ -908,6 +941,10 @@ end
 
 function parallel_task_context:is_region_param(idx)
   return self.region_params[idx] ~= nil
+end
+
+function parallel_task_context:get_task_point_symbol()
+  return self.task_point_symbol
 end
 
 function parallel_task_context:find_metadata_parameters(region_symbol)
@@ -920,6 +957,7 @@ function parallel_task_context:insert_metadata_parameters(params)
       self.region_params[self.region_param_indices[idx]]
     params:insert(mk_task_param(region_param.bounds))
   end
+  params:insert(mk_task_param(self:get_task_point_symbol()))
 end
 
 function parallel_task_context:make_param_arg_mapping(caller_cx, args)
@@ -956,33 +994,6 @@ function parallel_task_context:add_access(access, stencil)
     ghost_indices = terralib.newlist(),
     exploded_stencils = terralib.newlist(),
   }
-end
-
-function parallel_task_context:add_accesses(accesses, loop_var)
-  for access, _ in pairs(accesses) do
-    assert(std.is_ref(access.expr_type))
-    local index_access = extract_index_access_expr(access)
-    assert(index_access.value:is(ast.typed.expr.ID))
-    local index_expr = index_access.index
-    if not (index_expr:is(ast.typed.expr.ID) and
-            index_expr.value == loop_var) then
-      local region_symbol = index_access.value.value
-      assert(#loop_var:gettype().bounds_symbols == 1)
-      local field_path = access.expr_type.field_path
-
-      local stencil = Stencil {
-        region = region_symbol,
-        index = index_expr,
-        range = loop_var:gettype().bounds_symbols[1],
-        fields = { [field_path:hash()] = field_path },
-      }
-      self.field_accesses[access] = {
-        stencil = stencil,
-        ghost_indices = terralib.newlist(),
-        exploded_stencils = terralib.newlist(),
-      }
-    end
-  end
 end
 
 parallel_param.__index = parallel_param
@@ -1445,6 +1456,7 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
       args:insert(mk_expr_id(bounds_symbol))
     end
   end
+  args:insert(color_expr)
 
   local expr = mk_expr_call(task, args)
   local call_stat
@@ -1710,10 +1722,12 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
           assert(false, "unreachable")
         end
 
-        local reduction_info = parallelizable(expr).cx.reduction_info
+        local reduction_op = parallelizable(expr).cx.reduction_info.op
+        local lhs_type = std.as_read(lhs.expr_type)
         if node:is(ast.typed.stat.Var) then
           stats:insert(node {
-            values = terralib.newlist {reduction_info.init_expr},
+            values = terralib.newlist { mk_expr_constant(
+              std.reduction_op_init[reduction_op][lhs_type], lhs_type)}
           })
         end
         stats:insertall(
@@ -1981,7 +1995,7 @@ end
 -- ## Analyzer for scalar reductions
 -- #################
 
-function reduction_analysis.top_task(cx, node)
+function reduction_analysis.top_task(task_cx, node)
   if node.return_type:isunit() then return end
   local return_value = node.body.stats[#node.body.stats].value
   if not return_value:is(ast.typed.expr.ID) then
@@ -1990,13 +2004,18 @@ function reduction_analysis.top_task(cx, node)
   local reduction_var = return_value.value
   local init_expr
   local reduction_op
+  local decl
 
   ast.traverse_node_continuation(function(node, continuation)
     if node:is(ast.typed.stat.Var) then
       for idx = 1, #node.symbols do
         if node.symbols[idx] == reduction_var then
-          assert(node.values[idx])
+          assert(node.values[idx] ~= nil)
           init_expr = node.values[idx]
+          decl = {
+            stat = node,
+            index = idx,
+          }
           break
         end
       end
@@ -2016,11 +2035,13 @@ function reduction_analysis.top_task(cx, node)
 
   assert(init_expr)
   -- TODO: Task might pass through a scalar value
-  assert(reduction_op)
-  cx.reduction_info = {
+  assert(reduction_op ~= nil)
+  -- TODO: convert reductions with - or / into fold-and-reduces
+  assert(reduction_op ~= "-" and reduction_op ~= "/")
+  task_cx.reduction_info = {
     op = reduction_op,
     symbol = reduction_var,
-    init_expr = init_expr,
+    declaration = decl,
   }
 end
 
@@ -2399,37 +2420,61 @@ function parallelize_tasks.stat_for_list(task_cx, node)
 end
 
 function parallelize_tasks.top_task_body(task_cx, node)
-  return node {
-    stats = node.stats:map(function(stat)
+  local stats = data.flatmap(
+    function(stat)
       if stat:is(ast.typed.stat.ForList) then
         return parallelize_tasks.stat_for_list(task_cx, stat)
-      elseif task_cx.reduction_info and stat:is(ast.typed.stat.Var) then
-        local symbol = task_cx.reduction_info.symbol
-        local symbol_idx
+      elseif task_cx.reduction_info ~= nil and
+             task_cx.reduction_info.declaration.stat == stat then
+        local red_decl_index = task_cx.reduction_info.declaration.index
+
+        local symbols = terralib.newlist()
+        local types = terralib.newlist()
+        local values = terralib.newlist()
+
         for idx = 1, #stat.symbols do
-          if stat.symbols[idx] == symbol then
-            symbol_idx = idx
+          if idx ~= red_decl_index then
+            symbols:insert(stat.symbols[idx])
+            types:insert(stat.types[idx])
+            values:insert(stat.values[idx])
           end
         end
-        if symbol_idx then
-          local values = terralib.newlist()
-          values:insertall(stat.values)
-          local init =
-            std.reduction_op_init[task_cx.reduction_info.op][symbol:gettype()]
-          -- TODO: convert reductions with - or / into fold-and-reduces
-          assert(task_cx.reduction_info.op ~= "-" and
-                 task_cx.reduction_info.op ~= "/")
-          assert(init)
-          values[symbol_idx] = mk_expr_constant(init, symbol:gettype())
-          return stat { values = values }
-        else
-          return stat
+
+        local stats = terralib.newlist()
+        if #symbols > 0 then
+          stats:insert(stat {
+            symbols = symbols,
+            types = types,
+            values = values,
+          })
         end
+
+        local red_var = stat.symbols[red_decl_index]
+        local red_var_expr =
+          mk_expr_id(red_var, std.rawref(&red_var:gettype()))
+        stats:insert(mk_stat_var(red_var, stat.types[red_decl_index]))
+
+        local cond = mk_expr_binary(
+          "==", mk_expr_id(task_cx:get_task_point_symbol()),
+          mk_expr_zeros(task_cx:get_task_point_symbol():gettype()))
+        local if_stat = mk_stat_if(
+          cond, mk_stat_assignment(
+            red_var_expr, stat.values[red_decl_index]))
+        local init =
+          std.reduction_op_init[task_cx.reduction_info.op][red_var:gettype()]
+        assert(init ~= nil)
+        if_stat.else_block.stats:insert(
+          mk_stat_assignment(
+            red_var_expr, mk_expr_constant(init, red_var:gettype())))
+        stats:insert(if_stat)
+
+        return stats
       else
         return stat
       end
-    end),
-  }
+    end, node.stats)
+
+  return node { stats = stats }
 end
 
 function parallelize_tasks.top_task(global_cx, node)

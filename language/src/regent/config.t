@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Configuration and Command Line Parsing
+-- Regent Configuration and Command Line Parsing
 
 local common_config = require("common/config")
 
@@ -57,21 +57,21 @@ local default_options = {
   ["validate"] = true,
 
   -- Need this here to make the logger happy.
-  ["level"] = "",
+  ["log"] = "",
 }
 
-local function make_default_options()
-  local options = terralib.newlist()
-  for k, v in pairs(default_options) do
-    options:insert(
-      common_config.make_default_option("-f" .. k, k, type(v), v))
+local function make_default_options(prefix, options)
+  local result = terralib.newlist()
+  for k, v in pairs(options) do
+    result:insert(
+      common_config.make_default_option(prefix .. k, k, type(v), v))
   end
-  return options
+  return result
 end
 
 function config.args()
   return common_config.args(
-    make_default_options(default_options),
+    make_default_options("-f", default_options),
     "-f")
 end
 
