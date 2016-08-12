@@ -4336,9 +4336,11 @@ namespace Legion {
         // Check to see if the target instance is already valid
         // Views may be different levels of the region tree so we have
         // to do this by looking at the actual instances
+        FieldMask observed_mask;
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               valid_views.begin(); it != valid_views.end(); it++)
         {
+          observed_mask |= it->second;
           if (it->first->is_deferred_view())
             continue;
 #ifdef DEBUG_LEGION
@@ -4357,13 +4359,16 @@ namespace Legion {
           // We found the common view so we can break out now
           break;
         }
+        // Any fields for which we don't have instances don't matter
+        dirty_overlap &= observed_mask;
         // If we still have dirty fields, we need to check the children
         // to see if we are going to stomp on anyone
         if (!!dirty_overlap)
         {
           // If we ever get here, we are no longer fully valid
           fully_valid = false;
-          // Check to see if we have any composite views that will be problematic
+          // Check to see if we have any composite views that 
+          // will be problematic
           for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
                 valid_views.begin(); it != valid_views.end(); it++)
           {
