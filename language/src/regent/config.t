@@ -57,7 +57,7 @@ local default_options = {
   ["validate"] = true,
 
   -- Need this here to make the logger happy.
-  ["level"] = "",
+  ["log"] = "",
 }
 
 local function make_default_options()
