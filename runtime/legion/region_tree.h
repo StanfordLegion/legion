@@ -256,7 +256,8 @@ namespace Legion {
                                        const RegionTreePath &path,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       bool partial_traversal = false);
+                                       bool partial_traversal = false,
+                                       bool close_traversal = false);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
@@ -345,6 +346,7 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
                                      int composite_index,
+                                     ClosedNode *closed_tree,
                                      ApEvent term_event, 
                                      std::set<RtEvent> &map_applied,
                                      const InstanceSet &targets
@@ -1388,7 +1390,8 @@ namespace Legion {
                                    SingleTask *parent_ctx,
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events,
-                                   bool partial_traversal);
+                                   bool partial_traversal,
+                                   bool close_traversal);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
                                    const RegionTreePath &path,
@@ -1422,7 +1425,8 @@ namespace Legion {
       CompositeView* create_composite_instance(ContextID ctx_id,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
-                                     SingleTask *target_ctx);
+                                     SingleTask *target_ctx,
+                                     ClosedNode *closed_tree);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -1753,7 +1757,8 @@ namespace Legion {
       CompositeView *map_virtual_region(ContextID ctx, 
                                        const FieldMask &virtual_mask,
                                        VersionInfo &version_info,
-                                       SingleTask *target_ctx);
+                                       SingleTask *target_ctx,
+                                       ClosedNode *closed_tree);
       void premap_region(ContextID ctx, 
                          const RegionRequirement &req,
                          const FieldMask &valid_mask,

@@ -3542,6 +3542,8 @@ namespace Legion {
             it->first->request_final_version_state(overlap, ready_events);
           }
         }
+        // We're about to produce the first version of this instance
+        // so there's no need to request it
         for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
               vit = current_version_infos.begin(); vit != 
               current_version_infos.end(); vit++)
@@ -3558,7 +3560,6 @@ namespace Legion {
               continue;
             version_info.add_advance_version(it->first, overlap,
                                              false/*path only*/);
-            it->first->request_initial_version_state(overlap, ready_events);
           }
           if (!unversioned)
             break;
@@ -3866,9 +3867,88 @@ namespace Legion {
             unversioned_mask.clear();
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::record_close_only_versions(
+                                                const FieldMask &version_mask,
+                                                SingleTask *context,
+                                                Operation *op, unsigned index,
+                                                const RegionUsage &usage,
+                                                VersionInfo &version_info,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // See if we have been assigned
+      if (context != current_context)
+      {
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
+        current_context = context;
+      }
+      // See if we are the owner
+      if (!is_owner)
+      {
+        FieldMask request_mask = version_mask - remote_valid_fields;
+        if (!!request_mask)
+        {
+          RtEvent wait_on = send_remote_version_request(request_mask,
+                                                        ready_events); 
+          wait_on.wait();
+#ifdef DEBUG_LEGION
+          // When we wake up everything should be good
+          assert(!(version_mask - remote_valid_fields));
+#endif
+        }
+      }     
+      // We aren't mutating our data structures, so we just need 
+      // the manager lock in read only mode
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
+      // We need the both previous and advance version numbers
+      // We only need the instance information for the final versions
+      // in order to make a composite instance
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator 
+            vit = previous_version_infos.begin(); vit !=
+            previous_version_infos.end(); vit++)
+      {
+        FieldMask local_overlap = vit->second.get_valid_mask() & version_mask;
+        if (!local_overlap)
+          continue;
+        for (ManagerVersions::iterator it = vit->second.begin();
+              it != vit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & local_overlap;
+          if (!overlap)
+            continue;
+          version_info.add_current_version(it->first, overlap,
+                                           false/*path only*/);
+          it->first->request_final_version_state(overlap, ready_events);
+        }
+      }
+      // We don't need any information cause we're about to make
+      // the initial instance of these managers
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
+            vit = current_version_infos.begin(); vit != 
+            current_version_infos.end(); vit++)
+      {
+        FieldMask local_overlap = version_mask & vit->second.get_valid_mask();
+        if (!local_overlap)
+          continue;
+        for (ManagerVersions::iterator it = vit->second.begin();
+              it != vit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & local_overlap;
+          if (!overlap)
+            continue;
+          version_info.add_advance_version(it->first, overlap,
+                                           false/*path only*/);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

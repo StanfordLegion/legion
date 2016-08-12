@@ -1031,7 +1031,6 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
     public:
-      virtual void trigger_ready(void);
       virtual void trigger_commit(void);
     protected:
       RegionTreePath privilege_path;
@@ -1067,6 +1066,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
     public:
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1158,6 +1158,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1205,6 +1206,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void record_reference_mutation_effect(RtEvent event);

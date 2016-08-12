@@ -5028,22 +5028,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   privilege_path,
-                                                   version_info,
-                                                   preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
     void CloseOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
@@ -5142,12 +5126,16 @@ namespace Legion {
       deactivate_close();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
-      assert(closed_tree == NULL); // should have handed this off
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
       close_mask.clear();
       leave_open_mask.clear();
+      if (closed_tree != NULL)
+      {
+        delete closed_tree;
+        closed_tree = NULL;
+      }
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
@@ -5174,6 +5162,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InterCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions,
+                                                   false/*partial*/,
+                                                   true/*close*/);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void InterCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -5195,11 +5201,15 @@ namespace Legion {
       }
       else
         chosen_instances = restrict_info.get_instances();
+#ifdef DEBUG_LEGION
+      assert(closed_tree != NULL);
+#endif
       // Now we can perform our close operation
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/, 
-                                                composite_idx, completion_event,
+                                                composite_idx, closed_tree,
+                                                completion_event,
                                                 map_applied_conditions,
                                                 chosen_instances
 #ifdef DEBUG_LEGION
@@ -5207,6 +5217,8 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
+      // The physical perform close call took ownership
+      closed_tree = NULL;
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -5710,6 +5722,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PostCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void PostCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -5958,6 +5986,22 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path);
       end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -8333,13 +8377,6 @@ namespace Legion {
           target_procs[proc] = task;
           task->target_proc = proc;
         }
-      }
-      // If we have an slices we need to do our prewalks before we map points
-      if (!slice_tasks.empty())
-      {
-        for (std::set<SliceTask*>::const_iterator it = slice_tasks.begin();
-              it != slice_tasks.end(); it++)
-          (*it)->prewalk_slice();
       }
       // Then we need to actually perform the mapping
       {

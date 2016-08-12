@@ -1645,7 +1645,8 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op, 
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
-                        std::set<RtEvent> &ready_events, bool partial_traversal)
+                        std::set<RtEvent> &ready_events, 
+                        bool partial_traversal, bool close_traversal)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1665,7 +1666,8 @@ namespace Legion {
       parent_node->compute_version_numbers(ctx.get_id(), path, usage,
                                            user_mask, unversioned_mask,
                                            op, idx, parent_ctx, version_info, 
-                                           ready_events, partial_traversal);
+                                           ready_events, partial_traversal,
+                                           close_traversal);
     }
 
     //--------------------------------------------------------------------------
@@ -2123,19 +2125,21 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *child_node = get_node(req.region);
+      // Any closes have already been done, so this is an empty close tree
+      ClosedNode *closed_tree = new ClosedNode(child_node);
       if (needs_fields)
       {
         FieldMask composite_mask = 
           child_node->column_source->get_field_mask(req.privilege_fields);
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
-                                composite_mask, version_info, target_ctx);
+                    composite_mask, version_info, target_ctx, closed_tree);
         composite_ref.set_composite_view(view, op);
       }
       else
       {
         const FieldMask &composite_mask = composite_ref.get_valid_fields();
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
-                                 composite_mask, version_info, target_ctx);
+                     composite_mask, version_info, target_ctx, closed_tree);
         composite_ref.set_composite_view(view, op);
       }
     }
@@ -2314,8 +2318,8 @@ namespace Legion {
     ApEvent RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
                       const RegionRequirement &req, VersionInfo &version_info,
                       Operation *op, unsigned index, int composite_idx,
-                      ApEvent term_event, std::set<RtEvent> &map_applied,
-                      const InstanceSet &targets
+                      ClosedNode *closed_tree, ApEvent term_event, 
+                      std::set<RtEvent> &map_applied, const InstanceSet &targets
 #ifdef DEBUG_LEGION
                       , const char *log_name
                       , UniqueID uid
@@ -2335,7 +2339,7 @@ namespace Legion {
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                                closing_mask, version_info, op->get_parent());
+                  closing_mask, version_info, op->get_parent(), closed_tree);
       PhysicalState *physical_state = NULL;
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
       bool need_valid = true;
@@ -10633,6 +10637,10 @@ namespace Legion {
           flush_logical_reductions(closer, state, reduction_flush_fields,
                          record_close_operations, next_child, new_states);
       }
+      // If we are overwriting then we don't really care about what dirty
+      // data is in a given sub-tree since it isn't going to matter
+      const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
+                                !next_child.is_valid();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
@@ -10705,7 +10713,7 @@ namespace Legion {
                                        true/*allow next*/,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
-                                       false/*read only close*/,
+                                       overwriting/*read only close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        new_states, open_below);
@@ -10835,7 +10843,7 @@ namespace Legion {
                                          false/*allow next*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
-                                         false/*read only close*/,
+                                         overwriting/*read only close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          new_states, already_open);
@@ -10875,7 +10883,7 @@ namespace Legion {
                                          false/*allow next child*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
-                                         false/*read only close*/,
+                                         overwriting/*read only close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          new_states, already_open);
@@ -10927,7 +10935,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(!!overlap);
 #endif
-                closer.record_close_operation(overlap,
+                if (overwriting)
+                  closer.record_close_operation(overlap, false/*leave open*/,
+                                  true/*read only*/, false/*flush only*/);
+                else
+                  closer.record_close_operation(overlap,
                                   IS_READ_ONLY(closer.user.usage)/*leave open*/,
                                   false/*read only*/, false/*flush only*/);
                 // Advance the projection epochs
@@ -10953,8 +10965,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap,
-                   false/*leave open*/, false/*read only*/,false/*flush only*/);
+                  closer.record_close_operation(overlap, false/*leave open*/,
+                                overwriting/*read only*/,false/*flush only*/);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -12058,9 +12070,13 @@ namespace Legion {
                                                SingleTask *parent_ctx,
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
-                                               bool partial_traversal)
+                                               bool partial_traversal,
+                                               bool close_traversal)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!partial_traversal || !close_traversal); // can't be both
+#endif
       VersionManager &manager = get_current_version_manager(ctx);
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -12074,6 +12090,14 @@ namespace Legion {
           manager.record_path_only_versions(version_mask, split_mask,
                                unversioned_mask, parent_ctx, op, idx, 
                                usage, version_info, ready_events);
+        }
+        else if (close_traversal)
+        {
+          // We are a close operation, then we need to capture both
+          // previous and advance state names, but we need only need
+          // to request the currently valid instances of our roots
+          manager.record_close_only_versions(version_mask, parent_ctx, 
+                           op, idx, usage, version_info, ready_events);
         }
         else
         {
@@ -12111,7 +12135,8 @@ namespace Legion {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
                                 unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, partial_traversal);
+                                version_info, ready_events, 
+                                partial_traversal, close_traversal);
       }
     }
 
@@ -12321,7 +12346,8 @@ namespace Legion {
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
-                                                SingleTask *target_ctx)
+                                                SingleTask *target_ctx,
+                                                ClosedNode *closed_tree)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14710,12 +14736,13 @@ namespace Legion {
     CompositeView* RegionNode::map_virtual_region(ContextID ctx_id,
                                                  const FieldMask &virtual_mask,
                                                  VersionInfo &version_info,
-                                                 SingleTask *target_ctx)
+                                                 SingleTask *target_ctx,
+                                                 ClosedNode *closed_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
-      return create_composite_instance(ctx_id, virtual_mask, 
-                                       version_info, target_ctx);
+      return create_composite_instance(ctx_id, virtual_mask, version_info, 
+                                       target_ctx, closed_tree);
     }
 
     //--------------------------------------------------------------------------
