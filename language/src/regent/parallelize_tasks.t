@@ -996,33 +996,6 @@ function parallel_task_context:add_access(access, stencil)
   }
 end
 
-function parallel_task_context:add_accesses(accesses, loop_var)
-  for access, _ in pairs(accesses) do
-    assert(std.is_ref(access.expr_type))
-    local index_access = extract_index_access_expr(access)
-    assert(index_access.value:is(ast.typed.expr.ID))
-    local index_expr = index_access.index
-    if not (index_expr:is(ast.typed.expr.ID) and
-            index_expr.value == loop_var) then
-      local region_symbol = index_access.value.value
-      assert(#loop_var:gettype().bounds_symbols == 1)
-      local field_path = access.expr_type.field_path
-
-      local stencil = Stencil {
-        region = region_symbol,
-        index = index_expr,
-        range = loop_var:gettype().bounds_symbols[1],
-        fields = { [field_path:hash()] = field_path },
-      }
-      self.field_accesses[access] = {
-        stencil = stencil,
-        ghost_indices = terralib.newlist(),
-        exploded_stencils = terralib.newlist(),
-      }
-    end
-  end
-end
-
 parallel_param.__index = parallel_param
 
 function parallel_param.new(dop)
