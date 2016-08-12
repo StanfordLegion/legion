@@ -14,7 +14,11 @@
 
 -- Regent Compiler Passes (Hooks)
 
+local log = require("common/log")
+
 local passes_hooks = {}
+
+local log_passes = log.make_logger("passes")
 
 passes_hooks.optimization_hooks = terralib.newlist()
 
@@ -39,9 +43,9 @@ function passes_hooks.run_optimizations(node)
 end
 
 function passes_hooks.debug_optimizations(node)
-  print("Registered optimizations passes:")
+  log_passes:info("Registered optimizations passes:")
   for _, hook in ipairs(passes_hooks.optimization_hooks) do
-    print("  " .. tostring(hook[1]) .. ". " .. tostring(hook[2].pass_name))
+    log_passes:info("  " .. tostring(hook[1]) .. ". " .. tostring(hook[2].pass_name))
   end
   return node
 end

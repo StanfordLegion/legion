@@ -14,6 +14,8 @@
 
 -- Legion Configuration and Command Line Parsing
 
+local common_config = require("common/config")
+
 local config = {}
 
 local default_options = {
@@ -53,65 +55,24 @@ local default_options = {
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,
+
+  -- Need this here to make the logger happy.
+  ["level"] = "",
 }
 
-local option = {
-  __index = function(t, k)
-    error("no such option " .. tostring(k), 2)
-  end,
-  __newindex = function(t, k, v)
-    error("options should only be set at startup time", 2)
-  end,
-}
-
-function config.parse_args(rawargs)
-  local options = {}
+local function make_default_options()
+  local options = terralib.newlist()
   for k, v in pairs(default_options) do
-    options[k] = v
+    options:insert(
+      common_config.make_default_option("-f" .. k, k, type(v), v))
   end
-
-  local args = terralib.newlist()
-
-  if not rawargs then
-    return setmetatable(options, option), args
-  end
-
-  local i = 0
-  local arg_i = 1
-  while rawargs[i] do
-    local arg = rawargs[i]
-    if string.sub(arg, 1, 2) == "-f" then
-      local k = string.sub(rawargs[i], 3)
-      if default_options[k] == nil then
-        error("unknown option " .. rawargs[i])
-      end
-      if rawargs[i+1] == nil or tonumber(rawargs[i+1]) == nil then
-        error("option " .. rawargs[i] .. " missing argument")
-      end
-      local v = tonumber(rawargs[i+1])
-      if type(default_options[k]) == "boolean" then
-        v = v~= 0
-      end
-      options[k] = v
-      i = i + 1
-    else
-      args[arg_i] = rawargs[i]
-      arg_i = arg_i + 1
-    end
-    i = i + 1
-  end
-
-  return setmetatable(options, option), args
+  return options
 end
 
-local memoize_args = terralib.memoize(
-  function()
-    local rawargs = rawget(_G, "arg")
-    return {config.parse_args(rawargs)}
-  end)
-
 function config.args()
-  return unpack(memoize_args())
+  return common_config.args(
+    make_default_options(default_options),
+    "-f")
 end
 
 return config
