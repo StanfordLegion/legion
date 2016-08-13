@@ -624,8 +624,7 @@ function parser.expr_prefix(p)
     p:expect(",")
     local extent = p:expr()
     local start_at = false
-    if not p:matches(")") then
-      p:expect(",")
+    if p:nextif(",") then
       start_at = p:expr()
     end
     p:expect(")")
