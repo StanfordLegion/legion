@@ -133,7 +133,8 @@ before_script:
       make -s -C examples/full_ghost
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
     - |
-      if [[ "$TEST_SPY" -eq 1 ]]; then
+      # if [[ "$TEST_SPY" -eq 1 ]]; then
+      if [[ "$DEBUG" -eq 1 ]]; then
         git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
         pushd fuzz-tester
         WARN_AS_ERROR=0 python main.py
