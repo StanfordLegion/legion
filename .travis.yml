@@ -92,7 +92,8 @@ script:
 
   # Legion fuzz tester
   - |
-    if [[ "$TEST_SPY" -eq 1 ]]; then
+    # if [[ "$TEST_SPY" -eq 1 ]]; then
+    if [[ "$DEBUG" -eq 1 ]]; then
       git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
       pushd fuzz-tester
       WARN_AS_ERROR=0 python main.py
