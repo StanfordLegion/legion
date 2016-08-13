@@ -60,7 +60,6 @@ script:
 
   # Legion tutorials
   - |
-    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
     make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j$THREADS
     tutorial/00_hello_world/hello_world -logfile out_%.log
     make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
