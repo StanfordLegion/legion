@@ -2275,7 +2275,7 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
-      elseif std.type_eq(from, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+      elseif std.type_eq(from, c["legion_point_" .. tostring(data.max(st.dim, 1)) .. "d_t"]) then
         return `([st.from_point]([expr]))
       end
     elseif std.is_index_type(from) then

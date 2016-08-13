@@ -2072,7 +2072,7 @@ function type_check.expr_list_ispace(cx, node)
     local index_type = ispace_type.index_type
     -- Currently, mappings only work for structured index spaces.
     if index_type.dim == 0 then
-      log.error(node.ispace, "the usage of a mapping requires a structured index space")
+      report.error(node.ispace, "the usage of a mapping requires a structured index space")
     end
     
     -- Type-check `mapping`: it should be able to called with two parameters of
@@ -2710,8 +2710,7 @@ function type_check.expr(cx, node)
     return type_check.expr_method_call(cx, node)
 
   elseif node:is(ast.specialized.expr.Call) then
-    local result = type_check.expr_call(cx, node)
-    return result
+    return type_check.expr_call(cx, node)
 
   elseif node:is(ast.specialized.expr.Cast) then
     return type_check.expr_cast(cx, node)

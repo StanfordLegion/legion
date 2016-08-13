@@ -860,8 +860,7 @@ function parser.expr_prefix(p)
     p:expect("(")
     local ispace = p:expr()
     local mapping = false
-    if not p:matches(")") then
-      p:expect(",")
+    if p:nextif(",") then
       mapping = p:expr()
     end
     p:expect(")")
