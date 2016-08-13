@@ -285,47 +285,99 @@ local function get_nth_field_access(node, idx)
   end
 end
 
+local function flatten_multifield_accesses(node)
+  if not has_all_valid_field_accesses(node) then
+    report.error(node, "invalid use of multi-field access")
+  end
+
+  local flattened_lhs = terralib.newlist()
+  local flattened_rhs = terralib.newlist()
+
+  data.zip(node.lhs, node.rhs):map(function(pair)
+    local lh, rh = unpack(pair)
+    local num_accessed_fields =
+      join_num_accessed_fields(get_num_accessed_fields(lh),
+                               get_num_accessed_fields(rh))
+    assert(num_accessed_fields ~= false, "unreachable")
+    for idx = 1, num_accessed_fields do
+      flattened_lhs:insert(get_nth_field_access(lh, idx))
+      flattened_rhs:insert(get_nth_field_access(rh, idx))
+    end
+  end)
+
+  if #node.lhs == flattened_lhs and #node.rhs == flattened_rhs then
+    return node
+  else
+    return node {
+      lhs = flattened_lhs,
+      rhs = flattened_rhs,
+    }
+  end
+end
+
+local function has_reference(node, symbols)
+  if node == nil then return false end
+  local found = false
+  ast.traverse_node_postorder(function(node)
+    if not found and node:is(ast.specialized.expr.ID) then
+      found = symbols[node.value:hasname()] ~= nil
+    end
+  end, node)
+  return found
+end
+
+function normalize.stat_var(node)
+  if #node.symbols == 1 then return node
+  else
+    local symbols = {}
+    local needs_temporary = terralib.newlist()
+    local temporaries = {}
+    for idx = 1, #node.symbols do
+      if has_reference(node.values[idx], symbols) then
+        needs_temporary:insert(idx)
+        temporaries[idx] = std.newsymbol()
+      end
+      symbols[node.symbols[idx]:hasname()] = true
+    end
+
+    local flattened = terralib.newlist()
+    for idx = 1, #needs_temporary do
+      flattened:insert(node {
+        symbols = terralib.newlist {temporaries[needs_temporary[idx]]},
+        values = terralib.newlist {node.values[needs_temporary[idx]]},
+      })
+    end
+
+    for idx = 1, #node.symbols do
+      if temporaries[idx] then
+        flattened:insert(node {
+          symbols = terralib.newlist {node.symbols[idx]},
+          values = terralib.newlist {
+            ast.specialized.expr.ID {
+              value = temporaries[idx],
+              span = node.span,
+              annotations = node.annotations,
+            }
+          },
+        })
+      else
+        flattened:insert(node {
+          symbols = terralib.newlist {node.symbols[idx]},
+          values = terralib.newlist {node.values[idx]},
+        })
+      end
+    end
+    return flattened
+  end
+end
+
 function normalize.stat(node, continuation)
   if node:is(ast.specialized.stat.Assignment) or
      node:is(ast.specialized.stat.Reduce) then
-    if not has_all_valid_field_accesses(node) then
-      report.error(node, "invalid use of multi-field access")
-    end
-
-    local flattened_lhs = terralib.newlist()
-    local flattened_rhs = terralib.newlist()
-
-    data.zip(node.lhs, node.rhs):map(function(pair)
-      local lh, rh = unpack(pair)
-      local num_accessed_fields =
-        join_num_accessed_fields(get_num_accessed_fields(lh),
-                                 get_num_accessed_fields(rh))
-      assert(num_accessed_fields ~= false, "unreachable")
-      for idx = 1, num_accessed_fields do
-        flattened_lhs:insert(get_nth_field_access(lh, idx))
-        flattened_rhs:insert(get_nth_field_access(rh, idx))
-      end
-    end)
-
-    if node:is(ast.specialized.stat.Assignment) then
-      return ast.specialized.stat.Assignment {
-        lhs = flattened_lhs,
-        rhs = flattened_rhs,
-        annotations = node.annotations,
-        span = node.span,
-      }
-
-    elseif node:is(ast.specialized.stat.Reduce) then
-      return ast.specialized.stat.Reduce {
-        lhs = flattened_lhs,
-        rhs = flattened_rhs,
-        op = node.op,
-        annotations = node.annotations,
-        span = node.span,
-      }
-    else
-      assert(false)
-    end
+    node = flatten_multifield_accesses(node)
+    return node
+  elseif node:is(ast.specialized.stat.Var) then
+    return normalize.stat_var(node)
   else
     return continuation(node, true)
   end
