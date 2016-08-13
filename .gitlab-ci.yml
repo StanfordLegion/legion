@@ -133,6 +133,13 @@ before_script:
       make -s -C examples/full_ghost LG_RT_DIR=../../runtime
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
     - |
+      if [[ "$DEBUG" -eq 1 ]]; then
+        git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
+        pushd fuzz-tester
+        WARN_AS_ERROR=0 LG_RT_DIR=../../runtime python main.py
+        popd
+      fi
+    - |
       if [[ "$DEBUG" -eq 0 ]]; then
         make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
         make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
