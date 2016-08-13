@@ -91,7 +91,7 @@ script:
 
   # Legion fuzz tester
   - |
-    if [[ "$DEBUG" -eq 1 ]]; then
+    if [[ "$TEST_SPY" -eq 1 ]]; then
       git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
       pushd fuzz-tester
       WARN_AS_ERROR=0 LG_RT_DIR=../../runtime python main.py
