@@ -401,6 +401,7 @@ namespace Legion {
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
       inline void serialize(const ColorPoint &point);
+      inline void serialize(const Domain &domain);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -472,6 +473,7 @@ namespace Legion {
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
       inline void deserialize(ColorPoint &color);
+      inline void deserialize(Domain &domain);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -1460,6 +1462,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      serialize(dom.dim);
+      if (dom.dim == 0)
+        serialize(dom.is_id);
+      else
+      {
+        for (int i = 0; i < 2*dom.dim; i++)
+          serialize(dom.rect_data[i]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -1635,6 +1651,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       point.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(dom.dim);
+      if (dom.dim == 0)
+        deserialize(dom.is_id);
+      else
+      {
+        for (int i = 0; i < 2*dom.dim; i++)
+          deserialize(dom.rect_data[i]);
+      }
     }
       
     //--------------------------------------------------------------------------

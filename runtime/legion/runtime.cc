@@ -20913,15 +20913,19 @@ namespace Legion {
             InstanceRef::handle_deferred_composite_handle(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_NODE_TASK_ID:
+        case HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
           {
-            CompositeView::handle_deferred_node_refs(args);
+            CompositeView::handle_deferred_view_ref(args);
             break;
           }
-        case HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID:
+        case HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
           {
-            CompositeView::handle_deferred_view_creation(
-                            Runtime::get_runtime(p), args);
+            CompositeView::handle_deferred_view_registration(args);
+            break;
+          }
+        case HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID:
+          {
+            CompositeNode::handle_deferred_node_ref(args);
             break;
           }
         case HLR_UPDATE_VIEW_REFERENCES_TASK_ID:

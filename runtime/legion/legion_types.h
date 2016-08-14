@@ -279,8 +279,9 @@ namespace Legion {
       HLR_DEFERRED_ENQUEUE_TASK_ID,
       HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
       HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
-      HLR_DEFER_COMPOSITE_NODE_TASK_ID,
-      HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID,
+      HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
+      HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
+      HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID,
       HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
       HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
       HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
@@ -352,8 +353,8 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Composite Handle",                              \
-        "Deferred Composite Node Ref",                            \
-        "Deferred Composite View Creation",                       \
+        "Deferred Composite View Ref",                            \
+        "Deferred Composite View Registration",                   \
         "Deferred Mapper Message",                                \
         "Update View References for Version State",               \
         "Deferred Remove Version State Valid Ref",                \

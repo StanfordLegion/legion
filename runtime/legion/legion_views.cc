@@ -3432,6 +3432,7 @@ namespace Legion {
     {
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void DeferredView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -3520,6 +3521,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void DeferredView::issue_deferred_copies_across(const TraversalInfo &info,
@@ -3604,7 +3606,6 @@ namespace Legion {
     CompositeVersionInfo::~CompositeVersionInfo(void)
     //--------------------------------------------------------------------------
     {
-      version_info.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3624,12 +3625,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
-                              AddressSpaceID local_proc, CompositeNode *r,
-                              VersionInfo *info, bool register_now)
+                              AddressSpaceID local_proc, 
+                              CompositeVersionInfo *info, ClosedNode *tree, 
+                              bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
-                     node, register_now), root(r), version_info(info)
+                     node, register_now), version_info(info), closed_tree(tree)
     {
-      root->set_owner_did(did);
+      // Add our references
+      version_info->add_reference();
+      closed_tree->add_reference();
+#ifdef DEBUG_LEGION
+      assert(closed_tree != NULL);
+      assert(closed_tree->node == node);
+#endif
 #ifdef LEGION_GC
       log_garbage.info("GC Composite View %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3638,8 +3646,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false),
-        root(NULL), version_info(NULL)
+      : DeferredView(NULL, 0, 0, 0, NULL, false), 
+        version_info(NULL), closed_tree(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3650,10 +3658,38 @@ namespace Legion {
     CompositeView::~CompositeView(void)
     //--------------------------------------------------------------------------
     {
-      // Delete our root
-      legion_delete(root);
-      // Delete our version info
-      delete version_info;
+      // Delete our children
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        delete it->first;
+      children.clear();
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        if (it->first->remove_nested_resource_ref(did))
+          legion_delete(it->first);
+      }
+      valid_views.clear();
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
+      {
+        if (it->first->remove_nested_resource_ref(did))
+          LogicalView::delete_logical_view(it->first);
+      }
+      deferred_valid_views.clear();
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        if (it->first->remove_nested_valid_ref(did))
+          legion_delete(it->first);
+      }
+      reduction_views.clear();
+      // Remove our references and delete if necessary
+      if (version_info->remove_reference())
+        delete version_info;
+      // Remove our references and delete if necessary
+      if (closed_tree->remove_reference())
+        delete closed_tree;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -3684,12 +3720,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    CompositeView* CompositeView::clone(const FieldMask &clone_mask,
+          const LegionMap<DeferredView*,FieldMask>::aligned &replacements) const
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = context->runtime; 
+      DistributedID result_did = runtime->get_available_distributed_id(false);
+      CompositeView *result = legion_new<CompositeView>(context, result_did,
+          runtime->address_space, logical_node, runtime->address_space,
+          version_info, closed_tree, true/*register now*/);
+      // Clone the children
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        FieldMask overlap = it->second & clone_mask;
+        if (!overlap)
+          continue;
+        it->first->clone(result, overlap);
+      }
+      FieldMask dirty_overlap = dirty_mask & clone_mask;
+      if (!!dirty_overlap)
+      {
+        result->record_dirty_fields(dirty_overlap);
+        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+              it = valid_views.begin(); it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & dirty_overlap;
+          if (!overlap)
+            continue;
+          result->record_valid_view(it->first, overlap);
+        }
+      }
+      // Can just insert the replacements directly
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+            replacements.begin(); it != replacements.end(); it++)
+        result->record_valid_view(it->first, it->second);
+      FieldMask reduc_overlap = reduction_mask & clone_mask;
+      if (!!reduc_overlap)
+      {
+        result->record_reduction_fields(reduc_overlap);
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & reduc_overlap;
+          if (!overlap)
+            continue;
+          result->record_reduction_view(it->first, overlap);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void CompositeView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
         send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
-      root->notify_active(mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3698,21 +3785,42 @@ namespace Legion {
     {
       if (!is_owner())
         send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
-      root->notify_inactive(mutator); 
     }
 
     //--------------------------------------------------------------------------
     void CompositeView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_valid(mutator);
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->first->notify_valid(mutator);
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+        it->first->add_nested_valid_ref(did, mutator);
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
+        it->first->add_nested_valid_ref(did, mutator);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+        it->first->add_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void CompositeView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      root->notify_invalid(mutator);
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->first->notify_invalid(mutator);
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+        it->first->remove_nested_valid_ref(did, mutator);
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
+        it->first->remove_nested_valid_ref(did, mutator);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+        it->first->remove_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3732,7 +3840,8 @@ namespace Legion {
         else
           rez.serialize(logical_node->as_partition_node()->handle);
         version_info->pack_version_numbers(rez);
-        root->pack_composite_tree(rez, target);
+        closed_tree->pack_closed_node(rez);
+        pack_composite_view(rez);
       }
       runtime->send_composite_view(target, rez);
       update_remote_instances(target);
@@ -3747,18 +3856,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CompositeView::need_temporary_instance(MaterializedView *dst,
-                                                const FieldMask &copy_mask,
-                                                bool &already_valid)
+    void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
+                      LegionMap<DeferredView*,FieldMask>::aligned &replacements)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we have any valid data at this node that would
-      // be over-written by an intermediate-level
-      bool partially_valid = false;
-      return root->need_temporary_instance(dst, copy_mask, 
-                                           already_valid, partially_valid);  
+      // Figure out which fields are not dominated
+      FieldMask non_dominated = valid_mask;
+      new_tree->filter_dominated_fields(closed_tree, non_dominated);
+      FieldMask dominated = valid_mask - non_dominated;
+      if (!!dominated)
+      {
+        // If we had any dominated fields then we try to prune our
+        // deferred valid views and put the results directly into 
+        // the replacements
+        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+              deferred_valid_views.begin(); it != 
+              deferred_valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & dominated;
+          if (!overlap)
+            continue;
+          it->first->prune(new_tree, overlap, replacements);
+          if (!!overlap)
+          {
+            // Some fields are still valid so add them to the replacements
+            LegionMap<DeferredView*,FieldMask>::aligned::iterator finder =
+              replacements.find(it->first);
+            if (finder == replacements.end())
+              replacements[it->first] = overlap;
+            else
+              finder->second |= overlap;
+          }
+        }
+        // Any fields that were dominated are no longer valid
+        valid_mask -= dominated;
+        // If all fields were dominated then we are done
+        if (!valid_mask)
+          return;
+      }
+      // For any non-dominated fields, see if any of our composite views change
+      LegionMap<DeferredView*,FieldMask>::aligned local_replacements;
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & non_dominated;
+        if (!overlap)
+          continue;
+        it->first->prune(new_tree, overlap, local_replacements);
+      }
+      if (!local_replacements.empty())
+      {
+        FieldMask changed_mask;
+        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+              local_replacements.begin(); it != local_replacements.end(); it++)
+          changed_mask |= it->second;
+        CompositeView *view = clone(changed_mask, local_replacements);
+        replacements[view] = changed_mask;
+        // Any fields that changed are no longer valid
+        valid_mask -= changed_mask;
+      }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -3804,6 +3963,7 @@ namespace Legion {
         }
       }
     } 
+#endif
 
     //--------------------------------------------------------------------------
     bool CompositeView::is_upper_bound_node(RegionTreeNode *node) const
@@ -3837,101 +3997,310 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      VersionInfo *version_info = new VersionInfo();
+      CompositeVersionInfo *version_info = new CompositeVersionInfo();
       version_info->unpack_version_numbers(derez, runtime->forest);
-      CompositeNode *root = legion_new<CompositeNode>(target_node, 
-                                                      (CompositeNode*)NULL);
-      std::map<LogicalView*,std::pair<RtEvent,unsigned> > pending_refs;
-      root->unpack_composite_tree(derez, source, runtime, pending_refs);
-      if (!pending_refs.empty())
-      {
-        // Defer the adding of the references and the registration
-        // of the view itself until it is actually ready, do not 
-        // wait here to avoid blocking the virtual channel
-        std::set<RtEvent> ready_events;
-        for (std::map<LogicalView*,std::pair<RtEvent,unsigned> >::const_iterator
-              it = pending_refs.begin(); it != pending_refs.end(); it++)
-        {
-          if (it->second.first.has_triggered())
-          {
-            // If it's already triggered we can do it now
-            it->first->add_base_resource_ref(COMPOSITE_NODE_REF, 
-                                             it->second.second);
-            continue;
-          }
-          DeferCompositeNodeRefArgs args;
-          args.hlr_id = HLR_DEFER_COMPOSITE_NODE_TASK_ID;
-          args.view = it->first;
-          args.refs = it->second.second;
-          RtEvent ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_DEFER_COMPOSITE_NODE_TASK_ID, HLR_LATENCY_PRIORITY,
-              NULL/*op*/, it->second.first);
-          ready_events.insert(ready);
-        }
-        if (!ready_events.empty())
-        {
-          RtEvent wait_on = Runtime::merge_events(ready_events);
-          DeferCompositeViewCreationArgs args;
-          args.hlr_id = HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID;
-          args.did = did;
-          args.owner = owner;
-          args.target_node = target_node;
-          args.root = root;
-          args.version_info = version_info;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_DEFER_CREATE_COMPOSITE_VIEW_TASK_ID, HLR_LATENCY_PRIORITY,
-              NULL/*op*/, wait_on);
-          return;
-        }
-        // Otherwise fall through and do the normal case
-      }
-      // Nothing to wait for so we are good to go
+      ClosedNode *closed_tree = 
+        ClosedNode::unpack_closed_node(derez, runtime, is_region);
+      // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<CompositeView>(location, runtime->forest, 
                                            did, owner, target_node, 
                                            runtime->address_space,
-                                           root, version_info,
+                                           version_info, closed_tree,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
-                           target_node, runtime->address_space, root, 
-                           version_info, false/*register now*/);
-      // Register only after construction
+                           target_node, runtime->address_space,
+                           version_info, closed_tree, 
+                           false/*register now*/);
+      // Unpack all the internal data structures
+      std::set<RtEvent> ready_events;
+      view->unpack_composite_view(derez, ready_events);
+      if (!ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(ready_events);
+        DeferCompositeViewRegistrationArgs args;
+        args.hlr_id = HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID;
+        args.view = view;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+            HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID, 
+            HLR_LATENCY_PRIORITY, NULL/*op*/, wait_on);
+        // Not ready to perform registration yet
+        return;
+      }
+      // If we get here, we are ready to perform the registration
       view->register_with_runtime(NULL/*remote registration not needed*/);
-    }
+    } 
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_deferred_node_refs(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCompositeNodeRefArgs *ref_args = 
-        (const DeferCompositeNodeRefArgs*)args;
-      ref_args->view->add_base_resource_ref(COMPOSITE_NODE_REF, ref_args->refs);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_deferred_view_creation(Runtime *rt,
+    /*static*/ void CompositeView::handle_deferred_view_registration(
                                                                const void *args)
     //--------------------------------------------------------------------------
     {
-      const DeferCompositeViewCreationArgs *vargs = 
-        (const DeferCompositeViewCreationArgs*)args;
-      void *location;
-      CompositeView *view = NULL;
-      if (rt->find_pending_collectable_location(vargs->did, location))
-        view = legion_new_in_place<CompositeView>(location, rt->forest,
-                           vargs->did, vargs->owner, vargs->target_node,
-                           rt->address_space, vargs->root, vargs->version_info,
-                           false/*register now*/);
-      else
-        view = legion_new<CompositeView>(rt->forest, vargs->did,
-                           vargs->owner, vargs->target_node, 
-                           rt->address_space, vargs->root,
-                           vargs->version_info, false/*register now*/);
+      const DeferCompositeViewRegistrationArgs *vargs = 
+        (const DeferCompositeViewRegistrationArgs*)args;
       // Register only after construction
-      view->register_with_runtime(NULL/*remote registration not needed*/);
+      vargs->view->register_with_runtime(NULL/*remote registration not needed*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::record_dirty_fields(const FieldMask &dirty)
+    //--------------------------------------------------------------------------
+    {
+      dirty_mask |= dirty; 
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::record_valid_view(LogicalView *view, const FieldMask &m)
+    //--------------------------------------------------------------------------
+    {
+      // For now we'll just record it, we'll add references later
+      if (view->is_instance_view())
+      {
+#ifdef DEBUG_LEGION
+        assert(view->is_materialized_view());
+#endif
+        MaterializedView *mat_view = view->as_materialized_view();
+        LegionMap<MaterializedView*,FieldMask>::aligned::iterator finder = 
+          valid_views.find(mat_view);
+        if (finder == valid_views.end())
+        {
+          mat_view->add_nested_resource_ref(did);
+          valid_views[mat_view] = m;
+        }
+        else
+          finder->second |= m;
+      }
+      else
+      {
+        DeferredView *def_view = view->as_deferred_view();
+        LegionMap<DeferredView*,FieldMask>::aligned::iterator finder = 
+          deferred_valid_views.find(def_view);
+        if (finder == deferred_valid_views.end())
+        {
+          def_view->add_nested_resource_ref(did);
+          deferred_valid_views[def_view] = m;
+        }
+        else
+          finder->second |= m;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::record_reduction_fields(const FieldMask &reduc)
+    //--------------------------------------------------------------------------
+    {
+      reduction_mask |= reduc;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::record_reduction_view(ReductionView *view, 
+                                              const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
+        reduction_views.find(view);
+      if (finder == reduction_views.end())
+      {
+        view->add_nested_resource_ref(did);
+        reduction_views[view] = mask;
+      }
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::record_child_version_state(const ColorPoint &color, 
+                                     VersionState *state, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *child_node = logical_node->get_tree_child(color);
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (it->first->logical_node == child_node)
+        {
+          it->first->record_version_state(state, mask, false/*already valid*/);
+          it->second |= mask;
+          return;
+        }
+      }
+      // Didn't find it so make it
+      CompositeNode *child = 
+        legion_new<CompositeNode>(child_node, (CompositeNode*)NULL, did); 
+      child->record_version_state(state, mask, false/*already valid*/);
+      children[child] = mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::finalize_capture(void)
+    //--------------------------------------------------------------------------
+    {
+      // We add base resource references to all our views and 
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it =
+            valid_views.begin(); it != valid_views.end(); it++)
+        it->first->add_nested_resource_ref(did);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+        it->first->add_nested_resource_ref(did);
+      // For the deferred views, we try to prune them 
+      // based on our closed tree if they are the same we keep them 
+      std::vector<DeferredView*> to_erase;
+      LegionMap<DeferredView*,FieldMask>::aligned replacements;
+      for (LegionMap<DeferredView*,FieldMask>::aligned::iterator it = 
+           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      {
+        it->first->prune(closed_tree, it->second, replacements);
+        if (!it->second)
+          to_erase.push_back(it->first);
+        else
+          it->first->add_nested_resource_ref(did);
+      }
+      if (!to_erase.empty())
+      {
+        for (std::vector<DeferredView*>::const_iterator it = to_erase.begin();
+              it != to_erase.end(); it++)
+          deferred_valid_views.erase(*it);
+      }
+      if (!replacements.empty())
+      {
+        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+              replacements.begin(); it != replacements.end(); it++)
+        {
+          LegionMap<DeferredView*,FieldMask>::aligned::iterator finder =
+            deferred_valid_views.find(it->first);
+          if (finder == deferred_valid_views.end())
+          {
+            it->first->add_nested_resource_ref(did);
+            deferred_valid_views.insert(*it);
+          }
+          else
+            finder->second |= it->second;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::pack_composite_view(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(dirty_mask);
+      rez.serialize<size_t>(valid_views.size());
+      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(deferred_valid_views.size());
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+      rez.serialize(reduction_mask);
+      rez.serialize<size_t>(reduction_views.size());
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(children.size());
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        it->first->pack_composite_node(rez);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::unpack_composite_view(Deserializer &derez,
+                                              std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(dirty_mask);
+      size_t num_mat_views;
+      derez.deserialize(num_mat_views);
+      for (unsigned idx = 0; idx < num_mat_views; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        MaterializedView *mat_view = static_cast<MaterializedView*>(
+            runtime->find_or_request_logical_view(did, ready));
+        derez.deserialize(valid_views[mat_view]);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.insert(defer_add_reference(mat_view, ready));
+        else // Otherwise we can add the reference now
+          mat_view->add_nested_resource_ref(did);
+      }
+      size_t num_def_views;
+      derez.deserialize(num_def_views);
+      for (unsigned idx = 0; idx < num_def_views; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        DeferredView *def_view = static_cast<DeferredView*>(
+            runtime->find_or_request_logical_view(did, ready));
+        derez.deserialize(deferred_valid_views[def_view]);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.insert(defer_add_reference(def_view, ready));
+        else
+          def_view->add_nested_resource_ref(did);
+      }
+      derez.deserialize(reduction_mask);
+      size_t num_reduc_views;
+      derez.deserialize(num_reduc_views);
+      for (unsigned idx = 0; idx < num_reduc_views; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        ReductionView *reduc_view = static_cast<ReductionView*>(
+            runtime->find_or_request_logical_view(did, ready));
+        derez.deserialize(reduction_views[reduc_view]);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.insert(defer_add_reference(reduc_view, ready));
+        else
+          reduc_view->add_nested_resource_ref(did);
+      }
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        CompositeNode *child = CompositeNode::unpack_composite_node(derez, 
+                                    context->runtime, did, preconditions);
+        derez.deserialize(children[child]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent CompositeView::defer_add_reference(LogicalView *view, 
+                                               RtEvent precondition) const
+    //--------------------------------------------------------------------------
+    {
+      DeferCompositeViewRefArgs args;
+      args.hlr_id = HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID;
+      args.view = view;
+      args.did = did;
+      return context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+          HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID, HLR_LATENCY_PRIORITY,
+          NULL/*op*/, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_deferred_view_ref(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeViewRefArgs *ref_args = 
+        (const DeferCompositeViewRefArgs*)args;
+      ref_args->view->add_nested_resource_ref(ref_args->did);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3939,17 +4308,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeNode::CompositeNode(RegionTreeNode* node, CompositeNode *p)
-      : logical_node(node), parent(p), owner_did(0)
+    CompositeNode::CompositeNode(RegionTreeNode* node, CompositeNode *p,
+                                 DistributedID own_did)
+      : logical_node(node), parent(p), owner_did(own_did),
+        node_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->add_child(this);
     }
 
     //--------------------------------------------------------------------------
     CompositeNode::CompositeNode(const CompositeNode &rhs)
-      : logical_node(NULL), parent(NULL)
+      : logical_node(NULL), parent(NULL), owner_did(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3960,24 +4329,32 @@ namespace Legion {
     CompositeNode::~CompositeNode(void)
     //--------------------------------------------------------------------------
     {
+      node_lock.destroy_reservation();
+      node_lock = Reservation::NO_RESERVATION;
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            version_states.begin(); it != version_states.end(); it++)
+      {
+        if (it->first->remove_nested_resource_ref(owner_did))
+          legion_delete(it->first);
+      }
       // Free up all our children 
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
         legion_delete(it->first);
       }
-      // Remove our resource references
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+      children.clear();
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        if (it->first->remove_base_resource_ref(COMPOSITE_NODE_REF))
+        if (it->first->remove_nested_resource_ref(owner_did))
           LogicalView::delete_logical_view(it->first);
       }
       valid_views.clear();
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_base_resource_ref(COMPOSITE_NODE_REF))
+        if (it->first->remove_nested_valid_ref(owner_did))
           legion_delete(it->first);
       }
       reduction_views.clear();
@@ -4007,163 +4384,271 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::add_child(CompositeNode *child)
+    void CompositeNode::clone(CompositeView *target,
+                              const FieldMask &clone_mask) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(child->logical_node->get_depth() == (logical_node->get_depth()+1));
-#endif
-      // Referencing it should instantiate it
-      children[child];
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::update_child(CompositeNode *child,const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(children.find(child) != children.end());
-#endif
-      children[child] |= mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::finalize(FieldMask &final_mask)
-    //--------------------------------------------------------------------------
-    {
-      if (!children.empty())
+      const ColorPoint &color = logical_node->get_color();
+      // No need to hold the lock here, version states don't change
+      // after the composite node is made
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =  
+            version_states.begin(); it != version_states.end(); it++)
       {
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          it->first->finalize(it->second);
-          final_mask |= it->second;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::set_owner_did(DistributedID own_did)
-    //--------------------------------------------------------------------------
-    {
-      owner_did = own_did;
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->set_owner_did(own_did);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool CompositeNode::need_temporary_instance(MaterializedView *dst,
-                                                const FieldMask &copy_mask,
-                                                bool &fully_valid,
-                                                bool &partially_valid,
-                                                bool check_root) const
-    //--------------------------------------------------------------------------
-    {
-      // If we have any reduction instances we can never be fully valid
-      if (!(reduction_mask * copy_mask))
-        fully_valid = false; 
-      // See if we are at the root of the copy yet
-      if (check_root)
-      {
-        CompositeNode *child = find_next_root(dst->logical_node, copy_mask);
-        if (child != NULL)
-          return child->need_temporary_instance(dst, copy_mask, 
-                                                fully_valid, partially_valid);
-      }
-      // Otherwise we have to do the check here, see if we have any dirty
-      // data for which we don't have an instance in the children
-      FieldMask dirty_overlap = dirty_mask & copy_mask;
-      if (!!dirty_overlap)
-      {
-        // Check to see if the target instance is already valid
-        // Views may be different levels of the region tree so we have
-        // to do this by looking at the actual instances
-        FieldMask observed_mask;
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          observed_mask |= it->second;
-          if (it->first->is_deferred_view())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first->is_materialized_view());
-#endif
-          MaterializedView *dirty_view = it->first->as_materialized_view();
-          if (dirty_view->manager != dst->manager)
-            continue;
-          if (!(dirty_overlap * it->second))
-          {
-            // If we overlap for any fields at this level we are
-            // at least partially valid
-            partially_valid = true;
-            dirty_overlap -= it->second;
-          }
-          // We found the common view so we can break out now
-          break;
-        }
-        // Any fields for which we don't have instances don't matter
-        dirty_overlap &= observed_mask;
-        // If we still have dirty fields, we need to check the children
-        // to see if we are going to stomp on anyone
-        if (!!dirty_overlap)
-        {
-          // If we ever get here, we are no longer fully valid
-          fully_valid = false;
-          // Check to see if we have any composite views that 
-          // will be problematic
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            if (!it->first->is_composite_view())
-              continue;
-            // Only need to check against the dirty mask here
-            FieldMask overlap = it->second & dirty_mask;
-            if (!overlap)
-              continue;
-            bool local_full = false;
-            if (it->first->as_composite_view()->need_temporary_instance(dst, 
-                                                        overlap, local_full))
-              return true;
-          }
-          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
-                it = children.begin(); it != children.end(); it++)
-          {
-            // Use the copy_mask here, this could result in false
-            // positives but it will still be sound, it also means
-            // that we only ever need to traverse any node in the tree once
-            FieldMask overlap = it->second & copy_mask;
-            if (!overlap)
-              continue;
-            bool local_partial = false;
-            if (it->first->need_temporary_instance(dst, overlap, fully_valid,
-                                                   local_partial,false/*root*/))
-              return true;
-            // If we have local partial then there is dirty data below
-            // in this instance that we can't stomp on so we need a 
-            // temporary instance
-            if (local_partial)
-              return true;
-          }
-          // We've already traversed the children so there is no need
-          // to go any further
-          return false;
-        }
-      }
-      // Now check all the children
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-        FieldMask overlap = it->second & copy_mask;
+        FieldMask overlap = it->second & clone_mask;
         if (!overlap)
           continue;
-        if (it->first->need_temporary_instance(dst, overlap, fully_valid,
-                                               partially_valid, false/*root*/))
-          return true;
+        target->record_child_version_state(color, it->first, overlap);
       }
-      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::pack_composite_node(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      if (logical_node->is_region())
+      {
+        rez.serialize<bool>(true);
+        rez.serialize(logical_node->as_region_node()->handle);
+      }
+      else
+      {
+        rez.serialize<bool>(false);
+        rez.serialize(logical_node->as_partition_node()->handle);
+      }
+      rez.serialize<size_t>(version_states.size());
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            version_states.begin(); it != version_states.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
+        Deserializer &derez, Runtime *runtime, DistributedID owner_did,
+        std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      CompositeNode *result = 
+        legion_new<CompositeNode>(node, (CompositeNode*)NULL, owner_did);
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        VersionState *state = 
+          runtime->find_or_request_version_state(did, ready); 
+        derez.deserialize(result->version_states[state]);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferCompositeNodeRefArgs args;
+          args.hlr_id = HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID;
+          args.state = state;
+          args.owner_did = owner_did;
+          RtEvent precondition = 
+            runtime->issue_runtime_meta_task(&args, sizeof(args),
+                HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID, HLR_LATENCY_PRIORITY,
+                NULL/*op*/, ready);
+          preconditions.insert(precondition);
+        }
+        else
+          state->add_nested_resource_ref(owner_did);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeNode::handle_deferred_node_ref(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeNodeRefArgs *nargs = 
+        (const DeferCompositeNodeRefArgs*)args;
+      nargs->state->add_nested_resource_ref(nargs->owner_did);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // These should be empty when notify valid is called
+      assert(children.empty());
+      assert(valid_views.empty());
+      assert(reduction_views.empty());
+#endif
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            version_states.begin(); it != version_states.end(); it++)
+        it->first->add_nested_valid_ref(owner_did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            version_states.begin(); it != version_states.end(); it++)
+        it->first->remove_nested_valid_ref(owner_did, mutator);
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->first->notify_invalid(mutator);
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+        it->first->remove_nested_valid_ref(owner_did, mutator);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+        it->first->remove_nested_valid_ref(owner_did, mutator);
+    } 
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_dirty_fields(const FieldMask &dirty)
+    //--------------------------------------------------------------------------
+    {
+      // should already hold the lock from the caller
+      dirty_mask |= dirty;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
+    //--------------------------------------------------------------------------
+    {
+      // should already hold the lock from the caller
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        valid_views.find(view);
+      if (finder == valid_views.end())
+      {
+        // Add both a resource and a valid reference
+        // No need for a mutator since these must be valid if we are capturing
+        view->add_nested_resource_ref(owner_did);
+        view->add_nested_valid_ref(owner_did);
+        valid_views[view] = m;
+      }
+      else
+        finder->second |= m;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_reduction_fields(const FieldMask &reduc)
+    //--------------------------------------------------------------------------
+    {
+      // should already hold the lock from the caller
+      reduction_mask |= reduc;
+    }
+    
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_reduction_view(ReductionView *view,
+                                              const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      // should already hold the lock from the caller
+      LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
+        reduction_views.find(view);
+      if (finder == reduction_views.end())
+      {
+        // Add both a resource and a valid reference
+        // No need for a mutator since these must be valid if we are capturing
+        view->add_nested_resource_ref(owner_did);
+        view->add_nested_valid_ref(owner_did);
+        reduction_views[view] = mask;
+      }
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_child_version_state(const ColorPoint &color,
+                                     VersionState *state, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *child_node = logical_node->get_tree_child(color);
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (it->first->logical_node == child_node)
+        {
+          it->first->record_version_state(state, mask, true/*already valid*/);
+          it->second |= mask;
+          return;
+        }
+      }
+      // Didn't find it so make it
+      CompositeNode *child = 
+        legion_new<CompositeNode>(child_node, this, owner_did); 
+      child->record_version_state(state, mask, true/*already valid*/);
+      children[child] = mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::record_version_state(VersionState *state, 
+                                      const FieldMask &mask, bool already_valid)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+        version_states.find(state);
+      if (finder == version_states.end())
+      {
+        state->add_nested_resource_ref(owner_did);
+        if (already_valid)
+          state->add_nested_valid_ref(owner_did);
+        version_states[state] = mask;
+      }
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::capture(const FieldMask &capture_mask)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock n_lock(node_lock);
+        // Perform the capture of each of our overlapping version states
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              version_states.begin(); it != version_states.end(); it++)
+        {
+          FieldMask overlap = it->second & capture_mask;
+          if (!overlap)
+            continue;
+          it->first->capture(this, overlap);
+        }
+        // Then trigger any dependent events  
+        if (!pending_captures.empty())
+        {
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::iterator it = 
+                pending_captures.begin(); it != pending_captures.end(); it++)
+          {
+            if (it->second * capture_mask)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(!(it->second - capture_mask));
+#endif
+            to_trigger = it->first;
+            // Highlander mode: there can only be one
+            pending_captures.erase(it);
+            break;
+          }
+        }
+      }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -4635,195 +5120,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void CompositeNode::pack_composite_tree(Serializer &rez, 
-                                            AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(dirty_mask);
-      rez.serialize(reduction_mask);
-      rez.serialize<size_t>(valid_views.size());
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(reduction_views.size());
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        // Same as above 
-        rez.serialize(it->first->did);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(children.size());
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        rez.serialize(it->first->logical_node->get_color());
-        rez.serialize(it->second);
-        it->first->pack_composite_tree(rez, target);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::unpack_composite_tree(Deserializer &derez,
-                                              AddressSpaceID source,
-                                              Runtime *runtime,
-                                              std::map<LogicalView*,
-                                    std::pair<RtEvent,unsigned> > &pending_refs)
-    //--------------------------------------------------------------------------
-    {
-      derez.deserialize(dirty_mask);
-      derez.deserialize(reduction_mask);
-      size_t num_views;
-      derez.deserialize(num_views);
-      for (unsigned idx = 0; idx < num_views; idx++)
-      {
-        DistributedID view_did;
-        derez.deserialize(view_did);
-        RtEvent ready;
-        LogicalView *view = 
-          runtime->find_or_request_logical_view(view_did, ready);
-        derez.deserialize(valid_views[view]);
-        if (ready.exists())
-        {
-          std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
-            pending_refs.find(view);
-          if (finder == pending_refs.end())
-            pending_refs[view] = std::pair<RtEvent,unsigned>(ready,1);
-          else
-            finder->second.second++;
-          continue;
-        }
-        view->add_base_resource_ref(COMPOSITE_NODE_REF);
-      }
-      size_t num_reductions;
-      derez.deserialize(num_reductions);
-      for (unsigned idx = 0; idx < num_reductions; idx++)
-      {
-        DistributedID reduc_did;
-        derez.deserialize(reduc_did);
-        RtEvent ready;
-        LogicalView *view = 
-          runtime->find_or_request_logical_view(reduc_did, ready);
-        // Have to static cast since it might not be ready yet
-        ReductionView *red_view = static_cast<ReductionView*>(view);
-        derez.deserialize(reduction_views[red_view]);
-        if (ready.exists())
-        {
-          std::map<LogicalView*,std::pair<RtEvent,unsigned> >::iterator finder =
-            pending_refs.find(view);
-          if (finder == pending_refs.end())
-            pending_refs[view] = std::pair<RtEvent,unsigned>(ready,1);
-          else
-            finder->second.second++;
-          continue;
-        }
-        red_view->add_base_resource_ref(COMPOSITE_NODE_REF);
-      }
-      size_t num_children;
-      derez.deserialize(num_children);
-      for (unsigned idx = 0; idx < num_children; idx++)
-      {
-        ColorPoint child_color;
-        derez.deserialize(child_color);
-        RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
-        CompositeNode *child = legion_new<CompositeNode>(child_node, this);
-        derez.deserialize(children[child]);
-        child->unpack_composite_tree(derez, source, runtime, pending_refs);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        it->first->add_nested_gc_ref(owner_did, mutator);
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        it->first->add_nested_gc_ref(owner_did, mutator);
-      }
-      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->notify_active(mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_gc_ref(owner_did, mutator);
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_gc_ref(owner_did, mutator);
-      }
-      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->notify_inactive(mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        it->first->add_nested_valid_ref(owner_did, mutator);
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        it->first->add_nested_valid_ref(owner_did, mutator);
-      }
-      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->notify_valid(mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_valid_ref(owner_did, mutator);
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        // Don't worry about deletion condition since we own resource refs
-        it->first->remove_nested_valid_ref(owner_did, mutator);
-      }
-      for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        it->first->notify_invalid(mutator);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // FillView 
     /////////////////////////////////////////////////////////////
@@ -4938,15 +5234,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillView::need_temporary_instance(MaterializedView *dst,
-                                           const FieldMask &copy_mask,
-                                           bool &already_valid)
+    void FillView::prune(ClosedNode *new_tree, FieldMask &valid_mask, 
+                      LegionMap<DeferredView*,FieldMask>::aligned &replacements)
     //--------------------------------------------------------------------------
     {
-      // Not already valid
-      already_valid = false;
-      // Never need a temporary view for copying from a fill view
-      return false;
+      // We never get pruned so do nothing
     }
 
     //--------------------------------------------------------------------------

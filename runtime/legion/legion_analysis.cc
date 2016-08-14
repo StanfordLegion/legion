@@ -2778,7 +2778,7 @@ namespace Legion {
     void ClosedNode::record_closed_fields(const FieldMask &fields)
     //--------------------------------------------------------------------------
     {
-      closed_fields |= fields;
+      covered_fields |= fields;
     }
 
     //--------------------------------------------------------------------------
@@ -2813,6 +2813,289 @@ namespace Legion {
             doms[*it] = fields;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::fix_closed_tree(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we are complete and have all our children, that we can also
+      // infer covering at this node
+      if (!children.empty())
+      {
+        const bool local_complete = node->is_complete() && 
+          (children.size() == node->get_num_children());
+        bool first_child = true;
+        FieldMask child_covered;
+        // Do all our sub-trees first
+        for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          // Recurse down the tree
+          it->second->fix_closed_tree();
+          // Update our valid mask
+          valid_fields |= it->second->get_valid_fields();
+          // If the child is complete we can also update covered
+          if (it->second->node->is_complete())
+            covered_fields |= it->second->get_covered_fields();
+          if (local_complete)
+          {
+            if (first_child)
+            {
+              child_covered = it->second->get_covered_fields();
+              first_child = false;
+            }
+            else
+              child_covered &= it->second->get_covered_fields();
+          }
+        }
+        if (local_complete && !!child_covered)
+          covered_fields |= child_covered;
+      }
+      // All our covered fields are always valid
+      valid_fields |= covered_fields;
+      // Finally update our valid fields based on any projections
+      if (!projections.empty())
+      {
+        for (std::map<ProjectionFunction*,
+                  LegionMap<Domain,FieldMask>::aligned>::const_iterator pit = 
+              projections.begin(); pit != projections.end(); pit++) 
+        {
+          for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+                pit->second.begin(); it != pit->second.end(); it++)
+            valid_fields |= it->second;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::filter_dominated_fields(const ClosedNode *old_tree, 
+                                            FieldMask &non_dominated_mask) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node == old_tree->node); // should always be the same
+#endif
+      // We can remove any fields we are covered by here
+      if (!!covered_fields)
+      {
+        non_dominated_mask -= covered_fields;
+        if (!non_dominated_mask)
+          return;
+      }
+      // If we have any projections, we can also try to filter by that
+      if (!projections.empty())
+      {
+        old_tree->filter_dominated_projection_fields(non_dominated_mask, 
+                                                     projections); 
+        if (!non_dominated_mask)
+          return;
+      }
+      // Otherwise try to see if the children zip well
+      old_tree->filter_dominated_children(non_dominated_mask, children);
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::filter_dominated_projection_fields(
+        FieldMask &non_dominated_mask,
+        const std::map<ProjectionFunction*,
+                  LegionMap<Domain,FieldMask>::aligned> &new_projections) const
+    //--------------------------------------------------------------------------
+    {
+      // In order to remove a dominated field, for each of our projection
+      // operations, we need to find one in the new set that dominates it
+      FieldMask dominated_mask = non_dominated_mask;
+      for (std::map<ProjectionFunction*,
+                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
+            projections.begin(); pit != projections.end(); pit++)
+      {
+        // Set this iterator to the begining to start
+        // Use it later to find domains with the same projection function
+        std::map<ProjectionFunction*,
+                 LegionMap<Domain,FieldMask>::aligned>::const_iterator
+                   finder = new_projections.begin();
+        for (LegionMap<Domain,FieldMask>::aligned::const_iterator dit = 
+              pit->second.begin(); dit != pit->second.end(); dit++)
+        {
+          FieldMask overlap = dit->second & dominated_mask;
+          if (!overlap)
+            continue;
+          // If it's still at the beginning try to find it
+          if (finder == new_projections.begin())
+            finder = new_projections.find(pit->first);
+          // If we found it then we can try to find overlapping domains
+          if (finder != new_projections.end())
+          {
+            for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              FieldMask dom_overlap = overlap & it->second;
+              if (!dom_overlap)
+                continue; 
+              // Dimensions don't have to match, if they don't we don't care
+              if (it->first.get_dim() != dit->first.get_dim())
+                continue;
+              // See if the domain dominates
+              switch (it->first.get_dim())
+              {
+                case 1:
+                  {
+                    Rect<1> prev_rect = dit->first.get_rect<1>();
+                    Rect<1> next_rect = it->first.get_rect<1>();
+                    if (next_rect.dominates(prev_rect))
+                      overlap -= dom_overlap;
+                    break;
+                  }
+                case 2:
+                  {
+                    Rect<2> prev_rect = dit->first.get_rect<2>();
+                    Rect<2> next_rect = it->first.get_rect<2>();
+                    if (next_rect.dominates(prev_rect))
+                      overlap -= dom_overlap;
+                    break;
+                  }
+                case 3:
+                  {
+                    Rect<3> prev_rect = dit->first.get_rect<3>();
+                    Rect<3> next_rect = it->first.get_rect<3>();
+                    if (next_rect.dominates(prev_rect))
+                      overlap -= dom_overlap;
+                    break;
+                  }
+                default:
+                  assert(false); // bad dimension size
+              }
+              if (!overlap)
+                break;
+            }
+          }
+          // Any fields still in overlap are not dominated
+          if (!!overlap)
+          {
+            dominated_mask -= overlap;
+            if (!dominated_mask)
+              break;
+          }
+        }
+        // Didn't find any dominated fields so we are done
+        if (!dominated_mask)
+          break;
+      }
+      if (!!dominated_mask)
+        non_dominated_mask -= dominated_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::filter_dominated_children(FieldMask &non_dominated_mask,
+               const std::map<RegionTreeNode*,ClosedNode*> &new_children) const
+    //--------------------------------------------------------------------------
+    {
+      // In order to remove a field, it has to be dominated in all our children
+      FieldMask dominated_fields = non_dominated_mask;
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        FieldMask overlap = it->second->get_valid_fields() & non_dominated_mask;
+        if (!overlap)
+          continue;
+        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
+          new_children.find(it->first);
+        // If we can't find it, then we are immediately done
+        if (finder == new_children.end())
+          return;
+        FieldMask child_non_dominated = overlap;
+        finder->second->filter_dominated_fields(it->second,child_non_dominated);
+        dominated_fields &= (overlap - child_non_dominated);
+        if (!dominated_fields)
+          return;
+      }
+      non_dominated_mask -= dominated_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::pack_closed_node(Serializer &rez) const 
+    //--------------------------------------------------------------------------
+    {
+      if (node->is_region())
+        rez.serialize(node->as_region_node()->handle);
+      else
+        rez.serialize(node->as_partition_node()->handle);
+      rez.serialize(valid_fields);
+      rez.serialize(covered_fields);
+      rez.serialize<size_t>(projections.size());
+      for (std::map<ProjectionFunction*,
+                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
+            projections.begin(); pit != projections.end(); pit++)
+      {
+        rez.serialize(pit->first->projection_id);
+        rez.serialize<size_t>(pit->second.size());
+        for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+              pit->second.begin(); it != pit->second.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(children.size());
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->second->pack_closed_node(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::perform_unpack(Deserializer &derez, 
+                                    Runtime *runtime, bool is_region)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(valid_fields);
+      derez.deserialize(covered_fields);
+      size_t num_projections;
+      derez.deserialize(num_projections);
+      for (unsigned idx = 0; idx < num_projections; idx++)
+      {
+        ProjectionID pid;
+        derez.deserialize(pid);
+        ProjectionFunction *function = runtime->find_projection_function(pid);
+        LegionMap<Domain,FieldMask>::aligned &doms = projections[function];
+        size_t num_doms;
+        derez.deserialize(num_doms);
+        for (unsigned idx2 = 0; idx2 < num_doms; idx2++)
+        {
+          Domain dom;
+          derez.deserialize(dom);
+          derez.deserialize(doms[dom]);
+        }
+      }
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        ClosedNode *child = unpack_closed_node(derez, runtime, !is_region); 
+        children[child->node] = child;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ClosedNode* ClosedNode::unpack_closed_node(Deserializer &derez,
+                                               Runtime *runtime, bool is_region)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *node = NULL;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      ClosedNode *result = legion_new<ClosedNode>(node);
+      result->perform_unpack(derez, runtime, is_region);
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3217,17 +3500,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::initialize_composite_instance(CompositeView *view,
-                                                    const FieldMask &close_mask)
+    void PhysicalState::capture_composite_root(CompositeView *composite_view,
+                                               const FieldMask &close_mask) 
     //--------------------------------------------------------------------------
     {
+      // We already know the version states are valid in this case so 
+      // we can just capture them at the moment
       for (PhysicalVersions::iterator it = version_states.begin();
             it != version_states.end(); it++)
       {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        view->update_composite_view(it->first, overlap);
+        it->first->capture(composite_view, overlap);
       }
     }
 
@@ -6270,6 +6555,104 @@ namespace Legion {
 #endif
       vs->handle_version_state_update_response(to_trigger, derez, update_mask);
     } 
+
+    //--------------------------------------------------------------------------
+    void VersionState::capture(CompositeView *target, 
+                               const FieldMask &capture_mask) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need this in read only mode since we're just reading
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      FieldMask dirty_overlap = dirty_mask & capture_mask;
+      if (!!dirty_overlap)
+      {
+        target->record_dirty_fields(dirty_overlap);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & dirty_overlap;
+          if (!overlap)
+            continue;
+          target->record_valid_view(it->first, overlap);
+        }
+      }
+      FieldMask reduction_overlap = reduction_mask & capture_mask;
+      if (!!reduction_overlap)
+      {
+        target->record_reduction_fields(reduction_overlap);
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & reduction_overlap;
+          if (!overlap)
+            continue;
+          target->record_reduction_view(it->first, overlap);
+        }
+      }
+      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
+            open_children.begin(); cit != open_children.end(); cit++)
+      {
+        if (cit->second.get_valid_mask() * capture_mask)
+          continue;
+        for (StateVersions::iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & capture_mask;
+          if (!overlap)
+            continue;
+          target->record_child_version_state(cit->first, it->first, overlap);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::capture(CompositeNode *target,
+                               const FieldMask &capture_mask) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need this in read only mode since we're just reading
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      FieldMask dirty_overlap = dirty_mask & capture_mask;
+      if (!!dirty_overlap)
+      {
+        target->record_dirty_fields(dirty_overlap);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & dirty_overlap;
+          if (!overlap)
+            continue;
+          target->record_valid_view(it->first, overlap);
+        }
+      }
+      FieldMask reduction_overlap = reduction_mask & capture_mask;
+      if (!!reduction_overlap)
+      {
+        target->record_reduction_fields(reduction_overlap);
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & reduction_overlap;
+          if (!overlap)
+            continue;
+          target->record_reduction_view(it->first, overlap);
+        }
+      }
+      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
+            open_children.begin(); cit != open_children.end(); cit++)
+      {
+        if (cit->second.get_valid_mask() * capture_mask)
+          continue;
+        for (StateVersions::iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & capture_mask;
+          if (!overlap)
+            continue;
+          target->record_child_version_state(cit->first, it->first, overlap);
+        }
+      }
+    }
 
     /////////////////////////////////////////////////////////////
     // RegionTreePath 

@@ -2132,14 +2132,14 @@ namespace Legion {
         FieldMask composite_mask = 
           child_node->column_source->get_field_mask(req.privilege_fields);
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
-                    composite_mask, version_info, target_ctx, closed_tree);
+            composite_mask, version_info, target_ctx, closed_tree);
         composite_ref.set_composite_view(view, op);
       }
       else
       {
         const FieldMask &composite_mask = composite_ref.get_valid_fields();
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
-                     composite_mask, version_info, target_ctx, closed_tree);
+            composite_mask, version_info, target_ctx, closed_tree);
         composite_ref.set_composite_view(view, op);
       }
     }
@@ -12353,16 +12353,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(version_info.is_upper_bound_set());
 #endif
+      // Fix the closed tree
+      closed_tree->fix_closed_tree();
+      // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
       const AddressSpace local_space = context->runtime->address_space;
-      VersionInfo *view_info = new VersionInfo();
+      // Copy the version info that we need
+      CompositeVersionInfo *view_info = new CompositeVersionInfo();
       version_info.move_to(*view_info);
-      CompositeView *result = legion_new<CompositeView>(context, did,
-          local_space, this, local_space, 
-          legion_new<CompositeNode>(this, (CompositeNode*)NULL),
-          view_info, true/*register now*/);
+      // Make the view
+      CompositeView *result = legion_new<CompositeView>(context, did, 
+                           local_space, this, local_space, view_info, 
+                           closed_tree, true/*register now*/);
+      // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
-      state->initialize_composite_instance(result, closing_mask);
+      state->capture_composite_root(result, closing_mask);
+      result->finalize_capture();
       update_valid_views(state, closing_mask, true/*dirty*/, result);  
       return result;
     }
@@ -14734,10 +14740,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* RegionNode::map_virtual_region(ContextID ctx_id,
-                                                 const FieldMask &virtual_mask,
-                                                 VersionInfo &version_info,
-                                                 SingleTask *target_ctx,
-                                                 ClosedNode *closed_tree)
+                                                  const FieldMask &virtual_mask,
+                                                  VersionInfo &version_info,
+                                                  SingleTask *target_ctx,
+                                                  ClosedNode *closed_tree)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);

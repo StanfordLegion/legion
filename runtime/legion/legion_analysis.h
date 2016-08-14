@@ -590,7 +590,7 @@ namespace Legion {
      * to the level of projection functions at which point they
      * capture the projection information.
      */
-    class ClosedNode {
+    class ClosedNode : public Collectable {
     public:
       ClosedNode(RegionTreeNode *node);
       ClosedNode(const ClosedNode &rhs);
@@ -600,14 +600,35 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
+      inline const FieldMask& get_valid_fields(void) const 
+        { return valid_fields; }
+      inline const FieldMask& get_covered_fields(void) const
+        { return covered_fields; }
+    public:
       void add_child_node(ClosedNode *child);
       void record_closed_fields(const FieldMask &closed_fields);
       void record_projections(const ProjectionEpoch *epoch,
                               const FieldMask &closed_fields);
     public:
+      void fix_closed_tree(void);
+      void filter_dominated_fields(const ClosedNode *old_tree,
+                                   FieldMask &non_dominated_mask) const;
+    protected:
+      void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
+          const std::map<ProjectionFunction*,
+             LegionMap<Domain,FieldMask>::aligned> &new_projections) const;
+      void filter_dominated_children(FieldMask &non_dominated_mask,
+          const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
+    public:
+      void pack_closed_node(Serializer &rez) const;
+      void perform_unpack(Deserializer &derez, Runtime *runtime,bool is_region);
+      static ClosedNode* unpack_closed_node(Deserializer &derez, 
+                                            Runtime *runtime, bool is_region);
+    public:
       RegionTreeNode *const node;
     protected:
-      FieldMask closed_fields;
+      FieldMask valid_fields; // Fields that are summarized in this tree
+      FieldMask covered_fields; // Fields totally written to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
       std::map<ProjectionFunction*,
                LegionMap<Domain,FieldMask>::aligned> projections;
@@ -726,8 +747,8 @@ namespace Legion {
       void apply_state(AddressSpaceID target, 
                        std::set<RtEvent> &applied_conditions) const; 
     public:
-      void initialize_composite_instance(CompositeView *view,
-                                         const FieldMask &close_mask);
+      void capture_composite_root(CompositeView *composite_view,
+                                  const FieldMask &closed_mask);
     public:
       PhysicalState* clone(void) const;
     public:
@@ -1055,6 +1076,9 @@ namespace Legion {
                                                 Deserializer &derez);
       static void process_version_state_update_response(Runtime *rt,
                                                  Deserializer &derez); 
+    public:
+      void capture(CompositeView *target, const FieldMask &capture_mask) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;

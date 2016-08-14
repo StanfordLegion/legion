@@ -832,9 +832,8 @@ namespace Legion {
                           std::vector<FieldDataDescriptor> &field_data,
                                   std::set<ApEvent> &preconditions);
     public:
-      virtual bool need_temporary_instance(MaterializedView *dst,
-                                           const FieldMask &copy_mask,
-                                           bool &already_valid) = 0;
+      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+                 LegionMap<DeferredView*,FieldMask>::aligned &replacements) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -847,19 +846,16 @@ namespace Legion {
      * \class CompositeVersionInfo
      * This is a wrapper class for keeping track of the version
      * information for all the composite nodes in a composite instance.
+     * TODO: do we need synchronization on computing field versions
+     * because these objects can be shared between composite views
      */
-    class CompositeVersionInfo : public Collectable {
+    class CompositeVersionInfo : public VersionInfo, public Collectable {
     public:
       CompositeVersionInfo(void);
       CompositeVersionInfo(const CompositeVersionInfo &rhs);
       ~CompositeVersionInfo(void);
     public:
       CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
-    public:
-      inline VersionInfo& get_version_info(void)
-        { return version_info; }
-    protected:
-      VersionInfo version_info;
     };
 
     /**
@@ -872,32 +868,31 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
-      struct DeferCompositeNodeRefArgs {
+      struct DeferCompositeViewRefArgs {
       public:
         HLRTaskID hlr_id;
         LogicalView *view;
-        unsigned refs;
+        DistributedID did;
       };
-      struct DeferCompositeViewCreationArgs {
+      struct DeferCompositeViewRegistrationArgs {
       public:
         HLRTaskID hlr_id;
-        DistributedID did;
-        AddressSpaceID owner;
-        RegionTreeNode *target_node;
-        CompositeNode *root;
-        VersionInfo *version_info;
+        CompositeView *view;
       };
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    AddressSpaceID local_proc, CompositeNode *root,
-                    VersionInfo *info, bool register_now);
+                    AddressSpaceID local_proc, CompositeVersionInfo *info,
+                    ClosedNode *closed_tree, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
       CompositeView& operator=(const CompositeView &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      CompositeView* clone(const FieldMask &clone_mask,
+         const LegionMap<DeferredView*,FieldMask>::aligned &replacements) const;
     public:
       void set_translation_context(SingleTask *context);
       void update_composite_view(VersionState *state, const FieldMask &mask);
@@ -914,9 +909,8 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
-      virtual bool need_temporary_instance(MaterializedView *dst,
-                                           const FieldMask &copy_mask,
-                                           bool &already_valid);
+      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+                     LegionMap<DeferredView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -932,25 +926,57 @@ namespace Legion {
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_deferred_node_refs(const void *args);
-      static void handle_deferred_view_creation(Runtime *runtime,
-                                                const void *args);
+      static void handle_deferred_view_registration(const void *args);
     public:
-      // The root node for this composite view
-      CompositeNode *const root;
-      VersionInfo *const version_info;
+      void record_dirty_fields(const FieldMask &dirty_mask);
+      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_reduction_fields(const FieldMask &reduction_fields);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask);
+      void record_child_version_state(const ColorPoint &child_color, 
+                                 VersionState *state, const FieldMask &mask);
+      void finalize_capture(void);
+    public:
+      void pack_composite_view(Serializer &rez) const;
+      void unpack_composite_view(Deserializer &derez,
+                                 std::set<RtEvent> &preconditions);
+      RtEvent defer_add_reference(LogicalView *view, 
+                                  RtEvent precondition) const;
+      static void handle_deferred_view_ref(const void *args);
+    public:
+      // The path version info for this composite instance
+      CompositeVersionInfo *const version_info;
+      // The abstraction of the tree that we closed
+      ClosedNode *const closed_tree;
+    protected:
+      // Note that we never record any version state names here, we just
+      // record the views and children we immediately depend on and that
+      // is how we break the inifinite meta-data cycle
+      FieldMask dirty_mask, reduction_mask;
+      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
+      LegionMap<MaterializedView*,FieldMask>::aligned valid_views;
+      LegionMap<DeferredView*,FieldMask>::aligned deferred_valid_views;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**
      * \class CompositeNode
-     * A helper class for representing the frozen state of a region
-     * tree as part of one or more composite views.
+     * A composite node is a read-only snapshot of the final state of
+     * one or more version state objects. It's used for issuing
+     * copy operations from closed region tree.
      */
     class CompositeNode {
     public:
       static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
     public:
-      CompositeNode(RegionTreeNode *node, CompositeNode *parent);
+      struct DeferCompositeNodeRefArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *state;
+        DistributedID owner_did;
+      };
+    public:
+      CompositeNode(RegionTreeNode *node, CompositeNode *parent,
+                    DistributedID owner_did);
       CompositeNode(const CompositeNode &rhs);
       ~CompositeNode(void);
     public:
@@ -958,16 +984,26 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void add_child(CompositeNode *child);
-      void update_child(CompositeNode *child, const FieldMask &mask);
-      void finalize(FieldMask &final_mask);
-      void set_owner_did(DistributedID own_did);
+      void clone(CompositeView *target, const FieldMask &clone_mask) const;
+      void pack_composite_node(Serializer &rez) const;
+      static CompositeNode* unpack_composite_node(Deserializer &derez,
+                      Runtime *runtime, DistributedID owner_did,
+                      std::set<RtEvent> &preconditions);
+      static void handle_deferred_node_ref(const void *args);
     public:
-      bool need_temporary_instance(MaterializedView *dst,
-                                   const FieldMask &copy_mask,
-                                   bool &fully_valid,
-                                   bool &partially_valid,
-                                   bool check_root = true) const;
+      void notify_valid(ReferenceMutator *mutator);
+      void notify_invalid(ReferenceMutator *mutator);
+    public:
+      void record_dirty_fields(const FieldMask &dirty_mask);
+      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_reduction_fields(const FieldMask &reduction_fields);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask);
+      void record_child_version_state(const ColorPoint &child_color, 
+                                 VersionState *state, const FieldMask &mask);
+      void record_version_state(VersionState *state, const FieldMask &mask,
+                                bool already_valid);
+      void capture(const FieldMask &capture_mask);
+    public:
       void issue_deferred_copies(const TraversalInfo &info, 
                                  MaterializedView *dst,
                                  const FieldMask &copy_mask,
@@ -995,20 +1031,20 @@ namespace Legion {
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                           CopyAcrossHelper *helper) const;
     public:
-      void pack_composite_tree(Serializer &rez, AddressSpaceID target);
-      void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
-                               Runtime *runtime, std::map<LogicalView*,
-                                std::pair<RtEvent,unsigned> > &pending_refs);
-    public:
-      void notify_active(ReferenceMutator *mutator);
-      void notify_inactive(ReferenceMutator *mutator);
-      void notify_valid(ReferenceMutator *mutator);
-      void notify_invalid(ReferenceMutator *mutator);
-    public:
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
+      const DistributedID owner_did;
     protected:
-      DistributedID owner_did;
+      Reservation node_lock;
+      // No need to hold references, the version tree does that
+      // automatically for us so we can be dumb about things
+      // Also don't need to hold the lock when accessing this data
+      // structure because it is fixed after the node is made
+      LegionMap<VersionState*,FieldMask>::aligned version_states;
+      // Keep track of the fields that are valid because we've captured them
+      FieldMask valid_fields;
+      LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
+    protected:
       FieldMask dirty_mask, reduction_mask;
       LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
@@ -1061,9 +1097,8 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
-      virtual bool need_temporary_instance(MaterializedView *dst,
-                                           const FieldMask &copy_mask,
-                                           bool &already_valid);
+      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+                     LegionMap<DeferredView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
