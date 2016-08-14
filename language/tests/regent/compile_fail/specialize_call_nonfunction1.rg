@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
+-- specialize_call_nonfunction1.rg:24: unable to specialize non-function in function call position
 --   x(5)
 --   ^
 
