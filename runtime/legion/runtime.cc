@@ -20928,6 +20928,11 @@ namespace Legion {
             CompositeNode::handle_deferred_node_ref(args);
             break;
           }
+        case HLR_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
+          {
+            CompositeNode::handle_deferred_capture(args);
+            break;
+          }
         case HLR_UPDATE_VIEW_REFERENCES_TASK_ID:
           {
             VersionState::process_view_references(args);

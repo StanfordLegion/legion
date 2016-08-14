@@ -12367,6 +12367,9 @@ namespace Legion {
                            closed_tree, true/*register now*/);
       // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
+      // Pull down the valid instance views before we do the capture
+      pull_valid_instance_views(ctx_id, state, closing_mask, 
+                                false/*needs space*/, version_info);
       state->capture_composite_root(result, closing_mask);
       result->finalize_capture();
       update_valid_views(state, closing_mask, true/*dirty*/, result);  

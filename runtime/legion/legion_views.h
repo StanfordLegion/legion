@@ -859,12 +859,57 @@ namespace Legion {
     };
 
     /**
+     * \class CompositeBase
+     * A small helper class that provides some base functionality
+     * for both the CompositeView and CompositeNode classes
+     */
+    class CompositeBase {
+    public:
+      CompositeBase(Reservation &base_lock);
+      virtual ~CompositeBase(void);
+    public:
+      void issue_deferred_copies(const TraversalInfo &info, 
+                                 MaterializedView *dst,
+                                 const FieldMask &copy_mask,
+                                 VersionTracker *src_version_tracker,
+                                 RegionTreeNode *logical_node,
+              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                    CopyAcrossHelper *helper, bool check_root, 
+                    bool check_overwrite, bool check_ready = true);
+    protected:
+      virtual void perform_ready_check(FieldMask mask) = 0;
+    protected:
+      CompositeNode* find_next_root(RegionNode *target,
+                                    RegionTreeNode *logical_node,
+                                    const FieldMask &mask) const;
+      bool are_domination_tests_sound(RegionTreeNode *logical_node,
+                                      const FieldMask &mask) const;
+
+      void issue_update_reductions(const TraversalInfo &info, 
+                                   MaterializedView *dst, 
+                                   const FieldMask &copy_mask,
+                                   VersionTracker *src_version_tracker,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                          CopyAcrossHelper *helper) const;
+    private:
+      Reservation &base_lock;
+    protected:
+      FieldMask dirty_mask, reduction_mask;
+      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
      * \class CompositeView
      * The CompositeView class is used for deferring close
      * operations by representing a valid version of a single
      * logical region with a bunch of different instances.
      */
-    class CompositeView : public DeferredView, VersionTracker {
+    class CompositeView : public DeferredView, 
+                          public VersionTracker, public CompositeBase {
     public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
@@ -924,6 +969,9 @@ namespace Legion {
       virtual const FieldMask& get_split_mask(RegionTreeNode *node, 
                                               bool &is_split) const;
     public:
+      // From CompositeBase
+      virtual void perform_ready_check(FieldMask mask);
+    public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_view_registration(const void *args);
@@ -951,11 +999,8 @@ namespace Legion {
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
       // is how we break the inifinite meta-data cycle
-      FieldMask dirty_mask, reduction_mask;
-      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
       LegionMap<MaterializedView*,FieldMask>::aligned valid_views;
       LegionMap<DeferredView*,FieldMask>::aligned deferred_valid_views;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**
@@ -964,7 +1009,7 @@ namespace Legion {
      * one or more version state objects. It's used for issuing
      * copy operations from closed region tree.
      */
-    class CompositeNode {
+    class CompositeNode : public CompositeBase {
     public:
       static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
     public:
@@ -974,15 +1019,26 @@ namespace Legion {
         VersionState *state;
         DistributedID owner_did;
       };
+      struct DeferCaptureArgs {
+      public:
+        HLRTaskID hlr_id;
+        CompositeNode *proxy_this;
+        RtUserEvent capture_event;
+      };
     public:
       CompositeNode(RegionTreeNode *node, CompositeNode *parent,
                     DistributedID owner_did);
       CompositeNode(const CompositeNode &rhs);
-      ~CompositeNode(void);
+      virtual ~CompositeNode(void);
     public:
       CompositeNode& operator=(const CompositeNode &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      // From CompositeBase
+      virtual void perform_ready_check(FieldMask mask);
+      void capture(RtUserEvent capture_event);
+      static void handle_deferred_capture(const void *args);
     public:
       void clone(CompositeView *target, const FieldMask &clone_mask) const;
       void pack_composite_node(Serializer &rez) const;
@@ -1002,34 +1058,10 @@ namespace Legion {
                                  VersionState *state, const FieldMask &mask);
       void record_version_state(VersionState *state, const FieldMask &mask,
                                 bool already_valid);
-      void capture(const FieldMask &capture_mask);
     public:
-      void issue_deferred_copies(const TraversalInfo &info, 
-                                 MaterializedView *dst,
-                                 const FieldMask &copy_mask,
-                                 VersionTracker *src_version_tracker,
-              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                    CopyAcrossHelper *helper, bool check_root = true) const;
-      CompositeNode* find_next_root(RegionTreeNode *target,
-                                    const FieldMask &mask) const;
-      bool are_domination_tests_sound(const FieldMask &mask) const;
       void find_valid_views(const FieldMask &search_mask,
                       LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
-      void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
-                       FieldMask copy_mask, VersionTracker *src_version_tracker,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                    const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                          CopyAcrossHelper *helper) const;
-      void issue_update_reductions(const TraversalInfo &info, 
-                                   MaterializedView *dst, 
-                                   const FieldMask &copy_mask,
-                                   VersionTracker *src_version_tracker,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                          CopyAcrossHelper *helper) const;
+      
     public:
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
@@ -1038,17 +1070,12 @@ namespace Legion {
       Reservation node_lock;
       // No need to hold references, the version tree does that
       // automatically for us so we can be dumb about things
-      // Also don't need to hold the lock when accessing this data
-      // structure because it is fixed after the node is made
       LegionMap<VersionState*,FieldMask>::aligned version_states;
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
     protected:
-      FieldMask dirty_mask, reduction_mask;
-      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
     /**
