@@ -597,7 +597,7 @@ function specialize.expr_call(cx, node, allow_lists)
       span = node.span,
     }
   else
-    assert(false, "unreachable")
+    report.error(fn, "unable to specialize non-function in function call position")
   end
 end
 
