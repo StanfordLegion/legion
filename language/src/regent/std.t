@@ -576,15 +576,26 @@ function std.find_task_privileges(region_type, privileges, coherence_modes, flag
     grouped_coherence_modes, grouped_flags
 end
 
-function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
+function std.group_task_privileges_by_field_path(privileges, privilege_field_paths,
+                                                 privilege_field_types,
+                                                 privilege_coherence_modes,
+                                                 privilege_flags)
   local privileges_by_field_path = {}
+  local coherence_modes_by_field_path
+  if privilege_coherence_modes ~= nil then
+    coherence_modes_by_field_path = {}
+  end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
       privileges_by_field_path[field_path:hash()] = privilege
+      if coherence_modes_by_field_path ~= nil then
+        coherence_modes_by_field_path[field_path:hash()] =
+          privilege_coherence_modes[i]
+      end
     end
   end
-  return privileges_by_field_path
+  return privileges_by_field_path, coherence_modes_by_field_path
 end
 
 local privilege_modes = {
