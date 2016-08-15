@@ -734,6 +734,15 @@ function std.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
 
+-- Returns true if value `x` can be called in Regent (type cast doesn't count).
+function std.is_callable(x)
+  return terralib.isfunction(x) or
+    terralib.isoverloadedfunction(x) or
+    terralib.ismacro(x) or
+    std.is_task(x) or
+    type(x) == "cdata"
+end
+
 std.untyped = terralib.types.newstruct("untyped")
 
 function std.type_sub(t, mapping)

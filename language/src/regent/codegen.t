@@ -4528,22 +4528,25 @@ function codegen.expr_list_range(cx, node)
     expr_type)
 end
 
-local function make_mapping_call(cx, node, p, i, domain, ispace_type)
+local function make_ispace_domain_rect(domain, ispace_type)
+  assert(std.is_ispace(ispace_type))
+  local index_type = ispace_type.index_type
+  assert(index_type.dim > 0)
+  local rect_type = std.rect_type(index_type)
+  local get_rect = c["legion_domain_get_rect_" .. index_type.dim .. "d"]
+  assert(get_rect)
+  return expr.once_only(quote end, `([rect_type]([get_rect]([domain]))), rect_type)
+end
+
+local function make_mapping_call(cx, node, p, i, ispace_type, domain_rect)
   local mapping = node.mapping
   if not mapping then
-    return values.value (
-      node,
-      expr.just(quote end, `i),
-      int
-    )
+    return expr.just(quote end, `i), int
   end
 
   assert(std.is_ispace(ispace_type))
   local index_type = ispace_type.index_type
   assert(index_type.dim > 0)
-
-  local get_rect = c["legion_domain_get_rect_" .. index_type.dim .. "d"]
-  assert(get_rect)
 
   local param_p = ast.typed.expr.Internal {
     value = values.value(node, expr.just(quote end, p), index_type),
@@ -4555,23 +4558,24 @@ local function make_mapping_call(cx, node, p, i, domain, ispace_type)
   -- TODO(zhangwen): it seems inefficient to get rectangle from domain in every iteration.
   local rect_type = std.rect_type(index_type)
   local param_space = ast.typed.expr.Internal {
-    value = values.value(node,
-      expr.just(quote end, `([rect_type]([get_rect]([domain])))), rect_type),
+    value = values.value(node, expr.just(quote end, domain_rect), rect_type),
     expr_type = rect_type,
     annotations = ast.default_annotations(),
     span = node.span,
   }
 
+  local key_type = node.key_type
+  assert(terralib.types.istype(key_type) and key_type:isintegral())
   local call = ast.typed.expr.Call {
     fn = mapping,
     args = terralib.newlist({ param_p, param_space }),
     conditions = terralib.newlist({}),
-    expr_type = int,
+    expr_type = key_type,
     annotations = ast.default_annotations(),
     span = node.span,
   }
 
-  return codegen.expr(cx, call)
+  return codegen.expr(cx, call):read(cx, key_type), key_type
 end
 
 function codegen.expr_list_ispace(cx, node)
@@ -4597,22 +4601,32 @@ function codegen.expr_list_ispace(cx, node)
   -- Index for accessing list in loop.
   local i = terralib.newsymbol(int, "i")
 
+  -- Rect for index space domain (for when a mapping is specified).
+  local ispace_domain_rect = node.mapping and make_ispace_domain_rect(ispace_domain, ispace_type)
+  local mapping_call, key_type = make_mapping_call(
+    cx, node, p_symbol:getsymbol(), i, ispace_type, ispace_domain_rect and ispace_domain_rect.value)
+  assert(key_type:isintegral())
+
   -- Initially, each index in the index space is stored in a `KeyedIndex`
   -- along with its sorting key returned by `mapping`.  The indices will then
   -- be sorted and stored in the `result` list.
   local struct KeyedIndex {
     index : index_type;
-    key : int;
+    key : key_type;
   }
-  -- Compare function for the C qsort function.
+  -- Compare function for C `qsort`.
   terra KeyedIndex.compare(a : &opaque, b : &opaque) : int
-    return ([&KeyedIndex](a)).key - ([&KeyedIndex](b)).key
+    var key_a : key_type = ([&KeyedIndex](a)).key
+    var key_b : key_type = ([&KeyedIndex](b)).key
+    -- Comparing explicitly (instead of returning `key_a - key_b`) to avoid
+    -- integer overflow.
+    if key_a < key_b then return -1
+    elseif key_a > key_b then return 1
+    else return 0 end
   end
   -- Array of (index, key) pairs.
   local keyed_indices = terralib.newsymbol(&KeyedIndex, "keyed_indices")
 
-  local mapping_call = make_mapping_call(
-    cx, node, p_symbol:getsymbol(), i, ispace_domain, ispace_type):read(cx, int)
   local loop_body = ast.typed.stat.Internal {
     actions = quote
       [mapping_call.actions]
@@ -4637,6 +4651,16 @@ function codegen.expr_list_ispace(cx, node)
     span = node.span,
   }
 
+  local pre_loop_actions = quote
+    var [i] = 0
+  end
+  if ispace_domain_rect then
+    pre_loop_actions = quote
+      [pre_loop_actions];
+      [ispace_domain_rect.actions]
+    end
+  end
+
   local actions = quote
     [ispace.actions]
     [emit_debuginfo(node)]
@@ -4651,7 +4675,7 @@ function codegen.expr_list_ispace(cx, node)
     var [keyed_indices] = [&KeyedIndex](c.malloc(terralib.sizeof(KeyedIndex) * [result_len]))
     regentlib.assert([keyed_indices] ~= nil, "malloc failed in list_ispace (keyed_indices)")
     -- Populate `keyed_indices` array.
-    var [i] = 0;
+    [pre_loop_actions]
     [codegen.stat(cx, loop)]
     regentlib.assert(i == [result_len], "list_ispace final index doesn't match list length")
 
