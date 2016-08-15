@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:25: unable to specialize complex expression in function call position
+-- specialize_call_nonfunction_complex.rg:25: unable to specialize complex expression in function call position
 --   x[0]("hello %d\n", 6)
 --    ^
 
