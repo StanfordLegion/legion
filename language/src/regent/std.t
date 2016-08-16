@@ -779,7 +779,7 @@ function std.type_sub(t, mapping)
     else
       return std.partition(t.disjointness, parent_region_symbol, colors_symbol)
     end
-  elseif t:isarray() then
+  elseif terralib.types.istype(t) and t:isarray() then
     return std.type_sub(t.type, mapping)[t.N]
   else
     return t
