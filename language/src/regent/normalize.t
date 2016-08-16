@@ -37,7 +37,10 @@ local function join_num_accessed_fields(a, b)
 end
 
 local function get_num_accessed_fields(node)
-  if node:is(ast.specialized.expr.ID) then
+  if not ast.is_node(node) then
+    return 1
+
+  elseif node:is(ast.specialized.expr.ID) then
     return 1
 
   elseif node:is(ast.specialized.expr.Constant) then
