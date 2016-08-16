@@ -239,6 +239,12 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Release) then
     return nil
 
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return nil
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return nil
+
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return nil
 
@@ -913,6 +919,24 @@ function optimize_futures.expr_release(cx, node)
   }
 end
 
+function optimize_futures.expr_attach_hdf5(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local filename = concretize(optimize_futures.expr(cx, node.filename))
+  local mode = concretize(optimize_futures.expr(cx, node.mode))
+  return node {
+    region = region,
+    filename = filename,
+    mode = mode,
+  }
+end
+
+function optimize_futures.expr_detach_hdf5(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
 function optimize_futures.expr_allocate_scratch_fields(cx, node)
   local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node {
@@ -1111,6 +1135,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return optimize_futures.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return optimize_futures.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return optimize_futures.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return optimize_futures.expr_allocate_scratch_fields(cx, node)

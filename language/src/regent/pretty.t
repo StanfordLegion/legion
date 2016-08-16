@@ -523,6 +523,24 @@ function pretty.expr_release(cx, node)
       ")"})
 end
 
+function pretty.expr_attach_hdf5(cx, node)
+  return join({
+      "attach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region),
+              pretty.expr(cx, node.filename),
+              pretty.expr(cx, node.mode)}),
+      ")"})
+end
+
+function pretty.expr_detach_hdf5(cx, node)
+  return join({
+      "detach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region)}),
+      ")"})
+end
+
 function pretty.expr_allocate_scratch_fields(cx, node)
   return join({
       "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
@@ -709,6 +727,12 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return pretty.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return pretty.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return pretty.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return pretty.expr_allocate_scratch_fields(cx, node)

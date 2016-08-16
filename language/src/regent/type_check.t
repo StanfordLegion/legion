@@ -2443,6 +2443,108 @@ function type_check.expr_release(cx, node)
   }
 end
 
+function type_check.expr_attach_hdf5(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local filename = type_check.expr(cx, node.filename)
+  local filename_type = std.check_read(cx, filename)
+  local mode = type_check.expr(cx, node.mode)
+  local mode_type = std.check_read(cx, mode)
+  local expr_type = terralib.types.unit
+
+  if not std.is_region(region_type) then
+    -- Explicitly disallow lists of regions.
+    report.error(node, "type mismatch in argument 1: expected a region but got " .. tostring(region_type))
+  end
+
+  if not std.validate_implicit_cast(filename_type, rawstring) then
+    report.error(node, "type mismatch in argument 2: expected " .. tostring(rawstring) .. " but got " .. tostring(filename_type))
+  end
+  filename = insert_implicit_cast(filename, filename_type, rawstring)
+
+  if not std.validate_implicit_cast(mode_type, std.c.legion_file_mode_t) then
+    report.error(node, "type mismatch in argument 3: expected " .. tostring(std.c.legion_file_mode_t) .. " but got " .. tostring(mode_type))
+  end
+  mode = insert_implicit_cast(mode, mode_type, std.c.legion_file_mode_t)
+
+  for _, field_path in ipairs(region.fields) do
+    if not std.check_privilege(cx, std.reads, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      report.error(
+        node, "invalid privileges in attach: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      report.error(
+        node, "invalid privileges in detach: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.AttachHDF5 {
+    region = region,
+    filename = filename,
+    mode = mode,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_detach_hdf5(cx, node)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region)
+  local expr_type = terralib.types.unit
+
+  if not std.is_region(region_type) then
+    -- Explicitly disallow lists of regions.
+    report.error(node, "type mismatch in argument 1: expected a region but got " .. tostring(region_type))
+  end
+
+  for _, field_path in ipairs(region.fields) do
+    if not std.check_privilege(cx, std.reads, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      report.error(
+        node, "invalid privileges in detach: " .. tostring(std.reads) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+    if not std.check_privilege(cx, std.writes, region_type, field_path) then
+      local region_symbol
+      if node.region.region:is(ast.specialized.expr.ID) then
+        region_symbol = node.region.region.value
+      else
+        region_symbol = std.newsymbol()
+      end
+      report.error(
+        node, "invalid privileges in detach: " .. tostring(std.writes) ..
+          "(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  return ast.typed.expr.DetachHDF5 {
+    region = region,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_allocate_scratch_fields(cx, node)
   local region = type_check.expr_region_root(cx, node.region)
   local region_type = std.check_read(cx, region)
@@ -2787,6 +2889,12 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Release) then
     return type_check.expr_release(cx, node)
+
+  elseif node:is(ast.specialized.expr.AttachHDF5) then
+    return type_check.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.specialized.expr.DetachHDF5) then
+    return type_check.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.specialized.expr.AllocateScratchFields) then
     return type_check.expr_allocate_scratch_fields(cx, node)

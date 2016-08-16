@@ -1044,6 +1044,24 @@ function specialize.expr_release(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_attach_hdf5(cx, node, allow_lists)
+  return ast.specialized.expr.AttachHDF5 {
+    region = specialize.expr_region_root(cx, node.region),
+    filename = specialize.expr(cx, node.filename),
+    mode = specialize.expr(cx, node.mode),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_detach_hdf5(cx, node, allow_lists)
+  return ast.specialized.expr.DetachHDF5 {
+    region = specialize.expr_region_root(cx, node.region),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_allocate_scratch_fields(cx, node, allow_lists)
   return ast.specialized.expr.AllocateScratchFields {
     region = specialize.expr_region_root(cx, node.region),
@@ -1226,6 +1244,12 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Release) then
     return specialize.expr_release(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.AttachHDF5) then
+    return specialize.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.DetachHDF5) then
+    return specialize.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
     return specialize.expr_allocate_scratch_fields(cx, node, allow_lists)

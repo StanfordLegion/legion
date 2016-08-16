@@ -29,6 +29,10 @@ std.config, std.args = config.args()
 local c = base.c
 std.c = c
 
+std.file_read_only = c.LEGION_FILE_READ_ONLY
+std.file_read_write = c.LEGION_FILE_READ_WRITE
+std.file_create = c.LEGION_FILE_CREATE
+
 -- #####################################
 -- ## Utilities
 -- #################
