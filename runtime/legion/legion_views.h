@@ -869,24 +869,23 @@ namespace Legion {
       virtual ~CompositeBase(void);
     public:
       void issue_deferred_copies(const TraversalInfo &info, 
-                                 MaterializedView *dst,
-                                 const FieldMask &copy_mask,
+                                 MaterializedView *dst, FieldMask copy_mask,
                                  VersionTracker *src_version_tracker,
                                  RegionTreeNode *logical_node,
               const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                    CopyAcrossHelper *helper, bool check_root, 
+                    CopyAcrossHelper *helper, FieldMask dominate_mask, 
                     bool check_overwrite, bool check_ready = true);
     protected:
       virtual void perform_ready_check(FieldMask mask) = 0;
     protected:
-      CompositeNode* find_next_root(RegionNode *target,
-                                    RegionTreeNode *logical_node,
-                                    const FieldMask &mask) const;
+      void find_composite_children(RegionTreeNode *target, 
+                   LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
+                   bool check_overwrite, const FieldMask &copy_mask,
+                   FieldMask &dominate_mask, FieldMask &local_dominate);
       bool are_domination_tests_sound(RegionTreeNode *logical_node,
                                       const FieldMask &mask) const;
-
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
                                    const FieldMask &copy_mask,
@@ -898,7 +897,7 @@ namespace Legion {
       Reservation &base_lock;
     protected:
       FieldMask dirty_mask, reduction_mask;
-      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
+      LegionMap<CompositeNode*,FieldMask>::aligned children;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 

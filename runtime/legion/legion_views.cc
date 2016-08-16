@@ -3630,15 +3630,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeBase::issue_deferred_copies(const TraversalInfo &info, 
-                                 MaterializedView *dst,
-                                 const FieldMask &copy_mask,
+                                 MaterializedView *dst, FieldMask copy_mask,
                                  VersionTracker *src_version_tracker,
                                  RegionTreeNode *logical_node,
               const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                    CopyAcrossHelper *helper, bool check_root, 
-                    bool check_overwrite, bool check_ready)
+            CopyAcrossHelper *helper, FieldMask dominate_mask, 
+            bool check_overwrite, bool check_ready)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime, 
@@ -3646,72 +3645,206 @@ namespace Legion {
       // Do the ready check first
       if (check_ready)
         perform_ready_check(copy_mask);
-      // Now that we're done with our check, take our lock 
-      // in read only mode for any other data structures we might access
+      // First compute all the children that we are going to need to traverse
+      LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
+      FieldMask local_dominate;
+      find_composite_children(dst->logical_node, children_to_traverse, 
+          check_overwrite, copy_mask, dominate_mask, local_dominate);
+      // If we have fields that locally dominate (e.g. this is the 
+      // smallest dominating node) we need to perform the check to
+      // see if we are going to need to make a temporary instance
+      // We might also discover that they are already valid
+      if (!!local_dominate)
       {
-        AutoLock b_lock(base_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(check_overwrite);
+#endif
+        FielMask need_temporary;
+        std::vector<CompositeNode*> to_delete;
+        // Perform the overwrite check
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
+              children_to_traverse.begin(); it != 
+              children_to_traverse.end(); it++)
+        {
+          FieldMask check_mask = (it->second & local_dominate) - need_temporary;
+          if (!check_mask)
+            continue;
+          // If any fields are already valid below then we can remove
+          // them from being needed
+          FieldMask already_valid = check_mask;
+          it->first->perform_overwrite_check(dst, check_mask, 
+                                             need_temporary, already_valid);
+          if (!!already_valid)
+          {
+            it->second -= already_valid;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+        }
+        if (!!need_temporary)
+        {
+          // TODO: Make a temporary instance and issue copies to it
 
+          // If we issued copies to a temporary instance then we no
+          // longer need to do anything at this node
+          copy_mask -= need_temporary;
+          // If we no longer have any fields then we are done
+          if (!copy_mask)
+            return;
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
+                children_to_traverse.begin(); it != 
+                children_to_traverse.end(); it++)
+          {
+            it->second -= need_temporary;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<CompositeNode*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            children_to_traverse.erase(*it);
+        }
       }
+      // We have to issue udpate copies for any fields which are not
+      // still looking for their roots
+      FieldMask update_mask = copy_mask - dominate_mask; 
+      if (!!update_mask)
+      {
+        // Issue udpate copies for any of these fields
+        // Copy in the preconditions for when we traverse down the tree
+        LegionMap<ApEvent,FieldMask>::aligned local_conditions;
+        // TODO: issue local udpates
+        if (!children_to_traverse.empty())
+        {
+          // Our local conditions and preconditions from above become
+          // the preconditions for the children
+          local_conditions.insert(preconditions.begin(), preconditions.end());
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+                children_to_traverse.begin(); it != 
+                children_to_traverse.end(); it++)
+          {
+            it->first->issue_deferred_copies(info, dst, it->second, 
+                                             src_version_tracker, 
+                                             it->first->logical_node,
+                                             local_conditions,
+                                             postconditions,
+                                             postreductions, helper,
+                                             dominate_mask, check_overwrite);
+          }
+        }
+        // If we had any local condiitons, add them to the post-conditions
+        postconditions.insert(local_conditions.begin(), local_conditions.end());
+      }
+      else
+      {
+        // Traverse any children that we need to traverse
+        // using the normal preconditions
+        if (!children_to_traverse.empty())
+        {
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+                children_to_traverse.begin(); it != 
+                children_to_traverse.end(); it++)
+          {
+            it->first->issue_deferred_copies(info, dst, it->second, 
+                                             src_version_tracker, 
+                                             it->first->logical_node,
+                                             preconditions,
+                                             postconditions,
+                                             postreductions, helper,
+                                             dominate_mask, check_overwrite);
+          }
+        }
+      } 
+      // TODO: Finally issue any update reductions on the way back up
     }
-    
+
     //--------------------------------------------------------------------------
-    CompositeNode* CompositeBase::find_next_root(RegionNode *target,
-                                                 RegionTreeNode *logical_node,
-                                                 const FieldMask &mask) const
+    void CompositeBase::find_composite_children(RegionTreeNode *target,
+        LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
+        bool check_overwrite, const FieldMask &copy_mask,
+        FieldMask &dominate_mask, FieldMask &local_dominate)
     //--------------------------------------------------------------------------
     {
+      // need this in read only to touch the children data structure
+      AutoLock b_lock(base_lock,1,false/*exclusive*/);
       if (children.empty())
-        return NULL;
-      if (children.size() == 1)
       {
-        CompositeNode *child = children.begin()->first;
-        if (child->are_domination_tests_sound(child->logical_node, mask) && 
-            child->logical_node->dominates(target))
-          return child;
+        if (!!dominate_mask)
+        {
+          if (check_overwrite)
+            local_dominate = dominate_mask;
+          dominate_mask.clear();
+        }
       }
-      // If all the children are disjoint and we can find one that dominates
-      // then we know that none of the other ones are interfering
-      if (logical_node->are_all_children_disjoint())
+      else
       {
+        FieldMask still_dominating = dominate_mask;
+        // We can't have fields with multiple intersecting children
+        FieldMask intersecting_children;
+        // Dominating requires that there be at least one dominating child
+        FieldMask dominating_child;
         for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
               children.begin(); it != children.end(); it++)
         {
-          if (it->first->are_domination_tests_sound(it->first->logical_node, 
-                                                    mask) &&
-              it->first->logical_node->dominates(target))
-            return it->first;
-        }
-      }
-      CompositeNode *child = NULL;
-      // Check to see if we have one child that dominates and none
-      // that intersect
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-        // If anyone fails a sound domination test, then punt
-        if (it->first->logical_node->dominates(target))
-        {
-          // Having multiple dominating children is not allowed
-          if (child != NULL)
-            return NULL;
-          // Before we can count it as actually dominating, it has
-          // to pass a sound domination test
-          if (it->first->are_domination_tests_sound(it->first->logical_node, 
-                                                    mask))
-          {
-            child = it->first;
+          FieldMask overlap = it->second & copy_mask;
+          if (!overlap)
             continue;
-          }
+          // Skip any nodes that don't even intersect, they don't matter
+          if (!it->first->logical_node->intersects_with(target))
+            continue;  
+          // At this point we always record it because we must traverse it
+          LegionMap<CompositeNode*,FieldMask>::aligned::iterator finder = 
+            to_traverse.find(it->first);
+          if (finder == to_traverse.end())
+            to_traverse[it->first] = overlap;
           else
-            return NULL; // otherwise intersections are bad
+            finder->second |= overlap;
+          // See if we have more work to do for domination
+          FieldMask dom_overlap = overlap & still_dominating;
+          if (!dom_overlap)
+            continue;
+          // See if we are the first child or not, multiple intersecting
+          // children are not allowed
+          FieldMask multiple_children = intersecting_children & dom_overlap;  
+          intersecting_children |= dom_overlap;
+          if (!!multiple_children)
+          {
+            still_dominating -= multiple_children;
+            dom_overlap -= multiple_children;
+            if (!dom_overlap)
+              continue;
+          }
+          // See if the child dominates which means we can record it
+          // We don't need to check for duplicate dominating children
+          // because they would be guaranteed to interesect and we
+          // already took care of that above
+          if (it->first->logical_node->dominates(target) &&
+              it->first->are_domination_tests_sound(it->first->logical_node,
+                                                    dom_overlap))
+            dominating_child |= dom_overlap;
+          else // We have a child that is not-dominating, so we're done
+            still_dominating -= dom_overlap;
         }
-        // If it doesn't dominate, but it does intersect that is not allowed
-        if (it->first->logical_node->intersects_with(target))
-          return NULL;
+        // If we initially had dominating fields, we need to update them
+        if (!!dominate_mask)
+        {
+          // To be dominating below, we need to still be dominating
+          // and have observed at least one dominating child below
+          still_dominating &= dominating_child;
+          // If we need to check for overwrite, we need the fields
+          // that were locally dominated but are not dominated below
+          // and which we've seen open children below
+          if (check_overwrite)
+            local_dominate = 
+              (dominate_mask - still_dominating) & intersecting_children;
+          // Update the dominating mask
+          dominate_mask = still_dominating;
+        }
       }
-      return child;
     }
-
+    
     //--------------------------------------------------------------------------
     bool CompositeBase::are_domination_tests_sound(RegionTreeNode *logical_node,
                                                    const FieldMask &mask) const
@@ -3720,6 +3853,8 @@ namespace Legion {
       // Region domination tests are always sound
       if (logical_node->is_region())
         return true;
+      // Need to hold the lock to access these data structures
+      AutoLock b_lock(base_lock,1,false/*exclusive*/);
       // Partition domination tests are only sound if have all the
       // children for all the fields
       if (logical_node->get_num_children() != children.size())
@@ -4571,31 +4706,30 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         // Remove any fields that are already valid
         mask -= valid_fields;
+        if (!mask)
+          return;
+        for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
+              pending_captures.begin(); it != pending_captures.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          preconditions.insert(it->first);
+          mask -= it->second;
+          if (!mask)
+            break;
+        }
+        // If we still have fields, we're going to do a pending capture
         if (!!mask)
         {
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
-                pending_captures.begin(); it != pending_captures.end(); it++)
+          capture_event = Runtime::create_rt_user_event();
+          pending_captures[capture_event] = mask;
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                it = version_states.begin(); it != version_states.end(); it++)
           {
-            if (it->second * mask)
+            FieldMask overlap = it->second & mask;
+            if (!overlap)
               continue;
-            preconditions.insert(it->first);
-            mask -= it->second;
-            if (!mask)
-              break;
-          }
-          // If we still have fields, we're going to do a pending capture
-          if (!!mask)
-          {
-            capture_event = Runtime::create_rt_user_event();
-            pending_captures[capture_event] = mask;
-            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                  it = version_states.begin(); it != version_states.end(); it++)
-            {
-              FieldMask overlap = it->second & mask;
-              if (!overlap)
-                continue;
-              needed_states[it->first] = overlap;
-            }
+            needed_states[it->first] = overlap;
           }
         }
       }
