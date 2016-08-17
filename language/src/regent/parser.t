@@ -1017,6 +1017,36 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("attach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local filename = p:expr()
+    p:expect(",")
+    local mode = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.AttachHDF5 {
+      region = region,
+      filename = filename,
+      mode = mode,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("detach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.DetachHDF5 {
+      region = region,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("allocate_scratch_fields") then
     p:expect("(")
     local region = p:expr_region_root()

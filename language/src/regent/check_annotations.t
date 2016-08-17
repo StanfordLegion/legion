@@ -118,6 +118,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AttachHDF5) or
+      node:is(ast.typed.expr.DetachHDF5) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or

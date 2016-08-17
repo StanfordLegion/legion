@@ -48,6 +48,7 @@ function passes.compile(node, allow_pretty)
     node = normalize.entry(node)
     alpha_convert.entry(node) -- Run this here to avoid bitrot (discard result).
     node = type_check.entry(node)
+    node = normalize.entry(node)
     check_annotations.entry(node)
     node = passes.optimize(node)
     return passes.codegen(node, allow_pretty)

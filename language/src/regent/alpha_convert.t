@@ -181,6 +181,8 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.expr.Fill) or
       node:is(ast.specialized.expr.Acquire) or
       node:is(ast.specialized.expr.Release) or
+      node:is(ast.specialized.expr.AttachHDF5) or
+      node:is(ast.specialized.expr.DetachHDF5) or
       node:is(ast.specialized.expr.AllocateScratchFields) or
       node:is(ast.specialized.expr.WithScratchFields) or
       node:is(ast.specialized.expr.RegionRoot) or
