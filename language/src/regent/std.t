@@ -741,10 +741,6 @@ function std.is_ctor(t)
   return terralib.types.istype(t) and rawget(t, "is_ctor")
 end
 
-function std.is_fspace(x)
-  return getmetatable(x) == fspace
-end
-
 function std.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
