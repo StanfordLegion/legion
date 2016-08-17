@@ -1212,6 +1212,11 @@ function type_check.expr_new(cx, node)
 
   -- Pointer and region types checked in specialize.
 
+  if not std.type_eq(region_type:fspace(), node.pointer_type.points_to_type) then
+    report.error(node, "type mismatch in argument 1: expected " .. tostring(region_type:fspace()) ..
+                       ", got " .. tostring(node.pointer_type.points_to_type))
+  end
+
   local index_type = node.pointer_type.index_type
   if extent and not std.validate_implicit_cast(extent_type, index_type) then
     report.error(node, "type mismatch in argument 2: expected " .. tostring(index_type) .. ", got " .. tostring(extent_type))
