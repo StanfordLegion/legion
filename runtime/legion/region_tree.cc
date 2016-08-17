@@ -5180,7 +5180,8 @@ namespace Legion {
 	} else {
 	  std::set<Domain>::const_iterator it = right_set.begin();
 	  assert(it != right_set.end());
-	  const Realm::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  const Realm::ElementMask *maskp = 
+            &(it->get_index_space().get_valid_mask());
 	  int first_elmt = maskp->first_enabled();
 	  int last_elmt = maskp->last_enabled();
 	  while(++it != right_set.end())
@@ -5188,7 +5189,8 @@ namespace Legion {
 	    maskp = &(it->get_index_space().get_valid_mask());
 	    int new_first = maskp->first_enabled();
 	    int new_last = maskp->last_enabled();
-	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	    if ((new_first != -1) && 
+                ((first_elmt == -1) || (first_elmt > new_first)))
 	      first_elmt = new_first;
 	    if ((new_last != -1) && (last_elmt < new_last))
 	      last_elmt = new_last;
