@@ -1212,7 +1212,8 @@ function type_check.expr_new(cx, node)
 
   -- Pointer and region types checked in specialize.
 
-  if not std.type_eq(region_type:fspace(), node.pointer_type.points_to_type) then
+  if std.is_region(region_type) and
+     not std.type_eq(region_type:fspace(), node.pointer_type.points_to_type) then
     report.error(node, "type mismatch in argument 1: expected " .. tostring(region_type:fspace()) ..
                        ", got " .. tostring(node.pointer_type.points_to_type))
   end
