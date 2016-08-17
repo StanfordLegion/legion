@@ -7450,7 +7450,7 @@ namespace Legion {
           child_domains.insert(it->second->get_domain_blocking());
       }
       bool result = false;
-      if(is_disjoint())
+      if (is_disjoint())
       {
 	// if the partition is disjoint, we can determine completeness by
 	//  seeing if the total volume of the child domains matches the volume
@@ -7466,7 +7466,9 @@ namespace Legion {
 	     ++it)
 	  child_volume += it->get_volume();
 	result = (child_volume == parent_volume);
-      } else {
+      } 
+      else 
+      {
 	// if not disjoint, we have to do a considerably-more-expensive test
 	//  that handles overlap (i.e. double-counting) in the child domains
 	result = compute_dominates(child_domains, parent_domains);
