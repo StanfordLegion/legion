@@ -5226,15 +5226,12 @@ local function expr_acquire_setup_region(
       local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
       local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-      -- FIXME: When this is a list, a physical region won't be available.
-      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
-
       local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
         var [tag] = 0
         [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_acquire_launcher_create(
-          [dst_value].impl, [dst_parent], [dst_physical],
+          [dst_value].impl, [dst_parent],
           c.legion_predicate_true(), 0, [tag])
         c.legion_acquire_launcher_add_field(
           launcher, dst_field_id)
@@ -5357,15 +5354,12 @@ local function expr_release_setup_region(
       local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
       local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-      -- FIXME: When this is a list, a physical region won't be available.
-      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
-
       local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
         var [tag] = 0
         [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_release_launcher_create(
-          [dst_value].impl, [dst_parent], [dst_physical],
+          [dst_value].impl, [dst_parent],
           c.legion_predicate_true(), 0, [tag])
         c.legion_release_launcher_add_field(
           launcher, dst_field_id)
