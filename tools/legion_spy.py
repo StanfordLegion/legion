@@ -4262,8 +4262,8 @@ class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
                  'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
-                 'start_event', 'finish_event', 'inter_close_ops', 'task', 
-                 'task_id', 'points', 'creator', 'realm_copies', 'realm_fills', 
+                 'start_event', 'finish_event', 'inter_close_ops', 'task', 'task_id', 
+                 'index_owner', 'points', 'creator', 'realm_copies', 'realm_fills', 
                  'close_idx', 'partition_kind', 'partition_node', 'node_name', 
                  'cluster_name', 'generation', 'need_logical_replay', 
                  'reachable_cache', 'transitive_warning_issued']
@@ -4291,6 +4291,7 @@ class Operation(object):
         # Only valid for tasks
         self.task = None
         self.task_id = -1
+        self.index_owner = None
         # Only valid for index tasks
         self.points = None
         # Only valid for close operations
@@ -4403,12 +4404,18 @@ class Operation(object):
         self.partition_node = node
         self.partition_kind = kind
 
+    def set_index_owner(self, owner):
+        assert owner.kind == INDEX_TASK_KIND
+        assert not self.index_owner
+        self.index_owner = owner
+
     def add_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
         # Initialize if necessary
         if self.points is None:
             self.points = dict()
         point.op.set_name(self.name)
+        point.op.set_index_owner(self)
         index_point = point.point
         if index_point in self.points:
             self.points[index_point] = self.state.alias_points(point,
@@ -4638,57 +4645,62 @@ class Operation(object):
 
     def find_generated_copy_across(self, src_field, dst_field, region, 
                                    src_inst, dst_inst, redop=0, intersect=None):
-        if self.realm_copies is None:
-            return None
-        for copy in self.realm_copies:
-            if region is not copy.region:
-                continue
-            if src_field not in copy.src_fields:
-                continue
-            index = copy.src_fields.index(src_field)
-            if dst_field is not copy.dst_fields[index]:
-                continue
-            if src_inst is not copy.srcs[index]:
-                continue
-            if dst_inst is not copy.dsts[index]:
-                continue
-            if redop != copy.redops[index]:
-                continue
-            if intersect is not None or copy.intersect is not None:
-                if copy.intersect is not None:
-                    copy_shape = copy.region.intersection(copy.intersect)
-                else:
-                    copy_shape = copy.region.get_point_set()
-                if intersect is not None:
-                    base_shape = region.intersection(intersect)
-                else:
-                    base_shape = region.get_point_set()
-                one = copy_shape - base_shape
-                if not one.empty():
+        if self.realm_copies:
+            for copy in self.realm_copies:
+                if region is not copy.region:
                     continue
-                two = base_shape - copy_shape
-                if not two.empty():
+                if src_field not in copy.src_fields:
                     continue
-            # Record that we analyzed the copy
-            copy.analyzed = True
-            return copy
+                index = copy.src_fields.index(src_field)
+                if dst_field is not copy.dst_fields[index]:
+                    continue
+                if src_inst is not copy.srcs[index]:
+                    continue
+                if dst_inst is not copy.dsts[index]:
+                    continue
+                if redop != copy.redops[index]:
+                    continue
+                if intersect is not None or copy.intersect is not None:
+                    if copy.intersect is not None:
+                        copy_shape = copy.region.intersection(copy.intersect)
+                    else:
+                        copy_shape = copy.region.get_point_set()
+                    if intersect is not None:
+                        base_shape = region.intersection(intersect)
+                    else:
+                        base_shape = region.get_point_set()
+                    one = copy_shape - base_shape
+                    if not one.empty():
+                        continue
+                    two = base_shape - copy_shape
+                    if not two.empty():
+                        continue
+                # Record that we analyzed the copy
+                copy.analyzed = True
+                return copy
+        # If we are part of an index space, see if it was premapped
+        if self.index_owner:
+            return self.index_owner.find_generated_copy(src_field, dst_field,
+                                region, src_inst, dst_inst, redop, intersect)
         return None
 
     def find_generated_fill(self, field, region, dst, intersect=None):
-        if self.realm_fills is None:
-            return None
-        for fill in self.realm_fills:
-            if region is not fill.region:
-                continue
-            if field not in fill.fields:
-                continue
-            if dst not in fill.dsts:
-                continue
-            if fill.intersect is not intersect:
-                continue
-            # Record that we analyzed this fill
-            fill.analyzed = True
-            return fill
+        if self.realm_fills:
+            for fill in self.realm_fills:
+                if region is not fill.region:
+                    continue
+                if field not in fill.fields:
+                    continue
+                if dst not in fill.dsts:
+                    continue
+                if fill.intersect is not intersect:
+                    continue
+                # Record that we analyzed this fill
+                fill.analyzed = True
+                return fill
+        # If we are part of an index space, see if it was premapped
+        if self.index_owner:
+            return self.index_owner.find_generated_fill(field, region, dst, intersect)
         return None
 
     def perform_cycle_check(self):
@@ -5472,6 +5484,13 @@ class Operation(object):
             assert self.points is not None
             for point in self.points.itervalues():
                 point.op.print_event_graph(printer, elevate, all_nodes, False)
+            # Put any operations we generated in the elevate set
+            if self.realm_copies:
+                for copy in self.realm_copies:
+                    elevate[copy] = copy.get_context()
+            if self.realm_fills:
+                for fill in self.realm_fills:
+                    elevate[fill] = fill.get_context()
             return
         # If this is a single task, recurse and generate our subgraph first
         if self.kind is SINGLE_TASK_KIND:
