@@ -64,6 +64,7 @@ namespace Legion {
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
+      void get_fields(std::set<FieldID> &fields) const;
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fields) const;
       void remove_space_fields(std::set<FieldID> &fields) const;
@@ -148,6 +149,7 @@ namespace Legion {
                           Runtime *runtime, AddressSpaceID source);
     public:
       // Support for mapper queries
+      virtual void get_fields(std::set<FieldID> &fields) const = 0;
       virtual bool has_field(FieldID fid) const = 0;
       virtual void has_fields(std::map<FieldID,bool> &fields) const = 0;
       virtual void remove_space_fields(std::set<FieldID> &fields) const = 0;
@@ -269,6 +271,8 @@ namespace Legion {
                                     const std::vector<unsigned> &dst_indexes);
     public:
       // Interface to the mapper PhysicalInstance
+      virtual void get_fields(std::set<FieldID> &fields) const
+        { layout->get_fields(fields); }
       virtual bool has_field(FieldID fid) const
         { return layout->has_field(fid); }
       virtual void has_fields(std::map<FieldID,bool> &fields) const
@@ -328,6 +332,7 @@ namespace Legion {
       virtual ApEvent get_use_event(void) const = 0;
     public:
       // Support for mapper queries
+      virtual void get_fields(std::set<FieldID> &fields) const;
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
@@ -463,6 +468,7 @@ namespace Legion {
     public: 
       virtual size_t get_instance_size(void) const;
       virtual void send_manager(AddressSpaceID target);
+      virtual void get_fields(std::set<FieldID> &fields) const;
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;

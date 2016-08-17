@@ -52,6 +52,9 @@ namespace Legion {
       // Get the location of this physical instance
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
+      // Adds all fields that exist in instance to 'fields', unless
+      //  instance is virtual
+      void get_fields(std::set<FieldID> &fields) const;
     public:
       LogicalRegion get_logical_region(void) const;
       LayoutConstraintID get_layout_id(void) const;
@@ -97,7 +100,6 @@ namespace Legion {
       PhysicalInstance(PhysicalInstanceImpl impl);
     protected:   
       PhysicalInstanceImpl impl;
-      std::set<FieldID>  fields;
       friend std::ostream& operator<<(std::ostream& os,
 				      const PhysicalInstance& p);
     };
