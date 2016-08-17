@@ -10979,7 +10979,10 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (IS_WRITE(regions[idx]) && (regions[idx].handle_type == SINGULAR))
+        if (IS_WRITE(regions[idx]) && 
+            ((regions[idx].handle_type == SINGULAR) ||
+              ((regions[idx].handle_type == REG_PROJECTION) && 
+               (regions[idx].projection == 0))))
           regions[idx].flags |= MUST_PREMAP_FLAG;
       }
     }
