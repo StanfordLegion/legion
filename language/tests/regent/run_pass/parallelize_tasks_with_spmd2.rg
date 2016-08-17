@@ -170,9 +170,7 @@ task test(size : int)
     cnt += 1
   end
 
-  c.printf("serial: %f, parallel: %f, relative error: %.5f%%\n",
-    sum_serial, sum, cmath.fabs(sum - sum_serial) * 100 / sum_serial)
-  regentlib.assert(cmath.fabs(sum - sum_serial) / sum < 1e-4, "test failed")
+  regentlib.assert(cmath.fabs(sum - sum_serial) < 0.000001, "test failed")
   check(primary_region)
 end
 
