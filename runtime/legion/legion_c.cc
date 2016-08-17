@@ -3528,18 +3528,16 @@ legion_acquire_launcher_t
 legion_acquire_launcher_create(
   legion_logical_region_t logical_region_,
   legion_logical_region_t parent_region_,
-  legion_physical_region_t physical_region_,
   legion_predicate_t pred_ /* = legion_predicate_true() */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
   LogicalRegion logical_region = CObjectWrapper::unwrap(logical_region_);
   LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
-  PhysicalRegion *physical_region = CObjectWrapper::unwrap(physical_region_);
   Predicate *pred = CObjectWrapper::unwrap(pred_);
 
   AcquireLauncher *launcher =
-    new AcquireLauncher(logical_region, parent_region, *physical_region,
+    new AcquireLauncher(logical_region, parent_region, PhysicalRegion(),
                         *pred, id, tag);
   return CObjectWrapper::wrap(launcher);
 }
@@ -3602,18 +3600,16 @@ legion_release_launcher_t
 legion_release_launcher_create(
   legion_logical_region_t logical_region_,
   legion_logical_region_t parent_region_,
-  legion_physical_region_t physical_region_,
   legion_predicate_t pred_ /* = legion_predicate_true() */,
   legion_mapper_id_t id /* = 0 */,
   legion_mapping_tag_id_t tag /* = 0 */)
 {
   LogicalRegion logical_region = CObjectWrapper::unwrap(logical_region_);
   LogicalRegion parent_region = CObjectWrapper::unwrap(parent_region_);
-  PhysicalRegion *physical_region = CObjectWrapper::unwrap(physical_region_);
   Predicate *pred = CObjectWrapper::unwrap(pred_);
 
   ReleaseLauncher *launcher =
-    new ReleaseLauncher(logical_region, parent_region, *physical_region,
+    new ReleaseLauncher(logical_region, parent_region, PhysicalRegion(),
                         *pred, id, tag);
   return CObjectWrapper::wrap(launcher);
 }
