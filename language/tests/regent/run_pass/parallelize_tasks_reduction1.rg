@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fflow", "0", "-fdebug", "1",
+-- [["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
 --   "-fparallelize-dop", "9"]]
 
 -- FIXME: Breaks RDIR

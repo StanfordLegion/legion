@@ -197,7 +197,10 @@ namespace Realm {
 	  it++) {
 	assert((*it) > 0);
 	if(byte_offset < (off_t)(*it)) {
-	  assert((off_t)(byte_offset + size) <= (off_t)(*it));
+	  if ((off_t)(byte_offset + size) > (off_t)(*it)) {
+            log_inst.error("Requested field does not match the expected field size");
+            assert(false);
+          }
 	  field_start = start;
 	  field_size = (*it);
 	  return;

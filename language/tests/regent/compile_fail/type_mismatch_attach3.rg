@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
+-- type_mismatch_attach3.rg:24: type mismatch in argument 3: expected uint32 but got &int8
+--   attach(hdf5, r, "asdf.hdf", "create")
+--        ^
 
 import "regent"
 
 task f()
-  var x = 20
-  x(5)
+  var r = region(ispace(int1d, 5), int)
+  attach(hdf5, r, "asdf.hdf", "create")
 end
 f:compile()

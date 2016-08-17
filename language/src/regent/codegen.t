@@ -3394,6 +3394,7 @@ function codegen.expr_region(cx, node)
     actions = quote
       [actions];
       c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
+      var [pr] -- FIXME: Need to define physical region for detach to work
     end
   end
 
@@ -5225,15 +5226,12 @@ local function expr_acquire_setup_region(
       local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
       local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-      -- FIXME: When this is a list, a physical region won't be available.
-      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
-
       local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
         var [tag] = 0
         [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_acquire_launcher_create(
-          [dst_value].impl, [dst_parent], [dst_physical],
+          [dst_value].impl, [dst_parent],
           c.legion_predicate_true(), 0, [tag])
         c.legion_acquire_launcher_add_field(
           launcher, dst_field_id)
@@ -5356,15 +5354,12 @@ local function expr_release_setup_region(
       local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
       local dst_field_type = cx:region_or_list(dst_container_type):field_type(dst_copy_field)
 
-      -- FIXME: When this is a list, a physical region won't be available.
-      local dst_physical = cx:region_or_list(dst_container_type):physical_region(dst_copy_field)
-
       local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
       actions:insert(quote
         var [tag] = 0
         [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
         var launcher = c.legion_release_launcher_create(
-          [dst_value].impl, [dst_parent], [dst_physical],
+          [dst_value].impl, [dst_parent],
           c.legion_predicate_true(), 0, [tag])
         c.legion_release_launcher_add_field(
           launcher, dst_field_id)
@@ -5423,6 +5418,121 @@ function codegen.expr_release(cx, node)
            return std.as_read(condition.value.expr_type)
          end),
        node.conditions:map(function(condition) return condition.conditions end))]
+  end
+
+  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+end
+
+function codegen.expr_attach_hdf5(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+  local filename_type = std.as_read(node.filename.expr_type)
+  local filename = codegen.expr(cx, node.filename):read(cx, filename_type)
+  local mode_type = std.as_read(node.mode.expr_type)
+  local mode = codegen.expr(cx, node.mode):read(cx, mode_type)
+
+  if not cx.task_meta:get_config_options().inner then
+    report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
+  end
+
+  assert(cx:has_region(region_type))
+
+  local all_fields = std.flatten_struct_fields(region_type:fspace())
+  local full_fields = terralib.newlist()
+  for i, region_field in ipairs(node.region.fields) do
+    local region_full_fields = data.filter(
+      function(field) return field:starts_with(region_field) end,
+      all_fields)
+    full_fields:insertall(region_full_fields)
+  end
+
+  local field_map = terralib.newsymbol(c.legion_field_map_t, "field_map")
+  local field_map_setup = quote
+    var [field_map] = c.legion_field_map_create()
+    [full_fields:map(
+       function(field_path)
+         return quote
+           c.legion_field_map_insert(
+               [field_map],
+               [cx:region(region_type):field_id(field_path)],
+               [field_path:concat(".")])
+         end
+       end)]
+  end
+  local field_map_teardown = quote
+    c.legion_field_map_destroy([field_map])
+  end
+
+  local parent = get_container_root(
+    cx, `([region.value].impl), region_type, full_fields)
+
+  local new_pr = terralib.newsymbol(c.legion_physical_region_t, "new_pr")
+
+  local actions = quote
+    [region.actions]
+    [filename.actions]
+    [mode.actions]
+    [emit_debuginfo(node)]
+
+    [field_map_setup]
+    var [new_pr] = c.legion_runtime_attach_hdf5(
+      [cx.runtime], [cx.context],
+      [filename.value], [region.value].impl, [parent], [field_map], [mode.value])
+    [field_map_teardown]
+
+    [full_fields:map(
+       function(field_path)
+         return quote
+           -- FIXME: This is redundant (since the same physical region
+           -- will generally show up more than once. At any rate, it
+           -- would be preferable not to have to do this at all.
+           [cx:region(region_type):physical_region(field_path)] = [new_pr]
+         end
+       end)]
+  end
+
+  return values.value(node, expr.just(actions, quote end), terralib.types.unit)
+end
+
+function codegen.expr_detach_hdf5(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
+
+  if not cx.task_meta:get_config_options().inner then
+    report.warn(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
+  end
+
+  assert(cx:has_region(region_type))
+
+  local all_fields = std.flatten_struct_fields(region_type:fspace())
+  local full_fields = terralib.newlist()
+  for _, region_field in ipairs(node.region.fields) do
+    local region_full_fields = data.filter(
+      function(field) return field:starts_with(region_field) end,
+      all_fields)
+    full_fields:insertall(region_full_fields)
+  end
+
+  -- Hack: De-duplicate physical regions by symbol.
+  local pr_set = {}
+  for _, field_path in ipairs(full_fields) do
+    pr_set[cx:region(region_type):physical_region(field_path)] = true
+  end
+  local pr_list = terralib.newlist()
+  for pr, _ in pairs(pr_set) do
+    pr_list:insert(pr)
+  end
+
+  local actions = quote
+    [region.actions]
+    [emit_debuginfo(node)]
+
+    [pr_list:map(
+       function(pr)
+         return quote
+           c.legion_runtime_detach_hdf5([cx.runtime], [cx.context], [pr])
+         end
+       end)]
   end
 
   return values.value(node, expr.just(actions, quote end), terralib.types.unit)
@@ -6097,6 +6207,12 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return codegen.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return codegen.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return codegen.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return codegen.expr_allocate_scratch_fields(cx, node)

@@ -12,15 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
+-- runs-with:
+-- []
 
 import "regent"
 
-task f()
-  var x = 20
-  x(5)
+fspace t {
+  a : int32,
+  b : int64,
+  c : double,
+}
+
+local filename = os.tmpname() .. ".hdf"
+
+task main()
+  var is = ispace(int3d, {4, 4, 4})
+  var r = region(is, t)
+  attach(hdf5, r.{a, b, c}, filename, regentlib.file_create)
+  acquire(r)
+  release(r)
+  detach(hdf5, r.{a, b, c})
 end
-f:compile()
+regentlib.start(main)

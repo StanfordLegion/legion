@@ -523,6 +523,24 @@ function pretty.expr_release(cx, node)
       ")"})
 end
 
+function pretty.expr_attach_hdf5(cx, node)
+  return join({
+      "attach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region),
+              pretty.expr(cx, node.filename),
+              pretty.expr(cx, node.mode)}),
+      ")"})
+end
+
+function pretty.expr_detach_hdf5(cx, node)
+  return join({
+      "detach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region)}),
+      ")"})
+end
+
 function pretty.expr_allocate_scratch_fields(cx, node)
   return join({
       "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
@@ -709,6 +727,12 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return pretty.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return pretty.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return pretty.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return pretty.expr_allocate_scratch_fields(cx, node)
@@ -1004,12 +1028,38 @@ function pretty.top_task_privileges(cx, node)
   return result
 end
 
-function pretty.top_task_coherence_modes(cx, node)
-  return node:map(function(coherence_mode) tostring(coherence_mode) end)
+function pretty.top_task_coherence_modes(cx, node, mapping)
+  local result = terralib.newlist()
+  for region, coherence_modes in node:items() do
+    for field_path, coherence_mode in coherence_modes:items() do
+      result:insert(join({
+        tostring(coherence_mode),
+        "(",
+        terralib.newlist({
+            mapping[region],
+            unpack(field_path)}):concat("."),
+        ")"}))
+    end
+  end
+  return result
 end
 
-function pretty.top_task_flags(cx, node)
-  return node:map(function(flag) return tostring(flag) end)
+function pretty.top_task_flags(cx, node, mapping)
+  local result = terralib.newlist()
+  for region, flags in node:items() do
+    for field_path, flag in flags:items() do
+      flag:map(function(flag)
+        result:insert(join({
+          tostring(flag),
+          "(",
+          terralib.newlist({
+              mapping[region],
+              unpack(field_path)}):concat("."),
+          ")"}))
+      end)
+    end
+  end
+  return result
 end
 
 function pretty.top_task_conditions(cx, node)
@@ -1048,10 +1098,16 @@ function pretty.top_task(cx, node)
   if node.return_type ~= terralib.types.unit then
     return_type = " : " .. tostring(node.return_type)
   end
+  local mapping = {}
+  node.privileges:map(function(privileges)
+    privileges:map(function(privilege)
+      mapping[privilege.region:gettype()] = tostring(privilege.region)
+    end)
+  end)
   local meta = terralib.newlist()
   meta:insertall(pretty.top_task_privileges(cx, node.privileges))
-  meta:insertall(pretty.top_task_coherence_modes(cx, node.coherence_modes))
-  meta:insertall(pretty.top_task_flags(cx, node.flags))
+  meta:insertall(pretty.top_task_coherence_modes(cx, node.coherence_modes, mapping))
+  meta:insertall(pretty.top_task_flags(cx, node.flags, mapping))
   meta:insertall(pretty.top_task_conditions(cx, node.conditions))
   meta:insertall(pretty.top_task_constraints(cx, node.constraints))
   local config_options = pretty.task_config_options(cx, node.config_options)

@@ -29,6 +29,10 @@ std.config, std.args = config.args()
 local c = base.c
 std.c = c
 
+std.file_read_only = c.LEGION_FILE_READ_ONLY
+std.file_read_write = c.LEGION_FILE_READ_WRITE
+std.file_create = c.LEGION_FILE_CREATE
+
 -- #####################################
 -- ## Utilities
 -- #################
@@ -576,15 +580,26 @@ function std.find_task_privileges(region_type, privileges, coherence_modes, flag
     grouped_coherence_modes, grouped_flags
 end
 
-function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
+function std.group_task_privileges_by_field_path(privileges, privilege_field_paths,
+                                                 privilege_field_types,
+                                                 privilege_coherence_modes,
+                                                 privilege_flags)
   local privileges_by_field_path = {}
+  local coherence_modes_by_field_path
+  if privilege_coherence_modes ~= nil then
+    coherence_modes_by_field_path = {}
+  end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
       privileges_by_field_path[field_path:hash()] = privilege
+      if coherence_modes_by_field_path ~= nil then
+        coherence_modes_by_field_path[field_path:hash()] =
+          privilege_coherence_modes[i]
+      end
     end
   end
-  return privileges_by_field_path
+  return privileges_by_field_path, coherence_modes_by_field_path
 end
 
 local privilege_modes = {
@@ -726,10 +741,6 @@ function std.is_ctor(t)
   return terralib.types.istype(t) and rawget(t, "is_ctor")
 end
 
-function std.is_fspace(x)
-  return getmetatable(x) == fspace
-end
-
 function std.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
@@ -768,6 +779,8 @@ function std.type_sub(t, mapping)
     else
       return std.partition(t.disjointness, parent_region_symbol, colors_symbol)
     end
+  elseif terralib.types.istype(t) and t:isarray() then
+    return std.type_sub(t.type, mapping)[t.N]
   else
     return t
   end
@@ -1339,7 +1352,9 @@ function std.check_read(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reads, region_type, field_path) then
         local regions = t.bounds_symbols
@@ -1357,7 +1372,9 @@ function std.check_write(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.writes, region_type, field_path) then
         local regions = t.bounds_symbols
@@ -1379,7 +1396,9 @@ function std.check_reduce(cx, op, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
         local regions = t.bounds_symbols
@@ -2052,9 +2071,12 @@ local bounded_type = terralib.memoize(function(index_type, ...)
       if not (terralib.types.istype(bound) and
               (std.is_ispace(bound) or std.is_region(bound)))
       then
-        report.error(nil, tostring(self.index_type) ..
+        --report.error(nil, tostring(self.index_type) ..
+        --            " expected an ispace or region as argument " ..
+        --            tostring(i+1) .. ", got " .. tostring(bound))
+        return nil, tostring(self.index_type) ..
                     " expected an ispace or region as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound))
+                    tostring(i+1) .. ", got " .. tostring(bound)
       end
       if std.is_region(bound) and
         not (std.type_eq(bound.fspace_type, self.points_to_type) or
@@ -2062,16 +2084,20 @@ local bounded_type = terralib.memoize(function(index_type, ...)
               std.type_eq(bound.fspace_type, self.points_to_type.type)) or
              std.is_unpack_result(self.points_to_type))
       then
-        report.error(nil, tostring(self.index_type) .. " expected region(" ..
+        --report.error(nil, tostring(self.index_type) .. " expected region(" ..
+        --            tostring(self.points_to_type) .. ") as argument " ..
+        --            tostring(i+1) .. ", got " .. tostring(bound))
+        return nil, tostring(self.index_type) .. " expected region(" ..
                     tostring(self.points_to_type) .. ") as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound))
+                    tostring(i+1) .. ", got " .. tostring(bound)
       end
       if std.is_ispace(bound) then is_ispace = true end
       if std.is_region(bound) then is_region = true end
       bounds:insert(bound)
     end
     if is_ispace and is_region then
-      report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+      --report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+      return nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions"
     end
     return bounds
   end
@@ -2821,13 +2847,18 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region.type))
+        --report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
+        --            ", got " .. tostring(region.type))
+        return nil, "vptr expected a region as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region.type)
       end
       if not std.type_eq(region.fspace_type, points_to_type) then
-        report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
+        --report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
+        --            ") as argument " .. tostring(i+1) ..
+        --            ", got " .. tostring(region))
+        return nil, "vptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region))
+                    ", got " .. tostring(region)
       end
       bounds:insert(region)
     end

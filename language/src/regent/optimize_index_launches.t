@@ -61,12 +61,12 @@ local function check_privilege_noninterference(cx, task, region_type,
   local other_param_region_type = mapping[other_region_type]
   assert(param_region_type and other_param_region_type)
 
-  local privileges_by_field_path =
+  local privileges_by_field_path, coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         param_region_type, task:getprivileges(),
         task:get_coherence_modes(), task:get_flags()))
-  local other_privileges_by_field_path =
+  local other_privileges_by_field_path, other_coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         other_param_region_type,
@@ -79,7 +79,9 @@ local function check_privilege_noninterference(cx, task, region_type,
         not privilege or privilege == "none" or
         not other_privilege or other_privilege == "none" or
         (privilege == "reads" and other_privilege == "reads") or
-        (std.is_reduction_op(privilege) and privilege == other_privilege))
+        (std.is_reduction_op(privilege) and privilege == other_privilege) or
+        (coherence_modes_by_field_path[field_path] == "simultaneous" and
+         other_coherence_modes_by_field_path[field_path] == "simultaneous"))
     then
       return false
     end
@@ -113,15 +115,18 @@ local function analyze_noninterference_self(
 
   local param_region_type = mapping[region_type]
   assert(param_region_type)
-  local privileges, privilege_field_paths = std.find_task_privileges(
+  local privileges, privilege_field_paths, privilege_field_types,
+        privilege_coherence_modes, privilege_flags = std.find_task_privileges(
     param_region_type, task:getprivileges(),
     task:get_coherence_modes(), task:get_flags())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
+    local coherence = privilege_coherence_modes[i]
     if not (
         privilege == "none" or
         privilege == "reads" or
         std.is_reduction_op(privilege) or
+        coherence == "simultaneous" or
         #field_paths == 0)
     then
       return false
@@ -164,6 +169,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -190,7 +196,6 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -202,7 +207,8 @@ local function analyze_is_side_effect_free_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 
@@ -252,6 +258,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -279,7 +286,6 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -287,7 +293,8 @@ local function analyze_is_loop_invariant_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 

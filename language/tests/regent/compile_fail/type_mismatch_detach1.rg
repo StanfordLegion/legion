@@ -13,14 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
+-- type_mismatch_detach1.rg:24: type mismatch: expected a region but got int32
+--   detach(hdf5, r)
+--                ^
 
 import "regent"
 
 task f()
-  var x = 20
-  x(5)
+  var r = 123
+  detach(hdf5, r)
 end
 f:compile()

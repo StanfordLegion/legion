@@ -8737,7 +8737,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochTriggerer::MustEpochTriggerer(MustEpochOp *own)
-      : owner(own)
+      : current_proc(own->get_parent()->get_executing_processor()), owner(own)
     //--------------------------------------------------------------------------
     {
       trigger_lock = Reservation::create_reservation();
@@ -8745,7 +8745,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochTriggerer::MustEpochTriggerer(const MustEpochTriggerer &rhs)
-      : owner(rhs.owner)
+      : current_proc(rhs.current_proc), owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8822,6 +8822,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_individual(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
+      task->set_target_proc(current_proc);
       task->trigger_mapping();
     }
 
@@ -8829,6 +8830,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_index(IndexTask *task)
     //--------------------------------------------------------------------------
     {
+      task->set_target_proc(current_proc);
       task->trigger_mapping();
     }
 

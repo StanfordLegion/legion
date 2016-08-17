@@ -2491,7 +2491,6 @@ typedef long long int coord_t;
   legion_acquire_launcher_create(
     legion_logical_region_t logical_region,
     legion_logical_region_t parent_region,
-    legion_physical_region_t physical_region,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
@@ -2549,7 +2548,6 @@ typedef long long int coord_t;
   legion_release_launcher_create(
     legion_logical_region_t logical_region,
     legion_logical_region_t parent_region,
-    legion_physical_region_t physical_region,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);

@@ -13,14 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
+-- type_mismatch_new4.rg:26: type mismatch in argument 1: expected int32, got double
+--   var p = new(ptr(double, r), 5)
+--             ^
 
 import "regent"
 
-task f()
-  var x = 20
-  x(5)
+local c = regentlib.c
+
+task main()
+  var r = region(ispace(ptr, 5), int)
+  var p = new(ptr(double, r), 5)
 end
-f:compile()

@@ -12,15 +12,24 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
-
 import "regent"
 
-task f()
-  var x = 20
-  x(5)
+local fields = terralib.newlist({"a", "b", "c"})
+
+local elt = terralib.types.newstruct("elt")
+elt.entries = fields:map(function(field) return { field, int } end)
+
+task main()
+  var r = region(ispace(ptr, 5), elt)
+  new(ptr(elt, r), 3)
+
+  fill(r.[fields], 2)
+  for e in r do
+    e.[fields] = 1
+  end
+
+  for x in r do
+    regentlib.assert(x.a + x.b + x.c == 3, "test failed")
+  end
 end
-f:compile()
+regentlib.start(main)

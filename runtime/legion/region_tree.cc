@@ -5005,7 +5005,8 @@ namespace Legion {
 	} else {
 	  std::set<Domain>::const_iterator it = right_set.begin();
 	  assert(it != right_set.end());
-	  const Realm::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  const Realm::ElementMask *maskp = 
+            &(it->get_index_space().get_valid_mask());
 	  int first_elmt = maskp->first_enabled();
 	  int last_elmt = maskp->last_enabled();
 	  while(++it != right_set.end())
@@ -5013,7 +5014,8 @@ namespace Legion {
 	    maskp = &(it->get_index_space().get_valid_mask());
 	    int new_first = maskp->first_enabled();
 	    int new_last = maskp->last_enabled();
-	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	    if ((new_first != -1) && 
+                ((first_elmt == -1) || (first_elmt > new_first)))
 	      first_elmt = new_first;
 	    if ((new_last != -1) && (last_elmt < new_last))
 	      last_elmt = new_last;
@@ -7276,7 +7278,30 @@ namespace Legion {
         else
           child_domains.insert(it->second->get_domain_blocking());
       }
-      bool result = compute_dominates(child_domains, parent_domains);
+      bool result = false;
+      if (is_disjoint())
+      {
+	// if the partition is disjoint, we can determine completeness by
+	//  seeing if the total volume of the child domains matches the volume
+	//  of the parent domains
+	size_t parent_volume = 0;
+	for (std::set<Domain>::const_iterator it = parent_domains.begin();
+	     it != parent_domains.end();
+	     ++it)
+	  parent_volume += it->get_volume();
+	size_t child_volume = 0;
+	for (std::set<Domain>::const_iterator it = child_domains.begin();
+	     it != child_domains.end();
+	     ++it)
+	  child_volume += it->get_volume();
+	result = (child_volume == parent_volume);
+      } 
+      else 
+      {
+	// if not disjoint, we have to do a considerably-more-expensive test
+	//  that handles overlap (i.e. double-counting) in the child domains
+	result = compute_dominates(child_domains, parent_domains);
+      }
       if (can_cache)
       {
         AutoLock n_lock(node_lock);

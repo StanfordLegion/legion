@@ -1651,6 +1651,7 @@ namespace Legion {
       static void handle_individual(const void *args);
       static void handle_index(const void *args);
     private:
+      const Processor current_proc;
       MustEpochOp *const owner;
       Reservation trigger_lock;
     };

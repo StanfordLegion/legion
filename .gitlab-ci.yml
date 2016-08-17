@@ -104,43 +104,51 @@ before_script:
 # Each job will run this set of tests.
 .tests: &tests
   script:
+    - export LG_RT_DIR=$PWD/runtime
     - ./language/travis.py
     - |
-      make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
-      make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j$THREADS
+      make -s -C tutorial/00_hello_world -j$THREADS
       tutorial/00_hello_world/hello_world -logfile out_%.log
-      make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
+      make -s -C tutorial/01_tasks_and_futures
       tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
-      make -s -C tutorial/02_index_tasks LG_RT_DIR=../../runtime
+      make -s -C tutorial/02_index_tasks
       tutorial/02_index_tasks/index_tasks -logfile out_%.log
-      make -s -C tutorial/03_global_vars LG_RT_DIR=../../runtime
+      make -s -C tutorial/03_global_vars
       tutorial/03_global_vars/global_vars -logfile out_%.log
-      make -s -C tutorial/04_logical_regions LG_RT_DIR=../../runtime
+      make -s -C tutorial/04_logical_regions
       tutorial/04_logical_regions/logical_regions -logfile out_%.log
-      make -s -C tutorial/05_physical_regions LG_RT_DIR=../../runtime
+      make -s -C tutorial/05_physical_regions
       tutorial/05_physical_regions/physical_regions -logfile out_%.log
-      make -s -C tutorial/06_privileges LG_RT_DIR=../../runtime
+      make -s -C tutorial/06_privileges
       tutorial/06_privileges/privileges -logfile out_%.log
-      make -s -C tutorial/07_partitioning LG_RT_DIR=../../runtime
+      make -s -C tutorial/07_partitioning
       tutorial/07_partitioning/partitioning -logfile out_%.log
-      make -s -C tutorial/08_multiple_partitions LG_RT_DIR=../../runtime
+      make -s -C tutorial/08_multiple_partitions
       tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
-      make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
+      make -s -C tutorial/09_custom_mapper
       tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
     - |
-      make -s -C examples/full_circuit LG_RT_DIR=../../runtime
+      make -s -C examples/full_circuit
       examples/full_circuit/ckt_sim -logfile out_%.log
-      make -s -C examples/full_ghost LG_RT_DIR=../../runtime
+      make -s -C examples/full_ghost
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
     - |
-      if [[ "$DEBUG" -eq 0 ]]; then
-        make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-        make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+      # if [[ "$TEST_SPY" -eq 1 ]]; then
+      if [[ "$DEBUG" -eq 1 ]]; then
+        git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
+        pushd fuzz-tester
+        WARN_AS_ERROR=0 python main.py
+        popd
       fi
     - |
       if [[ "$DEBUG" -eq 0 ]]; then
-        make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-        make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+        make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+        make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+      fi
+    - |
+      if [[ "$DEBUG" -eq 0 ]]; then
+        make -s -C test/performance/realm SHARED_LOWLEVEL=0 clean_all
+        make -s -C test/performance/realm SHARED_LOWLEVEL=0 run_all
       fi
 
 ###
