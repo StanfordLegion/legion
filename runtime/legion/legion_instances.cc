@@ -309,6 +309,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<FieldID,unsigned>::const_iterator 
+	     it = field_indexes.begin(); it != field_indexes.end(); ++it)
+	fields.insert(it->first);
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutDescription::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -1294,6 +1303,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReductionManager::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(logical_field);
+    }
+
+    //--------------------------------------------------------------------------
     bool ReductionManager::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -1856,6 +1872,13 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualManager::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      // do nothing - can't really insert "all fields"
     }
 
     //--------------------------------------------------------------------------

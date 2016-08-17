@@ -9480,9 +9480,12 @@ namespace Legion {
         {
           FieldID fid = create_fields[idx];
           std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
-#ifdef DEBUG_LEGION
-          assert(finder != fields.end());
-#endif
+	  // Catch unknown fields here for now
+	  if (finder == fields.end())
+	  {
+	    log_run.fatal() << "ERROR: unknown field ID " << fid << " requested during instance creation";
+	    assert(0);
+	  }
           field_sizes[idx] = 
             std::pair<FieldID,size_t>(fid, finder->second.field_size);
           index_map[finder->second.idx] = idx;
