@@ -868,6 +868,9 @@ namespace Legion {
       CompositeBase(Reservation &base_lock);
       virtual ~CompositeBase(void);
     public:
+      // precconditions: dst dependences and writes above 
+      // postconditions: writes at-level and below
+      // postreductions: reductions from below in the tree
       void issue_deferred_copies(const TraversalInfo &info, 
                                  MaterializedView *dst, FieldMask copy_mask,
                                  VersionTracker *src_version_tracker,
@@ -879,18 +882,36 @@ namespace Legion {
                     bool check_overwrite, bool check_ready = true);
     protected:
       virtual void perform_ready_check(FieldMask mask) = 0;
+      virtual void find_valid_views(const FieldMask &update_mask,
+                                    const FieldMask &up_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views) = 0;
     protected:
       void find_composite_children(RegionTreeNode *target, 
                    LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
                    bool check_overwrite, const FieldMask &copy_mask,
-                   FieldMask &dominate_mask, FieldMask &local_dominate);
-      bool are_domination_tests_sound(RegionTreeNode *logical_node,
-                                      const FieldMask &mask) const;
+                   FieldMask &dominate_mask, FieldMask &local_dominate); 
+      void copy_to_temporary(const TraversalInfo &info, MaterializedView *dst,
+                             const FieldMask &temp_mask, 
+               const LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
+                             VersionTracker *src_version_tracker,
+                             CopyAcrossHelper *across_helper) const;
+      void compute_update_masks(const FieldMask &copy_mask,
+                                const FieldMask &dominate_mask,
+                                const FieldMask &local_dominate,
+                                FieldMask &update_mask, 
+                                FieldMask &reduc_update);
+      void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
+                       FieldMask copy_mask, VersionTracker *src_version_tracker,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
+                          CopyAcrossHelper *across_helper) const;
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
-                                   const FieldMask &copy_mask,
+                                   const FieldMask &reduce_mask,
                                    VersionTracker *src_version_tracker,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                    const LegionMap<ApEvent,FieldMask>::aligned &pre_above,
+                    const LegionMap<ApEvent,FieldMask>::aligned &pre_below,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                           CopyAcrossHelper *helper) const;
     private:
@@ -970,6 +991,9 @@ namespace Legion {
     public:
       // From CompositeBase
       virtual void perform_ready_check(FieldMask mask);
+      virtual void find_valid_views(const FieldMask &update_mask,
+                                    const FieldMask &up_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views);
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
@@ -1036,6 +1060,9 @@ namespace Legion {
     public:
       // From CompositeBase
       virtual void perform_ready_check(FieldMask mask);
+      virtual void find_valid_views(const FieldMask &update_mask,
+                                    const FieldMask &up_mask,
+                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views);
       void capture(RtUserEvent capture_event);
       static void handle_deferred_capture(const void *args);
     public:
@@ -1058,9 +1085,12 @@ namespace Legion {
       void record_version_state(VersionState *state, const FieldMask &mask,
                                 bool already_valid);
     public:
-      void find_valid_views(const FieldMask &search_mask,
-                      LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
-      
+      bool are_domination_tests_sound(RegionTreeNode *logical_node,
+                                      const FieldMask &mask) const; 
+      void perform_overwrite_check(MaterializedView *dst, 
+                                   const FieldMask &check_mask,
+                                   FieldMask &need_temporary,
+                                   FieldMask &already_valid);
     public:
       RegionTreeNode *const logical_node;
       CompositeNode *const parent;
