@@ -374,30 +374,250 @@ function normalize.stat_var(node)
   end
 end
 
-function normalize.stat(node, continuation)
-  if node:is(ast.specialized.stat.Assignment) or
-     node:is(ast.specialized.stat.Reduce) then
-    node = flatten_multifield_accesses(node)
-    return node
-  elseif node:is(ast.specialized.stat.Var) then
-    return normalize.stat_var(node)
+local function get_index_path(expr)
+  if expr:is(ast.typed.expr.Constant) and
+     expr.expr_type.type == "integer" then
+    return data.newtuple(tostring(expr.value))
+  elseif expr:is(ast.typed.expr.Cast) then
+    return get_index_path(expr.arg)
+  elseif expr:is(ast.typed.expr.Ctor) then
+    local fields = expr.fields:map(get_index_path)
+    local path = fields[1]
+    for idx = 2, #fields do
+      path = path .. fields[idx]
+    end
+    return path
+  elseif expr:is(ast.typed.expr.CtorListField) or
+         expr:is(ast.typed.expr.CtorRecField) then
+    return get_index_path(expr.value)
   else
-    return continuation(node, true)
+    return data.newtuple("*")
+  end
+end
+
+local function get_access_paths(expr)
+  if expr:is(ast.typed.expr.FieldAccess) then
+    local paths, next_exprs = get_access_paths(expr.value)
+    return paths:map(function(path)
+      return path .. data.newtuple(expr.field_name)
+    end), next_exprs
+
+  elseif expr:is(ast.typed.expr.IndexAccess) then
+    local paths, next_exprs = get_access_paths(expr.value)
+    local index_path = get_index_path(expr.index)
+    next_exprs:insert(expr.index)
+    return paths:map(function(path)
+      return path .. index_path
+    end), next_exprs
+
+  elseif expr:is(ast.typed.expr.Deref) then
+    return expr.expr_type.bounds_symbols:map(function(bound)
+      return data.newtuple(bound)
+    end), terralib.newlist {expr.value}
+
+  elseif expr:is(ast.typed.expr.ID) then
+    return terralib.newlist {data.newtuple(expr.value)},
+      terralib.newlist()
+
+  else
+    assert(false)
+  end
+end
+
+local pretty = require("regent/pretty")
+
+local function symbols_aliased(cx, sym1, sym2)
+  local function is_value_type(ty)
+    return ty:isprimitive() or std.is_fspace_instance(ty) or ty:isstruct()
+  end
+
+  local function pointers_aliased(ty1, ty2)
+    assert(ty1:ispointer() or ty2:ispointer())
+    -- Regent doesn't have an address-of operator, so the address of
+    -- a value-typed variable can neither be taken nor aliased. However,
+    -- pointers to arrays can be passed first to a Terra function and then
+    -- back to the Regent code, so the alasing between a pointer and an array
+    -- is still possible.
+    if ty1:ispointer() then
+      if ty2:ispointer() or ty2:isarray() then
+        return true
+      else
+        return false
+      end
+    end
+    assert(ty2:ispointer())
+    return pointers_aliased(ty2, ty1)
+  end
+
+  if sym1 == sym2 then return true
+  else
+    local ty1 = std.as_read(sym1:gettype())
+    local ty2 = std.as_read(sym2:gettype())
+    if std.is_region(ty1) and std.is_region(ty2) then
+      return std.type_maybe_eq(ty1:fspace(), ty2:fspace()) and
+             not std.check_constraint(cx,
+               std.constraint(ty1, ty2, std.disjointness))
+    elseif ty1:isarray() and ty2:isarray() then
+      return false
+    elseif ty1:ispointer() or ty2:ispointer() then
+      return pointers_aliased(ty1, ty2)
+    elseif is_value_type(ty1) or is_value_type(ty2) then
+      return false
+    else
+      assert(false, "should be unreachable")
+    end
+  end
+  return false
+end
+
+local function refs_aliased(cx, path1, path2)
+  local len = math.min(#path1, #path2)
+  local sym1 = path1[1]
+  local sym2 = path2[1]
+
+  if symbols_aliased(cx, sym1, sym2) then
+    for idx = 2, len do
+      local e1 = path1[idx]
+      local e2 = path2[idx]
+      if e1 ~= e2 and not (e1 == "*" or e2 == "*") then
+        return false
+      end
+    end
+    return true
+  end
+  return false
+end
+
+local function can_alias(node, cx, updates)
+  if ast.is_node(node) and node:is(ast.typed.expr) then
+    if std.is_ref(node.expr_type) or std.is_rawref(node.expr_type) then
+      local paths, next_exprs = get_access_paths(node)
+      for i = 1, #paths do
+        for j = 1, #updates do
+          if refs_aliased(cx, updates[j], paths[i]) then
+            return true
+          end
+        end
+      end
+
+      for i = 1, #next_exprs do
+        if can_alias(next_exprs[i], cx, updates) then
+          return true
+        end
+      end
+
+    else
+      for k, child in pairs(node) do
+        if k ~= "node_type" then
+          if can_alias(child, cx, updates) then
+            return true
+          end
+        end
+      end
+    end
+
+  elseif terralib.islist(node) then
+    for _, child in ipairs(node) do
+      if can_alias(child, cx, updates) then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+local function update_alias(expr, updates)
+  local paths = get_access_paths(expr)
+  updates:insertall(paths)
+end
+
+function normalize.stat_assignment_or_reduce(cx, node)
+  if #node.lhs == 1 then return node
+  else
+    local updates = terralib.newlist()
+    local needs_temporary = terralib.newlist()
+    local temporaries = {}
+    for idx = 1, #node.lhs do
+      local lh = node.lhs[idx]
+      local rh = node.rhs[idx]
+      if can_alias(rh, cx, updates) then
+        needs_temporary:insert(idx)
+        temporaries[idx] = std.newsymbol(std.as_read(rh.expr_type))
+      end
+      update_alias(lh, updates)
+    end
+
+    local flattened = terralib.newlist()
+    for idx = 1, #needs_temporary do
+      local symbol = temporaries[needs_temporary[idx]]
+      flattened:insert(ast.typed.stat.Var {
+        symbols = terralib.newlist {symbol},
+        types = terralib.newlist {symbol:gettype()},
+        values = terralib.newlist {node.rhs[needs_temporary[idx]]},
+        annotations = node.annotations,
+        span = node.span,
+      })
+    end
+
+    for idx = 1, #node.lhs do
+      if temporaries[idx] then
+        flattened:insert(node {
+          lhs = terralib.newlist {node.lhs[idx]},
+          rhs = terralib.newlist {
+            ast.typed.expr.ID {
+              value = temporaries[idx],
+              expr_type = std.rawref(&temporaries[idx]:gettype()),
+              span = node.span,
+              annotations = node.annotations,
+            }
+          },
+        })
+      else
+        flattened:insert(node {
+          lhs = terralib.newlist {node.lhs[idx]},
+          rhs = terralib.newlist {node.rhs[idx]},
+        })
+      end
+    end
+
+    return flattened
+  end
+end
+
+function normalize.stat(cx)
+  return function(node, continuation)
+    if node:is(ast.specialized.stat.Assignment) or
+       node:is(ast.specialized.stat.Reduce) then
+      node = flatten_multifield_accesses(node)
+      return node
+    elseif node:is(ast.typed.stat.Assignment) or
+           node:is(ast.typed.stat.Reduce) then
+      return normalize.stat_assignment_or_reduce(cx, node)
+    elseif node:is(ast.specialized.stat.Var) then
+      return normalize.stat_var(node)
+    else
+      return continuation(node, true)
+    end
   end
 end
 
 function normalize.top_task(node)
+  local cx = {}
+  if node:is(ast.typed) then
+    cx.constraints = node.prototype:get_constraints()
+  end
   return node {
     body = node.body {
       stats = ast.flatmap_node_continuation(
-        normalize.stat,
+        normalize.stat(cx),
         node.body.stats)
       }
   }
 end
 
 function normalize.entry(node)
-  if node:is(ast.specialized.top.Task) then
+  if node:is(ast.specialized.top.Task) or node:is(ast.typed.top.Task) then
     return normalize.top_task(node)
   else
     return node
