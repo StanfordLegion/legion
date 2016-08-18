@@ -9,6 +9,8 @@ Version 16.08.0 (August ??, 2016)
     - Command-line options for logging (-error and new -errlevel) support
         English names of logging levels (spew, debug, info, print,
         warn/warning, error, fatal, none) as well as integers
+  * Regent
+    - Installer now prompts for RDIR installation
 
 Version 16.06.0 (June 15, 2016)
   * Legion
