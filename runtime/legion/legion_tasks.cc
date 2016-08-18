@@ -11113,11 +11113,17 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (IS_WRITE(regions[idx]) && 
-            ((regions[idx].handle_type == SINGULAR) ||
-              ((regions[idx].handle_type == REG_PROJECTION) && 
-               (regions[idx].projection == 0))))
+        if (!IS_WRITE(regions[idx]))
+          continue;
+        if (regions[idx].handle_type == SINGULAR)
           regions[idx].flags |= MUST_PREMAP_FLAG;
+        else if (regions[idx].handle_type == REG_PROJECTION)
+        {
+          ProjectionFunction *function = runtime->find_projection_function(
+                                                    regions[idx].projection);
+          if (function->depth == 0)
+            regions[idx].flags |= MUST_PREMAP_FLAG;
+        }
       }
     }
 

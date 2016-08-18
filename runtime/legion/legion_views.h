@@ -815,9 +815,6 @@ namespace Legion {
       virtual void collect_users(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
-      void issue_deferred_copies(const TraversalInfo &info,
-                                 MaterializedView *dst,
-                                 const FieldMask &copy_mask);
       void issue_deferred_copies_across(const TraversalInfo &info,
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,
@@ -834,6 +831,9 @@ namespace Legion {
     public:
       virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
                  LegionMap<DeferredView*,FieldMask>::aligned &replacements) = 0;
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         const FieldMask &copy_mask) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -880,7 +880,7 @@ namespace Legion {
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
                     CopyAcrossHelper *helper, FieldMask dominate_mask, 
                     bool check_overwrite, bool check_ready = true);
-    protected:
+    public:
       virtual void perform_ready_check(FieldMask mask) = 0;
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -892,16 +892,18 @@ namespace Legion {
                    FieldMask &dominate_mask, FieldMask &local_dominate); 
       void copy_to_temporary(const TraversalInfo &info, MaterializedView *dst,
                              const FieldMask &temp_mask, 
-               const LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
+                             RegionTreeNode *logical_node,
                              VersionTracker *src_version_tracker,
-                             CopyAcrossHelper *across_helper) const;
+                             CopyAcrossHelper *across_helper,
+                     LegionMap<ApEvent,FieldMask>::aligned &postconditions);
       void compute_update_masks(const FieldMask &copy_mask,
                                 const FieldMask &dominate_mask,
                                 const FieldMask &local_dominate,
                                 FieldMask &update_mask, 
                                 FieldMask &reduc_update);
       void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
-                       FieldMask copy_mask, VersionTracker *src_version_tracker,
+                               FieldMask copy_mask,RegionTreeNode *logical_node,
+                               VersionTracker *src_version_tracker,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -978,6 +980,9 @@ namespace Legion {
                      LegionMap<DeferredView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
+                                         const FieldMask &copy_mask);
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
                                          const FieldMask &copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
@@ -1049,7 +1054,7 @@ namespace Legion {
         RtUserEvent capture_event;
       };
     public:
-      CompositeNode(RegionTreeNode *node, CompositeNode *parent,
+      CompositeNode(RegionTreeNode *node, CompositeBase *parent,
                     DistributedID owner_did);
       CompositeNode(const CompositeNode &rhs);
       virtual ~CompositeNode(void);
@@ -1093,7 +1098,7 @@ namespace Legion {
                                    FieldMask &already_valid);
     public:
       RegionTreeNode *const logical_node;
-      CompositeNode *const parent;
+      CompositeBase *const parent;
       const DistributedID owner_did;
     protected:
       Reservation node_lock;
@@ -1155,6 +1160,9 @@ namespace Legion {
     public:
       virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
                      LegionMap<DeferredView*,FieldMask>::aligned &replacements);
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         const FieldMask &copy_mask);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
