@@ -2182,7 +2182,8 @@ function stencil_analysis.join_stencil(s1, s2)
     if s1:is(ast.typed.expr.ID) then
       return (s1.value == s2.value) and s1
     elseif s1:is(ast.typed.expr.Binary) then
-      if s1.op == "%" then
+      if s1.op ~= s2.op then return nil
+      elseif s1.op == "%" then
         return arg_join(stencil_analysis.join_stencil(s1.rhs, s2.rhs) and
                         stencil_analysis.join_stencil(s1.lhs, s2.lhs),
                         s1, s2, "lhs")
