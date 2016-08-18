@@ -15,11 +15,9 @@
 -- runs-with:
 -- [
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "9", "-fflow", "0"],
---  ["-ll:cpu", "4", "-fflow", "0"]
+--   "-fparallelize-dop", "9"],
+--  ["-ll:cpu", "4"]
 -- ]
-
--- FIXME: Breaks RDIR
 
 import "regent"
 

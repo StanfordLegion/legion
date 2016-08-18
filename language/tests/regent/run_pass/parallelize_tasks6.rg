@@ -14,14 +14,13 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "4", "-fflow", "0"]
+--  ["-ll:cpu", "4"]
 -- ]
 
--- FIXME: Breaks RDIR
 -- FIXME: Breaks runtime
 --        Put back this test case after fixing runtime:
 --        ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---         "-fparallelize-dop", "8", "-fflow", "0"],
+--         "-fparallelize-dop", "8"],
 
 import "regent"
 
