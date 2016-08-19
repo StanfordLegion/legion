@@ -199,11 +199,11 @@ linux_clang35_terra35_cxx11_release:
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 
-# macOS with Clang 3.5
-macos_clang35_cxx98_debug_checks:
-  <<: [*macos, *tests]
-  variables:
-    <<: [*clang35, *debug, *cxx98_checks]
+# # macOS with Clang 3.5
+# macos_clang35_cxx98_debug_checks:
+#   <<: [*macos, *tests]
+#   variables:
+#     <<: [*clang35, *debug, *cxx98_checks]
 
 # Run minimal tests on other compilers.
 
