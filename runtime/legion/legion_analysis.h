@@ -181,9 +181,12 @@ namespace Legion {
     class VersionTracker {
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
-      virtual const FieldVersions& get_field_versions(RegionTreeNode *node) = 0;
-      virtual const FieldMask& get_split_mask(RegionTreeNode *node,
-                                              bool &is_split) const = 0;
+      virtual void get_field_versions(RegionTreeNode *node,
+                                      const FieldMask &needed_fields,
+                                      FieldVersions *&field_versions) = 0;
+      virtual void get_split_mask(RegionTreeNode *node, 
+                                  const FieldMask &needed_fields,
+                                  FieldMask &split) = 0;
     };
 
     /**
@@ -229,10 +232,13 @@ namespace Legion {
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
-      virtual const FieldMask& get_split_mask(RegionTreeNode *node, 
-                                              bool &is_split) const;
+      virtual void get_split_mask(RegionTreeNode *node, 
+                                  const FieldMask &needed_fields,
+                                  FieldMask &split);
     public:
-      virtual const FieldVersions& get_field_versions(RegionTreeNode *node);
+      virtual void get_field_versions(RegionTreeNode *node,
+                                      const FieldMask &needed_fields,
+                                      FieldVersions *&field_versions);
     public:
       void pack_version_info(Serializer &rez);
       void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);

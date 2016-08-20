@@ -756,14 +756,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const FieldVersions& VersionInfo::get_field_versions(RegionTreeNode *node)
+    void VersionInfo::get_field_versions(RegionTreeNode *node,
+                                         const FieldMask &needed_fields,
+                                         FieldVersions *&result_versions)
     //--------------------------------------------------------------------------
     {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < field_versions.size());
 #endif
-      return field_versions[depth];
+      result_versions = &field_versions[depth];
     }
 
     //--------------------------------------------------------------------------
@@ -777,17 +779,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const FieldMask& VersionInfo::get_split_mask(RegionTreeNode *node,
-                                                 bool &is_split) const
+    void VersionInfo::get_split_mask(RegionTreeNode *node,
+                                     const FieldMask &needed_fields,
+                                     FieldMask &result)
     //--------------------------------------------------------------------------
     {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < split_masks.size());
 #endif
-      const FieldMask &result = split_masks[depth];
-      is_split = !!result;
-      return result;
+      result = split_masks[depth];
     }
 
     //--------------------------------------------------------------------------
