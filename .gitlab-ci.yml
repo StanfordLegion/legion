@@ -61,11 +61,11 @@ before_script:
       echo "Unknown platform. Setting THREADS to 1."
       export THREADS=1
     fi
-  - |
-    if [[ "$(uname)" = "Darwin" ]]; then
-      brew update
-      brew install pypy homebrew/versions/llvm35
-    fi
+  # - |
+  #   if [[ "$(uname)" = "Darwin" ]]; then
+  #     brew update
+  #     brew install pypy homebrew/versions/llvm35
+  #   fi
   - |
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi

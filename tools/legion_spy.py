@@ -9801,7 +9801,13 @@ def run_geometry_tests(num_tests=10000):
     return success
 
 def main(temp_dir):
-    parser = argparse.ArgumentParser(
+    class MyParser(argparse.ArgumentParser):
+        def error(self, message):
+            self.print_usage(sys.stderr)
+            print('error: %s' % message, file=sys.stderr)
+            print('hint: invoke %s -h for a detailed description of all arguments' % self.prog, file=sys.stderr)
+            sys.exit(2)
+    parser = MyParser(
         description='Legion Spy runtime analysis and verification')
     parser.add_argument(
         '-l', '--logical', dest='logical_checks', action='store_true',

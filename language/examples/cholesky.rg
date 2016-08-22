@@ -14,9 +14,11 @@
 
 -- runs-with:
 -- [
---   ["-verify", "-ll:cpu", "4"],
---   ["-p", "1", "-verify"]
+--   ["-verify", "-ll:cpu", "4", "-fflow", "0"],
+--   ["-p", "1", "-verify", "-fflow", "0"]
 -- ]
+
+-- FIXME: Breaks RDIR
 
 import "regent"
 
