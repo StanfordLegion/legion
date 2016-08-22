@@ -65,16 +65,18 @@ MAP_OP_KIND = 3
 INTER_CLOSE_OP_KIND = 4
 READ_ONLY_CLOSE_OP_KIND = 5
 POST_CLOSE_OP_KIND = 6
-FENCE_OP_KIND = 7
-COPY_OP_KIND = 8
-FILL_OP_KIND = 9
-ACQUIRE_OP_KIND = 10 
-RELEASE_OP_KIND = 11
-DELETION_OP_KIND = 12
-ATTACH_OP_KIND = 13
-DETACH_OP_KIND = 14
-DEP_PART_OP_KIND = 15
-PENDING_PART_OP_KIND = 16
+OPEN_OP_KIND = 7
+ADVANCE_OP_KIND = 8
+FENCE_OP_KIND = 9
+COPY_OP_KIND = 10 
+FILL_OP_KIND = 11
+ACQUIRE_OP_KIND = 12 
+RELEASE_OP_KIND = 13
+DELETION_OP_KIND = 14
+ATTACH_OP_KIND = 15
+DETACH_OP_KIND = 16
+DEP_PART_OP_KIND = 17
+PENDING_PART_OP_KIND = 18
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -88,13 +90,18 @@ OpNames = [
 "Index Task",
 "Map Op",
 "Inter Close Op",
+"Read Only Close Op",
 "Post Close Op",
+"Open Op",
+"Advance Op",
 "Fence Op",
 "Copy Op",
 "Fill Op",
 "Acquire Op",
 "Release Op",
 "Deletion Op",
+"Attach Op",
+"Detach Op",
 "Dependent Partition Op",
 "Pending Partition Op",
 ]
@@ -4360,9 +4367,11 @@ class Operation(object):
             self.task_id = task_id
 
     def set_creator(self, creator, idx):
-        # Better be a close op kind
+        # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == READ_ONLY_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
+            self.kind == READ_ONLY_CLOSE_OP_KIND or \
+            self.kind == POST_CLOSE_OP_KIND or \
+            self.kind == OPEN_OP_KIND or self.kind == ADVANCE_OP_KIND
         self.creator = creator
         self.close_idx = idx
         # If our parent context created us we don't need to be recorded 
@@ -5433,6 +5442,8 @@ class Operation(object):
             INTER_CLOSE_OP_KIND : "orangered", 
             READ_ONLY_CLOSE_OP_KIND : "darkgreen",
             POST_CLOSE_OP_KIND : "darkslateblue",
+            OPEN_OP_KIND : "royalblue",
+            ADVANCE_OP_KIND : "magenta",
             FENCE_OP_KIND : "darkorchid2",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
@@ -8290,8 +8301,12 @@ mapping_pat              = re.compile(
 close_pat                = re.compile(
     prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1]) "+
            "(?P<is_read_only>[0-1])")
-close_creator_pat        = re.compile(
-    prefix+"Close Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
+internal_creator_pat     = re.compile(
+    prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
+open_pat                 = re.compile(
+    prefix+"Open Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+advance_pat              = re.compile(
+    prefix+"Advance Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fence_pat                = re.compile(
     prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
@@ -8798,11 +8813,27 @@ def parse_legion_spy_line(line, state):
         # because it as an actual operation
         op.set_context(context, not inter)
         return True
-    m = close_creator_pat.match(line)
+    m = internal_creator_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         creator = state.get_operation(int(m.group('cuid')))
         op.set_creator(creator, int(m.group('idx')))
+        return True
+    m = open_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(OPEN_OP_KIND)
+        op.set_name("Open Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = advance_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(ADVANCE_OP_KIND)
+        op.set_name("Advance Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
         return True
     m = fence_pat.match(line)
     if m is not None:
