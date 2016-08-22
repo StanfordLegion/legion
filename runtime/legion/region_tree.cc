@@ -1646,7 +1646,8 @@ namespace Legion {
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, 
-                        bool partial_traversal, bool close_traversal)
+                        bool partial_traversal, bool close_traversal,
+                        RegionTreeNode *parent_node)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1657,7 +1658,8 @@ namespace Legion {
       assert(ctx.exists());
 #endif
       RegionUsage usage(req); 
-      RegionNode *parent_node = get_node(req.parent);
+      if (parent_node == NULL)
+        parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Keep track of any unversioned fields
@@ -10265,9 +10267,14 @@ namespace Legion {
       // on then we will also automatically depend on us as well
       if (!advances.empty())
       {
-        for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it = 
-              advances.begin(); it != advances.end(); it++)
-          perform_advance_analysis(state, it->second, user);
+        // Don't want to register dependences on our opens
+        FieldMask non_open_fields = user.field_mask - local_open_mask;   
+        if (!!non_open_fields)
+        {
+          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                advances.begin(); it != advances.end(); it++)
+            perform_advance_analysis(state, it->second, user, non_open_fields);
+        }
       }
       // See if we need to perform any advance operations
       // because we're going to be writing below this level
@@ -10404,7 +10411,6 @@ namespace Legion {
       LogicalUser open_user(open, 0/*idx*/,
             RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), open_mask);
       open->add_mapping_reference(open_user.gen);
-      state.curr_epoch_users.push_back(open_user);
       // Register dependences against anything else that the creator 
       // operation has_dependences on 
       open->begin_dependence_analysis();
@@ -10415,6 +10421,8 @@ namespace Legion {
                 open_user, above_users, open_mask, 
                 open_mask/*doesn't matter*/, false/*validates*/);
       open->end_dependence_analysis();
+      // Now add this to the current list
+      state.curr_epoch_users.push_back(open_user);
     }
 
     //--------------------------------------------------------------------------
@@ -10446,7 +10454,7 @@ namespace Legion {
             advance_user, above_users, advance_mask,
             advance_mask/*doesn't matter*/, false/*validates*/);
       // Now perform our local dependence analysis for this advance
-      perform_advance_analysis(state, advance_user, creator);
+      perform_advance_analysis(state, advance_user, creator, advance_mask);
       // Update our list of advance operations
       advances[advance] = advance_user;
       // Add it to the list of current epoch users even if we're tracing 
@@ -10501,7 +10509,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::perform_advance_analysis(CurrentState &state,
                                                 const LogicalUser &advance_user,
-                                                const LogicalUser &create_user)
+                                                const LogicalUser &create_user,
+                                                const FieldMask &advance_mask)
     //--------------------------------------------------------------------------
     {
       // We know we are dominating from above, so we don't care about
@@ -10510,9 +10519,9 @@ namespace Legion {
       FieldMask dominator_mask = 
             perform_dependence_checks<CURR_LOGICAL_ALLOC,
                     false/*record*/, true/*has skip*/, true/*track dom*/>(
-              advance_user, state.curr_epoch_users, advance_user.field_mask,
+              advance_user, state.curr_epoch_users, advance_mask,
               empty_below, false/*validates*/, create_user.op, create_user.gen);
-      FieldMask non_dominated_mask = advance_user.field_mask - dominator_mask;
+      FieldMask non_dominated_mask = advance_mask - dominator_mask;
       if (!!non_dominated_mask)
       {
         perform_dependence_checks<PREV_LOGICAL_ALLOC,

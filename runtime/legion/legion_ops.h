@@ -911,6 +911,7 @@ namespace Legion {
                                    int target_idx, int source_idx, 
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
+      virtual unsigned find_parent_index(unsigned idx);
     protected:
       // These things are really only needed for tracing
       // Information about the operation that generated

@@ -257,7 +257,8 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
-                                       bool close_traversal = false);
+                                       bool close_traversal = false,
+                                       RegionTreeNode *parent_node = NULL);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
@@ -1309,7 +1310,8 @@ namespace Legion {
                                 const ColorPoint &next_child);
       void perform_advance_analysis(CurrentState &state, 
                                     const LogicalUser &advance_user,
-                                    const LogicalUser &create_user);
+                                    const LogicalUser &create_user,
+                                    const FieldMask &advance_mask);
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user);
       void close_logical_node(LogicalCloser &closer,

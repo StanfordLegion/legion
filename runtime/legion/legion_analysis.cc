@@ -177,6 +177,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
+    void* VersioningSet<REF_KIND>::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<VersioningSet<REF_KIND>,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    template<ReferenceSource REF_KIND>
+    void VersioningSet<REF_KIND>::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    template<ReferenceSource REF_KIND>
     FieldMask& VersioningSet<REF_KIND>::operator[](VersionState *state)
     //--------------------------------------------------------------------------
     {
@@ -654,9 +670,13 @@ namespace Legion {
         field_versions(rhs.field_versions), split_masks(rhs.split_masks)
     //--------------------------------------------------------------------------
     {
-      physical_states.resize(rhs.physical_states.size()); 
+      physical_states.resize(rhs.physical_states.size(), NULL); 
       for (unsigned idx = 0; idx < physical_states.size(); idx++)
+      {
+        if (rhs.physical_states[idx] == NULL)
+          continue;
         physical_states[idx] = rhs.physical_states[idx]->clone();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -677,9 +697,13 @@ namespace Legion {
 #endif
       upper_bound_node = rhs.upper_bound_node;
       field_versions = rhs.field_versions;
-      physical_states.resize(rhs.physical_states.size()); 
+      physical_states.resize(rhs.physical_states.size(), NULL); 
       for (unsigned idx = 0; idx < physical_states.size(); idx++)
+      {
+        if (rhs.physical_states[idx] == NULL)
+          continue;
         physical_states[idx] = rhs.physical_states[idx]->clone();
+      }
       return *this;
     }
 
@@ -4798,14 +4822,14 @@ namespace Legion {
             create_new_version_state(next_version, 
                                      has_initial_state, initial_space);
           if (update_parent_state)
-            new_states.insert(new_state, version_overlap);
+            new_states.insert(new_state, version_overlap, &mutator);
           // Kind of dangerous to be getting another iterator to this
           // data structure that we're iterating, but since neither
           // is mutating, we won't invalidate any iterators
           LegionMap<VersionID,ManagerVersions>::aligned::iterator 
             next_finder = current_version_infos.find(next_version);
           if (next_finder != current_version_infos.end())
-            next_finder->second.insert(new_state, version_overlap);
+            next_finder->second.insert(new_state, version_overlap, &mutator);
           else
             to_add[new_state] = version_overlap;
           current_filter -= version_overlap;
@@ -4821,7 +4845,7 @@ namespace Legion {
             create_new_version_state(init_version,
                                      has_initial_state, initial_space);
           if (update_parent_state)
-            new_states.insert(new_state, current_filter);
+            new_states.insert(new_state, current_filter, &mutator);
           current_version_infos[init_version].insert(new_state, 
                                                      current_filter, &mutator);
         }

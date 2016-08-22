@@ -9410,7 +9410,9 @@ namespace Legion {
         }
         // Now we can record our version numbers just like everyone else
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                      path, version_infos[idx], ready_events);
+                                      path, version_infos[idx], ready_events,
+                                      false/*partial*/, false/*close*/, 
+                                      parent_node);
       }
     }
 

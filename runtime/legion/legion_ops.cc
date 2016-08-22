@@ -4637,6 +4637,16 @@ namespace Legion {
                                target_idx, dtype, false/*validates*/, overlap);
     }
 
+    //--------------------------------------------------------------------------
+    unsigned InternalOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      return create_op->find_parent_index(creator_req_idx);
+    }
+
     /////////////////////////////////////////////////////////////
     // Open Operation 
     /////////////////////////////////////////////////////////////
@@ -4749,7 +4759,7 @@ namespace Legion {
       else
         complete_mapping();
       complete_execution();
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Advance Operation 

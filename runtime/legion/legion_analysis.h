@@ -126,6 +126,8 @@ namespace Legion {
       ~VersioningSet(void);
     public:
       VersioningSet& operator=(const VersioningSet &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       inline bool empty(void) const 
         { return single && (versions.single_version == NULL); }
@@ -148,7 +150,7 @@ namespace Legion {
       void move(VersioningSet &other);
     public:
       iterator begin(void) const;
-      inline iterator end(void) const { return iterator(this, NULL, true); }
+      inline iterator end(void) const { return iterator(this, NULL, single); }
     public:
       template<ReferenceSource ARG_KIND>
       void reduce(const FieldMask &reduce_mask, 
