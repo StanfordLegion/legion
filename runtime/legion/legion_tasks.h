@@ -622,6 +622,7 @@ namespace Legion {
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
+      virtual bool is_top_level_task(void) const { return false; }
     public:
       virtual void resolve_false(void) = 0;
       virtual void launch_task(void);
@@ -937,6 +938,7 @@ namespace Legion {
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
       virtual bool is_inline_task(void) const;
+      virtual bool is_top_level_task(void) const { return top_level_task; }
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);

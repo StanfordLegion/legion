@@ -3345,7 +3345,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!mask);
       // at most one of these should be true
-      assert(!leave_open && !read_only && !flush_only);
+      assert(!((leave_open && read_only) || (leave_open && flush_only) || 
+                (read_only && flush_only)));
 #endif
       if (read_only)
         read_only_close_mask |= mask;

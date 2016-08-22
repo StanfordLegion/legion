@@ -7337,8 +7337,9 @@ namespace Legion {
         }
       } 
       // If we have any created requirements, we have to issue virtual close
-      // operations for those fields as well.
-      if (!created_requirements.empty())
+      // operations for those fields as well. Skip this if we are the
+      // top-level task since there is no where for the state to go
+      if (!created_requirements.empty() && !is_top_level_task())
       {
         const unsigned offset = regions.size();
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
@@ -9370,9 +9371,9 @@ namespace Legion {
                                   path.get_child(parent_node->get_depth()));
           RegionTreePath open_path;
           open_path.initialize(path.get_min_depth()+1, path.get_max_depth());
-          for (unsigned idx = path.get_min_depth()+1; 
-                idx < path.get_max_depth(); idx++)
-            open_path.register_child(idx, path.get_child(idx));
+          for (unsigned idx2 = path.get_min_depth()+1; 
+                idx2 < path.get_max_depth(); idx2++)
+            open_path.register_child(idx2, path.get_child(idx2));
           for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
                 it = proj_epochs.begin(); it != proj_epochs.end(); it++)
           {
@@ -9390,9 +9391,9 @@ namespace Legion {
         {
           RegionTreePath advance_path;
           advance_path.initialize(path.get_min_depth(), path.get_max_depth()-1);
-          for (unsigned idx = path.get_min_depth(); 
-                idx < (path.get_max_depth()-1); idx++)
-            advance_path.register_child(idx, path.get_child(idx));
+          for (unsigned idx2 = path.get_min_depth(); 
+                idx2 < (path.get_max_depth()-1); idx2++)
+            advance_path.register_child(idx2, path.get_child(idx2));
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 
             (slice_req.region == slice_req.parent);

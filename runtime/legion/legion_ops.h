@@ -1021,8 +1021,9 @@ namespace Legion {
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
       // These is for internal close ops
-      void initialize_close(Operation *creator, unsigned idx);
-      void perform_logging(bool is_intermediate_close_op, bool read_only);
+      void initialize_close(Operation *creator, unsigned idx,
+                            unsigned parent_req_index);
+      void perform_logging(void);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;

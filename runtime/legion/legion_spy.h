@@ -256,12 +256,24 @@ namespace Legion {
 		      read_only_close_op ? 1 : 0);
       }
 
-      static inline void log_close_op_creator(UniqueID close_op_id,
-                                              UniqueID creator_op_id,
-                                              int idx)
+      static inline void log_open_operation(UniqueID context,
+                                            UniqueID unique_id)
       {
-        log_spy.print("Close Operation Creator %llu %llu %d",
-		      close_op_id, creator_op_id, idx);
+        log_spy.print("Open Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_advance_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Advance Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_internal_op_creator(UniqueID internal_op_id,
+                                                 UniqueID creator_op_id,
+                                                 int idx)
+      {
+        log_spy.print("Internal Operation Creator %llu %llu %d",
+		      internal_op_id, creator_op_id, idx);
       }
 
       static inline void log_fence_operation(UniqueID context,

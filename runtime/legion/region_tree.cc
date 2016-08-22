@@ -10432,9 +10432,8 @@ namespace Legion {
                           creator.idx, parent_is_upper_bound);
       LogicalUser advance_user(advance, 0/*idx*/, 
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), advance_mask);
-      // Add it to the list of current epoch users even if we're tracing 
+      // Add a mapping dependence so we can add it later
       advance->add_mapping_reference(advance_user.gen);
-      state.curr_epoch_users.push_back(advance_user);
       // Start our dependence analysis, we'll finish it when we
       // reach our destination
       advance->begin_dependence_analysis();
@@ -10450,6 +10449,8 @@ namespace Legion {
       perform_advance_analysis(state, advance_user, creator);
       // Update our list of advance operations
       advances[advance] = advance_user;
+      // Add it to the list of current epoch users even if we're tracing 
+      state.curr_epoch_users.push_back(advance_user);
     }
 
     //--------------------------------------------------------------------------
