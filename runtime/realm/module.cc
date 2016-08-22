@@ -34,6 +34,7 @@
 //  to the build-system-controlled list of statically-linked Realm modules
 #include "realm/runtime_impl.h"
 #include "realm/numa/numa_module.h"
+#include "realm/procset/procset_module.h"
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
