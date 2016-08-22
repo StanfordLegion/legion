@@ -311,6 +311,7 @@ namespace Legion {
                               VersionInfo &version_info,
                               SingleTask *target_ctx,
                               Operation *op,
+                              SingleTask *translation_ctx,
                               const bool needs_fields
 #ifdef DEBUG_LEGION
                               , unsigned index
@@ -345,6 +346,7 @@ namespace Legion {
                                      const RegionRequirement &req,
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
+                                     SingleTask *translation_context,
                                      int composite_index,
                                      ClosedNode *closed_tree,
                                      ApEvent term_event, 
@@ -450,11 +452,6 @@ namespace Legion {
       ApEvent detach_file(RegionTreeContext ctx, 
                           const RegionRequirement &req, DetachOp *detach_op, 
                           VersionInfo &version_info, const InstanceRef &ref);
-    public:
-      void send_back_logical_state(RegionTreeContext local_context,
-                                   RegionTreeContext remote_context,
-                                   const RegionRequirement &req,
-                                   AddressSpaceID target);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -1404,16 +1401,6 @@ namespace Legion {
                                    ProjectionEpochID advance_epoch,
                                    std::set<RtEvent> &ready_events);
     public:
-      void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
-                                   const FieldMask &send_mask, 
-                                   AddressSpaceID target);
-      void process_logical_state_return(Deserializer &derez,
-                                        AddressSpaceID source, 
-                                        ReferenceMutator *mutator);
-      static void handle_logical_state_return(RegionTreeForest *forest,
-                                              Deserializer &derez,
-                                              AddressSpaceID source);
-    public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
       void invalidate_deleted_state(ContextID ctx, 
@@ -1426,7 +1413,8 @@ namespace Legion {
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
                                      SingleTask *target_ctx,
-                                     ClosedNode *closed_tree);
+                                     ClosedNode *closed_tree,
+                                     SingleTask *translation_context);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -1758,7 +1746,8 @@ namespace Legion {
                                        const FieldMask &virtual_mask,
                                        VersionInfo &version_info,
                                        SingleTask *target_ctx,
-                                       ClosedNode *closed_tree);
+                                       ClosedNode *closed_tree,
+                                       SingleTask *translation_ctx);
       void premap_region(ContextID ctx, 
                          const RegionRequirement &req,
                          const FieldMask &valid_mask,

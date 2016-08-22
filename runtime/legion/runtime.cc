@@ -5255,11 +5255,6 @@ namespace Legion {
               runtime->handle_acquire_response(derez);
               break;
             }
-          case SEND_BACK_LOGICAL_STATE:
-            {
-              runtime->handle_logical_state_return(derez, remote_address_space);
-              break;
-            }
           case SEND_VARIANT_REQUEST:
             {
               runtime->handle_variant_request(derez, remote_address_space);
@@ -15181,15 +15176,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_logical_state(AddressSpaceID target,
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_variant_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16124,14 +16110,6 @@ namespace Legion {
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
       manager->process_acquire_response(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_logical_state_return(Deserializer &derez, 
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeNode::handle_logical_state_return(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -20987,6 +20965,14 @@ namespace Legion {
             const SliceTask::DeferMapAndLaunchArgs *margs = 
               (const SliceTask::DeferMapAndLaunchArgs*)args;
             margs->proxy_this->map_and_launch();
+            break;
+          }
+        case HLR_ADD_VERSIONING_SET_REF_TASK_ID:
+          {
+            const VersioningSetRefArgs *ref_args = 
+              (const VersioningSetRefArgs*)args;
+            LocalReferenceMutator mutator;
+            ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
             break;
           }
         case HLR_RETRY_SHUTDOWN_TASK_ID:

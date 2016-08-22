@@ -291,6 +291,84 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
+    RtEvent VersioningSet<REF_KIND>::insert(VersionState *state,
+                                            const FieldMask &mask, 
+                                            Runtime *runtime, RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (versions.single_version == NULL)
+        {
+          versions.single_version = state;
+          valid_fields = mask;
+          if (REF_KIND != LAST_SOURCE_REF)
+          {
+            VersioningSetRefArgs args;
+            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
+            args.state = state;
+            args.kind = REF_KIND;
+            return runtime->issue_runtime_meta_task(&args, sizeof(args),
+                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
+                NULL, pre);
+          }
+        }
+        else if (versions.single_version == state)
+        {
+          valid_fields |= mask;
+        }
+        else
+        {
+          // Go to multi
+          LegionMap<VersionState*,FieldMask>::aligned *multi = 
+            new LegionMap<VersionState*,FieldMask>::aligned();
+          (*multi)[versions.single_version] = valid_fields;
+          (*multi)[state] = mask;
+          versions.multi_versions = multi;
+          single = false;
+          valid_fields |= mask;
+          if (REF_KIND != LAST_SOURCE_REF)
+          {
+            VersioningSetRefArgs args;
+            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
+            args.state = state;
+            args.kind = REF_KIND;
+            return runtime->issue_runtime_meta_task(&args, sizeof(args),
+                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
+                NULL, pre);
+          }
+        }
+      }
+      else
+      {
+ #ifdef DEBUG_LEGION
+        assert(versions.multi_versions != NULL);
+#endif   
+        LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
+          versions.multi_versions->find(state);
+        if (finder == versions.multi_versions->end())
+        {
+          (*versions.multi_versions)[state] = mask;
+          if (REF_KIND != LAST_SOURCE_REF)
+          {
+            VersioningSetRefArgs args;
+            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
+            args.state = state;
+            args.kind = REF_KIND;
+            return runtime->issue_runtime_meta_task(&args, sizeof(args),
+                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
+                NULL, pre);
+          }
+        }
+        else
+          finder->second |= mask;
+        valid_fields |= mask;
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    template<ReferenceSource REF_KIND>
     void VersioningSet<REF_KIND>::erase(VersionState *to_erase) 
     //--------------------------------------------------------------------------
     {
@@ -612,7 +690,10 @@ namespace Legion {
     {
       const unsigned depth = node->get_depth();
       if (depth >= split_masks.size())
+      {
         split_masks.resize(depth+1);
+        physical_states.resize(depth+1,NULL);
+      }
       split_masks[depth] = split_mask;
     }
 
@@ -624,10 +705,22 @@ namespace Legion {
       RegionTreeNode *node = state->logical_node;
       const unsigned depth = node->get_depth();
       if (depth >= physical_states.size())
+      {
         physical_states.resize(depth+1, NULL);
+        split_masks.resize(depth+1);
+      }
       if (physical_states[depth] == NULL)
         physical_states[depth] = legion_new<PhysicalState>(node, path_only);
       physical_states[depth]->add_version_state(state, state_mask);
+      if (depth >= field_versions.size())
+        field_versions.resize(depth+1);
+      FieldVersions &local_versions = field_versions[depth];
+      FieldVersions::iterator finder = 
+        local_versions.find(state->version_number);
+      if (finder == local_versions.end())
+        local_versions[state->version_number] = state_mask;
+      else
+        finder->second |= state_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -638,7 +731,10 @@ namespace Legion {
       RegionTreeNode *node = state->logical_node;
       const unsigned depth = node->get_depth();
       if (depth >= physical_states.size())
+      {
         physical_states.resize(depth+1, NULL);
+        split_masks.resize(depth+1);
+      }
       if (physical_states[depth] == NULL)
         physical_states[depth] = legion_new<PhysicalState>(node, path_only);
       physical_states[depth]->add_advance_state(state, state_mask);
@@ -758,14 +854,61 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionInfo::get_field_versions(RegionTreeNode *node,
                                          const FieldMask &needed_fields,
-                                         FieldVersions *&result_versions)
+                                         FieldVersions &result_versions)
     //--------------------------------------------------------------------------
     {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < field_versions.size());
 #endif
-      result_versions = &field_versions[depth];
+      result_versions = field_versions[depth];
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::get_advance_versions(RegionTreeNode *node,
+                                           const FieldMask &needed_fields,
+                                           FieldVersions &result_versions)
+    //--------------------------------------------------------------------------
+    {
+      const unsigned depth = node->get_depth();
+#ifdef DEBUG_LEGION
+      assert(depth < split_masks.size());
+      assert(depth < field_versions.size());
+#endif
+      FieldMask split_overlap = split_masks[depth] & needed_fields;
+      if (!!split_overlap)
+      {
+        // Intermediate node with split fields, we only need the
+        // split fields for the advance part
+        const FieldVersions &local_versions = field_versions[depth];
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = it->second & split_overlap;
+          if (!overlap)
+            continue;
+          result_versions[it->first+1] = overlap;
+          split_overlap -= overlap;
+          if (!split_overlap)
+            break;
+        }
+      }
+      else if (depth == (field_versions.size() - 1))
+      {
+        // Bottom node with no split fields so therefore we need all
+        // the fields advanced
+        const FieldVersions &local_versions = field_versions[depth];
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          result_versions[it->first+1] = overlap;
+        }
+      }
+      // Otherwise it was an intermediate level with no split mask
+      // so there are by definition no advance fields
     }
 
     //--------------------------------------------------------------------------
@@ -795,32 +938,86 @@ namespace Legion {
     void VersionInfo::pack_version_info(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      pack_upper_bound_node(rez); 
-      // Then pack the split masks, nothing else needs to be sent
-      rez.serialize<size_t>(split_masks.size());
-      for (unsigned idx = 0; idx < split_masks.size(); idx++)
-        rez.serialize(split_masks[idx]);
+      pack_version_numbers(rez);
+      rez.serialize<size_t>(physical_states.size());
+#ifdef DEBUG_LEGION
+      bool first = true;
+#endif
+      bool is_region = upper_bound_node->is_region();
+      for (std::vector<PhysicalState*>::const_iterator it = 
+            physical_states.begin(); it != physical_states.end(); it++)
+      {
+        if ((*it) == NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(first); // should only see NULL above
+#endif
+          continue;
+        }
+#ifdef DEBUG_LEGION
+        if (first)
+          assert((*it)->node == upper_bound_node);
+        first = false;
+#endif
+        rez.serialize<bool>((*it)->path_only);
+        if (is_region)
+          rez.serialize((*it)->node->as_region_node()->handle);
+        else
+          rez.serialize((*it)->node->as_partition_node()->handle);
+        (*it)->pack_physical_state(rez);
+        // Reverse polarity
+        is_region = !is_region;
+      }
     }
 
     //--------------------------------------------------------------------------
     void VersionInfo::unpack_version_info(Deserializer &derez, 
-                                          RegionTreeForest *forest)
+                              Runtime *runtime, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      unpack_upper_bound_node(derez, forest);
-      size_t num_split_masks;
-      derez.deserialize(num_split_masks);
-      split_masks.resize(num_split_masks);
-      for (unsigned idx = 0; idx < num_split_masks; idx++)
-        derez.deserialize(split_masks[idx]);
+      unpack_version_numbers(derez, runtime->forest);
+      size_t num_states;
+      derez.deserialize(num_states);
+      physical_states.resize(num_states, NULL);
+      unsigned start_depth = upper_bound_node->get_depth();
+      bool is_region = upper_bound_node->is_region();
+      for (unsigned idx = start_depth; idx < num_states; idx++)
+      {
+        bool is_path_only;
+        derez.deserialize(is_path_only);
+        RegionTreeNode *node = NULL;
+        if (is_region)
+        {
+          LogicalRegion handle;
+          derez.deserialize(handle);
+          node = runtime->forest->get_node(handle);
+        }
+        else
+        {
+          LogicalPartition handle;
+          derez.deserialize(handle);
+          node = runtime->forest->get_node(handle);
+        }
+        PhysicalState *next = legion_new<PhysicalState>(node, is_path_only);
+        next->unpack_physical_state(derez, runtime, ready_events);
+        physical_states[idx] = next;
+        // Reverse the polarity
+        is_region = !is_region;
+      }
     }
 
     //--------------------------------------------------------------------------
     void VersionInfo::pack_version_numbers(Serializer &rez)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(split_masks.size() == field_versions.size());
+#endif
       pack_upper_bound_node(rez);
-      rez.serialize<size_t>(field_versions.size());
+      // Then pack the split masks, nothing else needs to be sent
+      rez.serialize<size_t>(split_masks.size());
+      for (unsigned idx = 0; idx < split_masks.size(); idx++)
+        rez.serialize(split_masks[idx]);
       for (unsigned idx = 0; idx < field_versions.size(); idx++)
       {
         const LegionMap<VersionID,FieldMask>::aligned &fields = 
@@ -843,6 +1040,9 @@ namespace Legion {
       unpack_upper_bound_node(derez, forest);
       size_t depth;
       derez.deserialize(depth);
+      split_masks.resize(depth);
+      for (unsigned idx = 0; idx < depth; idx++)
+        derez.deserialize(split_masks[idx]);
       field_versions.resize(depth);
       for (unsigned idx = 0; idx < depth; idx++)
       {
@@ -3432,6 +3632,71 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::pack_physical_state(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(version_states.size());
+      for (PhysicalVersions::iterator it = version_states.begin();
+            it != version_states.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(advance_states.size());
+      for (PhysicalVersions::iterator it = advance_states.begin();
+            it != advance_states.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::unpack_physical_state(Deserializer &derez,
+                                              Runtime *runtime,
+                                              std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      WrapperReferenceMutator mutator(ready_events);
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        FieldMask mask;
+        derez.deserialize(mask);
+        RtEvent ready;
+        VersionState *state = runtime->find_or_request_version_state(did,ready);
+        if (ready.exists())
+        {
+          RtEvent done = version_states.insert(state, mask, runtime, ready);
+          ready_events.insert(done);
+        }
+        else
+          version_states.insert(state, mask, &mutator);
+      }
+      size_t num_advance;
+      derez.deserialize(num_advance);
+      for (unsigned idx = 0; idx < num_advance; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        FieldMask mask;
+        derez.deserialize(mask);
+        RtEvent ready;
+        VersionState *state = runtime->find_or_request_version_state(did,ready);
+        if (ready.exists())
+        {
+          RtEvent done = advance_states.insert(state, mask, runtime, ready);
+          ready_events.insert(done);
+        }
+        else
+          advance_states.insert(state, mask, &mutator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6608,7 +6873,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture(CompositeNode *target,
-                               const FieldMask &capture_mask) const
+           const FieldMask &capture_mask, SingleTask *translation_context) const
     //--------------------------------------------------------------------------
     {
       // Only need this in read only mode since we're just reading
@@ -6623,7 +6888,7 @@ namespace Legion {
           FieldMask overlap = it->second & dirty_overlap;
           if (!overlap)
             continue;
-          target->record_valid_view(it->first, overlap);
+          target->record_valid_view(it->first, overlap, translation_context);
         }
       }
       FieldMask reduction_overlap = reduction_mask & capture_mask;
@@ -6636,7 +6901,7 @@ namespace Legion {
           FieldMask overlap = it->second & reduction_overlap;
           if (!overlap)
             continue;
-          target->record_reduction_view(it->first, overlap);
+          target->record_reduction_view(it->first, overlap,translation_context);
         }
       }
       for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =

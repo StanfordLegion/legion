@@ -793,11 +793,12 @@ namespace Legion {
           rez.serialize(copy_term);
           // Figure out which version infos we need
           LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions local_versions;
-          FieldVersions *field_versions = &local_versions;
+          FieldVersions field_versions;
+          // We don't need the split fields advanced here 
+          // because we are just contributing
           versions->get_field_versions(logical_node, copy_mask, field_versions);
           for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions->begin(); it != field_versions->end(); it++)
+                field_versions.begin(); it != field_versions.end(); it++)
           {
             FieldMask overlap = it->second & copy_mask;
             if (!overlap)
@@ -988,10 +989,9 @@ namespace Legion {
       bool need_version_update = false;
       if (IS_WRITE(usage))
       {
-        FieldVersions local_field_versions;
-        FieldVersions *field_versions = &local_field_versions;
-        versions->get_field_versions(logical_node, user_mask, field_versions);
-        need_version_update = update_version_numbers(user_mask, *field_versions,
+        FieldVersions advance_versions;
+        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
       // Go up the tree if necessary 
@@ -1032,10 +1032,9 @@ namespace Legion {
       bool need_update_above = false;
       if (need_version_update)
       {
-        FieldVersions local_field_versions;
-        FieldVersions *field_versions = &local_field_versions;
-        versions->get_field_versions(logical_node, user_mask, field_versions);
-        need_update_above = update_version_numbers(user_mask, *field_versions,
+        FieldVersions advance_versions;
+        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        need_update_above = update_version_numbers(user_mask, advance_versions,
                                                    source, applied_events);
       }
       // Go up the tree if we have to
@@ -1081,11 +1080,12 @@ namespace Legion {
           rez.serialize(term_event);
           // Figure out which version infos we need
           LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions local_field_versions;
-          FieldVersions *field_versions = &local_field_versions;
+          FieldVersions field_versions;
+          // No need to advance the split fields here since we
+          // are just reading from the previous version state
           versions->get_field_versions(logical_node, user_mask, field_versions);
           for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions->begin(); it != field_versions->end(); it++)
+                field_versions.begin(); it != field_versions.end(); it++)
           {
             FieldMask overlap = it->second & user_mask;
             if (!overlap)
@@ -1155,10 +1155,9 @@ namespace Legion {
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
       {
-        FieldVersions local_field_versions;
-        FieldVersions *field_versions = &local_field_versions;
-        versions->get_field_versions(logical_node, user_mask, field_versions);
-        need_version_update = update_version_numbers(user_mask, *field_versions,
+        FieldVersions advance_versions;
+        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
       // Go up the tree if necessary
@@ -1212,10 +1211,9 @@ namespace Legion {
       bool need_update_above = false;
       if (need_version_update)
       {
-        FieldVersions local_field_versions;
-        FieldVersions *field_versions = &local_field_versions;
-        versions->get_field_versions(logical_node, user_mask, field_versions);
-        need_update_above = update_version_numbers(user_mask, *field_versions,
+        FieldVersions advance_versions;
+        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        need_update_above = update_version_numbers(user_mask, advance_versions,
                                                    source, applied_events);
       }
       // Go up the tree if we have to
@@ -1380,15 +1378,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
-      FieldVersions local_field_versions;
-      FieldVersions *field_versions = &local_field_versions;
-      versions->get_field_versions(logical_node, user_mask, field_versions);
+      // These should be the field versions that we are targeting
+      // (e.g. the versions after this operation is done)
+      FieldVersions advance_versions;
+      versions->get_advance_versions(logical_node, user_mask, advance_versions);
 #ifndef LEGION_SPY
       FieldMask split_mask;
       versions->get_split_mask(logical_node, user_mask, split_mask);
 #endif
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            field_versions->begin(); it != field_versions->end(); it++)
+            advance_versions.begin(); it != advance_versions.end(); it++)
       {
         FieldMask overlap = it->second & user_mask;
         if (!overlap)
@@ -1595,9 +1594,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
-                                            const FieldVersions &field_versions,
-                                            const AddressSpaceID source,
-                                            std::set<RtEvent> &applied_events)
+                                           const FieldVersions &target_versions,
+                                           const AddressSpaceID source,
+                                           std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       FieldMask filter_mask, invalidate_mask;
@@ -1614,7 +1613,7 @@ namespace Legion {
       sanity_check_versions();
 #endif
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            field_versions.begin(); it != field_versions.end(); it++)
+            target_versions.begin(); it != target_versions.end(); it++)
       {
         FieldMask overlap = it->second & user_mask;
         if (!overlap)
@@ -2799,13 +2798,14 @@ namespace Legion {
         // If we are reading we need to check to see if we are at
         // the right version number and whether we have done the read
         // request yet for our given version number
-        FieldVersions local_field_versions;
-        FieldVersions *field_versions = &local_field_versions;
+        // No need to advance split version numbers since we would 
+        // not be interfering with anything in the new versions yet
+        FieldVersions field_versions;
         versions->get_field_versions(logical_node, check_mask, field_versions);
         need_valid_update = check_mask;
         AutoLock v_lock(view_lock);
         for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions->begin(); it != field_versions->end(); it++)
+              field_versions.begin(); it != field_versions.end(); it++)
         {
           FieldMask overlap = it->second & check_mask;
           if (!overlap)
@@ -2951,11 +2951,10 @@ namespace Legion {
       // these fields, then we need to send invalidations to remote nodes
       // for those fields.
       FieldMask invalidate_mask;
-      FieldVersions local_field_versions;
-      FieldVersions *field_versions = &local_field_versions;
+      FieldVersions field_versions;
       versions->get_field_versions(logical_node, check_mask, field_versions);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            field_versions->begin(); it != field_versions->end(); it++)
+            field_versions.begin(); it != field_versions.end(); it++)
       {
         FieldMask overlap = it->second & check_mask;
         if (!overlap)
@@ -4166,10 +4165,10 @@ namespace Legion {
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, 
                               CompositeVersionInfo *info, ClosedNode *tree, 
-                              bool register_now)
+                              SingleTask *context, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
                      node, register_now), CompositeBase(view_lock),
-        version_info(info), closed_tree(tree)
+        version_info(info), closed_tree(tree), translation_context(context)
     {
       // Add our references
       version_info->add_reference();
@@ -4187,7 +4186,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
       : DeferredView(NULL, 0, 0, 0, NULL, false), CompositeBase(view_lock),
-        version_info(NULL), closed_tree(NULL)
+        version_info(NULL), closed_tree(NULL), translation_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4268,7 +4267,7 @@ namespace Legion {
       DistributedID result_did = runtime->get_available_distributed_id(false);
       CompositeView *result = legion_new<CompositeView>(context, result_did,
           runtime->address_space, logical_node, runtime->address_space,
-          version_info, closed_tree, true/*register now*/);
+          version_info, closed_tree, translation_context, true/*register now*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -4307,6 +4306,50 @@ namespace Legion {
             continue;
           result->record_reduction_view(it->first, overlap);
         }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* CompositeView::translate_context(SingleTask *target_context)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = context->runtime; 
+      DistributedID result_did = runtime->get_available_distributed_id(false);
+      // Make a new set of version numbers
+      CompositeVersionInfo *new_info = new CompositeVersionInfo();
+      new_info->set_upper_bound_node(logical_node);
+      CompositeView *result = legion_new<CompositeView>(context, result_did,
+          runtime->address_space, logical_node, runtime->address_space,
+          new_info, closed_tree, target_context, true/*register now*/);
+      // Clone the children
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->first->clone(result, it->second);
+      if (!!dirty_mask)
+      {
+        result->record_dirty_fields(dirty_mask);
+        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+              it = valid_views.begin(); it != valid_views.end(); it++)
+          result->record_valid_view(it->first, it->second);
+      }
+      // Recursively apply the transformation
+      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+            deferred_valid_views.begin(); it != 
+            deferred_valid_views.end(); it++)
+      {
+        if (it->first->is_composite_view())
+          result->record_valid_view(it->first->as_composite_view()->
+              translate_context(target_context), it->second);
+        else
+          result->record_valid_view(it->first, it->second);
+      }
+      if (!!reduction_mask)
+      {
+        result->record_reduction_fields(reduction_mask);
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              reduction_views.begin(); it != reduction_views.end(); it++)
+          result->record_reduction_view(it->first, it->second);
       }
       return result;
     }
@@ -4373,6 +4416,10 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
+        if (translation_context != NULL)
+          rez.serialize<UniqueID>(translation_context->get_context_uid());
+        else
+          rez.serialize<UniqueID>(0);
         bool is_region = logical_node->is_region();
         rez.serialize(is_region);
         if (is_region)
@@ -4554,7 +4601,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CompositeView::get_field_versions(RegionTreeNode *node,
                                            const FieldMask &needed_fields,
-                                           FieldVersions *&field_versions)
+                                           FieldVersions &field_versions)
     //--------------------------------------------------------------------------
     {
       // Check to see if this is at the depth of our root node or above it
@@ -4577,7 +4624,7 @@ namespace Legion {
           if (!still_needed)
           {
             // We have to make a copy here since these versions could change
-            *field_versions = finder->second.versions;
+            field_versions = finder->second.versions;
             return;
           }
         }
@@ -4588,10 +4635,19 @@ namespace Legion {
       // Result wasn't cached, retake the lock in exclusive mode and compute it
       AutoLock v_lock(view_lock);
       NodeVersionInfo &result = node_versions[node];
-      capture_node->capture_field_versions(result.versions, 
-                                           result.split_fields, still_needed);
+      capture_node->capture_field_versions(result.versions, still_needed);
       result.valid_fields |= still_needed;
-      *field_versions = result.versions;
+      field_versions = result.versions;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::get_advance_versions(RegionTreeNode *node,
+                                             const FieldMask &needed_fields,
+                                             FieldVersions &field_versions)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called here
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4601,39 +4657,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if this is at the depth of our root node or above it
-      // if it is then we can just ask our version info for the results
-      if ((node == logical_node) || 
-          (node->get_depth() <= logical_node->get_depth()))
-      {
+      // if it is above then we can just ask our version info for the results
+      if (node->get_depth() < logical_node->get_depth())
         version_info->get_split_mask(node, needed_fields, split);
-        return;
-      }
-      // See if we've already cached the result
-      FieldMask still_needed;
-      {
-        AutoLock v_lock(view_lock,1,false/*exlcusive*/);
-        LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned::const_iterator
-          finder = node_versions.find(node);
-        if (finder != node_versions.end())
-        {
-          still_needed = needed_fields - finder->second.valid_fields;
-          if (!still_needed)
-          {
-            split = finder->second.split_fields;
-            return;
-          }
-        }
-        else
-          still_needed = needed_fields; // we still need all the fields
-      }
-      CompositeNode *capture_node = capture_above(node, still_needed);
-      // Result wasn't cached, retake the lock in exclusive mode and compute it
-      AutoLock v_lock(view_lock);
-      NodeVersionInfo &result = node_versions[node];
-      capture_node->capture_field_versions(result.versions, 
-                                           result.split_fields, still_needed);
-      result.valid_fields |= still_needed;
-      split = result.split_fields;
+      // Nothing at or below here is considered to be split because it is 
+      // closed so there is no need for us to do anything
     }
 
     //--------------------------------------------------------------------------
@@ -4657,6 +4685,13 @@ namespace Legion {
       // Do this on the way back down to know that the parent node is good
       parent_node->perform_ready_check(needed_fields);
       return parent_node->find_child_node(node);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* CompositeView::get_translation_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return translation_context;
     }
 
     //--------------------------------------------------------------------------
@@ -4713,6 +4748,8 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner;
       derez.deserialize(owner);
+      UniqueID translation_uid;
+      derez.deserialize(translation_uid);
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *target_node;
@@ -4732,6 +4769,9 @@ namespace Legion {
       version_info->unpack_version_numbers(derez, runtime->forest);
       ClosedNode *closed_tree = 
         ClosedNode::unpack_closed_node(derez, runtime, is_region);
+      SingleTask *translation_context = NULL;
+      if (translation_uid != 0)
+        translation_context = runtime->find_context(translation_uid);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
@@ -4740,11 +4780,12 @@ namespace Legion {
                                            did, owner, target_node, 
                                            runtime->address_space,
                                            version_info, closed_tree,
+                                           translation_context,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
                            target_node, runtime->address_space,
-                           version_info, closed_tree, 
+                           version_info, closed_tree, translation_context,
                            false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
@@ -4794,6 +4835,13 @@ namespace Legion {
         assert(view->is_materialized_view());
 #endif
         MaterializedView *mat_view = view->as_materialized_view();
+        // Perform a translation if necessary
+        if (translation_context != NULL)
+        {
+          InstanceView *inst_view = logical_node->find_instance_view(
+              mat_view->manager, translation_context);
+          mat_view = inst_view->as_materialized_view();
+        }
         LegionMap<MaterializedView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(mat_view);
         if (finder == valid_views.end())
@@ -4831,6 +4879,10 @@ namespace Legion {
                                               const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      // Perform a translation if necessary
+      if (translation_context != NULL)
+        view = logical_node->find_instance_view(view->manager, 
+                                  translation_context)->as_reduction_view();
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
       if (finder == reduction_views.end())
@@ -5127,6 +5179,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    SingleTask* CompositeNode::get_translation_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return parent->get_translation_context();
+    }
+
+    //--------------------------------------------------------------------------
     void CompositeNode::perform_ready_check(FieldMask mask)
     //--------------------------------------------------------------------------
     {
@@ -5253,6 +5312,7 @@ namespace Legion {
     void CompositeNode::capture(RtUserEvent capture_event)
     //--------------------------------------------------------------------------
     {
+      SingleTask *translation_context = parent->get_translation_context();
       {
         AutoLock n_lock(node_lock);
         LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
@@ -5267,7 +5327,7 @@ namespace Legion {
           FieldMask overlap = it->second & finder->second;
           if (!overlap)
             continue;
-          it->first->capture(this, overlap);
+          it->first->capture(this, overlap, translation_context);
         }
         valid_fields |= finder->second;
         pending_captures.erase(finder); 
@@ -5425,9 +5485,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
+    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m,
+                                          SingleTask *translation_context)
     //--------------------------------------------------------------------------
     {
+      // Perform a translation if necessary
+      if ((translation_context != NULL) && view->is_instance_view())
+        view = logical_node->find_instance_view(
+            view->as_instance_view()->get_manager(), translation_context);
       // should already hold the lock from the caller
       LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
         valid_views.find(view);
@@ -5453,9 +5518,13 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void CompositeNode::record_reduction_view(ReductionView *view,
-                                              const FieldMask &mask)
+                         const FieldMask &mask, SingleTask *translation_context)
     //--------------------------------------------------------------------------
     {
+      // Perform the translation if necessary
+      if (translation_context != NULL)
+        view = logical_node->find_instance_view(view->get_manager(), 
+                                      translation_context)->as_reduction_view();
       // should already hold the lock from the caller
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
@@ -5669,7 +5738,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeNode::capture_field_versions(FieldVersions &versions,
-                                               FieldMask &split_fields,
                                             const FieldMask &capture_mask) const
     //--------------------------------------------------------------------------
     {
@@ -5687,11 +5755,6 @@ namespace Legion {
         else
           finder->second |= overlap;
       }
-      // Any children for which we have fields are dirty and therefore
-      // are split versions numbers
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-            children.begin(); it != children.end(); it++)
-        split_fields |= it->second;
     }
 
     /////////////////////////////////////////////////////////////

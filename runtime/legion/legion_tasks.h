@@ -157,7 +157,8 @@ namespace Legion {
                               std::vector<VersionInfo> &infos,
                               const std::vector<bool> &full_version_info);
       void unpack_version_infos(Deserializer &derez,
-                                std::vector<VersionInfo> &infos);
+                                std::vector<VersionInfo> &infos,
+                                std::set<RtEvent> &ready_events);
     protected:
       void pack_restrict_infos(Serializer &rez, 
                                std::vector<RestrictInfo> &infos);
@@ -603,8 +604,6 @@ namespace Legion {
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      void send_back_created_state(AddressSpaceID target, unsigned start,
-                                   RegionTreeContext remote_outermost_context);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);

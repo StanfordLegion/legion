@@ -3211,7 +3211,7 @@ namespace Legion {
                                               src_requirements[idx],
                                               src_targets[src_composite],
                                               src_versions[idx],
-                                              parent_ctx, this,
+                                              parent_ctx, this, NULL,
                                               false/*needs fields*/
 #ifdef DEBUG_LEGION
                                               , idx, get_logging_name()
@@ -5208,6 +5208,7 @@ namespace Legion {
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/, 
+                                                NULL/*no translation*/,
                                                 composite_idx, closed_tree,
                                                 completion_event,
                                                 map_applied_conditions,
@@ -6017,6 +6018,7 @@ namespace Legion {
       runtime->forest->map_virtual_region(physical_ctx, requirement,
                                           composite_refs[0], version_info,
                                           parent_ctx->get_parent(), this,
+                                          parent_ctx->get_parent(),
                                           true/*needs fields*/
 #ifdef DEBUG_LEGION
                                           , 0/*idx*/, get_logging_name()

@@ -137,6 +137,8 @@ namespace Legion {
     public:
       void insert(VersionState *state, const FieldMask &mask, 
                   ReferenceMutator *mutator = NULL); 
+      RtEvent insert(VersionState *state, const FieldMask &mask, 
+                     Runtime *runtime, RtEvent pre);
       void erase(VersionState *to_erase);
       void clear(void);
       size_t size(void) const;
@@ -169,6 +171,14 @@ namespace Legion {
       bool single;
     };
 
+    // Small helper struct for adding references to versioning set values
+    struct VersioningSetRefArgs {
+    public:
+      HLRTaskID hlr_id;
+      VersionState *state;
+      ReferenceSource kind;
+    };
+
     // Small typedef to define field versions
     typedef LegionMap<VersionID,FieldMask>::aligned FieldVersions;
     /**
@@ -181,9 +191,12 @@ namespace Legion {
     class VersionTracker {
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
-      virtual void get_field_versions(RegionTreeNode *node,
+      virtual void get_field_versions(RegionTreeNode *node, 
                                       const FieldMask &needed_fields,
-                                      FieldVersions *&field_versions) = 0;
+                                      FieldVersions &field_versions) = 0;
+      virtual void get_advance_versions(RegionTreeNode *node,
+                                        const FieldMask &needed_fields,
+                                        FieldVersions &field_versions) = 0;
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split) = 0;
@@ -235,13 +248,16 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
-    public:
       virtual void get_field_versions(RegionTreeNode *node,
                                       const FieldMask &needed_fields,
-                                      FieldVersions *&field_versions);
+                                      FieldVersions &field_versions);
+      virtual void get_advance_versions(RegionTreeNode *node,
+                                        const FieldMask &needed_fields,
+                                        FieldVersions &field_versions);
     public:
       void pack_version_info(Serializer &rez);
-      void unpack_version_info(Deserializer &derez, RegionTreeForest *forest);
+      void unpack_version_info(Deserializer &derez, Runtime *runtime,
+                               std::set<RtEvent> &ready_events);
       void pack_version_numbers(Serializer &rez);
       void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
     protected:
@@ -743,6 +759,10 @@ namespace Legion {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
+      void pack_physical_state(Serializer &rez);
+      void unpack_physical_state(Deserializer &derez, Runtime *runtime,
+                                 std::set<RtEvent> &ready_events);
+    public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
     public:
@@ -1084,7 +1104,8 @@ namespace Legion {
                                                  Deserializer &derez); 
     public:
       void capture(CompositeView *target, const FieldMask &capture_mask) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask,
+                   SingleTask *translation_context) const;
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;

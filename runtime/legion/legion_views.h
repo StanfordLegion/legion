@@ -881,6 +881,7 @@ namespace Legion {
                     CopyAcrossHelper *helper, FieldMask dominate_mask, 
                     bool check_overwrite, bool check_ready = true);
     public:
+      virtual SingleTask* get_translation_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -958,13 +959,13 @@ namespace Legion {
       public:
         FieldVersions versions;
         FieldMask valid_fields;
-        FieldMask split_fields;
       };
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeVersionInfo *info,
-                    ClosedNode *closed_tree, bool register_now);
+                    ClosedNode *closed_tree, SingleTask *context,
+                    bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -974,9 +975,7 @@ namespace Legion {
     public:
       CompositeView* clone(const FieldMask &clone_mask,
          const LegionMap<DeferredView*,FieldMask>::aligned &replacements) const;
-    public:
-      void set_translation_context(SingleTask *context);
-      void update_composite_view(VersionState *state, const FieldMask &mask);
+      CompositeView* translate_context(SingleTask *target_context);
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
@@ -1006,7 +1005,10 @@ namespace Legion {
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
       virtual void get_field_versions(RegionTreeNode *node,
                                       const FieldMask &needed_fields,
-                                      FieldVersions *&field_versions);
+                                      FieldVersions &field_versions);
+      virtual void get_advance_versions(RegionTreeNode *node,
+                                        const FieldMask &needed_fields,
+                                        FieldVersions &field_versions);
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
@@ -1015,6 +1017,7 @@ namespace Legion {
                                    const FieldMask &needed_fields);
     public:
       // From CompositeBase
+      virtual SingleTask* get_translation_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1044,6 +1047,8 @@ namespace Legion {
       CompositeVersionInfo *const version_info;
       // The abstraction of the tree that we closed
       ClosedNode *const closed_tree;
+      // The translation context if any
+      SingleTask *const translation_context;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
@@ -1087,6 +1092,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       // From CompositeBase
+      virtual SingleTask* get_translation_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1106,9 +1112,11 @@ namespace Legion {
       void notify_invalid(ReferenceMutator *mutator);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask);
+      void record_valid_view(LogicalView *view, const FieldMask &mask,
+                             SingleTask *translation_context);
       void record_reduction_fields(const FieldMask &reduction_fields);
-      void record_reduction_view(ReductionView *view, const FieldMask &mask);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask,
+                                 SingleTask *translation_context);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
       void record_version_state(VersionState *state, const FieldMask &mask,
@@ -1125,7 +1133,6 @@ namespace Legion {
                                    FieldMask &need_temporary,
                                    FieldMask &already_valid);
       void capture_field_versions(FieldVersions &versions,
-                                  FieldMask &split_fields,
                                   const FieldMask &capture_mask) const;
     public:
       RegionTreeNode *const logical_node;

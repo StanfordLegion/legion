@@ -291,6 +291,7 @@ namespace Legion {
       HLR_DEFER_PERFORM_MAPPING_TASK_ID,
       HLR_DEFER_LAUNCH_TASK_ID,
       HLR_DEFER_MAP_AND_LAUNCH_TASK_ID,
+      HLR_ADD_VERSIONING_SET_REF_TASK_ID,
       HLR_MESSAGE_ID, // These two must be the last two
       HLR_RETRY_SHUTDOWN_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -367,6 +368,7 @@ namespace Legion {
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
         "Defer Task Map and Launch",                              \
+        "Defer Versioning Set Reference",                         \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -602,7 +604,6 @@ namespace Legion {
       SEND_NEVER_GC_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
-      SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
       SEND_CONSTRAINT_REQUEST,
@@ -718,7 +719,6 @@ namespace Legion {
         "Send Never GC Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
-        "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
         "Send Constraint Request",                                    \

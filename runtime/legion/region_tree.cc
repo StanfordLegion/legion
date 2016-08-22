@@ -2109,6 +2109,7 @@ namespace Legion {
                                               VersionInfo &version_info,
                                               SingleTask *target_ctx,
                                               Operation *op,
+                                              SingleTask *translation_context,
                                               const bool needs_fields
 #ifdef DEBUG_LEGION
                                               , unsigned index
@@ -2132,14 +2133,16 @@ namespace Legion {
         FieldMask composite_mask = 
           child_node->column_source->get_field_mask(req.privilege_fields);
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
-            composite_mask, version_info, target_ctx, closed_tree);
+                                 composite_mask, version_info, target_ctx,
+                                 closed_tree, translation_context);
         composite_ref.set_composite_view(view, op);
       }
       else
       {
         const FieldMask &composite_mask = composite_ref.get_valid_fields();
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
-            composite_mask, version_info, target_ctx, closed_tree);
+                                 composite_mask, version_info, target_ctx,
+                                 closed_tree, translation_context);
         composite_ref.set_composite_view(view, op);
       }
     }
@@ -2317,7 +2320,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
                       const RegionRequirement &req, VersionInfo &version_info,
-                      Operation *op, unsigned index, int composite_idx,
+                      Operation *op, unsigned index, 
+                      SingleTask *translation_context, int composite_idx,
                       ClosedNode *closed_tree, ApEvent term_event, 
                       std::set<RtEvent> &map_applied, const InstanceSet &targets
 #ifdef DEBUG_LEGION
@@ -2339,7 +2343,8 @@ namespace Legion {
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                  closing_mask, version_info, op->get_parent(), closed_tree);
+                                closing_mask, version_info, op->get_parent(), 
+                                closed_tree, translation_context);
       PhysicalState *physical_state = NULL;
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
       bool need_valid = true;
@@ -3250,23 +3255,6 @@ namespace Legion {
       // Perform the detachment
       return detach_node->detach_file(ctx.get_id(), detach_op,
                                       version_info, ref);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::send_back_logical_state(RegionTreeContext local_ctx,
-                                                   RegionTreeContext remote_ctx,
-                                                   const RegionRequirement &req,
-                                                   AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *top_node = get_node(req.region);  
-      FieldMask send_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      top_node->send_back_logical_state(local_ctx.get_id(), remote_ctx.get_id(),
-                                        send_mask, target);
     }
 
     //--------------------------------------------------------------------------
@@ -12206,176 +12194,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::send_back_logical_state(ContextID local_ctx,
-                                                 ContextID remote_ctx,
-                                                 const FieldMask &send_mask,
-                                                 AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(local_ctx);
-      Serializer field_rez;
-      unsigned num_field_states = 0;
-      for (LegionList<FieldState>::aligned::const_iterator it = 
-            state.field_states.begin(); it != state.field_states.end(); it++)
-      {
-        if (send_mask * it->valid_fields)
-          continue;
-        num_field_states++;
-        field_rez.serialize(it->open_state);
-        field_rez.serialize(it->redop);
-        unsigned num_children = 0;
-        Serializer child_rez;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator cit = 
-              it->open_children.begin(); cit != it->open_children.end(); cit++)
-        {
-          FieldMask overlap = send_mask & cit->second;
-          if (!overlap)
-            continue;
-          num_children++;
-          child_rez.serialize(cit->first);
-          child_rez.serialize(overlap);
-          // Also traverse the child
-          RegionTreeNode *child = get_tree_child(cit->first);
-          child->send_back_logical_state(local_ctx, remote_ctx, overlap,target);
-        }
-        field_rez.serialize(num_children);
-        field_rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
-      }
-      // Make an event to indicate when we are done moving the state back
-      RtUserEvent done_event = Runtime::create_rt_user_event();
-      Serializer rez;
-      {
-        RezCheck z(rez); 
-        if (is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(as_partition_node()->handle);
-        }
-        rez.serialize(remote_ctx);
-        rez.serialize(num_field_states);
-        rez.serialize(field_rez.get_buffer(), field_rez.get_used_bytes());
-        // No need to pack the users, they are done
-        // TODO Versioning: send back version data
-        assert(false);
-        if (!(state.outstanding_reduction_fields * send_mask))
-        {
-          Serializer reduc_rez;
-          unsigned num_reductions = 0;
-          for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
-                state.outstanding_reductions.begin(); it !=
-                state.outstanding_reductions.end(); it++)
-          {
-            FieldMask overlap = it->second & send_mask;
-            if (!overlap)
-              continue;
-            num_reductions++;
-            reduc_rez.serialize(it->first);
-            reduc_rez.serialize(overlap);
-          }
-          rez.serialize(num_reductions);
-          rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
-        }
-        else
-          rez.serialize<unsigned>(0);
-        FieldMask send_dirty = state.dirty_below & send_mask;
-        rez.serialize(send_dirty);
-        
-        rez.serialize(done_event);
-      }
-      context->runtime->send_back_logical_state(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::process_logical_state_return(Deserializer &derez,
-                               AddressSpaceID source, ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      ContextID local_ctx;
-      derez.deserialize(local_ctx);
-      CurrentState &state = get_current_state(local_ctx);
-      unsigned num_field_states;
-      derez.deserialize(num_field_states);
-      for (unsigned idx = 0; idx < num_field_states; idx++)
-      {
-        FieldState field_state;
-        derez.deserialize(field_state.open_state);
-        derez.deserialize(field_state.redop);
-        unsigned num_children;
-        derez.deserialize(num_children);
-        if (num_children == 0)
-          continue;
-        for (unsigned idx2 = 0; idx2 < num_children; idx2++)
-        {
-          ColorPoint child;
-          derez.deserialize(child);
-          FieldMask &child_mask = field_state.open_children[child];
-          derez.deserialize(child_mask);
-          field_state.valid_fields |= child_mask;
-        }
-        merge_new_field_state(state, field_state);
-      }
-      // TODO Versioning: unpack versioning information
-      assert(false);
-      unsigned num_reduc;
-      derez.deserialize(num_reduc);
-      for (unsigned idx = 0; idx < num_reduc; idx++)
-      {
-        ReductionOpID redop;
-        derez.deserialize(redop);
-        FieldMask reduc_mask;
-        derez.deserialize(reduc_mask);
-        state.outstanding_reductions[redop] |= reduc_mask;
-        state.outstanding_reduction_fields |= reduc_mask;
-      }
-      FieldMask dirty_below;
-      derez.deserialize(dirty_below);
-      state.dirty_below |= dirty_below;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::handle_logical_state_return(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = forest->get_node(handle); 
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = forest->get_node(handle);
-      }
-      std::set<RtEvent> mutator_events;
-      WrapperReferenceMutator mutator(mutator_events);
-      target_node->process_logical_state_return(derez, source, &mutator);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      if (!mutator_events.empty())
-        Runtime::trigger_event(done_event, 
-            Runtime::merge_events(mutator_events));
-      else
-        Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
                                                 SingleTask *target_ctx,
-                                                ClosedNode *closed_tree)
+                                                ClosedNode *closed_tree,
+                                                SingleTask *translation_context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12392,7 +12216,8 @@ namespace Legion {
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
                            local_space, this, local_space, view_info, 
-                           closed_tree, true/*register now*/);
+                           closed_tree, translation_context, 
+                           true/*register now*/);
       // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
       // Pull down the valid instance views before we do the capture
@@ -14774,12 +14599,13 @@ namespace Legion {
                                                   const FieldMask &virtual_mask,
                                                   VersionInfo &version_info,
                                                   SingleTask *target_ctx,
-                                                  ClosedNode *closed_tree)
+                                                  ClosedNode *closed_tree,
+                                                  SingleTask *translation_ctx)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
       return create_composite_instance(ctx_id, virtual_mask, version_info, 
-                                       target_ctx, closed_tree);
+                                 target_ctx, closed_tree, translation_ctx);
     }
 
     //--------------------------------------------------------------------------

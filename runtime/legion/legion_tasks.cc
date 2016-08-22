@@ -840,7 +840,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::unpack_version_infos(Deserializer &derez,
-                                      std::vector<VersionInfo> &infos)
+                                      std::vector<VersionInfo> &infos,
+                                      std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -850,7 +851,7 @@ namespace Legion {
         bool full_info;
         derez.deserialize(full_info);
         if (full_info)
-          infos[idx].unpack_version_info(derez, runtime->forest);
+          infos[idx].unpack_version_info(derez, runtime, ready_events);
         else
           infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
@@ -3200,39 +3201,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false); // should only be called for RemoteTask
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::send_back_created_state(AddressSpaceID target, 
-                                             unsigned start,
-                                             RegionTreeContext remote_outermost)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-      {
-        RegionRequirement &req = created_requirements[idx];
-        // If it was deleted, then we don't care
-        if (created_regions.find(req.region) == created_regions.end())
-          continue;
-        FieldSpace fs = req.region.get_field_space();
-        bool all_fields_deleted = true;
-        for (std::set<FieldID>::const_iterator it = 
-              req.privilege_fields.begin(); it != 
-              req.privilege_fields.end(); it++)
-        {
-          if (created_fields.find(std::pair<FieldSpace,FieldID>(fs,*it)) != 
-              created_fields.end())
-          {
-            all_fields_deleted = false;
-            break;
-          }
-        }
-        if (all_fields_deleted)
-          continue;
-        unsigned index = regions.size() + idx;
-        runtime->forest->send_back_logical_state(get_parent_context(index),
-                       remote_outermost, created_requirements[idx], target);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6269,11 +6237,13 @@ namespace Legion {
           SingleTask *target_ctx = this;
           if (is_locally_mapped() && !runtime->is_local(target_proc))
             target_ctx = parent_ctx;
+          // No translation context for now, we'll change that
+          // when we know where we are going to be running
           runtime->forest->map_virtual_region(enclosing_contexts[idx],
                                               regions[idx],
                                               physical_instances[idx][0],
                                               get_version_info(idx),
-                                              target_ctx, this,
+                                              target_ctx, this, NULL,
                                               false/*needs fields*/
 #ifdef DEBUG_LEGION
                                               , idx, get_logging_name()
@@ -6550,11 +6520,11 @@ namespace Legion {
           assert(physical_instances[idx].has_composite_ref());
 #endif
           const InstanceRef &ref = physical_instances[idx].get_composite_ref();
-          CompositeView *composite_view = ref.get_composite_view();
           // If we locally mapped and are now remote, we need to translate
           // this composite instance so that its views are specific to 
           // our context
-          composite_view->set_translation_context(this);
+          CompositeView *composite_view = 
+            ref.get_composite_view()->translate_context(this); 
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx], 
               this, idx, composite_view);
@@ -7334,6 +7304,7 @@ namespace Legion {
       if (!is_leaf() || has_virtual_instances())
       {
         // Note that this loop doesn't handle create regions
+        // we deal with that case below
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
           // We also don't need to close up read-only instances
@@ -7365,6 +7336,20 @@ namespace Legion {
           }
         }
       } 
+      // If we have any created requirements, we have to issue virtual close
+      // operations for those fields as well.
+      if (!created_requirements.empty())
+      {
+        const unsigned offset = regions.size();
+        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+        {
+          // Make a virtual close op to close up the tree  
+          VirtualCloseOp *close_op = 
+            runtime->get_available_virtual_close_op(true);
+          close_op->initialize(this, offset + idx);
+          runtime->add_to_dependence_queue(executing_processor, close_op);
+        }
+      }
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -9019,7 +9004,7 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
-      unpack_version_infos(derez, version_infos);
+      unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -9155,13 +9140,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      send_back_created_state(target, regions.size(), remote_outermost_context);
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
+      AddressSpaceID target = runtime->find_address_space(orig_proc);
       pack_privilege_state(rez, target);
       // Then pack the future result
       {
@@ -12371,7 +12355,7 @@ namespace Legion {
       derez.deserialize(remote_outermost_context);
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
-      unpack_version_infos(derez, version_infos);
+      unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       unpack_projection_infos(derez, projection_infos, index_domain);
       if (Runtime::legion_spy_enabled)
@@ -12859,18 +12843,11 @@ namespace Legion {
     void SliceTask::pack_remote_complete(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Send back any created state that our point tasks made
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
-      for (std::vector<PointTask*>::const_iterator it = points.begin();
-            it != points.end(); it++)
-      {
-        (*it)->send_back_created_state(target, regions.size(),
-                                       remote_outermost_context);
-      }
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
       // Serialize the privilege state
+      AddressSpaceID target = runtime->find_address_space(orig_proc);
       pack_privilege_state(rez, target); 
       // Now pack up the future results
       if (redop != 0)
