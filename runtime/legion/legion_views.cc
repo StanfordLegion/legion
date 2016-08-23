@@ -181,7 +181,7 @@ namespace Legion {
       assert(view->is_instance_view());
 #endif
       InstanceView *inst_view = view->as_instance_view();
-      inst_view->process_update_response(derez, done_event);
+      inst_view->process_update_response(derez, done_event, runtime->forest);
     }
 
     //--------------------------------------------------------------------------
@@ -574,15 +574,20 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
+      RegionNode *origin_node = logical_node->as_region_node();
       find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
-                                    versions, creator_op_id, index, source,
-                                    preconditions, applied_events);
+                                    origin_node, versions, creator_op_id, 
+                                    index, source, preconditions, 
+                                    applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-                        local_point, versions, creator_op_id, index,
-                        source, preconditions, applied_events);
+                        local_point, origin_node, versions, creator_op_id, 
+                        index, source, preconditions, applied_events);
       }
     }
 
@@ -591,6 +596,7 @@ namespace Legion {
                                                          bool reading,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
+                                                  RegionNode *origin_node,
                                                   VersionTracker *versions,
                                                   const UniqueID creator_op_id,
                                                   const unsigned index,
@@ -600,14 +606,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_local_copy_preconditions(redop, reading, copy_mask, child_color, 
-                                    versions, creator_op_id, index, source,
-                                    preconditions, applied_events);
+                                    origin_node, versions, creator_op_id, index, 
+                                    source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-                        local_point, versions, creator_op_id, index, 
-                        source, preconditions, applied_events);
+                        local_point, origin_node, versions, creator_op_id, 
+                        index, source, preconditions, applied_events);
       }
     }
     
@@ -616,6 +622,7 @@ namespace Legion {
                                                          bool reading,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
+                                                  RegionNode *origin_node,
                                                   VersionTracker *versions,
                                                   const UniqueID creator_op_id,
                                                   const unsigned index,
@@ -639,7 +646,7 @@ namespace Legion {
         RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
         FieldMask observed, non_dominated;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions(copy_mask, usage, child_color, 
+        find_current_preconditions(copy_mask, usage, child_color, origin_node,
                                    creator_op_id, index, preconditions,
                                    dead_events, filter_current_users,
                                    observed, non_dominated);
@@ -649,8 +656,8 @@ namespace Legion {
         const FieldMask previous_mask = copy_mask - dominated;
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color,
-                                      creator_op_id, index, preconditions,
-                                      dead_events);
+                                      origin_node, creator_op_id, index, 
+                                      preconditions, dead_events);
       }
       else
       {
@@ -667,14 +674,16 @@ namespace Legion {
           const FieldMask current_mask = copy_mask - write_skip_mask;
           if (!!current_mask)
             find_current_preconditions(current_mask, usage, child_color,
-                                       creator_op_id, index, preconditions,
-                                       dead_events, filter_current_users,
+                                       origin_node, creator_op_id, index, 
+                                       preconditions, dead_events, 
+                                       filter_current_users,
                                        observed, non_dominated);
         }
         else // the normal case with no write-skip
           find_current_preconditions(copy_mask, usage, child_color, 
-                                     creator_op_id, index, preconditions,
-                                     dead_events, filter_current_users,
+                                     origin_node, creator_op_id, index, 
+                                     preconditions, dead_events, 
+                                     filter_current_users, 
                                      observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
@@ -682,8 +691,8 @@ namespace Legion {
         const FieldMask previous_mask = copy_mask - dominated;
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color,
-                                      creator_op_id, index, preconditions,
-                                      dead_events);
+                                      origin_node, creator_op_id, index, 
+                                      preconditions, dead_events);
       }
       if (!dead_events.empty() || 
           !filter_previous_users.empty() || !filter_current_users.empty() ||
@@ -730,21 +739,27 @@ namespace Legion {
         usage.privilege = REDUCE;
       else
         usage.privilege = READ_WRITE;
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
+      RegionNode *origin_node = logical_node->as_region_node();
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color,
-                               versions, creator_op_id, index, 
+                               origin_node, versions, creator_op_id, index,
                                copy_mask, source, applied_events);
       }
       add_local_copy_user(usage, copy_term, true/*base*/, ColorPoint(),
-          versions, creator_op_id, index, copy_mask, source, applied_events);
+          origin_node, versions, creator_op_id, index, copy_mask, 
+          source, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_copy_user_above(const RegionUsage &usage, 
                                                ApEvent copy_term, 
                                                const ColorPoint &child_color,
+                                               RegionNode *origin_node,
                                                VersionTracker *versions,
                                                const UniqueID creator_op_id,
                                                const unsigned index,
@@ -756,17 +771,19 @@ namespace Legion {
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_copy_user_above(usage, copy_term, local_color,
+        parent->add_copy_user_above(usage, copy_term, local_color, origin_node,
             versions, creator_op_id, index, copy_mask, source, applied_events);
       }
       add_local_copy_user(usage, copy_term, false/*base*/, child_color, 
-          versions, creator_op_id, index, copy_mask, source, applied_events);
+          origin_node, versions, creator_op_id, index, copy_mask, 
+          source, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_local_copy_user(const RegionUsage &usage, 
                                                ApEvent copy_term,bool base_user,
                                                const ColorPoint &child_color,
+                                               RegionNode *origin_node,
                                                VersionTracker *versions,
                                                const UniqueID creator_op_id,
                                                const unsigned index,
@@ -788,6 +805,7 @@ namespace Legion {
           rez.serialize(usage);
           rez.serialize(copy_mask);
           rez.serialize(child_color);
+          rez.serialize(origin_node->handle);
           rez.serialize(creator_op_id);
           rez.serialize(index);
           rez.serialize(copy_term);
@@ -819,7 +837,7 @@ namespace Legion {
         applied_events.insert(remote_update_event);
       }
       PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color, 
-                                                    creator_op_id, index);
+                                    creator_op_id, index, origin_node);
       user->add_reference();
       bool issue_collect = false;
       {
@@ -861,15 +879,21 @@ namespace Legion {
       if (start_use_event.exists())
         wait_on_events.insert(start_use_event);
       UniqueID op_id = op->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
+      RegionNode *origin_node = logical_node->as_region_node();
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
-         versions, op_id, index, user_mask, wait_on_events, applied_events);
+          origin_node, versions, op_id, index, user_mask, 
+          wait_on_events, applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
-            versions, op_id, index, user_mask, wait_on_events, applied_events);
+                              origin_node, versions, op_id, index, user_mask, 
+                              wait_on_events, applied_events);
       }
       return Runtime::merge_events(wait_on_events); 
     }
@@ -879,6 +903,7 @@ namespace Legion {
                                                 const RegionUsage &usage,
                                                 ApEvent term_event,
                                                 const ColorPoint &child_color,
+                                                RegionNode *origin_node,
                                                 VersionTracker *versions,
                                                 const UniqueID op_id,
                                                 const unsigned index,
@@ -888,14 +913,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
-      find_local_user_preconditions(usage, term_event, child_color, versions, 
-          op_id, index, user_mask, preconditions, applied_events);
+      find_local_user_preconditions(usage, term_event, child_color, origin_node,
+          versions, op_id, index, user_mask, preconditions, applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
-            versions, op_id, index, user_mask, preconditions, applied_events);
+                              origin_node, versions, op_id, index, user_mask, 
+                              preconditions, applied_events);
       }
     }
 
@@ -904,6 +930,7 @@ namespace Legion {
                                                 const RegionUsage &usage,
                                                 ApEvent term_event,
                                                 const ColorPoint &child_color,
+                                                RegionNode *origin_node,
                                                 VersionTracker *versions,
                                                 const UniqueID op_id,
                                                 const unsigned index,
@@ -925,8 +952,8 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
-        find_current_preconditions(user_mask, usage, child_color, term_event,
-                                   op_id, index, preconditions, 
+        find_current_preconditions(user_mask, usage, child_color, origin_node,
+                                   term_event, op_id, index, preconditions, 
                                    dead_events, filter_current_users, 
                                    observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
@@ -935,15 +962,15 @@ namespace Legion {
         const FieldMask previous_mask = user_mask - dominated;
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color, 
-                                      term_event, op_id, index,
+                                      origin_node, term_event, op_id, index,
                                       preconditions, dead_events);
       }
       else
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
-        find_current_preconditions(user_mask, usage, child_color, term_event,
-                                   op_id, index, preconditions, 
+        find_current_preconditions(user_mask, usage, child_color, origin_node,
+                                   term_event, op_id, index, preconditions, 
                                    dead_events, filter_current_users, 
                                    observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
@@ -952,7 +979,7 @@ namespace Legion {
         const FieldMask previous_mask = user_mask - dominated;
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color, 
-                                      term_event, op_id, index,
+                                      origin_node, term_event, op_id, index,
                                       preconditions, dead_events);
       }
       if (!dead_events.empty() || 
@@ -994,17 +1021,22 @@ namespace Legion {
         need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
+      RegionNode *origin_node = logical_node->as_region_node();
       // Go up the tree if necessary 
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, versions, 
-         op_id, index, user_mask, need_version_update, source, applied_events);
+        parent->add_user_above(usage, term_event, local_color, origin_node,
+            versions, op_id, index, user_mask, need_version_update, 
+            source, applied_events);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                         ColorPoint(), versions, op_id, index, 
-                         user_mask, source, applied_events);
+                         ColorPoint(), origin_node, versions, op_id, 
+                         index, user_mask, source, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1020,6 +1052,7 @@ namespace Legion {
     void MaterializedView::add_user_above(const RegionUsage &usage,
                                           ApEvent term_event,
                                           const ColorPoint &child_color,
+                                          RegionNode *origin_node,
                                           VersionTracker *versions,
                                           const UniqueID op_id,
                                           const unsigned index,
@@ -1041,10 +1074,11 @@ namespace Legion {
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, versions,
-         op_id, index, user_mask, need_update_above, source, applied_events);
+        parent->add_user_above(usage, term_event, local_color, origin_node,
+            versions, op_id, index, user_mask, need_update_above, 
+            source, applied_events);
       }
-      add_local_user(usage, term_event, child_color, versions,
+      add_local_user(usage, term_event, child_color, origin_node, versions,
                      op_id, index, user_mask, source, applied_events);
     }
 
@@ -1052,6 +1086,7 @@ namespace Legion {
     bool MaterializedView::add_local_user(const RegionUsage &usage,
                                           ApEvent term_event,
                                           const ColorPoint &child_color,
+                                          RegionNode *origin_node,
                                           VersionTracker *versions,
                                           const UniqueID op_id,
                                           const unsigned index,
@@ -1106,7 +1141,7 @@ namespace Legion {
         applied_events.insert(remote_update_event);
       }
       PhysicalUser *new_user = 
-        legion_new<PhysicalUser>(usage, child_color, op_id, index);
+        legion_new<PhysicalUser>(usage, child_color, op_id, index, origin_node);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user
@@ -1149,9 +1184,14 @@ namespace Legion {
       if (start_use_event.exists())
         wait_on_events.insert(start_use_event);
       UniqueID op_id = op->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
+      RegionNode *origin_node = logical_node->as_region_node();
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
-          versions, op_id, index, user_mask, wait_on_events, applied_events);
+                     origin_node, versions, op_id, index, user_mask, 
+                     wait_on_events, applied_events);
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
       {
@@ -1165,14 +1205,14 @@ namespace Legion {
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color, 
-                              versions, op_id, index, user_mask, source, 
-                              wait_on_events, applied_events, 
-                              need_version_update);
+                              origin_node, versions, op_id, index, 
+                              user_mask, source, wait_on_events, 
+                              applied_events, need_version_update);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                         ColorPoint(), versions, op_id, index, 
-                         user_mask, source, applied_events);
+                         ColorPoint(), origin_node, versions, op_id, 
+                         index, user_mask, source, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1195,6 +1235,7 @@ namespace Legion {
     void MaterializedView::add_user_above_fused(const RegionUsage &usage, 
                                                 ApEvent term_event,
                                                 const ColorPoint &child_color,
+                                                RegionNode *origin_node,
                                                 VersionTracker *versions,
                                                 const UniqueID op_id,
                                                 const unsigned index,
@@ -1206,8 +1247,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
-      find_local_user_preconditions(usage, term_event, child_color, versions, 
-          op_id, index, user_mask, preconditions, applied_events);
+      find_local_user_preconditions(usage, term_event, child_color, origin_node,
+          versions, op_id, index, user_mask, preconditions, applied_events);
       bool need_update_above = false;
       if (need_version_update)
       {
@@ -1220,12 +1261,12 @@ namespace Legion {
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color,
+        parent->add_user_above_fused(usage, term_event, local_color,origin_node,
                               versions, op_id, index, user_mask, source,
                               preconditions, applied_events, need_update_above);
       }
       // Add the user on the way back down
-      add_local_user(usage, term_event, child_color, versions,
+      add_local_user(usage, term_event, child_color, origin_node, versions,
                      op_id, index, user_mask, source, applied_events);
       // No need to launch a collect user task, the child takes care of that
     }
@@ -1238,9 +1279,12 @@ namespace Legion {
                                             const unsigned index)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
       // No need to take the lock since we are just initializing
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                    op_id, index);
+                          op_id, index, logical_node->as_region_node());
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -2224,6 +2268,7 @@ namespace Legion {
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
                                                  const ColorPoint &child_color,
+                                                 RegionNode *origin_node,
                                                  ApEvent term_event,
                                                  const UniqueID op_id,
                                                  const unsigned index,
@@ -2261,7 +2306,7 @@ namespace Legion {
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index))
+                                     child_color, op_id, index, origin_node))
           {
             preconditions.insert(cit->first);
             filter_events[cit->first] = overlap;
@@ -2278,8 +2323,8 @@ namespace Legion {
             const FieldMask user_overlap = user_mask & it->second;
             if (!user_overlap)
               continue;
-            if (has_local_precondition(it->first, usage,
-                                       child_color, op_id, index))
+            if (has_local_precondition(it->first, usage, child_color, 
+                                       op_id, index, origin_node))
             {
               preconditions.insert(cit->first);
               filter_events[cit->first] |= user_overlap;
@@ -2296,6 +2341,7 @@ namespace Legion {
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
                                                  const ColorPoint &child_color,
+                                                 RegionNode *origin_node,
                                                  ApEvent term_event,
                                                  const UniqueID op_id,
                                                  const unsigned index,
@@ -2330,7 +2376,7 @@ namespace Legion {
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index))
+                                     child_color, op_id, index, origin_node))
             preconditions.insert(pit->first);
         }
         else
@@ -2341,8 +2387,8 @@ namespace Legion {
           {
             if (user_mask * it->second)
               continue;
-            if (has_local_precondition(it->first, usage,
-                                       child_color, op_id, index))
+            if (has_local_precondition(it->first, usage, child_color, 
+                                       op_id, index, origin_node))
               preconditions.insert(pit->first);
           }
         }
@@ -2354,6 +2400,7 @@ namespace Legion {
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
                                                  const ColorPoint &child_color,
+                                                 RegionNode *origin_node,
                                                  const UniqueID op_id,
                                                  const unsigned index,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -2388,7 +2435,7 @@ namespace Legion {
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index))
+                                     child_color, op_id, index, origin_node))
           {
             LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
               preconditions.find(cit->first);
@@ -2410,8 +2457,8 @@ namespace Legion {
             const FieldMask user_overlap = user_mask & it->second;
             if (!user_overlap)
               continue;
-            if (has_local_precondition(it->first, usage,
-                                       child_color, op_id, index))
+            if (has_local_precondition(it->first, usage, child_color, 
+                                       op_id, index, origin_node))
             {
               LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
                 preconditions.find(cit->first);
@@ -2433,6 +2480,7 @@ namespace Legion {
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
                                                  const ColorPoint &child_color,
+                                                 RegionNode *origin_node,
                                                  const UniqueID op_id,
                                                  const unsigned index,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -2465,7 +2513,7 @@ namespace Legion {
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index))
+                                     child_color, op_id, index, origin_node))
           {
             LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
               preconditions.find(pit->first);
@@ -2484,8 +2532,8 @@ namespace Legion {
             const FieldMask user_overlap = user_mask & it->second;
             if (!user_overlap)
               continue;
-            if (has_local_precondition(it->first, usage,
-                                       child_color, op_id, index))
+            if (has_local_precondition(it->first, usage, child_color, 
+                                       op_id, index, origin_node))
             {
               LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
                 preconditions.find(pit->first);
@@ -3140,7 +3188,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::process_update_response(Deserializer &derez,
-                                                   RtUserEvent done_event)
+                                                   RtUserEvent done_event,
+                                                   RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3192,7 +3241,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
               PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               current_users.user_mask |= new_mask;
@@ -3204,7 +3253,7 @@ namespace Legion {
             if (num_users == 1)
             {
               current_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
               derez.deserialize(current_users.user_mask);
             }
             else
@@ -3217,7 +3266,7 @@ namespace Legion {
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
                 PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/);
+                  PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 current_users.user_mask |= new_mask;
@@ -3262,7 +3311,7 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
               PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
               FieldMask &new_mask = local[new_user];
               derez.deserialize(new_mask);
               previous_users.user_mask |= new_mask;
@@ -3274,7 +3323,7 @@ namespace Legion {
             if (num_users == 1)
             {
               previous_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/);
+                PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
               derez.deserialize(previous_users.user_mask);
             }
             else
@@ -3287,7 +3336,7 @@ namespace Legion {
               for (unsigned idx2 = 0; idx2 < num_users; idx2++)
               {
                 PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/);
+                  PhysicalUser::unpack_user(derez, true/*add ref*/, forest);
                 FieldMask &new_mask = local[new_user];
                 derez.deserialize(new_mask);
                 previous_users.user_mask |= new_mask;
@@ -3351,6 +3400,9 @@ namespace Legion {
       derez.deserialize(user_mask);
       ColorPoint child_color;
       derez.deserialize(child_color);
+      LogicalRegion origin_handle;
+      derez.deserialize(origin_handle);
+      RegionNode *origin_node = forest->get_node(origin_handle);
       UniqueID op_id;
       derez.deserialize(op_id);
       unsigned index;
@@ -3377,11 +3429,12 @@ namespace Legion {
         // Do analysis and register the user
         LegionMap<ApEvent,FieldMask>::aligned dummy_preconditions;
         find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
-                                    user_mask, child_color,
+                                    user_mask, child_color, origin_node,
                                     &dummy_version_info, op_id, index, source,
                                     dummy_preconditions, applied_conditions);
         add_local_copy_user(usage, term_event, true/*base user*/,
-                            child_color, &dummy_version_info, op_id, index,
+                            child_color, origin_node,
+                            &dummy_version_info, op_id, index,
                             user_mask, source, applied_conditions);
       }
       else
@@ -3389,14 +3442,15 @@ namespace Legion {
         // Do analysis and register the user
         std::set<ApEvent> dummy_preconditions;
         find_local_user_preconditions(usage, term_event, child_color,
-                                      &dummy_version_info, op_id, 
+                                      origin_node, &dummy_version_info, op_id,
                                       index,user_mask, dummy_preconditions, 
                                       applied_conditions);
         if (IS_WRITE(usage))
           update_version_numbers(user_mask, field_versions,
                                  source, applied_conditions);
-        if (add_local_user(usage, term_event, child_color, &dummy_version_info,
-                           op_id, index, user_mask, source, applied_conditions))
+        if (add_local_user(usage, term_event, child_color, origin_node,
+                           &dummy_version_info, op_id, index, user_mask, 
+                           source, applied_conditions))
         {
           WrapperReferenceMutator mutator(applied_conditions);
           defer_collect_user(term_event, &mutator);
@@ -6346,17 +6400,20 @@ namespace Legion {
         PhysicalUser *user;
         // We don't use field versions for doing interference 
         // tests on reductions so no need to record it
+#ifdef DEBUG_LEGION
+        assert(logical_node->is_region());
+#endif
         if (reading)
         {
           RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
           user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                          creator_op_id, index);
+                  creator_op_id, index, logical_node->as_region_node());
         }
         else
         {
           RegionUsage usage(REDUCE, EXCLUSIVE, redop);
           user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                          creator_op_id, index);
+                  creator_op_id, index, logical_node->as_region_node());
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, copy_term, mask);
@@ -6447,9 +6504,12 @@ namespace Legion {
         runtime->send_view_remote_update(logical_owner, rez);
         applied_events.insert(remote_applied_event);
       }
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
       const bool reading = IS_READ_ONLY(usage);
       PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                        op_id, index);
+                                op_id, index, logical_node->as_region_node());
       bool issue_collect = false;
       {
         AutoLock v_lock(view_lock);
@@ -6512,11 +6572,14 @@ namespace Legion {
       ApEvent use_event = manager->get_use_event();
       if (use_event.exists())
         wait_on.insert(use_event);
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
       // Who cares just hold the lock in exlcusive mode, this analysis
       // shouldn't be too expensive for reduction views
       bool issue_collect = false;
       PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                        op_id, index);
+                                op_id, index, logical_node->as_region_node());
       {
         AutoLock v_lock(view_lock);
         if (!reading) // Reducing
@@ -6729,10 +6792,13 @@ namespace Legion {
                                          const unsigned index)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(logical_node->is_region());
+#endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                    op_id, index);
+                            op_id, index, logical_node->as_region_node());
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor
@@ -6984,7 +7050,7 @@ namespace Legion {
           if (it->second.single)
           {
             rez.serialize<size_t>(1);
-            rez.serialize(*(it->second.users.single_user));
+            it->second.users.single_user->pack_user(rez);
             rez.serialize(it->second.user_mask);
           }
           else
@@ -6994,7 +7060,7 @@ namespace Legion {
                   uit = it->second.users.multi_users->begin(); uit != 
                   it->second.users.multi_users->end(); uit++)
             {
-              rez.serialize(*(uit->first));
+              uit->first->pack_user(rez);
               rez.serialize(uit->second);
             }
           }
@@ -7005,7 +7071,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::process_update_response(Deserializer &derez,
-                                                RtUserEvent done_event)
+                                                RtUserEvent done_event,
+                                                RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7030,8 +7097,8 @@ namespace Legion {
           derez.deserialize(num_users);
           if (num_users == 1)
           {
-            current_users.users.single_user = legion_new<PhysicalUser>();
-            derez.deserialize(*(current_users.users.single_user));
+            current_users.users.single_user = 
+              PhysicalUser::unpack_user(derez, false/*add ref*/, forest);
             derez.deserialize(current_users.user_mask);
           }
           else
@@ -7043,8 +7110,8 @@ namespace Legion {
               *(current_users.users.multi_users);
             for (unsigned idx2 = 0; idx2 < num_users; idx2++)
             {
-              PhysicalUser *user = legion_new<PhysicalUser>();
-              derez.deserialize(*user);
+              PhysicalUser *user =
+                PhysicalUser::unpack_user(derez, false/*add ref*/, forest);
               derez.deserialize(multi[user]);
             }
           }
@@ -7099,18 +7166,23 @@ namespace Legion {
         derez.deserialize(redop);
         bool reading;
         derez.deserialize(reading);
-        PhysicalUser *user;
+        PhysicalUser *user = NULL;
+#ifdef DEBUG_LEGION
+        assert(logical_node->is_region());
+#endif
         // We don't use field versions for doing interference 
         // tests on reductions so no need to record it
         if (reading)
         {
           RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index,
+                                          logical_node->as_region_node());
         }
         else
         {
           RegionUsage usage(REDUCE, EXCLUSIVE, redop);
-          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+          user = legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index,
+                                          logical_node->as_region_node());
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, term_event, user_mask);
@@ -7127,8 +7199,12 @@ namespace Legion {
         RegionUsage usage;
         derez.deserialize(usage);
         const bool reading = IS_READ_ONLY(usage);
+#ifdef DEBUG_LEGION
+        assert(logical_node->is_region());
+#endif
         PhysicalUser *new_user = 
-          legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index);
+          legion_new<PhysicalUser>(usage, ColorPoint(), op_id, index,
+                                   logical_node->as_region_node());
         AutoLock v_lock(view_lock);
         add_physical_user(new_user, reading, term_event, user_mask);
         // Only need to do this if we actually have a term event

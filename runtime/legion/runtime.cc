@@ -20751,6 +20751,7 @@ namespace Legion {
               (VersionState::SendVersionStateArgs*)args;
             vargs->proxy_this->send_version_state_update(vargs->target, 
                                                   *(vargs->request_mask),
+                                                  vargs->request_kind,
                                                   vargs->to_trigger);
             legion_delete(vargs->request_mask);
             break;

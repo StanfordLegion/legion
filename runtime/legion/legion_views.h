@@ -194,7 +194,8 @@ namespace Legion {
       virtual void process_update_request(AddressSpaceID source,
                                RtUserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event) = 0;
+                                           RtUserEvent done_event,
+                                           RegionTreeForest *forest) = 0;
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
                                          RegionTreeForest *forest) = 0;
@@ -299,6 +300,7 @@ namespace Legion {
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
+                                         RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
@@ -308,6 +310,7 @@ namespace Legion {
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
+                                         RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
@@ -325,6 +328,7 @@ namespace Legion {
     protected:
       void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
                                const ColorPoint &child_color,
+                               RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index,
@@ -334,6 +338,7 @@ namespace Legion {
       void add_local_copy_user(const RegionUsage &usage, 
                                ApEvent copy_term, bool base_user,
                                const ColorPoint &child_color,
+                               RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
                                const unsigned index,
@@ -351,6 +356,7 @@ namespace Legion {
       void find_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const ColorPoint &child_color,
+                                         RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
@@ -360,6 +366,7 @@ namespace Legion {
       void find_local_user_preconditions(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const ColorPoint &child_color,
+                                         RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
                                          const unsigned index,
@@ -375,6 +382,7 @@ namespace Legion {
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
+                          RegionNode *origin_node,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
@@ -383,6 +391,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
+                          RegionNode *origin_node,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
@@ -401,6 +410,7 @@ namespace Legion {
     protected:
       void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
                                 const ColorPoint &child_color,
+                                RegionNode *origin_node,
                                 VersionTracker *version_tracker,
                                 const UniqueID op_id,
                                 const unsigned index,
@@ -464,6 +474,7 @@ namespace Legion {
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
+                                      RegionNode *origin_node,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -475,6 +486,7 @@ namespace Legion {
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
+                                      RegionNode *origin_node,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -484,6 +496,7 @@ namespace Legion {
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
+                                      RegionNode *origin_node,
                                       const UniqueID op_id,
                                       const unsigned index,
                   LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -494,6 +507,7 @@ namespace Legion {
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
+                                      RegionNode *origin_node,
                                       const UniqueID op_id,
                                       const unsigned index,
                   LegionMap<ApEvent,FieldMask>::aligned &preconditions,
@@ -504,7 +518,8 @@ namespace Legion {
                                      const RegionUsage &next_user,
                                      const ColorPoint &child_color,
                                      const UniqueID op_id,
-                                     const unsigned index);
+                                     const unsigned index,
+                                     RegionNode *origin_node);
     public:
       //void update_versions(const FieldMask &update_mask);
       void find_atomic_reservations(const FieldMask &mask, 
@@ -540,7 +555,8 @@ namespace Legion {
       virtual void process_update_request(AddressSpaceID source,
                                RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event);
+                                           RtUserEvent done_event,
+                                           RegionTreeForest *forest);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
                                          RegionTreeForest *forest);
@@ -754,7 +770,8 @@ namespace Legion {
       virtual void process_update_request(AddressSpaceID source,
                                RtUserEvent done_event, Deserializer &derez);
       virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event);
+                                           RtUserEvent done_event,
+                                           RegionTreeForest *forest);
       virtual void process_remote_update(Deserializer &derez,
                                          AddressSpaceID source,
                                          RegionTreeForest *forest);
@@ -1391,7 +1408,8 @@ namespace Legion {
                                                  const RegionUsage &next_user,
                                                  const ColorPoint &child_color,
                                                  const UniqueID op_id,
-                                                 const unsigned index)
+                                                 const unsigned index,
+                                                 RegionNode *origin_node)
     //--------------------------------------------------------------------------
     {
       // Different region requirements of the same operation 
@@ -1409,6 +1427,9 @@ namespace Legion {
         // Disjoint children means we can skip it
         if (user->child.is_valid() && (disjoint_children || 
               logical_node->are_children_disjoint(child_color, user->child)))
+          return false;
+        // See if the two origin nodes don't intersect
+        if (!origin_node->intersects_with(user->node))
           return false;
       }
       // Now do a dependence test for coherence non-interference

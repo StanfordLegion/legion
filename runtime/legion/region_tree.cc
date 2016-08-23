@@ -12148,8 +12148,7 @@ namespace Legion {
               !version_info.is_upper_bound_node(this);
             const AddressSpaceID local_space = context->runtime->address_space;
             manager.advance_versions(version_mask, parent_ctx, 
-             true/*has initial state*/, local_space, update_parent_state,
-             local_space, ready_events);
+             local_space, update_parent_state, local_space, ready_events);
           }
           // Record the actual versions to be used here 
           manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
@@ -12195,13 +12194,14 @@ namespace Legion {
       // Perform the advance
       const bool local_update_parent = update_parent_state && 
                                        !skip_update_parent;
-      manager.advance_versions(advance_mask, parent_ctx, 
-           false/*has initial state*/, local_space, local_update_parent,
-           local_space, ready_events, dedup_opens, open_epoch, 
-           dedup_advances, advance_epoch);
-      // Continue the traversal, 
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
+      // As long as we are advancing in the middle of the tree
+      // then we have no initial state
+      manager.advance_versions(advance_mask, parent_ctx, 
+           local_space, local_update_parent, local_space, ready_events, 
+           dedup_opens, open_epoch, dedup_advances, advance_epoch);
+      // Continue the traversal, 
       // wonder if we get tail call recursion optimization
       if (!arrived)
       {
