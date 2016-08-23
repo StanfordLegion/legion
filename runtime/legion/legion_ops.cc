@@ -1040,7 +1040,11 @@ namespace Legion {
     void Operation::record_logical_dependence(const LogicalUser &user)
     //--------------------------------------------------------------------------
     {
-      logical_records.push_back(user);
+      // Never record advance operations, they are always last
+      // before a generating operation so nothing else below in 
+      // the tree should depend on them
+      if (user.op->get_operation_kind() != ADVANCE_OP_KIND)
+        logical_records.push_back(user);
     }
 
     //--------------------------------------------------------------------------
@@ -5114,11 +5118,12 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, false/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
+      requirement = req;
       initialize_close(creator, close_idx, parent_req_index);
       close_mask = close_m;
       leave_open_mask = leave_m;
       closed_tree = closed_t;
-      version_info.clone_logical(clone_info, close_m);
+      version_info.clone_logical(clone_info, close_m, closed_t->node);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)

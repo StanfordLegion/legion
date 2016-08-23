@@ -12711,19 +12711,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_MAPPED_CALL);
-      // No matter what, flush out our physical states
       RtEvent applied_condition;
-      if (!is_remote() || !is_locally_mapped())
-      {
-        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-        {
-          version_infos[idx].apply_mapping(owner_space, map_applied_conditions);
-        }
-        if (!map_applied_conditions.empty())
-          applied_condition = Runtime::merge_events(map_applied_conditions);
-      }
-      else if (!map_applied_conditions.empty())
+      if (!map_applied_conditions.empty())
         applied_condition = Runtime::merge_events(map_applied_conditions);
       if (is_remote())
       {
@@ -13015,10 +13004,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MinimalPoint::MinimalPoint(const MinimalPoint &rhs)
+      : arg(NULL), arglen(0), own_arg(false)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // should only be called with rhs being empty
+#ifdef DEBUG_LEGION
+      assert(rhs.dp.dim == 0);
+      assert(rhs.arg == NULL);
+      assert(rhs.arglen == 0);
+#endif
     }
 
     //--------------------------------------------------------------------------

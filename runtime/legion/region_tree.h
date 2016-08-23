@@ -1310,8 +1310,7 @@ namespace Legion {
                                 const ColorPoint &next_child);
       void perform_advance_analysis(CurrentState &state, 
                                     const LogicalUser &advance_user,
-                                    const LogicalUser &create_user,
-                                    const FieldMask &advance_mask);
+                                    const LogicalUser &create_user);
       void close_reduction_analysis(ContextID ctx,
                                     const LogicalUser &user);
       void close_logical_node(LogicalCloser &closer,

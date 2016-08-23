@@ -151,10 +151,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
     VersioningSet<REF_KIND>::VersioningSet(const VersioningSet &rhs)
+      : single(true) 
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // must be empty
+#ifdef DEBUG_LEGION
+      assert(rhs.single);
+      assert(rhs.versions.single_version == NULL);
+#endif
+      versions.single_version = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -193,29 +198,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND>
-    FieldMask& VersioningSet<REF_KIND>::operator[](VersionState *state)
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-#ifdef DEBUG_LEGION
-        assert(state == versions.single_version);
-#endif
-        return valid_fields;
-      }
-      else
-      {
-        LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
-          versions.multi_versions->find(state);
-#ifdef DEBUG_LEGION
-        assert(finder != versions.multi_versions->end());
-#endif
-        return finder->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND>
     const FieldMask& VersioningSet<REF_KIND>::operator[](
                                                       VersionState *state) const
     //--------------------------------------------------------------------------
@@ -244,6 +226,9 @@ namespace Legion {
                                const FieldMask &mask, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
       if (single)
       {
         if (versions.single_version == NULL)
@@ -253,7 +238,7 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
 #ifdef DEBUG_LEGION
-            assert(mutator != NULL);
+            //assert(mutator != NULL);
 #endif
             state->add_base_valid_ref(REF_KIND, mutator);
           }
@@ -275,7 +260,7 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
 #ifdef DEBUG_LEGION
-            assert(mutator != NULL);
+            //assert(mutator != NULL);
 #endif
             state->add_base_valid_ref(REF_KIND, mutator);
           }
@@ -294,7 +279,7 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
 #ifdef DEBUG_LEGION
-            assert(mutator != NULL);
+            //assert(mutator != NULL);
 #endif
             state->add_base_valid_ref(REF_KIND, mutator);
           }
@@ -312,6 +297,9 @@ namespace Legion {
                                             Runtime *runtime, RtEvent pre)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
       if (single)
       {
         if (versions.single_version == NULL)
@@ -409,10 +397,7 @@ namespace Legion {
         {
           // go back to single
           finder = versions.multi_versions->begin();
-#ifdef DEBUG_LEGION
-          // Field should align
-          assert(finder->second == valid_fields);
-#endif
+          valid_fields = finder->second;
           VersionState *first = finder->first;
           delete versions.multi_versions;
           versions.single_version = first;
@@ -457,6 +442,7 @@ namespace Legion {
         versions.multi_versions = NULL;
         single = true;
       }
+      valid_fields.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -535,11 +521,16 @@ namespace Legion {
                                      VersioningSet<REF_KIND>::begin(void) const
     //--------------------------------------------------------------------------
     {
+      // Scariness!
       if (single)
-        // Scariness!
+      {
+        // If we're empty return end
+        if (versions.single_version == NULL)
+          return end();
         return iterator(this, 
             reinterpret_cast<std::pair<VersionState*,FieldMask>*>(
               const_cast<VersioningSet<REF_KIND>*>(this)), true/*single*/);
+      }
       else
         return iterator(this,
             reinterpret_cast<std::pair<VersionState*,FieldMask>*>(
@@ -697,6 +688,7 @@ namespace Legion {
 #endif
       upper_bound_node = rhs.upper_bound_node;
       field_versions = rhs.field_versions;
+      split_masks = rhs.split_masks;
       physical_states.resize(rhs.physical_states.size(), NULL); 
       for (unsigned idx = 0; idx < physical_states.size(); idx++)
       {
@@ -709,15 +701,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::record_split_fields(RegionTreeNode *node,
-                                          const FieldMask &split_mask)
+                            const FieldMask &split_mask, unsigned offset/*= 0*/)
     //--------------------------------------------------------------------------
     {
-      const unsigned depth = node->get_depth();
-      if (depth >= split_masks.size())
-      {
-        split_masks.resize(depth+1);
-        physical_states.resize(depth+1,NULL);
-      }
+      const unsigned depth = node->get_depth() + offset;
+#ifdef DEBUG_LEGION
+      assert(depth < split_masks.size());
+#endif
       split_masks[depth] = split_mask;
     }
 
@@ -728,16 +718,16 @@ namespace Legion {
     {
       RegionTreeNode *node = state->logical_node;
       const unsigned depth = node->get_depth();
-      if (depth >= physical_states.size())
-      {
-        physical_states.resize(depth+1, NULL);
-        split_masks.resize(depth+1);
-      }
+#ifdef DEBUG_LEGION
+      assert(depth < physical_states.size());
+#endif
       if (physical_states[depth] == NULL)
         physical_states[depth] = legion_new<PhysicalState>(node, path_only);
       physical_states[depth]->add_version_state(state, state_mask);
-      if (depth >= field_versions.size())
-        field_versions.resize(depth+1);
+      // Now record the version information
+#ifdef DEBUG_LEGION
+      assert(depth < field_versions.size());
+#endif
       FieldVersions &local_versions = field_versions[depth];
       FieldVersions::iterator finder = 
         local_versions.find(state->version_number);
@@ -754,11 +744,9 @@ namespace Legion {
     {
       RegionTreeNode *node = state->logical_node;
       const unsigned depth = node->get_depth();
-      if (depth >= physical_states.size())
-      {
-        physical_states.resize(depth+1, NULL);
-        split_masks.resize(depth+1);
-      }
+#ifdef DEBUG_LEGION
+      assert(depth < physical_states.size());
+#endif
       if (physical_states[depth] == NULL)
         physical_states[depth] = legion_new<PhysicalState>(node, path_only);
       physical_states[depth]->add_advance_state(state, state_mask);
@@ -772,6 +760,18 @@ namespace Legion {
       assert(upper_bound_node == NULL);
 #endif
       upper_bound_node = node;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VersionInfo::has_physical_states(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < physical_states.size(); idx++)
+      {
+        if (physical_states[idx] != NULL)
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -797,6 +797,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionInfo::resize(size_t max_depth)
+    //--------------------------------------------------------------------------
+    {
+      // Make this max_depth+1
+      max_depth += 1;
+      field_versions.resize(max_depth);
+      physical_states.resize(max_depth,NULL);
+      split_masks.resize(max_depth);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
@@ -804,7 +815,10 @@ namespace Legion {
       field_versions.clear();
       for (std::vector<PhysicalState*>::const_iterator it = 
             physical_states.begin(); it != physical_states.end(); it++)
-        legion_delete(*it);
+      {
+        if ((*it) != NULL)
+          legion_delete(*it);
+      }
       physical_states.clear();
       split_masks.clear();
     }
@@ -827,7 +841,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::clone_logical(const VersionInfo &rhs, 
-                                    const FieldMask &mask)
+                                 const FieldMask &mask, RegionTreeNode *to_node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -836,26 +850,29 @@ namespace Legion {
       assert(field_versions.empty());
       assert(split_masks.empty());
 #endif
+      const unsigned max_depth = to_node->get_depth() + 1;
+#ifdef DEBUG_LEGION
+      assert(max_depth <= rhs.split_masks.size());
+#endif
       // Only need to copy over the upper bound and split masks that
       // are computed as part of the logical analysis
       upper_bound_node = rhs.upper_bound_node;
-      split_masks.resize(rhs.split_masks.size());
-      for (unsigned idx = 0; idx < split_masks.size(); idx++)
+      split_masks.resize(max_depth);
+      for (unsigned idx = 0; idx < max_depth; idx++)
         split_masks[idx] = rhs.split_masks[idx] & mask;
+      // Only need to resize the other things
+      field_versions.resize(max_depth);
+      physical_states.resize(max_depth, NULL);
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::move_to(VersionInfo &rhs)
+    void VersionInfo::copy_to(VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
       rhs.upper_bound_node = upper_bound_node;
-      rhs.physical_states = physical_states;
+      // No need to copy over the physical states
       rhs.field_versions = field_versions;
       rhs.split_masks = split_masks;
-      upper_bound_node = NULL;
-      physical_states.clear();
-      field_versions.clear();
-      split_masks.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2316,6 +2333,9 @@ namespace Legion {
     // Projection Epoch
     /////////////////////////////////////////////////////////////
 
+    // C++ is really dumb
+    const ProjectionEpochID ProjectionEpoch::first_epoch;
+
     //--------------------------------------------------------------------------
     ProjectionEpoch::ProjectionEpoch(ProjectionEpochID id, const FieldMask &m)
       : epoch_id(id), valid_fields(m)
@@ -2609,10 +2629,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::capture_projection_epochs(const FieldMask &capture_mask,
-                                                 ProjectionInfo &info) const
+    void CurrentState::capture_projection_epochs(FieldMask capture_mask,
+                                                 ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!capture_mask);
+#endif
       for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
@@ -2620,7 +2643,17 @@ namespace Legion {
         if (!overlap)
           continue;
         info.record_projection_epoch(it->first, overlap);
+        capture_mask -= overlap;
+        if (!capture_mask)
+          return;
       }
+      // If it didn't already exist, start a new projection epoch
+      ProjectionEpoch *new_epoch = 
+        new ProjectionEpoch(ProjectionEpoch::first_epoch, capture_mask);
+      new_epoch->insert(info.projection, info.projection_domain);
+      projection_epochs[ProjectionEpoch::first_epoch] = new_epoch;
+      // Record it
+      info.record_projection_epoch(ProjectionEpoch::first_epoch, capture_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2661,9 +2694,10 @@ namespace Legion {
       assert(!!update_mask);
 #endif
       // If we get here will still have an update mask so make an epoch
-      ProjectionEpoch *new_epoch = new ProjectionEpoch(0, update_mask);
+      ProjectionEpoch *new_epoch = 
+        new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
       new_epoch->insert(info.projection, info.projection_domain);
-      projection_epochs[0] = new_epoch;
+      projection_epochs[ProjectionEpoch::first_epoch] = new_epoch;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3795,15 +3829,24 @@ namespace Legion {
                                                const FieldMask &close_mask) 
     //--------------------------------------------------------------------------
     {
-      // We already know the version states are valid in this case so 
-      // we can just capture them at the moment
+      // We need to capture the normal instance data from the version
+      // states and the open children from the advance states. We 
+      // already know that everything is valid
       for (PhysicalVersions::iterator it = version_states.begin();
             it != version_states.end(); it++)
       {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        it->first->capture(composite_view, overlap);
+        it->first->capture_root_instances(composite_view, overlap);
+      }
+      for (PhysicalVersions::iterator it = advance_states.begin();
+            it != advance_states.end(); it++)
+      {
+        FieldMask overlap = it->second & close_mask;
+        if (!overlap)
+          continue;
+        it->first->capture_root_children(composite_view, overlap);
       }
     }
 
@@ -6848,8 +6891,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void VersionState::capture(CompositeView *target, 
-                               const FieldMask &capture_mask) const
+    void VersionState::capture_root_instances(CompositeView *target, 
+                                            const FieldMask &capture_mask) const
     //--------------------------------------------------------------------------
     {
       // Only need this in read only mode since we're just reading
@@ -6880,6 +6923,15 @@ namespace Legion {
           target->record_reduction_view(it->first, overlap);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::capture_root_children(CompositeView *target,
+                                            const FieldMask &capture_mask) const
+    //--------------------------------------------------------------------------
+    {
+      // Only need this in read only mode since we're just reading
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
       for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
             open_children.begin(); cit != open_children.end(); cit++)
       {

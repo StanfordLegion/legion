@@ -865,7 +865,7 @@ namespace Legion {
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
          versions, op_id, index, user_mask, wait_on_events, applied_events);
       // Go up the tree if we have to
-      if ((parent != NULL) && versions->is_upper_bound_node(logical_node))
+      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
@@ -1161,7 +1161,7 @@ namespace Legion {
                                                      source, applied_events);
       }
       // Go up the tree if necessary
-      if ((parent != NULL) && versions->is_upper_bound_node(logical_node))
+      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color, 
@@ -1217,7 +1217,7 @@ namespace Legion {
                                                    source, applied_events);
       }
       // Go up the tree if we have to
-      if ((parent != NULL) && versions->is_upper_bound_node(logical_node))
+      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color,

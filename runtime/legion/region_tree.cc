@@ -1497,6 +1497,12 @@ namespace Legion {
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
+      // Update the version info to set the maximum depth
+      if (projection_info.is_projecting())
+        version_info.resize(path.get_max_depth() + 
+                            projection_info.projection->depth);
+      else
+        version_info.resize(path.get_max_depth());
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -10267,14 +10273,9 @@ namespace Legion {
       // on then we will also automatically depend on us as well
       if (!advances.empty())
       {
-        // Don't want to register dependences on our opens
-        FieldMask non_open_fields = user.field_mask - local_open_mask;   
-        if (!!non_open_fields)
-        {
-          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
-                advances.begin(); it != advances.end(); it++)
-            perform_advance_analysis(state, it->second, user, non_open_fields);
-        }
+        for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+              advances.begin(); it != advances.end(); it++)
+          perform_advance_analysis(state, it->second, user);
       }
       // See if we need to perform any advance operations
       // because we're going to be writing below this level
@@ -10347,9 +10348,19 @@ namespace Legion {
         {
           FieldMask split_fields = state.dirty_below & user.field_mask;
           if (!!split_fields)
+          {
             version_info.record_split_fields(this, split_fields);
-          // Record our projection epochs
-          state.capture_projection_epochs(user.field_mask, proj_info);
+            // Also record split versions for any levels below
+            // down to the level above our projection function
+            if (proj_info.projection->depth > 1)
+            {
+              for (int idx = 0; 
+                    idx < (proj_info.projection->depth - 1); idx++)
+                version_info.record_split_fields(this, split_fields, idx);
+            }
+          }
+          // Record our projection epochs and split masks
+          state.capture_projection_epochs(user.field_mask, proj_info); 
           // If we're writing, then record our projection info in 
           // the current projection epoch
           if (IS_WRITE(user.usage))
@@ -10454,7 +10465,7 @@ namespace Legion {
             advance_user, above_users, advance_mask,
             advance_mask/*doesn't matter*/, false/*validates*/);
       // Now perform our local dependence analysis for this advance
-      perform_advance_analysis(state, advance_user, creator, advance_mask);
+      perform_advance_analysis(state, advance_user, creator);
       // Update our list of advance operations
       advances[advance] = advance_user;
       // Add it to the list of current epoch users even if we're tracing 
@@ -10509,8 +10520,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::perform_advance_analysis(CurrentState &state,
                                                 const LogicalUser &advance_user,
-                                                const LogicalUser &create_user,
-                                                const FieldMask &advance_mask)
+                                                const LogicalUser &create_user)
     //--------------------------------------------------------------------------
     {
       // We know we are dominating from above, so we don't care about
@@ -10519,9 +10529,9 @@ namespace Legion {
       FieldMask dominator_mask = 
             perform_dependence_checks<CURR_LOGICAL_ALLOC,
                     false/*record*/, true/*has skip*/, true/*track dom*/>(
-              advance_user, state.curr_epoch_users, advance_mask,
+              advance_user, state.curr_epoch_users, advance_user.field_mask,
               empty_below, false/*validates*/, create_user.op, create_user.gen);
-      FieldMask non_dominated_mask = advance_mask - dominator_mask;
+      FieldMask non_dominated_mask = advance_user.field_mask - dominator_mask;
       if (!!non_dominated_mask)
       {
         perform_dependence_checks<PREV_LOGICAL_ALLOC,
@@ -12222,7 +12232,7 @@ namespace Legion {
       const AddressSpace local_space = context->runtime->address_space;
       // Copy the version info that we need
       CompositeVersionInfo *view_info = new CompositeVersionInfo();
-      version_info.move_to(*view_info);
+      version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
                            local_space, this, local_space, view_info, 

@@ -134,7 +134,6 @@ namespace Legion {
       inline const FieldMask& get_valid_mask(void) const 
         { return valid_fields; }
     public:
-      FieldMask& operator[](VersionState *state);
       const FieldMask& operator[](VersionState *state) const;
     public:
       void insert(VersionState *state, const FieldMask &mask, 
@@ -169,6 +168,7 @@ namespace Legion {
         VersionState *single_version;
         LegionMap<VersionState*,FieldMask>::aligned *multi_versions;
       } versions;
+      // These can be an overapproximation if we have multiple versions
       FieldMask valid_fields;
       bool single;
     };
@@ -216,7 +216,8 @@ namespace Legion {
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      void record_split_fields(RegionTreeNode *node, const FieldMask &split);
+      void record_split_fields(RegionTreeNode *node, const FieldMask &split,
+                               unsigned offset = 0);
       void add_current_version(VersionState *state, 
                                const FieldMask &state_mask, bool path_only);
       void add_advance_version(VersionState *state, 
@@ -230,8 +231,7 @@ namespace Legion {
       inline RegionTreeNode* get_upper_bound_node(void) const 
         { return upper_bound_node; }
       void set_upper_bound_node(RegionTreeNode *node);
-      inline bool has_physical_states(void) const 
-        { return !physical_states.empty(); }
+      bool has_physical_states(void) const; 
     public:
       // The copy through parameter is useful for mis-speculated
       // operations that still need to copy state from one 
@@ -240,10 +240,12 @@ namespace Legion {
       void apply_mapping(AddressSpaceID target,
                          std::set<RtEvent> &applied_conditions,
                          bool copy_through = false);
+      void resize(size_t max_depth);
       void clear(void);
       void sanity_check(unsigned depth);
-      void clone_logical(const VersionInfo &rhs, const FieldMask &mask);
-      void move_to(VersionInfo &rhs);
+      void clone_logical(const VersionInfo &rhs, const FieldMask &mask,
+                         RegionTreeNode *to_node);
+      void copy_to(VersionInfo &rhs);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -531,6 +533,8 @@ namespace Legion {
      */
     class ProjectionEpoch {
     public:
+      static const ProjectionEpochID first_epoch = 1;
+    public:
       ProjectionEpoch(ProjectionEpochID epoch_id,
                       const FieldMask &mask);
       ProjectionEpoch(const ProjectionEpoch &rhs);
@@ -575,8 +579,8 @@ namespace Legion {
       void clear_deleted_state(const FieldMask &deleted_mask);
     public:
       void advance_projection_epochs(const FieldMask &advance_mask);
-      void capture_projection_epochs(const FieldMask &capture_mask,
-                                     ProjectionInfo &info) const;
+      void capture_projection_epochs(FieldMask capture_mask,
+                                     ProjectionInfo &info);
       void capture_close_epochs(FieldMask capture_mask,
                                 ClosedNode *closed_node) const;
       void update_projection_epochs(FieldMask update_mask,
@@ -1105,7 +1109,10 @@ namespace Legion {
       static void process_version_state_update_response(Runtime *rt,
                                                  Deserializer &derez); 
     public:
-      void capture(CompositeView *target, const FieldMask &capture_mask) const;
+      void capture_root_instances(CompositeView *target, 
+                                  const FieldMask &capture_mask) const;
+      void capture_root_children(CompositeView *target,
+                                 const FieldMask &capture_mask) const;
       void capture(CompositeNode *target, const FieldMask &capture_mask,
                    SingleTask *translation_context) const;
     public:
