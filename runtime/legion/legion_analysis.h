@@ -869,7 +869,6 @@ namespace Legion {
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, SingleTask *context,
-                            AddressSpaceID initial_space,
                             bool update_parent_state,
                             AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
@@ -892,11 +891,9 @@ namespace Legion {
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     protected:
-      VersionState* create_new_version_state(VersionID vid,
-                                             AddressSpaceID initial_space);
+      VersionState* create_new_version_state(VersionID vid);
     public:
       RtEvent send_remote_advance(const FieldMask &advance_mask,
-                                  AddressSpaceID initial_space,
                                   bool update_parent_state,
                                   bool dedup_opens, 
                                   ProjectionEpochID open_epoch,
@@ -1018,23 +1015,11 @@ namespace Legion {
         VersionState *proxy_this;
         ReferenceSource ref_kind;
       };
-      struct ChildRequestFunctor {
+      template<VersionRequestKind KIND>
+      struct RequestFunctor {
       public:
-        ChildRequestFunctor(VersionState *proxy, AddressSpaceID r,
-                            const FieldMask &m, std::set<RtEvent> &pre)
-          : proxy_this(proxy), requestor(r), mask(m), preconditions(pre) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        VersionState *proxy_this;
-        AddressSpaceID requestor;
-        const FieldMask &mask;
-        std::set<RtEvent> &preconditions;
-      };
-      struct FinalRequestFunctor {
-      public:
-        FinalRequestFunctor(VersionState *proxy, AddressSpaceID r,
-                            const FieldMask &m, std::set<RtEvent> &pre)
+        RequestFunctor(VersionState *proxy, AddressSpaceID r,
+                       const FieldMask &m, std::set<RtEvent> &pre)
           : proxy_this(proxy), requestor(r), mask(m), preconditions(pre) { }
       public:
         void apply(AddressSpaceID target);
@@ -1047,7 +1032,6 @@ namespace Legion {
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
-                   AddressSpaceID initial_space,
                    RegionTreeNode *node, bool register_now);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);
@@ -1141,7 +1125,6 @@ namespace Legion {
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;
-      const AddressSpaceID initial_space;
     protected:
       Reservation state_lock;
       // Fields which have been directly written to

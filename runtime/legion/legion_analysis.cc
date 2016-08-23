@@ -4072,8 +4072,7 @@ namespace Legion {
       if (current_version_infos.empty())
       {
         std::set<RtEvent> dummy_events;
-        VersionState *init_state = 
-          create_new_version_state(init_version, runtime->address_space);
+        VersionState *init_state = create_new_version_state(init_version);
 #ifdef DEBUG_LEGION
         assert(dummy_events.empty());
 #endif
@@ -4259,8 +4258,7 @@ namespace Legion {
         }
         if (!!unversioned)
         {
-          VersionState *new_state = create_new_version_state(init_version,
-                                                  runtime->address_space);
+          VersionState *new_state = create_new_version_state(init_version);
           version_info.add_current_version(new_state, unversioned,
                                            false/*path only*/);
           version_info.add_advance_version(new_state, unversioned,
@@ -4579,7 +4577,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::advance_versions(FieldMask mask, SingleTask *context, 
-                                          AddressSpaceID initial_space,
                                           bool update_parent_state,
                                           AddressSpaceID source_space,
                                           std::set<RtEvent> &applied_events,
@@ -4632,8 +4629,7 @@ namespace Legion {
       if (!is_owner)
       {
         // First send back the message to the owner to do the advance there
-        RtEvent advanced = send_remote_advance(mask, initial_space, 
-                                               update_parent_state,
+        RtEvent advanced = send_remote_advance(mask, update_parent_state,
                                                dedup_opens, open_epoch, 
                                                dedup_advances, advance_epoch);
         applied_events.insert(advanced); 
@@ -4866,8 +4862,7 @@ namespace Legion {
           VersionID next_version = vit->first+1;
           // Remove this version number from the delete set if it exists
           to_delete_current.erase(next_version);
-          VersionState *new_state = 
-            create_new_version_state(next_version, initial_space);
+          VersionState *new_state = create_new_version_state(next_version);
           if (update_parent_state)
             new_states.insert(new_state, version_overlap, &mutator);
           // Kind of dangerous to be getting another iterator to this
@@ -4888,8 +4883,7 @@ namespace Legion {
         // are being initialized and should be added as version 1
         if (!!current_filter)
         {
-          VersionState *new_state = 
-            create_new_version_state(init_version, initial_space);
+          VersionState *new_state = create_new_version_state(init_version);
           if (update_parent_state)
             new_states.insert(new_state, current_filter, &mutator);
           current_version_infos[init_version].insert(new_state, 
@@ -5096,19 +5090,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* VersionManager::create_new_version_state(VersionID vid,
-                                                   AddressSpaceID initial_space)
+    VersionState* VersionManager::create_new_version_state(VersionID vid)
     //--------------------------------------------------------------------------
     {
       DistributedID did = runtime->get_available_distributed_id(false);
       return legion_new<VersionState>(vid, runtime, did, 
           runtime->address_space, runtime->address_space,
-          initial_space, node, true/*register now*/);
+          node, true/*register now*/);
     }
 
     //--------------------------------------------------------------------------
     RtEvent VersionManager::send_remote_advance(const FieldMask &advance_mask,
-                                                AddressSpaceID initial_space,
                                                 bool update_parent_state,
                                                 bool dedup_opens,
                                                 ProjectionEpochID open_epoch,
@@ -5136,7 +5128,6 @@ namespace Legion {
           rez.serialize(node->as_partition_node()->handle);
         }
         rez.serialize(advance_mask);
-        rez.serialize(initial_space);
         rez.serialize(update_parent_state);
         rez.serialize(dedup_opens);
         if (dedup_opens)
@@ -5176,8 +5167,6 @@ namespace Legion {
       }
       FieldMask advance_mask;
       derez.deserialize(advance_mask);
-      AddressSpaceID initial_space;
-      derez.deserialize(initial_space);
       bool update_parent;
       derez.deserialize(update_parent);
       bool dedup_opens;
@@ -5195,10 +5184,9 @@ namespace Legion {
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
-      manager.advance_versions(advance_mask, context,
-                               initial_space, source_space, update_parent, 
-                               done_preconditions, dedup_opens, open_epoch, 
-                               dedup_advances, advance_epoch);
+      manager.advance_versions(advance_mask, context, source_space, 
+                               update_parent, done_preconditions, dedup_opens,
+                               open_epoch, dedup_advances, advance_epoch);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));
@@ -5600,11 +5588,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
-                               AddressSpaceID initial_sp,
                                RegionTreeNode *node, bool register_now)
       : DistributedCollectable(rt, id, own_sp, local_sp, register_now), 
         version_number(vid), logical_node(node), 
-        initial_space(initial_sp), state_lock(Reservation::create_reservation())
+        state_lock(Reservation::create_reservation())
 #ifdef DEBUG_LEGION
         , currently_active(true), currently_valid(true)
 #endif
@@ -5623,7 +5610,7 @@ namespace Legion {
     VersionState::VersionState(const VersionState &rhs)
       : DistributedCollectable(rhs.runtime, rhs.did, rhs.local_space,
                                rhs.owner_space, false/*register now*/),
-        version_number(0), logical_node(NULL), initial_space(0)
+        version_number(0), logical_node(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5959,20 +5946,7 @@ namespace Legion {
     void VersionState::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(currently_valid); // should be monotonic
-#endif
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        it->first->add_nested_valid_ref(did, mutator);
-      }
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduction_views.begin(); it != reduction_views.end(); it++)
-      {
-        it->first->add_nested_valid_ref(did, mutator);
-      }
+      // Views have their valid references added when they are inserted 
     }
 
     //--------------------------------------------------------------------------
@@ -6012,7 +5986,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::ChildRequestFunctor::apply(AddressSpaceID target)
+    template<VersionState::VersionRequestKind KIND>
+    void VersionState::RequestFunctor<KIND>::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Skip the requestor
@@ -6020,7 +5995,7 @@ namespace Legion {
         return;
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       proxy_this->send_version_state_update_request(target, requestor, 
-          ready_event, mask, CHILD_VERSION_REQUEST);
+          ready_event, mask, KIND);
       preconditions.insert(ready_event);
     }
 
@@ -6056,7 +6031,7 @@ namespace Legion {
           if (!!remaining_mask)
           {
             std::set<RtEvent> local_preconditions;
-            ChildRequestFunctor functor(this, local_space, 
+            RequestFunctor<CHILD_VERSION_REQUEST> functor(this, local_space, 
                                         remaining_mask, local_preconditions);
             map_over_remote_instances(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
@@ -6102,48 +6077,74 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_REQUEST_INITIAL_CALL);
-      // If we are the initial state, we are also done
-      if (initial_space == local_space)
-        return;
-      // We're not the initial owner, send requests for fields we haven't
-      // already requested
-      FieldMask remaining_mask = request_mask;
-      AutoLock s_lock(state_lock);
-      for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-            initial_events.begin(); it != initial_events.end(); it++)
+      FieldMask needed_fields;
       {
-        FieldMask overlap = remaining_mask & it->second;
-        if (!overlap)
-          continue;
-        preconditions.insert(it->first);
-        remaining_mask -= overlap;
-        if (!remaining_mask)
-          return;
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        // See if we have initial data
+        needed_fields = request_mask - valid_fields;
       }
-      // If we still have remaining fields, make a new event and 
-      // send a request to the intial owner
-      if (!!remaining_mask)
-      {
-        RtUserEvent ready_event = Runtime::create_rt_user_event();
-        send_version_state_update_request(initial_space, local_space, 
-            ready_event, remaining_mask, INITIAL_VERSION_REQUEST);
-        // Save the event indicating when the fields will be ready
-        initial_events[ready_event] = remaining_mask;
-        preconditions.insert(ready_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::FinalRequestFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Skip the requestor
-      if (target == requestor)
+      if (!needed_fields)
         return;
-      RtUserEvent ready_event = Runtime::create_rt_user_event();
-      proxy_this->send_version_state_update_request(target, requestor, 
-          ready_event, mask, FINAL_VERSION_REQUEST);
-      preconditions.insert(ready_event);
+      if (is_owner())
+      {
+        // We're the owner, if we have remote copies then send a 
+        // request to them for the needed fields
+        if (has_remote_instances())
+        {
+          AutoLock s_lock(state_lock);
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+                initial_events.begin(); it != initial_events.end(); it++)
+          {
+            FieldMask overlap = it->second & needed_fields;
+            if (!overlap)
+              continue;
+            preconditions.insert(it->first);
+            needed_fields -= overlap;
+            if (!needed_fields)
+              return; 
+          }
+          // If we still have remaining fields, we have to send requests to
+          // all the other nodes asking for their data
+          if (!!needed_fields)
+          {
+            std::set<RtEvent> local_preconditions;
+            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, local_space,
+                                          needed_fields, local_preconditions);
+            map_over_remote_instances(functor);
+            RtEvent ready_event = Runtime::merge_events(local_preconditions);
+            child_events[ready_event] = needed_fields;
+            preconditions.insert(ready_event);
+          }
+        }
+        // Otherwise no one has anything so we are done
+      }
+      else
+      {
+        AutoLock s_lock(state_lock);
+        // Figure out which requests we haven't sent yet
+        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+              initial_events.begin(); it != initial_events.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          preconditions.insert(it->first);
+          needed_fields -= overlap;
+          if (!needed_fields)
+            return;
+        }
+        // If we still have remaining fields, make a new event and 
+        // send a request to the intial owner
+        if (!!needed_fields)
+        {
+          RtUserEvent ready_event = Runtime::create_rt_user_event();
+          send_version_state_update_request(owner_space, local_space, 
+              ready_event, needed_fields, INITIAL_VERSION_REQUEST);
+          // Save the event indicating when the fields will be ready
+          initial_events[ready_event] = needed_fields;
+          preconditions.insert(ready_event);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6178,7 +6179,7 @@ namespace Legion {
           if (!!remaining_mask)
           {
             std::set<RtEvent> local_preconditions;
-            FinalRequestFunctor functor(this, local_space, 
+            RequestFunctor<FINAL_VERSION_REQUEST> functor(this, local_space, 
                                         remaining_mask, local_preconditions);
             map_over_remote_instances(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
@@ -6435,7 +6436,6 @@ namespace Legion {
           rez.serialize<bool>(false);
           rez.serialize(logical_node->as_partition_node()->handle);
         }
-        rez.serialize(initial_space);
       }
       runtime->send_version_state_response(target, rez);
       update_remote_instances(target);
@@ -6484,20 +6484,16 @@ namespace Legion {
         derez.deserialize(handle);
         node = runtime->forest->get_node(handle);
       }
-      AddressSpaceID initial_space;
-      derez.deserialize(initial_space);
       void *location;
       VersionState *state = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         state = legion_new_in_place<VersionState>(location, version_number,
                                                   runtime, did, source, 
                                                   runtime->address_space,
-                                                  initial_space, node,
-                                                  false/*register now*/);
+                                                  node, false/*register now*/);
       else
         state = legion_new<VersionState>(version_number, runtime, did,
                                          source, runtime->address_space,
-                                         initial_space,
                                          node, false/*register now*/);
       // Once construction is complete then we do the registration
       state->register_with_runtime(NULL/*no remote registration needed*/);
@@ -6511,31 +6507,37 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_REQUEST_CALL);
-      // If this is an initial version request, we can handle that easy
-      if (request_kind == INITIAL_VERSION_REQUEST)
+      // If we are the not the owner, the same thing happens no matter what
+      if (!is_owner())
       {
-#ifdef DEBUG_LEGION
-        assert(initial_space == local_space);
-#endif
+        // If we are not the owner, all we have to do is replay with our state
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        FieldMask overlap = valid_fields & request_mask;
-        if (!overlap)
-          Runtime::trigger_event(to_trigger);
-        else
-          // No need to wait for anything since we are the initial owner
-          launch_send_version_state_update(source, to_trigger, 
-                                           overlap, request_kind);
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert((request_kind == CHILD_VERSION_REQUEST) || 
-               (request_kind == FINAL_VERSION_REQUEST));
-#endif
-        if (!is_owner())
+        if (request_kind == CHILD_VERSION_REQUEST)
         {
-          // If we are not the owner, all we have to do is replay with our state
-          AutoLock s_lock(state_lock,1,false/*exclusive*/);
+          // See if we have any children we need to send
+          bool has_children = false;
+          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator it =
+                open_children.begin(); it != open_children.end(); it++)
+          {
+            if (it->second.get_valid_mask() * request_mask)
+              continue;
+            has_children = true;
+            break;
+          }
+          if (has_children)
+            launch_send_version_state_update(source, to_trigger, 
+                                             request_mask, request_kind);
+          else // no children so we can trigger now
+            Runtime::trigger_event(to_trigger);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert((request_kind == INITIAL_VERSION_REQUEST) || 
+                 (request_kind == FINAL_VERSION_REQUEST));
+#endif
+          // Check to see if we have valid fields, if not we
+          // can trigger the event immediately
           FieldMask overlap = valid_fields & request_mask;
           if (!overlap)
             Runtime::trigger_event(to_trigger);
@@ -6543,23 +6545,99 @@ namespace Legion {
             launch_send_version_state_update(source, to_trigger, 
                                              overlap, request_kind);
         }
+      }
+      else
+      {
+        // We're the owner, see if we're doing an initial requst or not 
+        if (request_kind == INITIAL_VERSION_REQUEST)
+        {
+          // See if we have any remote instances
+          if (has_remote_instances())
+          {
+            // Send notifications to any remote instances
+            FieldMask needed_fields;
+            RtEvent local_event;
+            {
+              // See if we have to send any messages
+              AutoLock s_lock(state_lock,1,false/*exclusive*/);
+              FieldMask overlap = request_mask & valid_fields;
+              if (!!overlap)
+              {
+                needed_fields = request_mask - overlap;
+                if (!!needed_fields)
+                {
+                  // We're going to have send messages so we need a local event
+                  RtUserEvent local = Runtime::create_rt_user_event();
+                  launch_send_version_state_update(source, local,
+                                                   overlap, request_kind);
+                  local_event = local;
+                }
+                else // no messages, so do the normal thing
+                {
+                  launch_send_version_state_update(source, to_trigger,
+                                                   overlap, request_kind);
+                  return; // we're done here
+                }
+              }
+              else
+                needed_fields = request_mask; // need all the fields
+            }
+#ifdef DEBUG_LEGION
+            assert(!!needed_fields);
+#endif
+            std::set<RtEvent> local_preconditions;
+            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, source,
+                                      needed_fields, local_preconditions);
+            map_over_remote_instances(functor);
+            if (!local_preconditions.empty())
+            {
+              if (local_event.exists())
+                local_preconditions.insert(local_event);
+              Runtime::trigger_event(to_trigger,
+                  Runtime::merge_events(local_preconditions));
+            }
+            else
+            {
+              // Sent no messages
+              if (local_event.exists())
+                Runtime::trigger_event(to_trigger, local_event);
+              else
+                Runtime::trigger_event(to_trigger);
+            }
+          }
+          else
+          {
+            // No remote instances so handle ourselves locally only
+            AutoLock s_lock(state_lock,1,false/*exclusive*/);
+            FieldMask overlap = request_mask & valid_fields;
+            if (!overlap)
+              Runtime::trigger_event(to_trigger);
+            else
+              launch_send_version_state_update(source, to_trigger,
+                                               overlap, request_kind);
+          }
+        }
         else
         {
-          // We're the owner handling a final version request
+#ifdef DEBUG_LEGION
+          assert((request_kind == CHILD_VERSION_REQUEST) || 
+                 (request_kind == FINAL_VERSION_REQUEST));
+#endif
+          // We're the owner handling a child or final version request
           // See if we have any remote instances to handle ourselves
           if (has_remote_instances())
           {
             std::set<RtEvent> local_preconditions;
             if (request_kind == CHILD_VERSION_REQUEST)
             {
-              ChildRequestFunctor functor(this, source, request_mask, 
-                                          local_preconditions);
+              RequestFunctor<CHILD_VERSION_REQUEST> functor(this, source, 
+                                      request_mask, local_preconditions);
               map_over_remote_instances(functor);
             }
             else
             {
-              FinalRequestFunctor functor(this, source, request_mask, 
-                                          local_preconditions);
+              RequestFunctor<FINAL_VERSION_REQUEST> functor(this, source, 
+                                      request_mask, local_preconditions);
               map_over_remote_instances(functor);
             }
             if (!local_preconditions.empty())
