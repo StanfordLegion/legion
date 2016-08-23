@@ -781,7 +781,7 @@ namespace Legion {
             break;
           }
           if (!convert_requirement_mapping(ctx,local_copy.dst_requirements[idx],
-                                           output.src_instances[idx]))
+                                           output.dst_instances[idx]))
           {
             success = false;
             break;
