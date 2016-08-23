@@ -4319,6 +4319,9 @@ class Operation(object):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
                self.kind == READ_ONLY_CLOSE_OP_KIND
 
+    def is_internal(self):
+        return self.is_close() or self.kind == ADVANCE_OP_KIND or self.kind == OPEN_OP_KIND
+
     def set_name(self, name):
         self.name = name
         if self.points is not None:
@@ -5528,7 +5531,7 @@ class Operation(object):
         return False
 
     def is_physical_operation(self):
-        if self.is_close():
+        if self.is_internal():
             return False
         if self.kind is COPY_OP_KIND:
             return False
