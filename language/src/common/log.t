@@ -112,6 +112,10 @@ function log.make_logger(category)
   return setmetatable(result, logger)
 end
 
+function log.get_log_level(category)
+  return categories[category]
+end
+
 function logger:log(level, format_string, ...)
   assert(type(level) == "number")
   assert(type(format_string) == "string")

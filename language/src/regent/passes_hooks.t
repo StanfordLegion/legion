@@ -15,6 +15,7 @@
 -- Regent Compiler Passes (Hooks)
 
 local log = require("common/log")
+local profile = require("regent/profile")
 
 local passes_hooks = {}
 
@@ -37,7 +38,7 @@ end
 
 function passes_hooks.run_optimizations(node)
   for _, hook in ipairs(passes_hooks.optimization_hooks) do
-    node = hook[2].entry(node)
+    node = profile(hook[2].pass_name, node, hook[2].entry)(node)
   end
   return node
 end
