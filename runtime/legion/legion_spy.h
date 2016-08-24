@@ -432,6 +432,20 @@ namespace Legion {
                       unique_id, index, pid);
       }
 
+      template<int DIM>
+      static inline void log_launch_index_space_rect(UniqueID unique_id,
+                                                     long long int *lower, 
+                                                     long long int *higher)
+      {
+        log_spy.print("Index Launch Rect %llu %d "
+                      "%lld %lld %lld %lld %lld %lld",
+		      unique_id, DIM, lower[0],
+		      DIM < 2 ? 0 : lower[1], 
+		      DIM < 3 ? 0 : lower[2], higher[0],
+		      DIM < 2 ? 0 : higher[1],
+		      DIM < 3 ? 0 : higher[2]);
+      }
+
       // Logger call for physical instances
       static inline void log_physical_instance(IDType inst_id, IDType mem_id,
                                                ReductionOpID redop)

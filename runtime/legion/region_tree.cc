@@ -11140,7 +11140,8 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_domain))
+                  it->projection_domain_dominates(proj_info.projection_domain) &&
+                  !IS_REDUCE(closer.user.usage))
               {
                 // Update the domain  
                 it->projection_domain = proj_info.projection_domain;

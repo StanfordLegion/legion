@@ -4720,7 +4720,7 @@ namespace Legion {
           const LogicalPartition &handle = 
             start_node->as_partition_node()->handle;
           LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                    true/*region*/, handle.index_partition.id,
+                                    false/*region*/, handle.index_partition.id,
                                     handle.field_space.id, handle.tree_id,
                                     READ_WRITE, EXCLUSIVE, 0/*redop*/,
                                     parent_space.id);
@@ -4862,7 +4862,7 @@ namespace Legion {
           const LogicalPartition &handle = 
             parent_node->as_partition_node()->handle;
           LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                    true/*region*/, handle.index_partition.id,
+                                    false/*region*/, handle.index_partition.id,
                                     handle.field_space.id, handle.tree_id,
                                     READ_WRITE, EXCLUSIVE, 0/*redop*/,
                                     parent_space.id);

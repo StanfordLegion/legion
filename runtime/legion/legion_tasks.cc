@@ -10832,6 +10832,32 @@ namespace Legion {
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
         }
+        switch (index_domain.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> rect = index_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rect = index_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rect = index_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       return future_map;
     }
@@ -10904,6 +10930,32 @@ namespace Legion {
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
         }
+        switch (index_domain.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> rect = index_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rect = index_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rect = index_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       return reduction_future;
     }
@@ -10960,6 +11012,32 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
+        switch (index_domain.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> rect = index_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rect = index_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rect = index_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
         }
       }
       return future_map;
@@ -11033,6 +11111,32 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
+        switch (index_domain.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> rect = index_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rect = index_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rect = index_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
         }
       }
       return reduction_future;
