@@ -3089,7 +3089,7 @@ class LogicalState(object):
             return (True,None,None,None)
         else:
             next_unopened = unopened and not next_open
-            return (True,next_open,next_unopened,advance_op)
+            return (True,next_open and not open_local,next_unopened,advance_op)
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
@@ -3502,15 +3502,15 @@ class LogicalState(object):
         open_op = op.get_open_operation(req, self.node, self.field)
         if open_op is None:
             if perform_checks:
-                print("ERROR: %s (UID=%s) failed to generate "+
+                print(("ERROR: %s (UID=%s) failed to generate "+
                       "an open operation for field %s of region "+
-                      "requirement %s at %s" %
+                      "requirement %s at %s") %
                       (op, str(op.uid), self.field, req.index, self.node))
             else:
-                print("ERROR: %s (UID=%s) failed to generate "+
+                print(("ERROR: %s (UID=%s) failed to generate "+
                       "an open operation that we normally would have expected. "+
                       "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm." % (op, str(op.uid)))
+                      "to confirm.") % (op, str(op.uid)))
             if self.node.state.assert_on_error:
                 assert False
         return open_op
@@ -3519,15 +3519,15 @@ class LogicalState(object):
         advance = op.get_advance_operation(req, self.node, self.field)
         if advance is None:
             if perform_checks:
-                print("ERROR: %s (UID=%s) failed to generate "+
+                print(("ERROR: %s (UID=%s) failed to generate "+
                       "an advance operation for field %s of region "+
-                      "requirement %s at %s" %
+                      "requirement %s at %s") %
                       (op, str(op.uid), self.field, req.index, self.node))
             else:
-                print("ERROR: %s (UID=%s) failed to generate "+
+                print(("ERROR: %s (UID=%s) failed to generate "+
                       "an advance operation that we normally would have expected. "+
                       "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm." % (op, str(op.uid)))
+                      "to confirm.") % (op, str(op.uid)))
             if self.node.state.assert_on_error:
                 assert False
         return advance
