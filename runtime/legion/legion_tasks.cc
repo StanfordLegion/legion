@@ -2638,7 +2638,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const bool reg = (req.handle_type == SINGULAR) ||
-                 (req.handle_type == REG_PROJECTION);
+                       (req.handle_type == REG_PROJECTION);
+      const bool proj = (req.handle_type == REG_PROJECTION) ||
+                        (req.handle_type == PART_PROJECTION); 
 
       LegionSpy::log_logical_requirement(uid, idx, reg,
           reg ? req.region.index_space.id :
@@ -2649,6 +2651,8 @@ namespace Legion {
                 req.partition.tree_id,
           req.privilege, req.prop, req.redop, req.parent.index_space.id);
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
+      if (proj)
+        LegionSpy::log_requirement_projection(uid, idx, req.projection);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5249,6 +5253,20 @@ namespace Legion {
       if (!privilege_fields.empty()) return ERROR_BAD_PARENT_REGION;
         // If we make it here then we are good
       return NO_ERROR;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion SingleTask::find_logical_region(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (index < regions.size())
+        return regions[index].region;
+      index -= regions.size();
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(index < created_requirements.size());
+#endif
+      return created_requirements[index].region;
     }
     
     //--------------------------------------------------------------------------

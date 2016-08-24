@@ -4701,6 +4701,34 @@ namespace Legion {
       start_node = start;
       open_path = path;
       open_mask = mask;
+      if (Runtime::legion_spy_enabled)
+      {
+        unsigned parent_index = find_parent_index(0);
+        IndexSpace parent_space = 
+          parent_ctx->find_logical_region(parent_index).get_index_space();
+        if (start_node->is_region())
+        {
+          const LogicalRegion &handle = start_node->as_region_node()->handle;
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    true/*region*/, handle.index_space.id,
+                                    handle.field_space.id, handle.tree_id,
+                                    READ_WRITE, EXCLUSIVE, 0/*redop*/,
+                                    parent_space.id);
+        }
+        else
+        {
+          const LogicalPartition &handle = 
+            start_node->as_partition_node()->handle;
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    true/*region*/, handle.index_partition.id,
+                                    handle.field_space.id, handle.tree_id,
+                                    READ_WRITE, EXCLUSIVE, 0/*redop*/,
+                                    parent_space.id);
+        }
+        std::set<FieldID> fields;
+        start_node->column_source->get_field_set(open_mask, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4815,6 +4843,34 @@ namespace Legion {
       parent_node = parent;
       advance_mask = advance;
       parent_is_upper_bound = is_upper;
+      if (Runtime::legion_spy_enabled)
+      {
+        unsigned parent_index = find_parent_index(0);
+        IndexSpace parent_space = 
+          parent_ctx->find_logical_region(parent_index).get_index_space();
+        if (parent_node->is_region())
+        {
+          const LogicalRegion &handle = parent_node->as_region_node()->handle;
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    true/*region*/, handle.index_space.id,
+                                    handle.field_space.id, handle.tree_id,
+                                    READ_WRITE, EXCLUSIVE, 0/*redop*/,
+                                    parent_space.id);
+        }
+        else
+        {
+          const LogicalPartition &handle = 
+            parent_node->as_partition_node()->handle;
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    true/*region*/, handle.index_partition.id,
+                                    handle.field_space.id, handle.tree_id,
+                                    READ_WRITE, EXCLUSIVE, 0/*redop*/,
+                                    parent_space.id);
+        }
+        std::set<FieldID> fields;
+        parent_node->column_source->get_field_set(advance_mask, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+      }
     }
 
     //--------------------------------------------------------------------------

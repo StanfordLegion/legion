@@ -10257,12 +10257,15 @@ namespace Legion {
           closer.register_close_operations(state.curr_epoch_users);
         }
         // See if we have any open_only fields to merge
-        FieldMask open_only = user.field_mask - unopened_field_mask;
-        if (!!open_only)
-          add_open_field_state(state, arrived, proj_info, 
-                               user, open_only, next_child);
+        if (!arrived || proj_info.is_projecting())
+        {
+          FieldMask open_only = user.field_mask - unopened_field_mask;
+          if (!!open_only)
+            add_open_field_state(state, arrived, proj_info, 
+                                 user, open_only, next_child);
+        }
       }
-      else
+      else if (!arrived || proj_info.is_projecting())
       {
         // Everything is open-only so make a state and merge it in
         add_open_field_state(state, arrived, proj_info, 

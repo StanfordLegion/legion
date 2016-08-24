@@ -542,6 +542,7 @@ namespace Legion {
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, 
                                       bool skip_privileges = false) const; 
+      LogicalRegion find_logical_region(unsigned index);
     protected:
       LegionErrorType check_privilege_internal(const RegionRequirement &req,
                                       const RegionRequirement &parent_req,

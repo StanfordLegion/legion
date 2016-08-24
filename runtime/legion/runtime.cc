@@ -13460,6 +13460,8 @@ namespace Legion {
         exit(ERROR_DUPLICATE_PROJECTION_ID);
       }
       projection_functions[pid] = function;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_projection_function(pid, function->depth);
     }
 
     //--------------------------------------------------------------------------

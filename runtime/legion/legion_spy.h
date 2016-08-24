@@ -419,6 +419,19 @@ namespace Legion {
         }
       }
 
+      static inline void log_projection_function(ProjectionID pid,
+                                                 int depth)
+      {
+        log_spy.print("Projection Function %u %d", pid, depth);
+      }
+
+      static inline void log_requirement_projection(UniqueID unique_id,
+                                      unsigned index, ProjectionID pid)
+      {
+        log_spy.print("Logical Requirement Projection %llu %u %u", 
+                      unique_id, index, pid);
+      }
+
       // Logger call for physical instances
       static inline void log_physical_instance(IDType inst_id, IDType mem_id,
                                                ReductionOpID redop)
