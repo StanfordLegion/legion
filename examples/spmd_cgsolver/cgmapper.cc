@@ -6,7 +6,7 @@ LegionRuntime::Logger::Category log_cgmap("cgmapper");
 
 // thanks to the wonders of ADL, this template has to be in either the Realm or std
 //  namespace to be found...
-namespace Realm {
+namespace std {
   template <typename T>
   std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
   {
@@ -196,17 +196,6 @@ bool CGMapper::pre_map_task(Task *task)
     }
 
   return true;
-}
-
-bool CGMapper::map_must_epoch(const std::vector<Task*> &tasks,
-			      const std::vector<MappingConstraint> &constraints,
-			      MappingTagID tag)
-{
-  // just map all the tasks, and rely on them satisfying the constraints
-  for(std::vector<Task*>::const_iterator it = tasks.begin(); it != tasks.end(); it++)
-    map_task(*it);
-
-  return false;
 }
 
 void CGMapper::notify_mapping_result(const Mappable *mappable)
