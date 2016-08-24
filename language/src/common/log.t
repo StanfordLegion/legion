@@ -113,7 +113,7 @@ function log.make_logger(category)
 end
 
 function log.get_log_level(category)
-  return categories[category]
+  return categories[category] or min_level
 end
 
 function logger:log(level, format_string, ...)
