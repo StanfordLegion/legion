@@ -67,7 +67,7 @@ template <unsigned DIM>
 static int volume(const Point<DIM>& p)
 {
   int v = 1;
-  for(int i = 0; i < DIM; i++)
+  for(unsigned i = 0; i < DIM; i++)
     v *= p.x[i];
   return v;
 }
