@@ -1904,6 +1904,9 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
       ast.map_node_continuation(normalize_accesses.expr(normalizer_cx), access)
     local index_access = extract_index_access_expr(normalized)
     local index_expr = index_access.index
+		if index_expr:is(ast.typed.expr.Cast) then
+		  index_expr = index_expr.arg
+		end
     if not (index_expr:is(ast.typed.expr.ID) and
             index_expr.value == loop_var) then
       local region_symbol = index_access.value.value
@@ -2521,17 +2524,20 @@ function parallelize_tasks.top_task(global_cx, node)
   for region, _ in pairs(node.prototype:get_region_universe()) do
     region_universe[region] = true
   end
+  -- FIXME: Workaround for the current limitation in SPMD transformation
+  local field_set = {}
+  for idx = 1, #task_cx.stencils do
+		task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
+  end
+  local fields = terralib.newlist()
+  for field, _ in pairs(field_set) do fields:insert(field) end
+
   for idx = 1, #task_cx.stencils do
 		local region = task_cx.ghost_symbols[idx]
-		local fields = task_cx.stencils[idx]:fields()
+		--local fields = task_cx.stencils[idx]:fields()
     -- TODO: handle reductions on ghost regions
-    privileges:insertall(fields:map(function(field)
-      return terralib.newlist { data.map_from_table {
-        node_type = "privilege",
-        region = region,
-        field_path = field,
-        privilege = std.reads,
-      }}
+    privileges:insert(fields:map(function(field)
+      return std.privilege(std.reads, region, field)
     end))
     --coherence_modes[region][field_path] = std.exclusive
     region_universe[region:gettype()] = true
