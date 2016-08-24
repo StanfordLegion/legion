@@ -280,8 +280,7 @@ namespace Legion {
                                       SingleTask *context, unsigned index,
                                       CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
-                                      LogicalRegion handle,
-                                      bool logical_users_only);
+                                      LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
@@ -340,7 +339,7 @@ namespace Legion {
                    const std::vector<bool> &to_skip,
                    std::vector<VersionInfo> &version_infos,
                    std::vector<RestrictInfo> &restrict_infos,
-                   const std::vector<RegionTreeContext> &contexts,
+                   RegionTreeContext enclosing_context,
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events);
       ApEvent physical_perform_close(RegionTreeContext ctx,
@@ -369,8 +368,7 @@ namespace Legion {
                                      , UniqueID uid
 #endif
                                      );
-      ApEvent copy_across(RegionTreeContext src_ctx,
-                          RegionTreeContext dst_ctx,
+      ApEvent copy_across(RegionTreeContext ctx,
                           const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
                           const InstanceSet &src_targets, 
@@ -379,8 +377,7 @@ namespace Legion {
                           int src_composite, Operation *op, 
                           unsigned index, ApEvent precondition,
                           std::set<RtEvent> &map_applied);
-      ApEvent reduce_across(RegionTreeContext src_ctx,
-                            RegionTreeContext dst_ctx,
+      ApEvent reduce_across(RegionTreeContext ctx,
                             const RegionRequirement &src_req,
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
@@ -1403,7 +1400,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events);
     public:
       void initialize_current_state(ContextID ctx);
-      void invalidate_current_state(ContextID ctx, bool logical_users_only);
+      void invalidate_current_state(ContextID ctx);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
       void invalidate_version_state(ContextID ctx);

@@ -148,8 +148,6 @@ namespace Legion {
       RtEvent defer_distribute_task(RtEvent precondition);
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op);
       RtEvent defer_launch_task(RtEvent precondition);
-    public:
-      RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void enqueue_ready_task(RtEvent wait_on = RtEvent::NO_RT_EVENT);
     protected:
@@ -481,8 +479,6 @@ namespace Legion {
       // for logging created region requirements
       void log_created_requirement(unsigned index);
     public:
-      void get_top_regions(std::map<LogicalRegion,
-                                    RegionTreeContext> &top_regions);
       void analyze_destroy_index_space(IndexSpace handle, 
                                    std::vector<RegionRequirement> &delete_reqs,
                                    std::vector<unsigned> &parent_req_indexes);
@@ -564,20 +560,17 @@ namespace Legion {
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
                                      MustEpochOp *must_epoch_owner,
-                               const std::vector<RegionTreeContext> &enclosing,
                                      std::vector<InstanceSet> &valid_instances);
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
-                              const std::vector<RegionTreeContext> &enclosing,
                                     std::vector<InstanceSet> &valid_instances);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
                     VariantImpl *impl, const char *call_name) const;
     protected:
-      void invoke_mapper(MustEpochOp *must_epoch_owner,
-          const std::vector<RegionTreeContext> &enclosing_contexts);
+      void invoke_mapper(MustEpochOp *must_epoch_owner);
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);
@@ -634,18 +627,17 @@ namespace Legion {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(ApUserEvent &chain_event) = 0;
       virtual void return_virtual_instance(unsigned index, 
-                                           InstanceSet &refs) = 0;
+                                           InstanceSet &refs,
+                                           bool created) = 0;
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
-      virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
       virtual void send_remote_context(AddressSpaceID target, 
                                        RemoteTask *dst) = 0;
     public:
-      RegionTreeContext find_enclosing_context(unsigned idx);
       // Override by RemoteTask
       virtual SingleTask* find_parent_context(void);
     public:
@@ -905,7 +897,8 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
+      virtual void return_virtual_instance(unsigned index, 
+                                           InstanceSet &refs, bool created);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -914,7 +907,6 @@ namespace Legion {
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -967,7 +959,6 @@ namespace Legion {
       IndividualTask *orig_task; // Not a valid pointer when remote
       ApEvent remote_completion_event;
       UniqueID remote_unique_id;
-      RegionTreeContext remote_outermost_context;
       UniqueID remote_owner_uid;
     protected:
       Future predicate_false_future;
@@ -1020,7 +1011,8 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
+      virtual void return_virtual_instance(unsigned index, 
+                                           InstanceSet &refs, bool created);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -1029,7 +1021,6 @@ namespace Legion {
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
-      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -1096,8 +1087,8 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
-      virtual RemoteTask* find_outermost_context(void) = 0;
+      virtual void return_virtual_instance(unsigned index, 
+                                           InstanceSet &refs, bool created);
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
@@ -1155,7 +1146,6 @@ namespace Legion {
     public:
       void initialize_remote(UniqueID context_uid, bool is_top_level);
     public:
-      virtual RemoteTask* find_outermost_context(void);
       virtual UniqueID get_context_uid(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -1183,12 +1173,8 @@ namespace Legion {
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
     public:
-      void add_top_region(LogicalRegion handle);
-    public:
       void convert_virtual_instances(Deserializer &derez);
       static void handle_convert_virtual_instances(Deserializer &derez);
-    protected:
-      std::set<LogicalRegion> top_level_regions;
     protected:
       UniqueID remote_owner_uid;
       UniqueID parent_context_uid;
@@ -1223,8 +1209,6 @@ namespace Legion {
     public:
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
-    public:
-      virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -1465,7 +1449,7 @@ namespace Legion {
     public:
       void return_privileges(PointTask *point);
       void return_virtual_instance(unsigned index, InstanceSet &refs,
-                                   const RegionRequirement &req);
+                                   const RegionRequirement &req, bool created);
       void record_child_mapped(RtEvent child_complete);
       void record_child_complete(void);
       void record_child_committed(void);
@@ -1496,7 +1480,6 @@ namespace Legion {
       IndexTask *index_owner;
       ApEvent index_complete;
       UniqueID remote_unique_id;
-      RegionTreeContext remote_outermost_context;
       bool locally_mapped;
       bool need_versioning_analysis;
       UniqueID remote_owner_uid;

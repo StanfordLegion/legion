@@ -51,6 +51,7 @@ namespace Legion {
         READ_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
+        RETURN_CLOSE_OP_KIND,
         ACQUIRE_OP_KIND,
         RELEASE_OP_KIND,
         DYNAMIC_COLLECTIVE_OP_KIND,
@@ -83,6 +84,7 @@ namespace Legion {
         "Read Close",               \
         "Post Close",               \
         "Virtual Close",            \
+        "Return Close",             \
         "Acquire",                  \
         "Release",                  \
         "Dynamic Collective",       \
@@ -1200,7 +1202,8 @@ namespace Legion {
     public:
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index);
+      void initialize(SingleTask *ctx, unsigned index,
+                      const RegionRequirement &req, bool created);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1214,6 +1217,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       unsigned parent_idx;
+      bool created_requirement;
       std::set<RtEvent> map_applied_conditions;
     };
 

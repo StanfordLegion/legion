@@ -1307,7 +1307,7 @@ namespace Legion {
      */
     class CurrentInvalidator : public NodeTraverser {
     public:
-      CurrentInvalidator(ContextID ctx, bool logical_users_only);
+      CurrentInvalidator(ContextID ctx);
       CurrentInvalidator(const CurrentInvalidator &rhs);
       ~CurrentInvalidator(void);
     public:
@@ -1318,7 +1318,6 @@ namespace Legion {
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
-      const bool logical_users_only;
     };
 
     /**

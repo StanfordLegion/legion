@@ -2137,15 +2137,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(ContextID c, bool logical_only)
-      : ctx(c), logical_users_only(logical_only)
+    CurrentInvalidator::CurrentInvalidator(ContextID c)
+      : ctx(c)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CurrentInvalidator::CurrentInvalidator(const CurrentInvalidator &rhs)
-      : ctx(0), logical_users_only(false)
+      : ctx(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2179,7 +2179,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, logical_users_only); 
+      node->invalidate_current_state(ctx); 
       return true;
     }
 
@@ -2187,7 +2187,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx, logical_users_only);
+      node->invalidate_current_state(ctx);
       return true;
     }
 

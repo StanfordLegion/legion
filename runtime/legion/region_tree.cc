@@ -1485,8 +1485,7 @@ namespace Legion {
       if (IS_NO_ACCESS(req))
         return;
       SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+      RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
@@ -1548,8 +1547,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+      RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
       assert(req.privilege == REDUCE);
@@ -1607,8 +1605,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
       SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+      RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
@@ -1658,8 +1655,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+      RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
@@ -1694,8 +1690,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL);
       SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(op->find_parent_index(idx));
+      RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
@@ -1816,13 +1811,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
-                                                      LogicalRegion handle,
-                                                      bool logical_users_only)
+                                                      LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
       RegionNode *top_node = get_node(handle);
-      CurrentInvalidator invalidator(ctx.get_id(), logical_users_only);
+      CurrentInvalidator invalidator(ctx.get_id());
       top_node->visit_node(&invalidator);
     }
 
@@ -2220,7 +2214,7 @@ namespace Legion {
                                   const std::vector<bool> &to_skip,
                                   std::vector<VersionInfo> &version_infos,
                                   std::vector<RestrictInfo> &restrict_infos,
-                                 const std::vector<RegionTreeContext> &contexts,
+                                  RegionTreeContext enclosing_context,
                                   std::deque<InstanceSet> &target_sets,
                                   std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -2308,8 +2302,8 @@ namespace Legion {
         if (!copy_out_views.empty() || !reduce_out_views.empty())
         {
           RegionNode *node = get_node(req.region); 
-          TraversalInfo traversal_info(contexts[idx1].get_id(), op, idx1, req,
-                                 info, restricted_fields, map_applied_events);
+          TraversalInfo traversal_info(enclosing_context.get_id(), op, idx1, 
+                          req, info, restricted_fields, map_applied_events);
           const InstanceSet &restricted_instances = 
             restrict_infos[idx1].get_instances();
           std::vector<MaterializedView*> restricted_views(
@@ -2449,8 +2443,7 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::copy_across(RegionTreeContext src_ctx,
-                                        RegionTreeContext dst_ctx,
+    ApEvent RegionTreeForest::copy_across(RegionTreeContext ctx,
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
                                         const InstanceSet &src_targets, 
@@ -2555,7 +2548,7 @@ namespace Legion {
           assert(composite_ref.is_composite_ref());
 #endif
           CompositeView *src_view = composite_ref.get_composite_view();
-          TraversalInfo info(src_ctx.get_id(), op, index, src_req,
+          TraversalInfo info(ctx.get_id(), op, index, src_req,
              src_version_info, composite_ref.get_valid_fields(), map_applied);
           InstanceView *view = 
               dst_node->convert_reference(dst_ref, op->get_parent());
@@ -2593,8 +2586,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::reduce_across(RegionTreeContext src_ctx,
-                                            RegionTreeContext dst_ctx,
+    ApEvent RegionTreeForest::reduce_across(RegionTreeContext ctx,
                                             const RegionRequirement &src_req,
                                             const RegionRequirement &dst_req,
                                             const InstanceSet &src_targets,
@@ -13478,17 +13470,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_current_state(ContextID ctx,
-                                                  bool logical_users_only)
+    void RegionTreeNode::invalidate_current_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
       if (!current_states.has_entry(ctx))
         return;
       CurrentState &state = get_current_state(ctx);
-      if (logical_users_only)
-        state.clear_logical_users();
-      else
-        state.reset(); 
+      state.reset(); 
     }
 
     //--------------------------------------------------------------------------
