@@ -2574,17 +2574,15 @@ class LogicalRegion(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, 
-                                 open_local, unopened, advance_op, rev, checks):
+                                 open_local, unopened, advance_op, prev, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
         arrived = (depth+1) == len(path)
         next_child = path[depth+1] if not arrived else None
-        (result, 
-         next_open, 
-         next_unopened,
-         next_advance) = self.logical_state[field].perform_logical_analysis(op, 
-                 req, next_child, open_local, unopened, advance_op, prev, checks)
+        result,next_open,next_unopened,next_advance = \
+            self.logical_state[field].perform_logical_analysis(op, req, next_child, 
+                                    open_local, unopened, advance_op, prev, checks)
         if not result:
             return False
         if not arrived:
@@ -2873,11 +2871,9 @@ class LogicalPartition(object):
             self.logical_state[field] = LogicalState(self, field)
         arrived = (depth+1) == len(path)
         next_child = path[depth+1] if not arrived else None
-        (result,
-         next_open,
-         next_unopened,
-         next_advance) = self.logical_state[field].perform_logical_analysis(op, 
-             req, next_child, next_open, next_unopened, advance_op, prev, checks)
+        result,next_open,next_unopened,next_advance = \
+          self.logical_state[field].perform_logical_analysis(op, req, next_child, 
+                              open_local, unopened, advance_op, prev, checks)
         if not result:
             return False
         if not arrived:
@@ -3029,7 +3025,8 @@ class LogicalPartition(object):
 class LogicalState(object):
     __slots__ = ['node', 'field', 'open_children', 'open_redop',
                  'current_epoch_users', 'previous_epoch_users', 
-                 'current_redop', 'dirty_below', 'projection_mode']
+                 'current_redop', 'dirty_below', 'projection_mode',
+                 'projection_epoch']
     def __init__(self, node, field):
         self.node = node
         self.field = field
@@ -3040,6 +3037,7 @@ class LogicalState(object):
         self.current_redop = 0 # for reductions being done at this node
         self.dirty_below = False
         self.projection_mode = OPEN_NONE 
+        self.projection_epoch = list()
 
     def perform_logical_analysis(self, op, req, next_child, open_local, unopened, 
                                  advance_op, previous_deps, perform_checks):
@@ -3053,21 +3051,16 @@ class LogicalState(object):
         # Figure out if we need to check close operations or not
         if unopened:
             if arrived and req.is_projection():
-                (result,next_open) = self.siphon_logical_projection(op, req, 
-                                              previous_deps, perform_checks) 
-                if not result:
+                if not self.siphon_logical_projection(op, req, 
+                                                      previous_deps, perform_checks):
                     return (False,None,None,None)
             else:
-                (result,next_open) = self.siphon_logical_children(op, req, 
-                                next_child, previous_deps, perform_checks)
-                if not result:
+                if not self.siphon_logical_children(op, req, next_child, 
+                                                    previous_deps, perform_checks):
                     return (False,None,None,None)
-            if next_open:
-                self.open_state(req, next_child)
-        elif not arrived or req.is_projection():
-            # If we're just opening then that is easy
-            self.open_state(req, next_child) 
-            next_open = False
+        # Perform any open operations if necessary
+        if next_child or req.is_projection():
+            next_open = self.open_state(op, req, next_child)
         # If we have an advance op, perform its analysis
         # otherwise see if we need to make one
         if advance_op:
@@ -3077,7 +3070,7 @@ class LogicalState(object):
                 return (False,None,None,None)
         elif req.has_write() and not self.dirty_below and \
                           (not arrived or req.is_projection()):
-            (result,advance_op) = self.perform_advance_operation(op, 
+            result,advance_op = self.perform_advance_operation(op, 
                                  req, previous_deps, perform_checks) 
             if not result:
                 return (False,None,None,None)
@@ -3156,10 +3149,11 @@ class LogicalState(object):
         self.open_redop = dict()
         self.current_redop = 0
         self.dirty_below = False
-        self.open_projection = OPEN_NONE
+        self.projection_mode = OPEN_NONE
+        self.projection_epoch = list()
 
     def perform_open_operation(self, op, req, previous_deps, perform_checks):
-        open_op = self.find_open_operation(self, op, req, perform_checks)
+        open_op = self.find_open_operation(op, req, perform_checks)
         # No need to do anything for the open, just perform the epoch analysis
         assert 0 in open_op.reqs
         open_req = open_op.reqs[0]
@@ -3195,8 +3189,8 @@ class LogicalState(object):
         self.register_logical_user(open_op, open_req)
         return True
 
-    def perform_advance_operation(self, op, req, previous_deps):
-        advance = self.find_advance_operation(self, op, req, perform_checks)
+    def perform_advance_operation(self, op, req, previous_deps, perform_checks):
+        advance = self.find_advance_operation(op, req, perform_checks)
         # No need to do anything for the advance, just perform the epoch analysis
         assert 0 in advance.reqs
         advance_req = advance.reqs[0]
@@ -3232,11 +3226,91 @@ class LogicalState(object):
         self.register_logical_user(advance, advance_req)
         return (True,advance)
 
+    def open_state(self, op, req, next_child):
+        # Then figure out how to open our child if necessary  
+        if next_child is not None:
+            next_open = next_child not in self.open_children
+            if req.is_read_only():
+                if next_child in self.open_children:
+                    # Only need to change it if it was in reduce mode
+                    if self.open_children[next_child] == OPEN_SINGLE_REDUCE:
+                        self.open_children[next_child] = OPEN_READ_WRITE
+                        del self.open_redop[next_child]
+                    elif self.open_children[next_child] == OPEN_MULTI_REDUCE:
+                        self.open_children[next_child] = OPEN_READ_ONLY
+                        del self.open_redop[next_child]
+                else:
+                    self.open_children[next_child] = OPEN_READ_ONLY
+            elif req.is_reduce():
+                # See how many interfering children there are in the same mode
+                other_children = set()
+                for child,redop in self.open_redop.iteritems():
+                    if redop != req.redop:
+                        continue
+                    if self.node.are_children_disjoint(child,next_child):
+                        continue
+                    if child is next_child:
+                        continue
+                    other_children.add(child)
+                if other_children:
+                    # Everyone is in multi-reduce mode
+                    self.open_children[next_child] = OPEN_MULTI_REDUCE
+                    for child in other_children:
+                        assert self.open_children[next_child] == OPEN_SINGLE_REDUCE or \
+                            self.open_children[next_child] == OPEN_MULTI_REDUCE
+                        self.open_children[next_child] = OPEN_MULTI_REDUCE
+                else:
+                    # Just single reduce mode
+                    self.open_children[next_child] = OPEN_SINGLE_REDUCE
+                assert req.redop != 0
+                self.open_redop[next_child] = req.redop
+            else:
+                # Normal read-write case is easy
+                self.open_children[next_child] = OPEN_READ_WRITE
+        else:
+            assert req.is_projection()
+            assert not self.open_children
+            next_open = False
+            if req.is_read_only():
+                if self.projection_mode == OPEN_NONE:
+                    self.projection_mode = OPEN_READ_ONLY
+            elif req.is_reduce():
+                assert self.projection_mode == OPEN_NONE
+                self.projection_mode = OPEN_MULTI_REDUCE
+                self.current_redop = req.redop
+            else:
+                self.projection_mode = OPEN_READ_WRITE
+            self.projection_epoch.append((req.projection_function, 
+                                          op.get_index_launch_rect()))
+        return next_open
+
     # Maybe not the most intuitive name for a method but it aligns with the runtime
     def siphon_logical_children(self, op, req, next_child, 
                                 previous_deps, perform_checks):
         # First see if we have any reductions to flush
-        if self.current_redop != 0 and self.current_redop != req.redop:
+        if self.projection_mode != OPEN_NONE:
+            assert not self.open_children # shouldn't have any open children
+            empty_children_to_close = dict()
+            if self.projection_mode == OPEN_READ_ONLY:
+                # We need a close if req is not read only or there is a next child
+                if not req.is_read_only() or next_child:
+                    if not self.perform_close_operation(empty_children_to_close,
+                                  True, op, req, previous_deps, perform_checks):
+                        return False
+            elif self.projection_mode == OPEN_READ_WRITE:
+                # We close this no matter what
+                if not self.perform_close_operation(empty_children_to_close,
+                                  False, op, req, previous_deps, perform_checks):
+                    return False
+            else:
+                assert self.projection_mode == OPEN_MULTI_REDUCE
+                assert self.current_redop != 0
+                if not req.is_reduce() or next_child or \
+                            req.redop != self.current_redop: 
+                    if not self.perform_close_operation(empty_children_to_close,
+                                  False, op, req, previous_deps, perform_checks):
+                        return False
+        elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = dict()
             permit_leave_open = False # Never allowed to leave anything open here
             # Flushing reductions close all children no matter what
@@ -3320,46 +3394,77 @@ class LogicalState(object):
         else:
             # All children are disjoint so no closes necessary
             pass
-        # Then figure out how to open our child if necessary  
-        if next_child is not None:
-            if req.is_read_only():
-                if next_child in self.open_children:
-                    # Only need to change it if it was in reduce mode
-                    if self.open_children[next_child] == OPEN_SINGLE_REDUCE:
-                        self.open_children[next_child] = OPEN_READ_WRITE
-                        del self.open_redop[next_child]
-                    elif self.open_children[next_child] == OPEN_MULTI_REDUCE:
-                        self.open_children[next_child] = OPEN_READ_ONLY
-                        del self.open_redop[next_child]
-                else:
-                    self.open_children[next_child] = OPEN_READ_ONLY
-            elif req.is_reduce():
-                # See how many interfering children there are in the same mode
-                other_children = set()
-                for child,redop in self.open_redop.iteritems():
-                    if redop != req.redop:
-                        continue
-                    if self.node.are_children_disjoint(child,next_child):
-                        continue
-                    if child is next_child:
-                        continue
-                    other_children.add(child)
-                if other_children:
-                    # Everyone is in multi-reduce mode
-                    self.open_children[next_child] = OPEN_MULTI_REDUCE
-                    for child in other_children:
-                        assert self.open_children[next_child] == OPEN_SINGLE_REDUCE or \
-                            self.open_children[next_child] == OPEN_MULTI_REDUCE
-                        self.open_children[next_child] = OPEN_MULTI_REDUCE
-                else:
-                    # Just single reduce mode
-                    self.open_children[next_child] = OPEN_SINGLE_REDUCE
-                assert req.redop != 0
-                self.open_redop[next_child] = req.redop
-            else:
-                # Normal read-write case is easy
-                self.open_children[next_child] = OPEN_READ_WRITE 
         return True
+
+    def siphon_logical_projection(self, op, req, previous_deps, perform_checks):
+        assert req.is_projection()
+        if self.projection_mode != OPEN_NONE:
+            empty_children_to_close = dict()
+            if self.projection_mode == OPEN_READ_ONLY:
+                if not req.read_only():
+                    if not self.perform_close_operation(empty_children_to_close,
+                                  True, op, req, previous_deps, perform_checks):
+                        return False
+            elif self.projection_mode == OPEN_READ_WRITE:
+                # Figure out if we are in shallow disjoint mode or not
+                shallow_disjoint = req.projection_function.depth == 1 
+                same_func_and_rect = True
+                current_rect = op.get_index_launch_rect()
+                for func,rect in self.projection_epochs:
+                    if shallow_disjoint and func.projection_function.depth != 1:
+                        shallow_disjoint = False
+                        if not same_func_and_rect:
+                            break
+                    if same_func_and_rect:
+                        if func is not req.projection_function:
+                            same_func_and_rect = False
+                            if not shallow_disjoint:
+                                break
+                        elif not rect.dominates(current_rect):
+                            same_func_and_rect= False
+                            if not shallow_disjoint:
+                                break
+                # If we can't do either of these then we have to close
+                # Also have to close if this is a reduction
+                if not shallow_disjoint and not same_func_and_rect or req.is_reduce():
+                    if not self.perform_close_operation(empty_children_to_close,
+                                  False, op, req, previous_deps, perform_checks):
+                        return False
+            else:
+                assert self.projection_mode == OPEN_MULTI_REDUCE
+                assert self.current_redop != 0
+                if self.current_redop != req.redop:
+                    if self.perform_close_operation(empty_children_to_close,
+                              False, op, req, previous_deps, perform_checks):
+                        return False
+        elif self.current_redop != 0 and self.current_redop != req.redop:
+            children_to_close = dict()
+            permit_leave_open = False # Never allowed to leave anything open here
+            # Flushing reductions close all children no matter what
+            for child,open_mode in self.open_children.iteritems():
+                children_to_close[child] = permit_leave_open
+            # If we are flushing reductions we do a close no matter what
+            if not self.perform_close_operation(children_to_close, False, op, req, 
+                                                previous_deps, perform_checks):
+                return False
+        else:
+            # Close all open children
+            children_to_close = dict()
+            children_to_read_close = dict()
+            for child,open_mode in self.open_children.iteritems():
+                if open_mode == OPEN_READ_ONLY:
+                    children_to_read_close[child] = False
+                else:
+                    children_to_close[child] = False
+            if children_to_close:
+                if not self.perform_close_operation(children_to_close, False, op, req,
+                                                    previous_deps, perform_checks):
+                    return False
+            if children_to_read_close:
+                if not self.perform_close_operation(children_to_close, True, op, req,
+                                                    previous_deps, perform_checks):
+                    return False
+        return True 
 
     def siphon_logical_deletion(self, op, req, next_child, 
                                 previous_deps, perform_checks, force_close):
@@ -3393,9 +3498,6 @@ class LogicalState(object):
             assert False # should never get here
         return True 
 
-    def open_state(self, req, next_child):
-        pass
-
     def find_open_operation(self, op, req, perform_checks):
         open_op = op.get_open_operation(req, self.node, self.field)
         if open_op is None:
@@ -3403,12 +3505,12 @@ class LogicalState(object):
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "an open operation for field %s of region "+
                       "requirement %s at %s" %
-                      (op, op.uid, self.field, req.index, self.node))
+                      (op, str(op.uid), self.field, req.index, self.node))
             else:
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "an open operation that we normally would have expected. "+
                       "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm." % (op, op.uid))
+                      "to confirm." % (op, str(op.uid)))
             if self.node.state.assert_on_error:
                 assert False
         return open_op
@@ -3420,12 +3522,12 @@ class LogicalState(object):
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "an advance operation for field %s of region "+
                       "requirement %s at %s" %
-                      (op, op.uid, self.field, req.index, self.node))
+                      (op, str(op.uid), self.field, req.index, self.node))
             else:
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "an advance operation that we normally would have expected. "+
                       "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm." % (op, op.uid))
+                      "to confirm." % (op, str(op.uid)))
             if self.node.state.assert_on_error:
                 assert False
         return advance
@@ -3437,12 +3539,12 @@ class LogicalState(object):
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "a close operation for field %s of region "+
                       "requirement %s at %s%s" %
-                      (op, op.uid, self.field, req.index, self.node, error_str))
+                      (op, str(op.uid), self.field, req.index, self.node, error_str))
             else:
                 print("ERROR: %s (UID=%s) failed to generate "+
                       "a close operation that we normally would have expected. This "+
                       "is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm." % (op, op.uid))
+                      "to confirm." % (op, str(op.uid)))
             if self.node.state.assert_on_error:
                 assert False
         return close
@@ -3580,6 +3682,7 @@ class LogicalState(object):
         self.current_redop = 0
         self.dirty_below = False
         self.projection_mode = OPEN_NONE
+        self.projection_epoch = list()
         
     def perform_epoch_analysis(self, op, req, perform_checks, 
                                can_dominate, recording_set,
@@ -3613,7 +3716,7 @@ class LogicalState(object):
                                         req.index, dep_type)
                 prev_op.add_outgoing(dep)
                 op.add_incoming(dep)
-            if recording_set is not None:
+            if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
                 recording_set.append((prev_op,prev_req))
         if not dominates:
             for prev_op,prev_req in self.previous_epoch_users:
@@ -3640,7 +3743,7 @@ class LogicalState(object):
                                             req.index, dep_type)
                     prev_op.add_outgoing(dep)
                     op.add_incoming(dep)   
-                if recording_set is not None:
+                if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
                     recording_set.append((prev_op,prev_req))
         if can_dominate and dominates:
             # Filter back the users
@@ -4442,8 +4545,8 @@ class Operation(object):
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'index_owner', 'points', 
-                 'creator', 'realm_copies', 'realm_fills', 'internal_idx', 
-                 'partition_kind', 'partition_node', 'node_name', 
+                 'launch_rect', 'creator', 'realm_copies', 'realm_fills', 
+                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
                  'cluster_name', 'generation', 'need_logical_replay', 
                  'reachable_cache', 'transitive_warning_issued']
                   # If you add a field here, you must update the merge method
@@ -4475,6 +4578,7 @@ class Operation(object):
         self.index_owner = None
         # Only valid for index tasks
         self.points = None
+        self.launch_rect = None
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
@@ -4563,6 +4667,15 @@ class Operation(object):
         else:
             assert self.kind == POST_CLOSE_OP_KIND
 
+    def set_launch_rect(self, rect):
+        assert self.kind == INDEX_TASK_KIND
+        assert not self.launch_rect
+        self.launch_rect = rect
+
+    def get_index_launch_rect(self):
+        assert self.launch_rect
+        return self.launch_rect
+
     def add_open_operation(self, open_op):
         if self.open_ops is None:
             self.open_ops = list()
@@ -4612,7 +4725,7 @@ class Operation(object):
                 continue
             if field not in advance_req.fields:
                 continue
-            return advance_op
+            return advance
         return None
 
     def get_close_operation(self, req, node, field):
@@ -5109,17 +5222,26 @@ class Operation(object):
         return True
 
     def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
-        for dep in self.incoming:
-            if dep.op1 is not prev_op:
-                continue
-            if dep.idx1 is not prev_req.index:
-                continue
-            if dep.idx2 is not req.index:
-                continue
-            if dep.dtype is not dtype:
-                continue
-            # We found a good mapping dependence, so all is good
-            return True
+        if self.incoming:
+            for dep in self.incoming:
+                if dep.op1 is not prev_op:
+                    continue
+                if dep.idx1 is not prev_req.index:
+                    continue
+                if dep.idx2 is not req.index:
+                    continue
+                if dep.dtype is not dtype:
+                    continue
+                # We found a good mapping dependence, so all is good
+                return True
+        # Special case for advance ops and open ops
+        if prev_op.kind == OPEN_OP_KIND and self.advance_ops:
+            for advance in self.advance_ops:
+                if req.index != advance.internal_idx:
+                    continue
+                if advance.has_mapping_dependence(advance.reqs[0], prev_op, 
+                                                  prev_req, TRUE_DEPENDENCE, field):
+                    return True
         # Look for the dependence transitively
         if self.has_transitive_mapping_dependence(prev_op):
             return True
@@ -8580,6 +8702,10 @@ projection_func_pat     = re.compile(
 req_proj_pat            = re.compile(
     prefix+"Logical Requirement Projection (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
            "(?P<pid>[0-9]+)")
+index_launch_domain_pat = re.compile(
+    prefix+"Index Launch Rect (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
+           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
+           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
@@ -8837,6 +8963,22 @@ def parse_legion_spy_line(line, state):
         index = int(m.group('index'))
         func = state.get_projection_function(int(m.group('pid')))
         op.set_projection_function(index, func)
+        return True
+    m = index_launch_domain_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        dim = int(m.group('dim'))
+        lo = Point(dim)
+        hi = Point(dim)
+        lo.vals[0] = int(m.group('lo1'))
+        hi.vals[0] = int(m.group('hi1'))
+        if dim >= 2:
+            lo.vals[1] = int(m.group('lo2'))
+            hi.vals[1] = int(m.group('hi2'))
+            if dim >= 3:
+                lo.vals[2] = int(m.group('lo3'))
+                hi.vals[2] = int(m.group('hi3'))
+        op.set_launch_rect(Rect(lo, hi)) 
         return True
     m = mapping_dep_pat.match(line)
     if m is not None:
