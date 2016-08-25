@@ -5035,7 +5035,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CloseOp::initialize_close(Operation *creator, unsigned idx,
-                                   unsigned parent_req_index)
+                                   unsigned parent_req_index,
+                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5045,8 +5046,7 @@ namespace Legion {
       // We always track this so get the close index
       context_index = parent_ctx->register_new_close_operation(this);
       parent_task = parent_ctx;
-      parent_ctx->clone_requirement(parent_req_index, requirement);
-      localize_region_requirement(requirement);
+      requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     }
 
@@ -5169,7 +5169,7 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, false/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      initialize_close(creator, close_idx, parent_req_index);
+      initialize_close(creator, close_idx, parent_req_index, req);
       close_mask = close_m;
       leave_open_mask = leave_m;
       closed_tree = closed_t;
@@ -5615,7 +5615,7 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, true/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      initialize_close(creator, close_idx, parent_req_index);
+      initialize_close(creator, close_idx, parent_req_index, req);
       close_mask = close_m;
       if (Runtime::legion_spy_enabled)
         perform_logging();

@@ -718,7 +718,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::add_current_version(VersionState *state, 
-                                    const FieldMask &state_mask, bool path_only) 
+                                    const FieldMask &state_mask, bool path_only)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = state->logical_node;
@@ -744,7 +744,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::add_advance_version(VersionState *state, 
-                                    const FieldMask &state_mask, bool path_only) 
+                                    const FieldMask &state_mask, bool path_only)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = state->logical_node;

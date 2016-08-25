@@ -4273,7 +4273,7 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(did))
+        if (it->first->remove_nested_resource_ref(did))
           legion_delete(it->first);
       }
       reduction_views.clear();

@@ -1285,10 +1285,9 @@ namespace Legion {
                                  const TraceInfo &trace_info,
                                  VersionInfo &version_info,
                                  ProjectionInfo &projection_info,
-                                 const FieldMask &local_open_mask,
                                  FieldMask &unopened_field_mask,
                      LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
-      void create_logical_open(CurrentState &state,
+      void create_logical_open(ContextID ctx,
                                const FieldMask &open_mask,
                                const LogicalUser &creator,
                                const RegionTreePath &path);
@@ -1305,7 +1304,7 @@ namespace Legion {
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const ColorPoint &next_child);
-      void perform_advance_analysis(CurrentState &state, 
+      void perform_advance_analysis(CurrentState &state, AdvanceOp *advance,
                                     const LogicalUser &advance_user,
                                     const LogicalUser &create_user);
       void close_reduction_analysis(ContextID ctx,

@@ -1025,7 +1025,8 @@ namespace Legion {
                             const RegionRequirement &req, bool track);
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
-                            unsigned parent_req_index);
+                            unsigned parent_req_index,
+                            const RegionRequirement &req);
       void perform_logging(void);
     public:
       virtual void activate(void) = 0;
