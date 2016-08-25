@@ -682,8 +682,13 @@ namespace Legion {
       inline bool has_close_operations(void) const 
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
                   (!!flush_only_close_mask); }
-      void record_close_operation(const FieldMask &mask, bool leave_open,
-                                  bool read_only, bool flush_only);
+      // Record normal closes like this
+      void record_close_operation(const FieldMask &mask, 
+                                  const FieldMask &dirty_below,
+                                  bool leave_open);
+      void record_read_only_close(const FieldMask &mask);
+      void record_flush_only_close(const FieldMask &mask,
+                                   const FieldMask &dirty_below);
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
@@ -723,6 +728,8 @@ namespace Legion {
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
+      FieldMask root_split_mask; // for normal closes, track dirty below
+      FieldMask flush_split_mask; // for flush closes, track dirty below
     protected:
       // At most we will ever generate three close operations at a node
       InterCloseOp *normal_close_op;

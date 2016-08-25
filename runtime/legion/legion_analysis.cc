@@ -3402,25 +3402,42 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::record_close_operation(const FieldMask &mask, 
-                               bool leave_open, bool read_only, bool flush_only)
+                                               const FieldMask &dirty_below,
+                                               bool leave_open)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
-      // at most one of these should be true
-      assert(!((leave_open && read_only) || (leave_open && flush_only) || 
-                (read_only && flush_only)));
 #endif
-      if (read_only)
-        read_only_close_mask |= mask;
-      else if (flush_only)
-        flush_only_close_mask |= mask;
-      else
-      {
-        normal_close_mask |= mask;
-        if (leave_open)
-          leave_open_mask |= mask;
-      }
+      normal_close_mask |= mask;
+      // Record fields that are dirty below for this close
+      if (!!dirty_below)
+        root_split_mask |= (dirty_below & mask);
+      if (leave_open)
+        leave_open_mask |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::record_read_only_close(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      read_only_close_mask |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalCloser::record_flush_only_close(const FieldMask &mask,
+                                                const FieldMask &dirty_below)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      flush_only_close_mask |= mask;
+      if (!!dirty_below)
+        flush_split_mask |= (dirty_below & mask);
     }
 
     //--------------------------------------------------------------------------
@@ -3500,8 +3517,8 @@ namespace Legion {
         // Now initialize the operation
         normal_close_op->initialize(creator->get_parent(), req, finder->second,
                                     trace_info.trace, trace_info.req_idx, 
-                                    ver_info, normal_close_mask, 
-                                    leave_open_mask,creator);
+                                    ver_info, normal_close_mask,
+                                    root_split_mask, leave_open_mask, creator);
         // We can clear this now
         closed_nodes.clear();
       }
@@ -3534,7 +3551,7 @@ namespace Legion {
         FieldMask empty_leave_open;
         flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,
             trace_info.trace, trace_info.req_idx, ver_info, 
-            flush_only_close_mask, empty_leave_open, creator);
+            flush_only_close_mask, flush_split_mask, empty_leave_open, creator);
       }
     }
 

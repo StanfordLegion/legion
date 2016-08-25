@@ -5046,6 +5046,7 @@ namespace Legion {
       context_index = parent_ctx->register_new_close_operation(this);
       parent_task = parent_ctx;
       parent_ctx->clone_requirement(parent_req_index, requirement);
+      localize_region_requirement(requirement);
       initialize_privilege_path(privilege_path, requirement);
     }
 
@@ -5158,22 +5159,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                  ClosedNode *closed_t, LegionTrace *trace, 
-                                  int close_idx, const VersionInfo &clone_info,
-                                  const FieldMask &close_m, 
-                                  const FieldMask &leave_m, Operation *creator)
+                              ClosedNode *closed_t, LegionTrace *trace, 
+                              int close_idx, const VersionInfo &clone_info,
+                              const FieldMask &close_m, const FieldMask &split,
+                              const FieldMask &leave_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, false/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      requirement = req;
       initialize_close(creator, close_idx, parent_req_index);
       close_mask = close_m;
       leave_open_mask = leave_m;
       closed_tree = closed_t;
       version_info.clone_logical(clone_info, close_m, closed_t->node);
+      // Record the root split information
+      version_info.record_split_fields(closed_t->node, split);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)

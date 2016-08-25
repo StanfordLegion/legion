@@ -10600,7 +10600,7 @@ namespace Legion {
         }
         // Recursively perform any close operations
         FieldMask already_open;
-        perform_close_operations(closer, overlap, *it, 
+        perform_close_operations(closer, overlap, state.dirty_below, *it,
                                  ColorPoint()/*next child*/,
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
@@ -10717,7 +10717,8 @@ namespace Legion {
                 // read-only children requires no work.
                 const bool needs_upgrade = HAS_WRITE(closer.user.usage);
                 FieldMask already_open;
-                perform_close_operations(closer, current_mask, *it, next_child,
+                perform_close_operations(closer, current_mask, 
+                                         state.dirty_below, *it, next_child,
                                          true/*allow next*/,
                                          needs_upgrade,
                                          false/*permit leave open*/,
@@ -10740,7 +10741,8 @@ namespace Legion {
           case OPEN_READ_WRITE:
             {
               // Close up any open partitions that conflict with ours
-              perform_close_operations(closer, current_mask, *it, next_child,
+              perform_close_operations(closer, current_mask, 
+                                       state.dirty_below, *it, next_child,
                                        true/*allow next*/,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
@@ -10845,8 +10847,8 @@ namespace Legion {
                 {
                   // Cases 3 and 4
                   FieldMask already_open;
-                  perform_close_operations(closer, current_mask, *it, 
-                                           next_child, 
+                  perform_close_operations(closer, current_mask, 
+                                           state.dirty_below, *it, next_child,
                                            true/*allow next*/,
                                            true/*needs upgrade*/,
                                            false/*permit leave open*/,
@@ -10870,7 +10872,8 @@ namespace Legion {
               {
                 // Closing everything up, so just do it
                 FieldMask already_open;
-                perform_close_operations(closer, current_mask, *it, next_child,
+                perform_close_operations(closer, current_mask, 
+                                         state.dirty_below, *it, next_child,
                                          false/*allow next*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
@@ -10910,7 +10913,8 @@ namespace Legion {
                 // Need to close up the open field since we're going
                 // to have to do it anyway
                 FieldMask already_open;
-                perform_close_operations(closer, current_mask, *it, next_child,
+                perform_close_operations(closer, current_mask, 
+                                         state.dirty_below, *it, next_child,
                                          false/*allow next child*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
@@ -10941,8 +10945,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap,                
-                   false/*leave open*/, true/*read only*/, false/*flush only*/);
+                  closer.record_read_only_close(overlap);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -10967,12 +10970,10 @@ namespace Legion {
                 assert(!!overlap);
 #endif
                 if (overwriting)
-                  closer.record_close_operation(overlap, false/*leave open*/,
-                                  true/*read only*/, false/*flush only*/);
+                  closer.record_read_only_close(overlap);
                 else
-                  closer.record_close_operation(overlap,
-                                  IS_READ_ONLY(closer.user.usage)/*leave open*/,
-                                  false/*read only*/, false/*flush only*/);
+                  closer.record_close_operation(overlap, state.dirty_below,
+                            IS_READ_ONLY(closer.user.usage)/*leave open*/);
                 // Advance the projection epochs
                 state.advance_projection_epochs(overlap);
               }
@@ -10996,8 +10997,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap, false/*leave open*/,
-                                overwriting/*read only*/,false/*flush only*/);
+                  if (overwriting)
+                    closer.record_read_only_close(overlap);
+                  else
+                    closer.record_close_operation(overlap, state.dirty_below,
+                                                  false/*leave open*/);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11069,7 +11073,8 @@ namespace Legion {
           case OPEN_READ_ONLY:
             {
               FieldMask already_open;
-              perform_close_operations(closer, current_mask, *it, 
+              perform_close_operations(closer, current_mask, 
+                                       state.dirty_below, *it, 
                                        no_next_child, false/*allow next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
@@ -11089,7 +11094,8 @@ namespace Legion {
           case OPEN_MULTI_REDUCE:
             {
               FieldMask already_open;
-              perform_close_operations(closer, current_mask, *it, 
+              perform_close_operations(closer, current_mask, 
+                                       state.dirty_below, *it, 
                                        no_next_child, false/*allow next*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
@@ -11149,9 +11155,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap,
-                                            IS_READ_ONLY(closer.user.usage),
-                                            false/*read only*/, false/*flush*/);
+                  closer.record_close_operation(overlap, state.dirty_below,
+                                          IS_READ_ONLY(closer.user.usage));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11193,9 +11198,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap,
-                                            IS_READ_ONLY(closer.user.usage),
-                                            false/*read only*/, false/*flush*/);
+                  closer.record_close_operation(overlap, state.dirty_below,
+                                          IS_READ_ONLY(closer.user.usage));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11220,9 +11224,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_close_operation(overlap,
-                                            IS_READ_ONLY(closer.user.usage),
-                                            false/*read only*/, false/*flush*/);
+                  closer.record_close_operation(overlap, state.dirty_below,
+                                          IS_READ_ONLY(closer.user.usage));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11293,7 +11296,8 @@ namespace Legion {
             continue;
           }
           FieldMask closed_child_fields;
-          perform_close_operations(closer, overlap, *it,
+          perform_close_operations(closer, overlap, 
+                                   state.dirty_below, *it,
                                    next_child, false/*allow_next*/,
                                    false/*needs upgrade*/,
                                    false/*permit leave open*/,
@@ -11313,8 +11317,7 @@ namespace Legion {
         // to be performed but only to flush the reductions
         FieldMask unflushed = reduction_flush_fields - flushed_fields;
         if (!!unflushed)
-          closer.record_close_operation(unflushed,
-              false/*leave open*/, false/*read only*/, true/*flush only*/);
+          closer.record_flush_only_close(unflushed, state.dirty_below);
         // Then we can mark that these fields no longer have 
         // unflushed reductions
         clear_logical_reduction_fields(state, reduction_flush_fields);
@@ -11324,6 +11327,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::perform_close_operations(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
+                                            const FieldMask &dirty_below,
                                             FieldState &state,
                                             const ColorPoint &next_child, 
                                             bool allow_next_child,
@@ -11377,8 +11381,11 @@ namespace Legion {
                                              read_only_close);
               if (record_close_operations)
               {
-                closer.record_close_operation(close_mask,
-                    permit_leave_open, read_only_close, false/*flush only*/);
+                if (read_only_close)
+                  closer.record_read_only_close(close_mask);
+                else
+                  closer.record_close_operation(close_mask,
+                            dirty_below, permit_leave_open);
                 actually_closed = close_mask;
               }
               // Remove the closed fields
@@ -11441,8 +11448,11 @@ namespace Legion {
                                          permit_leave_open, read_only_close);
           if (record_close_operations)
           {
-            closer.record_close_operation(close_mask,
-                permit_leave_open, read_only_close, false/*flush only*/);
+            if (read_only_close)
+              closer.record_read_only_close(close_mask);
+            else
+              closer.record_close_operation(close_mask, dirty_below,
+                                            permit_leave_open);
             actually_closed |= close_mask;
           }
           // Remove the close fields
@@ -11972,7 +11982,8 @@ namespace Legion {
               // can record that it is already open
               if (force_close_next)
               {
-                perform_close_operations(closer, current_mask, *it,
+                perform_close_operations(closer, current_mask, 
+                                         state.dirty_below, *it,
                                          next_child, false/*allow next*/,
                                          false/*upgrade next child*/,
                                          false/*permit leave open*/,
@@ -11997,7 +12008,8 @@ namespace Legion {
               // Go to read-write mode and close if necessary
               if (force_close_next)
               {
-                perform_close_operations(closer, current_mask, *it,
+                perform_close_operations(closer, current_mask, 
+                                         state.dirty_below, *it,
                                          next_child, false/*allow next*/,
                                          false/*upgrade next child*/,
                                          false/*permit leave open*/,
@@ -12038,7 +12050,8 @@ namespace Legion {
           case OPEN_MULTI_REDUCE:
             {
               // Do the close here if our child is open
-              perform_close_operations(closer, current_mask, *it,
+              perform_close_operations(closer, current_mask, 
+                                       state.dirty_below, *it,
                                        next_child, false/*allow next*/,
                                        false/*upgrade next child*/,
                                        false/*permit leave open*/,
@@ -12055,8 +12068,7 @@ namespace Legion {
           case OPEN_READ_ONLY_PROJ:
             {
               // Do a read only close here 
-              closer.record_close_operation(overlap,
-                  false/*leave open*/, true/*read only*/, false/*flush only*/);
+              closer.record_read_only_close(overlap);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
@@ -12071,8 +12083,8 @@ namespace Legion {
           case OPEN_REDUCE_PROJ:
             {
               // Do the close here 
-              closer.record_close_operation(overlap,
-                  false/*leave open*/, false/*read only*/, false/*flush only*/);
+              closer.record_close_operation(overlap, state.dirty_below,
+                                            false/*leave open*/);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
@@ -12125,6 +12137,20 @@ namespace Legion {
         }
         else if (close_traversal)
         {
+          // See if we have any fields that still need to be advanced
+          // e.g. ones that are just being flushed and not closed 
+          // from having dirty data below
+          const FieldMask &split_mask = version_info.get_split_mask(depth);
+          FieldMask advance_mask = version_mask - split_mask;
+          if (!!advance_mask)
+          {
+            // We update the parent state if we are not the top-level node
+            const bool update_parent_state = 
+              !version_info.is_upper_bound_node(this);
+            const AddressSpaceID local_space = context->runtime->address_space;
+            manager.advance_versions(advance_mask, parent_ctx,
+                update_parent_state, local_space, ready_events);
+          }
           // We are a close operation, then we need to capture both
           // previous and advance state names, but we need only need
           // to request the currently valid instances of our roots
