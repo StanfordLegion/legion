@@ -3068,6 +3068,9 @@ class LogicalState(object):
             if not self.perform_epoch_analysis(advance_op, advance_op.reqs[0],
                                               perform_checks, False, None, op):
                 return (False,None,None,None)
+            # Mark that we are now dirty below
+            assert not self.dirty_below
+            self.dirty_below = True
         elif req.has_write() and not self.dirty_below and \
                           (not arrived or req.is_projection()):
             result,advance_op = self.perform_advance_operation(op, 
@@ -6466,8 +6469,12 @@ class Task(object):
             op.print_op_mapping_decisions(depth)
 
     def print_dataflow_graph(self, path, simplify_graphs):
-        if len(self.operations) < 2:
+        if len(self.operations) == 0:
             return 0
+        if len(self.operations) == 1:
+            op = self.operations[0]
+            if not op.inter_close_ops and not op.open_ops and not op.advance_ops:
+                return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
         printer = GraphPrinter(path,filename)
