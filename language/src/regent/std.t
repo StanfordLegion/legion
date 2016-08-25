@@ -2421,7 +2421,12 @@ function std.index_type(base_type, displayname)
       "__mod", {
         st.metamethods.__mod,
         terra(a : st, b : std.rect_type(st)) : st
-          return (a + b:size()) % b:size()
+          if a <= b then
+            return a
+          else
+            var sz = b:size()
+            return (a + sz) % sz
+          end
         end
       })
   end

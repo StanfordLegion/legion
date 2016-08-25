@@ -31,10 +31,6 @@ public:
 
   virtual bool pre_map_task(Task *task);
 
-  virtual bool map_must_epoch(const std::vector<Task*> &tasks,
-			      const std::vector<MappingConstraint> &constraints,
-			      MappingTagID tag);
-
   virtual void notify_mapping_result(const Mappable *mappable);
 
   virtual int get_tunable_value(const Task *task, 

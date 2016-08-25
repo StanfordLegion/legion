@@ -105,11 +105,15 @@ function log.make_logger(category)
   -- Replace disabled levels with nops.
   for name, value in pairs(level) do
     if value < category_min_level then
-      logger[name] = nop
+      result[name] = nop
     end
   end
 
   return setmetatable(result, logger)
+end
+
+function log.get_log_level(category)
+  return categories[category] or min_level
 end
 
 function logger:log(level, format_string, ...)
