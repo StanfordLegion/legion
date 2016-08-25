@@ -3542,7 +3542,7 @@ namespace Legion {
           creator->runtime->get_available_inter_close_op(false);
         req.privilege_fields.clear();
         // Compute the set of fields that we need
-        root_node->column_source->get_field_set(normal_close_mask,
+        root_node->column_source->get_field_set(flush_only_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
         // Make a closed tree of just the root node

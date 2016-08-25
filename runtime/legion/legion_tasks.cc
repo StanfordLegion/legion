@@ -8450,6 +8450,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent IndividualTask::perform_must_epoch_version_analysis(
+                                                             MustEpochOp *owner)
+    //--------------------------------------------------------------------------
+    {
+      // No need to do anything here, we'll do it as part of perform_mapping
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent IndividualTask::perform_mapping(
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -9369,6 +9378,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PointTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
+    //--------------------------------------------------------------------------
+    {
+      // See if we've done our slice version analysis yet
+      return slice_owner->perform_must_epoch_version_analysis(owner);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -9776,6 +9793,15 @@ namespace Legion {
       // should never be called
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent WrapperTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -12029,6 +12055,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Slices are already done with early mapping 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent SliceTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
+    //--------------------------------------------------------------------------
+    {
+      bool first = false;
+      RtUserEvent result = owner->find_slice_versioning_event(this, first); 
+      // If we're first, then we do the analysis
+      // and chain the events
+      if (first)
+      {
+        RtEvent versioning_done = perform_versioning_analysis();
+        Runtime::trigger_event(result, versioning_done);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

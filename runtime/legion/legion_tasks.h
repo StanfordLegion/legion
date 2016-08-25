@@ -622,6 +622,7 @@ namespace Legion {
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
+      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
@@ -883,6 +884,7 @@ namespace Legion {
       void set_top_level(void);
     public:
       RtEvent perform_versioning_analysis(void);
+      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -1001,6 +1003,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       void perform_versioning_analysis(std::set<RtEvent> &ready_events);
+      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
       virtual void trigger_dependence_analysis(void);
     public:
@@ -1083,6 +1086,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
+      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
@@ -1438,6 +1442,7 @@ namespace Legion {
                              std::vector<MinimalPoint> &minimal_points);
     public:
       RtEvent perform_versioning_analysis(void);
+      RtEvent perform_must_epoch_version_analysis(MustEpochOp *owner);
       void apply_local_version_infos(std::set<RtEvent> &map_conditions);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);

@@ -8775,6 +8775,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtUserEvent MustEpochOp::find_slice_versioning_event(SliceTask *slice,
+                                                         bool &first)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      std::map<SliceTask*,RtUserEvent>::const_iterator finder = 
+        slice_version_events.find(slice);
+      if (finder == slice_version_events.end())
+      {
+        first = true; 
+        RtUserEvent result = Runtime::create_rt_user_event();
+        slice_version_events[slice] = result;
+        return result;
+      }
+      else
+      {
+        first = false;
+        return finder->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     int MustEpochOp::find_operation_index(Operation *op, GenerationID op_gen)
     //--------------------------------------------------------------------------
     {
@@ -9013,6 +9035,10 @@ namespace Legion {
     void MustEpochMapper::map_task(SingleTask *task)
     //--------------------------------------------------------------------------
     {
+      // Before we can actually map, we have to perform our versioning analysis
+      RtEvent versions_ready = task->perform_must_epoch_version_analysis(owner);
+      if (versions_ready.exists())
+        versions_ready.wait();
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.

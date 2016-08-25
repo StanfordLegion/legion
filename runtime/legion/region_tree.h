@@ -1504,6 +1504,7 @@ namespace Legion {
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
+      InstanceView* convert_manager(PhysicalManager *manager, SingleTask *ctx);
       InstanceView* convert_reference(const InstanceRef &ref, SingleTask *ctx);
       CompositeView* convert_reference(const InstanceRef &ref) const;
       void convert_target_views(const InstanceSet &targets, SingleTask *context, 

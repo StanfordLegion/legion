@@ -574,10 +574,9 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      RegionNode *origin_node = logical_node->as_region_node();
+      RegionNode *origin_node = logical_node->is_region() ? 
+        logical_node->as_region_node() : 
+        logical_node->as_partition_node()->parent;
       find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
                                     origin_node, versions, creator_op_id, 
                                     index, source, preconditions, 
@@ -739,10 +738,9 @@ namespace Legion {
         usage.privilege = REDUCE;
       else
         usage.privilege = READ_WRITE;
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      RegionNode *origin_node = logical_node->as_region_node();
+      RegionNode *origin_node = logical_node->is_region() ? 
+        logical_node->as_region_node() : 
+        logical_node->as_partition_node()->parent;
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
@@ -879,10 +877,9 @@ namespace Legion {
       if (start_use_event.exists())
         wait_on_events.insert(start_use_event);
       UniqueID op_id = op->get_unique_op_id();
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      RegionNode *origin_node = logical_node->as_region_node();
+      RegionNode *origin_node = logical_node->is_region() ? 
+        logical_node->as_region_node() : 
+        logical_node->as_partition_node()->parent;
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
           origin_node, versions, op_id, index, user_mask, 
@@ -1021,10 +1018,9 @@ namespace Legion {
         need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      RegionNode *origin_node = logical_node->as_region_node();
+      RegionNode *origin_node = logical_node->is_region() ? 
+        logical_node->as_region_node() : 
+        logical_node->as_partition_node()->parent;
       // Go up the tree if necessary 
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -1184,10 +1180,9 @@ namespace Legion {
       if (start_use_event.exists())
         wait_on_events.insert(start_use_event);
       UniqueID op_id = op->get_unique_op_id();
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
-      RegionNode *origin_node = logical_node->as_region_node();
+      RegionNode *origin_node = logical_node->is_region() ? 
+        logical_node->as_region_node() : 
+        logical_node->as_partition_node()->parent;
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
                      origin_node, versions, op_id, index, user_mask, 
@@ -4892,7 +4887,7 @@ namespace Legion {
         // Perform a translation if necessary
         if (translation_context != NULL)
         {
-          InstanceView *inst_view = logical_node->find_instance_view(
+          InstanceView *inst_view = logical_node->convert_manager(
               mat_view->manager, translation_context);
           mat_view = inst_view->as_materialized_view();
         }
@@ -4935,7 +4930,7 @@ namespace Legion {
     {
       // Perform a translation if necessary
       if (translation_context != NULL)
-        view = logical_node->find_instance_view(view->manager, 
+        view = logical_node->convert_manager(view->manager, 
                                   translation_context)->as_reduction_view();
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
@@ -5545,7 +5540,7 @@ namespace Legion {
     {
       // Perform a translation if necessary
       if ((translation_context != NULL) && view->is_instance_view())
-        view = logical_node->find_instance_view(
+        view = logical_node->convert_manager(
             view->as_instance_view()->get_manager(), translation_context);
       // should already hold the lock from the caller
       LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
@@ -5577,7 +5572,7 @@ namespace Legion {
     {
       // Perform the translation if necessary
       if (translation_context != NULL)
-        view = logical_node->find_instance_view(view->get_manager(), 
+        view = logical_node->convert_manager(view->get_manager(), 
                                       translation_context)->as_reduction_view();
       // should already hold the lock from the caller
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 

@@ -1652,6 +1652,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
+      if (IS_NO_ACCESS(req))
+        return;
       SingleTask *parent_ctx = op->get_parent();
       RegionTreeContext ctx = parent_ctx->get_context(); 
 #ifdef DEBUG_LEGION
@@ -13347,14 +13349,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* RegionTreeNode::convert_reference(const InstanceRef &ref,
-                                                    SingleTask *context)
+    InstanceView* RegionTreeNode::convert_manager(PhysicalManager *manager,
+                                                  SingleTask *context)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!ref.is_composite_ref());
-#endif
-      PhysicalManager *manager = ref.get_manager();
 #ifdef DEBUG_LEGION
       // Small sanity check to make sure they are in the same tree
       assert(get_tree_id() == manager->region_node->get_tree_id());
@@ -13377,6 +13375,18 @@ namespace Legion {
         result = 
           as_partition_node()->convert_reference_partition(manager, context); 
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* RegionTreeNode::convert_reference(const InstanceRef &ref,
+                                                    SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!ref.is_composite_ref());
+#endif
+      PhysicalManager *manager = ref.get_manager();
+      return convert_manager(manager, context);
     }
 
     //--------------------------------------------------------------------------
