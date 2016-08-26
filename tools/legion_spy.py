@@ -3278,8 +3278,9 @@ class LogicalState(object):
             if req.is_read_only():
                 if self.projection_mode == OPEN_NONE:
                     self.projection_mode = OPEN_READ_ONLY
+                else:
+                    assert self.projection_mode == OPEN_READ_WRITE
             elif req.is_reduce():
-                assert self.projection_mode == OPEN_NONE
                 self.projection_mode = OPEN_MULTI_REDUCE
                 self.current_redop = req.redop
             else:
@@ -3403,19 +3404,19 @@ class LogicalState(object):
     def siphon_logical_projection(self, op, req, previous_deps, perform_checks):
         assert req.is_projection()
         if self.projection_mode != OPEN_NONE:
+            assert not self.open_children # Should not have any open children
             empty_children_to_close = dict()
             if self.projection_mode == OPEN_READ_ONLY:
-                if not req.read_only():
-                    if not self.perform_close_operation(empty_children_to_close,
-                                  True, op, req, previous_deps, perform_checks):
-                        return False
+                # No need to do anything here, we're just 
+                # going to change projection modes
+                pass
             elif self.projection_mode == OPEN_READ_WRITE:
                 # Figure out if we are in shallow disjoint mode or not
                 shallow_disjoint = req.projection_function.depth == 1 
                 same_func_and_rect = True
                 current_rect = op.get_index_launch_rect()
-                for func,rect in self.projection_epochs:
-                    if shallow_disjoint and func.projection_function.depth != 1:
+                for func,rect in self.projection_epoch:
+                    if shallow_disjoint and func.depth != 1:
                         shallow_disjoint = False
                         if not same_func_and_rect:
                             break
@@ -3465,9 +3466,11 @@ class LogicalState(object):
                                                     previous_deps, perform_checks):
                     return False
             if children_to_read_close:
-                if not self.perform_close_operation(children_to_close, True, op, req,
+                if not self.perform_close_operation(children_to_read_close, True, op, req,
                                                     previous_deps, perform_checks):
                     return False
+            # Can now reset this
+            self.open_children = dict()
         return True 
 
     def siphon_logical_deletion(self, op, req, next_child, 
@@ -3536,8 +3539,8 @@ class LogicalState(object):
                 assert False
         return advance
 
-    def find_close_operation(self, op, req, perform_checks, error_str):
-        close = op.get_close_operation(req, self.node, self.field)
+    def find_close_operation(self, op, req, read_only, perform_checks, error_str):
+        close = op.get_close_operation(req, self.node, self.field, read_only)
         if close is None:
             if perform_checks:
                 print(("ERROR: %s (UID=%s) failed to generate "+
@@ -3628,15 +3631,9 @@ class LogicalState(object):
         error_str = ' for read-only close operation' if read_only_close \
             else ' for normal close operation'
         # Find the close operation first
-        close = self.find_close_operation(op, req, perform_checks, error_str)
-        # Make sure it is the right kind
-        if read_only_close and close.kind != READ_ONLY_CLOSE_OP_KIND:
-            if self.node.state.assert_on_error:
-                assert False
-            return False
-        if not read_only_close and close.kind != INTER_CLOSE_OP_KIND:
-            if self.node.state.assert_on_error:
-                assert False
+        close = self.find_close_operation(op, req, read_only_close,
+                                          perform_checks, error_str)
+        if not close:
             return False
         for child,permit_leave_open in children_to_close.iteritems():
             closed_users = list()
@@ -3709,6 +3706,9 @@ class LogicalState(object):
                 if not replay_op.need_logical_replay:
                     replay_op.need_logical_replay = set()
                 replay_op.need_logical_replay.add((prev_req.index,self.field))
+                continue
+            # Close operations from the same creator can never depend on eachother
+            if op.is_close() and prev_op.is_close() and op.creator is prev_op.creator:
                 continue
             # Check to see if it has the mapping dependence
             if perform_checks:
@@ -4733,7 +4733,7 @@ class Operation(object):
             return advance
         return None
 
-    def get_close_operation(self, req, node, field):
+    def get_close_operation(self, req, node, field, read_only):
         if self.inter_close_ops is None:
             return None
         for close in self.inter_close_ops:
@@ -4745,6 +4745,10 @@ class Operation(object):
                 continue
             if field not in close_req.fields:
                 continue 
+            if read_only and close.kind != READ_ONLY_CLOSE_OP_KIND:
+                continue
+            if not read_only and close.kind != INTER_CLOSE_OP_KIND:
+                continue
             return close
         return None
 
