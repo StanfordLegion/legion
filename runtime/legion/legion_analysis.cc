@@ -571,11 +571,11 @@ namespace Legion {
         nit->second -= overlap;
         if (!nit->second)
           to_erase_new.push_back(nit->first);
-        // Iterate over our states states and see which ones interfere
+        // Iterate over our states and see which ones interfere
         for (typename VersioningSet<REF_KIND>::iterator it = begin(); 
               it != end(); it++)
         {
-          FieldMask local_overlap = nit->second & overlap;
+          FieldMask local_overlap = it->second & overlap;
           if (!local_overlap)
             continue;
           // Overlapping fields to two different version states, compare
@@ -593,8 +593,8 @@ namespace Legion {
             // better be the same object with overlapping fields 
             // and the same version number
             assert(it->first == nit->first);
-          // Otherwise we kepp the old one and throw away the new one
 #endif  
+          // Otherwise we keep the old one and throw away the new one
           overlap -= local_overlap;
           if (!overlap)
             break;
@@ -780,13 +780,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_mapping(AddressSpaceID target,
-             std::set<RtEvent> &applied_conditions, bool copy_through/*=false*/)
+    void VersionInfo::apply_mapping(std::set<RtEvent> &applied_conditions, 
+                                    bool copy_through/*=false*/)
     //--------------------------------------------------------------------------
     {
       // We only ever need to apply state at the leaves
 #ifdef DEBUG_LEGION
       assert(!physical_states.empty());
+      assert(physical_states.size() == split_masks.size());
 #endif
       unsigned last_idx = physical_states.size() - 1;
       if (copy_through)
@@ -796,9 +797,9 @@ namespace Legion {
         // If we have advance states and we haven't capture, then
         // we need to propagate information
         if (state->has_advance_states() && !state->is_captured())
-          state->capture_state();
+          state->capture_state(split_masks[last_idx]);
       }
-      physical_states[last_idx]->apply_state(target, applied_conditions);
+      physical_states[last_idx]->apply_state(applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -887,13 +888,14 @@ namespace Legion {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < physical_states.size());
+      assert(physical_states.size() == split_masks.size());
 #endif
       PhysicalState *result = physical_states[depth];
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
       if (!result->is_captured())
-        result->capture_state();
+        result->capture_state(split_masks[depth]);
       return result;
     }
 
@@ -1849,10 +1851,12 @@ namespace Legion {
                                                  const FieldMask &epoch_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(projection_epochs.find(epoch) == projection_epochs.end());
-#endif
-      projection_epochs[epoch] = epoch_mask;
+      LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator finder = 
+        projection_epochs.find(epoch);
+      if (finder == projection_epochs.end())
+        projection_epochs[epoch] = epoch_mask;
+      else
+        finder->second |= epoch_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3797,7 +3801,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::capture_state(void)
+    void PhysicalState::capture_state(const FieldMask &split_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime,
@@ -3811,7 +3815,7 @@ namespace Legion {
         for (PhysicalVersions::iterator it = version_states.begin();
               it != version_states.end(); it++)
         {
-          it->first->update_path_only_state(this, it->second);
+          it->first->update_path_only_state(this, it->second, split_mask);
         }
       }
       else
@@ -3826,8 +3830,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::apply_state(AddressSpaceID target, 
-                                    std::set<RtEvent> &applied_conditions) const
+    void PhysicalState::apply_state(std::set<RtEvent> &applied_conditions) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime,
@@ -3840,15 +3843,13 @@ namespace Legion {
         return;
       for (PhysicalVersions::iterator it = advance_states.begin();
             it != advance_states.end(); it++)
-      {
-        it->first->merge_physical_state(this, it->second, target,
-                                        applied_conditions);
-      }
+        it->first->merge_physical_state(this, it->second, applied_conditions);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalState::capture_composite_root(CompositeView *composite_view,
-                                               const FieldMask &close_mask) 
+                                               const FieldMask &close_mask,
+                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_above) 
     //--------------------------------------------------------------------------
     {
       // We need to capture the normal instance data from the version
@@ -3870,6 +3871,10 @@ namespace Legion {
           continue;
         it->first->capture_root_children(composite_view, overlap);
       }
+      // Finally record any valid above views
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_above.begin(); it != valid_above.end(); it++)
+        composite_view->record_valid_view(it->first, it->second);
     }
 
     //--------------------------------------------------------------------------
@@ -5759,30 +5764,37 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::update_path_only_state(PhysicalState *state,
-                                             const FieldMask &update_mask) const
+                                             const FieldMask &update_mask,
+                                             const FieldMask &split_mask) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_PATH_ONLY_CALL);
+      // We can't capture valid views that are no longer valid
+      // because the version numbers have been advanced
+      FieldMask view_capture_mask = update_mask - split_mask;
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       // If we are premapping, we only need to update the dirty bits
       // and the valid instance views 
       if (!!dirty_mask)
         state->dirty_mask |= (dirty_mask & update_mask);
-      for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-            track_aligned::const_iterator it = valid_views.begin();
-            it != valid_views.end(); it++)
+      if (!!view_capture_mask)
       {
-        FieldMask overlap = it->second & update_mask;
-        if (!overlap && !it->first->has_space(update_mask))
-          continue;
-        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
-          iterator finder = state->valid_views.find(it->first);
-        if (finder == state->valid_views.end())
-          state->valid_views[it->first] = overlap;
-        else
-          finder->second |= overlap;
+        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::const_iterator it = valid_views.begin();
+              it != valid_views.end(); it++)
+        {
+          FieldMask overlap = it->second & view_capture_mask;
+          if (!overlap)
+            continue;
+          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+            iterator finder = state->valid_views.find(it->first);
+          if (finder == state->valid_views.end())
+            state->valid_views[it->first] = overlap;
+          else
+            finder->second |= overlap;
+        }
       }
     }
 
@@ -5837,7 +5849,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask,
-                                            AddressSpaceID target,
                                           std::set<RtEvent> &applied_conditions,
                                             bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
@@ -5932,8 +5943,8 @@ namespace Legion {
         // but we only insert the ones for our fields
         StateVersions &local_states = (finder == open_children.end()) ? 
           open_children[child_color] : finder->second;
-        for (StateVersions::iterator it = local_states.begin();
-              it != local_states.end(); it++)
+        for (VersioningSet<>::iterator it = new_states.begin();
+              it != new_states.end(); it++)
         {
           FieldMask overlap = it->second & update_mask;
           if (!overlap)

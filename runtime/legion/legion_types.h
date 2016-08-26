@@ -763,6 +763,7 @@ namespace Legion {
       CREATE_INSTANCE_TOP_VIEW_CALL,
       CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL,
       LAUNCH_TASK_CALL,
+      SINGLE_RETURN_VIRTUAL_CALL,
       ACTIVATE_MULTI_CALL,
       DEACTIVATE_MULTI_CALL,
       SLICE_INDEX_SPACE_CALL,
@@ -818,7 +819,6 @@ namespace Legion {
       SLICE_HANDLE_FUTURE_CALL,
       SLICE_CLONE_AS_POINT_CALL,
       SLICE_ENUMERATE_POINTS_CALL,
-      SLICE_RETURN_VIRTUAL_CALL,
       SLICE_MAPPED_CALL,
       SLICE_COMPLETE_CALL,
       SLICE_COMMIT_CALL,
@@ -931,6 +931,7 @@ namespace Legion {
       "Create Instance Top View",                                     \
       "Convert Virtual Instance Top View",                            \
       "Launch Task",                                                  \
+      "Single Return Virtual",                                        \
       "Activate Multi",                                               \
       "Deactivate Multi",                                             \
       "Slice Index Space",                                            \
@@ -941,7 +942,6 @@ namespace Legion {
       "Activate Individual",                                          \
       "Deactivate Individual",                                        \
       "Individual Perform Mapping",                                   \
-      "Individual Return Virtual",                                    \
       "Individual Trigger Complete",                                  \
       "Individual Trigger Commit",                                    \
       "Individual Post Mapped",                                       \
@@ -986,7 +986,6 @@ namespace Legion {
       "Slice Handle Future",                                          \
       "Slice Cone as Point",                                          \
       "Slice Enumerate Points",                                       \
-      "Slice Return Virtual",                                         \
       "Slice Mapped",                                                 \
       "Slice Complete",                                               \
       "Slice Commit",                                                 \

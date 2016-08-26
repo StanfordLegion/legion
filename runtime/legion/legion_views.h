@@ -846,8 +846,6 @@ namespace Legion {
                           std::vector<FieldDataDescriptor> &field_data,
                                   std::set<ApEvent> &preconditions);
     public:
-      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
-                 LegionMap<DeferredView*,FieldMask>::aligned &replacements) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask) = 0;
@@ -946,6 +944,7 @@ namespace Legion {
     protected:
       FieldMask dirty_mask, reduction_mask;
       LegionMap<CompositeNode*,FieldMask>::aligned children;
+      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
@@ -991,7 +990,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       CompositeView* clone(const FieldMask &clone_mask,
-         const LegionMap<DeferredView*,FieldMask>::aligned &replacements) const;
+        const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const;
       CompositeView* translate_context(SingleTask *target_context);
     public:
       virtual bool has_parent(void) const { return false; }
@@ -1006,8 +1005,8 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
-      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
-                     LegionMap<DeferredView*,FieldMask>::aligned &replacements);
+      void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
+                 LegionMap<CompositeView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask);
@@ -1070,8 +1069,7 @@ namespace Legion {
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
       // is how we break the inifinite meta-data cycle
-      LegionMap<MaterializedView*,FieldMask>::aligned valid_views;
-      LegionMap<DeferredView*,FieldMask>::aligned deferred_valid_views;
+      LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     };
@@ -1139,8 +1137,9 @@ namespace Legion {
       void record_version_state(VersionState *state, const FieldMask &mask,
                                 bool already_valid);
     public:
-      bool are_domination_tests_sound(RegionTreeNode *logical_node,
-                                      const FieldMask &mask) const; 
+      void find_sound_domination_mask(RegionTreeNode *logical_node,
+                                      const FieldMask &mask,
+                                      FieldMask &dom_fields) const; 
       void compute_local_complete(MaterializedView *dst,
                                   const FieldMask &test_mask,
                                   FieldMask &local_complete);
@@ -1163,8 +1162,6 @@ namespace Legion {
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
-    protected:
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
     };
 
     /**
@@ -1213,8 +1210,6 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
-      virtual void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
-                     LegionMap<DeferredView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask);

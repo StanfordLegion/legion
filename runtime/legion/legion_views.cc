@@ -605,7 +605,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_local_copy_preconditions(redop, reading, copy_mask, child_color, 
-                                    origin_node, versions, creator_op_id, index, 
+                                    origin_node, versions, creator_op_id, index,
                                     source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -3622,11 +3622,11 @@ namespace Legion {
       // First compute all the children that we are going to need to traverse
       LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
       FieldMask local_dominate, top_need_copy, update_mask, reduction_update;
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
+      LegionMap<LogicalView*,FieldMask>::aligned current_valid_views;
       perform_local_analysis(dst, logical_node, children_to_traverse, 
                              check_overwrite, copy_mask, dominate_mask, 
                              local_dominate, top_need_copy, update_mask, 
-                             reduction_update, valid_views);
+                             reduction_update, current_valid_views);
       // If we have fields that locally dominate (e.g. this is the 
       // smallest dominating node) we need to perform the check to
       // see if we are going to need to make a temporary instance
@@ -3652,8 +3652,8 @@ namespace Legion {
           // If any fields are already valid below then we can remove
           // them from being needed
           FieldMask already_valid = check_mask;
-          it->first->perform_overwrite_check(dst, check_mask, top_need_copy, 
-                                             need_temporary, already_valid);
+          it->first->perform_overwrite_check(dst, check_mask, 
+                        top_need_copy, need_temporary, already_valid);
 #ifdef DEBUG_LEGION
           assert(already_valid * need_temporary);
 #endif
@@ -3698,13 +3698,13 @@ namespace Legion {
       const LegionMap<ApEvent,FieldMask>::aligned 
                           *below_preconditions = &preconditions;
       LegionMap<ApEvent,FieldMask>::aligned local_preconditions;
-      if (!!update_mask && !valid_views.empty())
+      if (!!update_mask && !current_valid_views.empty())
       {
         // Issue udpate copies for any of these fields
         // We can always put our writes directly into the postconditions
         issue_update_copies(info, dst, update_mask, logical_node, 
                             src_version_tracker, preconditions, 
-                            postconditions, valid_views, helper);
+                            postconditions, current_valid_views, helper);
         // If going down see if we need to build a new set of preconditions
         if (!children_to_traverse.empty() && !postconditions.empty())
         {
@@ -3761,7 +3761,7 @@ namespace Legion {
         FieldMask &dominate_mask, FieldMask &local_dominate,
         FieldMask &top_need_copy, FieldMask &update_mask, 
         FieldMask &reduction_update,
-        LegionMap<LogicalView*,FieldMask>::aligned &valid_views)
+        LegionMap<LogicalView*,FieldMask>::aligned &current_valid_views)
     //--------------------------------------------------------------------------
     {
       // need this in read only to touch the children data structure
@@ -3843,10 +3843,21 @@ namespace Legion {
           // We don't need to check for duplicate dominating children
           // because they would be guaranteed to interesect and we
           // already took care of that above
-          if (it->first->logical_node->dominates(dst->logical_node) &&
-              it->first->are_domination_tests_sound(it->first->logical_node,
-                                                    dom_overlap))
-            dominating_child |= dom_overlap;
+          if (it->first->logical_node->dominates(dst->logical_node))
+          {
+            FieldMask dom_fields;
+            it->first->find_sound_domination_mask(it->first->logical_node,
+                                                  dom_overlap, dom_fields);
+            if (!!dom_fields)
+            {
+              dominating_child |= dom_overlap;
+              FieldMask non_dom_fields = dom_overlap - dom_fields;
+              if (!!non_dom_fields)
+                still_dominating -= non_dom_fields;
+            }
+            else
+              still_dominating -= dom_overlap;
+          }
           else // We have a child that is not-dominating, so we're done
             still_dominating -= dom_overlap;
         }
@@ -3872,60 +3883,73 @@ namespace Legion {
       if (!!local_dominate)
       {
         find_valid_views(update_mask | local_dominate, local_dominate, 
-                         valid_views, false/*need lock, already have it*/);
+                         current_valid_views, false/*need lock*/);
         top_need_copy = local_dominate;
         // Check to see if the destination is already in the set of 
         // valid views in which case we don't need a top copy
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          valid_views.find(dst);
-        // All fields that are already valid don't need a top copy
-        if (finder != valid_views.end())
-          top_need_copy -= finder->second;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+             current_valid_views.begin(); it != current_valid_views.end(); it++)
+        {
+          if (it->first->is_deferred_view())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first->is_materialized_view());
+#endif
+          if (it->first->as_materialized_view()->manager == dst->manager)
+          {
+            // All fields that are already valid don't need a top copy
+            top_need_copy -= it->second;
+            break;
+          }
+        }
         // If we still have top-copy fields, then they must be udpated
         if (!!top_need_copy)
         {
-          // Handle a special case here where we are closing up to
-          // exactly the destination node, in this case, check to 
-          // see if everything below is complete, in which case we
-          // can avoid any necessary top copies
-          if (dst->logical_node == logical_node)
+          // In order for all the fields to be complete, we must be
+          // complete and we have fields for all children that 
+          // intersect with our destination
+          FieldMask all_complete;
+          if (logical_node->is_complete() &&
+              (children.size() == logical_node->get_num_children()))
           {
-            // See if we can find a complete child, or see if
-            // we are complete and all our children have valid data
-            FieldMask all_complete;
-            // Only worth tracking this if we have all the children
-            if (to_traverse.size() == logical_node->get_num_children())
-              all_complete = top_need_copy;
-            for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator
-                  it = to_traverse.begin(); it != to_traverse.end(); it++)
+            all_complete = top_need_copy;
+            for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator 
+                  it = children.begin(); it != children.end(); it++)
             {
-              FieldMask local_complete;
-              FieldMask overlap = it->second & top_need_copy;
-              if (!!overlap)
-                it->first->compute_local_complete(dst, overlap, 
-                                                  local_complete);
-              if (!!local_complete)
-              {
-                // If the child itself is complete, then those fields are done
-                if (it->first->logical_node->is_complete())
-                {
-                  top_need_copy -= local_complete;
-                  if (!top_need_copy)
-                    break;
-                }
-                if (!!all_complete)
-                  all_complete &= local_complete;
-              }
-              else if (!!all_complete)
-                all_complete.clear();
+              if (!it->first->logical_node->intersects_with(dst->logical_node))
+                continue;
+              all_complete &= it->second;
+              if (!all_complete)
+                break;
             }
-            // If we had any all_complete fields, then we can remove them
-            if (!!all_complete)
-              top_need_copy -= all_complete;
-            if (!!top_need_copy)
-              update_mask |= top_need_copy;
           }
-          else
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator
+                it = to_traverse.begin(); it != to_traverse.end(); it++)
+          {
+            FieldMask local_complete;
+            FieldMask overlap = it->second & top_need_copy;
+            if (!!overlap)
+              it->first->compute_local_complete(dst, overlap, 
+                                                local_complete);
+            if (!!local_complete)
+            {
+              // If the child itself is complete, then those fields are done
+              if (it->first->logical_node->is_complete())
+              {
+                top_need_copy -= local_complete;
+                if (!top_need_copy)
+                  break;
+              }
+              if (!!all_complete)
+                all_complete &= local_complete;
+            }
+            else if (!!all_complete)
+              all_complete.clear();
+          }
+          // If we had any all_complete fields, then we can remove them
+          if (!!all_complete)
+            top_need_copy -= all_complete;
+          if (!!top_need_copy)
             update_mask |= top_need_copy;
         }
       }
@@ -3933,7 +3957,7 @@ namespace Legion {
       {
         // Just find the valid views for the update fields
         find_valid_views(update_mask, local_dominate/*empty*/, 
-                         valid_views, false/*need lock, already have it*/);
+                         current_valid_views, false/*need lock*/);
         // top_need_copy is empty in this case
       }
       // Reduction update are easy
@@ -4053,7 +4077,7 @@ namespace Legion {
                                             VersionTracker *src_version_tracker,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
+          const LegionMap<LogicalView*,FieldMask>::aligned &current_valid_views,
                                           CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
@@ -4065,7 +4089,7 @@ namespace Legion {
       {
         PhysicalManager *dst_manager = dst->get_manager();
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-              valid_views.begin(); it != valid_views.end(); it++)
+             current_valid_views.begin(); it != current_valid_views.end(); it++)
         {
           if (it->first->is_deferred_view())
             continue;
@@ -4083,8 +4107,8 @@ namespace Legion {
       LegionMap<MaterializedView*,FieldMask>::aligned src_instances;
       LegionMap<DeferredView*,FieldMask>::aligned deferred_instances;
       // Sort the instances
-      dst->logical_node->sort_copy_instances(info, dst, copy_mask, valid_views,
-                                             src_instances, deferred_instances);
+      dst->logical_node->sort_copy_instances(info, dst, copy_mask, 
+          current_valid_views, src_instances, deferred_instances);
       // Now we can issue the copy operations
       if (!src_instances.empty())
       {
@@ -4251,20 +4275,21 @@ namespace Legion {
             children.begin(); it != children.end(); it++)
         delete it->first;
       children.clear();
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
-      {
-        if (it->first->remove_nested_resource_ref(did))
-          legion_delete(it->first);
-      }
-      valid_views.clear();
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
       {
         if (it->first->remove_nested_resource_ref(did))
           LogicalView::delete_logical_view(it->first);
       }
-      deferred_valid_views.clear();
+      valid_views.clear();
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
+      {
+        if (it->first->remove_nested_resource_ref(did))
+          LogicalView::delete_logical_view(it->first);
+      }
+      nested_composite_views.clear();
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
@@ -4309,7 +4334,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* CompositeView::clone(const FieldMask &clone_mask,
-          const LegionMap<DeferredView*,FieldMask>::aligned &replacements) const
+         const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime; 
@@ -4330,7 +4355,7 @@ namespace Legion {
       if (!!dirty_overlap)
       {
         result->record_dirty_fields(dirty_overlap);
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator 
               it = valid_views.begin(); it != valid_views.end(); it++)
         {
           FieldMask overlap = it->second & dirty_overlap;
@@ -4340,7 +4365,7 @@ namespace Legion {
         }
       }
       // Can just insert the replacements directly
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
             replacements.begin(); it != replacements.end(); it++)
         result->record_valid_view(it->first, it->second);
       FieldMask reduc_overlap = reduction_mask & clone_mask;
@@ -4378,20 +4403,17 @@ namespace Legion {
       if (!!dirty_mask)
       {
         result->record_dirty_fields(dirty_mask);
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator 
               it = valid_views.begin(); it != valid_views.end(); it++)
           result->record_valid_view(it->first, it->second);
       }
       // Recursively apply the transformation
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-            deferred_valid_views.begin(); it != 
-            deferred_valid_views.end(); it++)
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
       {
-        if (it->first->is_composite_view())
-          result->record_valid_view(it->first->as_composite_view()->
-              translate_context(target_context), it->second);
-        else
-          result->record_valid_view(it->first, it->second);
+        result->record_valid_view(it->first->translate_context(target_context),
+                                  it->second);
       }
       if (!!reduction_mask)
       {
@@ -4426,11 +4448,12 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
         it->first->notify_valid(mutator);
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
@@ -4444,11 +4467,12 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
         it->first->notify_invalid(mutator);
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-            deferred_valid_views.begin(); it != deferred_valid_views.end();it++)
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
@@ -4493,7 +4517,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-                      LegionMap<DeferredView*,FieldMask>::aligned &replacements)
+                     LegionMap<CompositeView*,FieldMask>::aligned &replacements)
     //--------------------------------------------------------------------------
     {
       // Figure out which fields are not dominated
@@ -4505,9 +4529,9 @@ namespace Legion {
         // If we had any dominated fields then we try to prune our
         // deferred valid views and put the results directly into 
         // the replacements
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-              deferred_valid_views.begin(); it != 
-              deferred_valid_views.end(); it++)
+        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+              nested_composite_views.begin(); it != 
+              nested_composite_views.end(); it++)
         {
           FieldMask overlap = it->second & dominated;
           if (!overlap)
@@ -4516,7 +4540,7 @@ namespace Legion {
           if (!!overlap)
           {
             // Some fields are still valid so add them to the replacements
-            LegionMap<DeferredView*,FieldMask>::aligned::iterator finder =
+            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
               replacements.find(it->first);
             if (finder == replacements.end())
               replacements[it->first] = overlap;
@@ -4531,9 +4555,10 @@ namespace Legion {
           return;
       }
       // For any non-dominated fields, see if any of our composite views change
-      LegionMap<DeferredView*,FieldMask>::aligned local_replacements;
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      LegionMap<CompositeView*,FieldMask>::aligned local_replacements;
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
       {
         FieldMask overlap = it->second & non_dominated;
         if (!overlap)
@@ -4543,7 +4568,7 @@ namespace Legion {
       if (!local_replacements.empty())
       {
         FieldMask changed_mask;
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
               local_replacements.begin(); it != local_replacements.end(); it++)
           changed_mask |= it->second;
         CompositeView *view = clone(changed_mask, local_replacements);
@@ -4759,7 +4784,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Never need the lock here anyway
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
       {
         FieldMask overlap = update_mask & it->second;
@@ -4772,8 +4797,9 @@ namespace Legion {
         else
           finder->second |= overlap;
       }
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
       {
         FieldMask overlap = update_mask & it->second;
         if (!overlap)
@@ -4891,7 +4917,7 @@ namespace Legion {
               mat_view->manager, translation_context);
           mat_view = inst_view->as_materialized_view();
         }
-        LegionMap<MaterializedView*,FieldMask>::aligned::iterator finder = 
+        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(mat_view);
         if (finder == valid_views.end())
         {
@@ -4904,15 +4930,54 @@ namespace Legion {
       else
       {
         DeferredView *def_view = view->as_deferred_view();
-        LegionMap<DeferredView*,FieldMask>::aligned::iterator finder = 
-          deferred_valid_views.find(def_view);
-        if (finder == deferred_valid_views.end())
+        if (def_view->is_composite_view())
         {
-          def_view->add_nested_resource_ref(did);
-          deferred_valid_views[def_view] = m;
+          CompositeView *composite_view = def_view->as_composite_view();
+          // See if it is a nested on or from above
+          if (composite_view->logical_node == logical_node)
+          {
+            // nested
+            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
+              nested_composite_views.find(composite_view);
+            if (finder == nested_composite_views.end())
+            {
+              composite_view->add_nested_resource_ref(did);
+              nested_composite_views[composite_view] = m;
+            }
+            else
+              finder->second |= m;
+          }
+          else
+          {
+            // not nested
+#ifdef DEBUG_LEGION
+            assert(composite_view->logical_node->get_depth() < 
+                    logical_node->get_depth()); // should be above us
+#endif
+            LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+              valid_views.find(composite_view);
+            if (finder == valid_views.end())
+            {
+              composite_view->add_nested_resource_ref(did);
+              valid_views[composite_view] = m;
+            }
+            else
+              finder->second |= m;
+          }
         }
         else
-          finder->second |= m;
+        {
+          // Just add it like normal
+          LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+            valid_views.find(def_view);
+          if (finder == valid_views.end())
+          {
+            def_view->add_nested_resource_ref(did);
+            valid_views[def_view] = m;
+          }
+          else
+            finder->second |= m;
+        }
       }
     }
 
@@ -4971,7 +5036,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We add base resource references to all our views and 
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it =
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->add_nested_resource_ref(did);
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
@@ -4979,10 +5044,11 @@ namespace Legion {
         it->first->add_nested_resource_ref(did);
       // For the deferred views, we try to prune them 
       // based on our closed tree if they are the same we keep them 
-      std::vector<DeferredView*> to_erase;
-      LegionMap<DeferredView*,FieldMask>::aligned replacements;
-      for (LegionMap<DeferredView*,FieldMask>::aligned::iterator it = 
-           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      std::vector<CompositeView*> to_erase;
+      LegionMap<CompositeView*,FieldMask>::aligned replacements;
+      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
       {
         // If the composite view is above in the tree we don't
         // need to worry about pruning it for resource reasons
@@ -5004,21 +5070,21 @@ namespace Legion {
       }
       if (!to_erase.empty())
       {
-        for (std::vector<DeferredView*>::const_iterator it = to_erase.begin();
+        for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
               it != to_erase.end(); it++)
-          deferred_valid_views.erase(*it);
+          nested_composite_views.erase(*it);
       }
       if (!replacements.empty())
       {
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
               replacements.begin(); it != replacements.end(); it++)
         {
-          LegionMap<DeferredView*,FieldMask>::aligned::iterator finder =
-            deferred_valid_views.find(it->first);
-          if (finder == deferred_valid_views.end())
+          LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
+            nested_composite_views.find(it->first);
+          if (finder == nested_composite_views.end())
           {
             it->first->add_nested_resource_ref(did);
-            deferred_valid_views.insert(*it);
+            nested_composite_views.insert(*it);
           }
           else
             finder->second |= it->second;
@@ -5032,15 +5098,16 @@ namespace Legion {
     {
       rez.serialize(dirty_mask);
       rez.serialize<size_t>(valid_views.size());
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
-      rez.serialize<size_t>(deferred_valid_views.size());
-      for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
-           deferred_valid_views.begin(); it != deferred_valid_views.end(); it++)
+      rez.serialize<size_t>(nested_composite_views.size());
+      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+            nested_composite_views.begin(); it != 
+            nested_composite_views.end(); it++)
       {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
@@ -5075,28 +5142,28 @@ namespace Legion {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        MaterializedView *mat_view = static_cast<MaterializedView*>(
+        LogicalView *view = static_cast<LogicalView*>(
             runtime->find_or_request_logical_view(did, ready));
-        derez.deserialize(valid_views[mat_view]);
+        derez.deserialize(valid_views[view]);
         if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(mat_view, ready));
+          preconditions.insert(defer_add_reference(view, ready));
         else // Otherwise we can add the reference now
-          mat_view->add_nested_resource_ref(did);
+          view->add_nested_resource_ref(did);
       }
-      size_t num_def_views;
-      derez.deserialize(num_def_views);
-      for (unsigned idx = 0; idx < num_def_views; idx++)
+      size_t num_nested_views;
+      derez.deserialize(num_nested_views);
+      for (unsigned idx = 0; idx < num_nested_views; idx++)
       {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        DeferredView *def_view = static_cast<DeferredView*>(
+        CompositeView *view = static_cast<CompositeView*>(
             runtime->find_or_request_logical_view(did, ready));
-        derez.deserialize(deferred_valid_views[def_view]);
+        derez.deserialize(nested_composite_views[view]);
         if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(def_view, ready));
+          preconditions.insert(defer_add_reference(view, ready));
         else
-          def_view->add_nested_resource_ref(did);
+          view->add_nested_resource_ref(did);
       }
       derez.deserialize(reduction_mask);
       size_t num_reduc_views;
@@ -5496,12 +5563,8 @@ namespace Legion {
     void CompositeNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // These should be empty when notify valid is called
-      assert(children.empty());
-      assert(valid_views.empty());
-      assert(reduction_views.empty());
-#endif
+      // No need to add valid references to the other things
+      // they have their valid references added when they are captured 
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             version_states.begin(); it != version_states.end(); it++)
         it->first->add_nested_valid_ref(owner_did, mutator);
@@ -5631,26 +5694,35 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool CompositeNode::are_domination_tests_sound(RegionTreeNode *logical_node,
-                                                   const FieldMask &mask) const
+    void CompositeNode::find_sound_domination_mask(RegionTreeNode *logical_node,
+                                                   const FieldMask &mask,
+                                                   FieldMask &dom_fields) const
     //--------------------------------------------------------------------------
     {
-      // Region domination tests are always sound
+      if (!mask)
+        return;
+      // Region domination tests are always sound for all fields
       if (logical_node->is_region())
-        return true;
+      {
+        dom_fields = mask;
+        return;
+      }
       // Need to hold the lock to access these data structures
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       // Partition domination tests are only sound if have all the
       // children for all the fields
       if (logical_node->get_num_children() != children.size())
-        return false;
+        return;
+      dom_fields = mask;
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        if (!!(it->second - mask))
-          return false;
+        if (!it->first->logical_node->intersects_with(logical_node))
+          continue;
+        dom_fields &= it->second;
+        if (!dom_fields)
+          break;
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -5665,22 +5737,36 @@ namespace Legion {
       // If we have no children, see if we have a valid copy of the data
       if (children.empty())
       {
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          valid_views.find(dst);
-        if (finder != valid_views.end())
-          local_complete = finder->second & test_mask;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          if (it->first->is_deferred_view())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first->is_materialized_view());
+#endif
+          if (it->first->as_materialized_view()->manager == dst->manager)
+          {
+            local_complete = it->second & test_mask;
+            break;
+          }
+        }
       }
       else
       {
         // See if we can find a complete child, or see if
         // we are complete and all our children have valid data
         FieldMask all_complete;
-        // Only worth tracking this if we have all the children
-        if (children.size() == logical_node->get_num_children())
+        // Only worth tracking this if we are complete
+        if (logical_node->is_complete() &&
+            (children.size() == logical_node->get_num_children()))
           all_complete = test_mask;
         for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
               children.begin(); it != children.end(); it++)
         {
+          if (!!all_complete && 
+              logical_node->intersects_with(dst->logical_node))
+            all_complete &= it->second;
           FieldMask child_complete;
           FieldMask overlap = it->second & test_mask;
           if (!!overlap)
@@ -5720,13 +5806,20 @@ namespace Legion {
       FieldMask local_dirty = dirty_mask & check_mask;
       if (!!local_dirty)
       {
-        // See if it is already valid
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          valid_views.find(dst);
-        // We can remove any fields for which the instance is already valid
-        if (finder != valid_views.end())
+        // See if it is already valid, have to compare managers
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              valid_views.begin(); it != valid_views.end(); it++)
         {
-          FieldMask dirty_overlap = finder->second & local_dirty;
+          if (it->first->is_deferred_view())
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first->is_materialized_view());
+#endif
+          MaterializedView *mat_view = it->first->as_materialized_view();
+          // Different managers means that we don't care
+          if (mat_view->manager != dst->manager)
+            continue;
+          FieldMask dirty_overlap = it->second & local_dirty;
           if (!!dirty_overlap)
           {
             // See if there are any fields for which we need a copy above 
@@ -5917,14 +6010,6 @@ namespace Legion {
       runtime->send_fill_view(target, rez);
       // We've now done the send so record it
       update_remote_instances(target);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillView::prune(ClosedNode *new_tree, FieldMask &valid_mask, 
-                      LegionMap<DeferredView*,FieldMask>::aligned &replacements)
-    //--------------------------------------------------------------------------
-    {
-      // We never get pruned so do nothing
     }
 
     //--------------------------------------------------------------------------

@@ -1995,8 +1995,7 @@ namespace Legion {
       assert(!mapped_instances.empty());
 #endif 
       // We're done so apply our mapping changes
-      version_info.apply_mapping(runtime->address_space, 
-                                 map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
       region.impl->reset_references(mapped_instances, termination_event);
@@ -3073,12 +3072,10 @@ namespace Legion {
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        src_versions[idx].apply_mapping(runtime->address_space,
-                                        map_applied_conditions,
+        src_versions[idx].apply_mapping(map_applied_conditions,
                                         true/*copy through*/);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        dst_versions[idx].apply_mapping(runtime->address_space,
-                                        map_applied_conditions,
+        dst_versions[idx].apply_mapping(map_applied_conditions,
                                         true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -3314,10 +3311,8 @@ namespace Legion {
         // Don't apply changes to the source if we have a composite instance
         // because it is unsound to mutate the region tree that way
         if (src_composite == -1)
-          src_versions[idx].apply_mapping(runtime->address_space, 
-                                          map_applied_conditions);
-        dst_versions[idx].apply_mapping(runtime->address_space, 
-                                        map_applied_conditions); 
+          src_versions[idx].apply_mapping(map_applied_conditions);
+        dst_versions[idx].apply_mapping(map_applied_conditions); 
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
 #ifdef LEGION_SPY
@@ -5302,7 +5297,7 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      version_info.apply_mapping(runtime->address_space,map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -6334,8 +6329,7 @@ namespace Legion {
     {
       // Clean up this operation
       complete_execution();
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions,
+      version_info.apply_mapping(map_applied_conditions,
                                  true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -6385,8 +6379,7 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<ApEvent> acquire_preconditions;
@@ -6864,8 +6857,7 @@ namespace Legion {
     {
       // Clean up this operation
       complete_execution();
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions,
+      version_info.apply_mapping(map_applied_conditions,
                                  true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -6914,8 +6906,7 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         release_preconditions.insert(mapped_instances[idx].get_ready_event());
@@ -10080,8 +10071,7 @@ namespace Legion {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions,
+      version_info.apply_mapping(map_applied_conditions,
                                  true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -10143,8 +10133,7 @@ namespace Legion {
                                           completion_event);
 #endif
         }
-        version_info.apply_mapping(runtime->address_space, 
-                                   map_applied_conditions);
+        version_info.apply_mapping(map_applied_conditions);
         // Clear value and value size since the forest ended up 
         // taking ownership of them
         value = NULL;
@@ -10230,8 +10219,7 @@ namespace Legion {
                                         completion_event);
 #endif
       }
-      version_info.apply_mapping(runtime->address_space, 
-                                 map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -10713,8 +10701,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
-      version_info.apply_mapping(runtime->address_space,
-                                 map_applied_conditions);
+      version_info.apply_mapping(map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(result);
       // Once we have created the instance, then we are done
@@ -11126,8 +11113,7 @@ namespace Legion {
         runtime->forest->detach_file(physical_ctx, requirement, 
                                      this, version_info, reference);
       std::set<RtEvent> applied_conditions;
-      version_info.apply_mapping(runtime->address_space, 
-                                 applied_conditions);
+      version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())
         complete_mapping(Runtime::merge_events(applied_conditions));
       else

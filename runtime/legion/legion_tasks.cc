@@ -2297,8 +2297,7 @@ namespace Legion {
 #endif
                               );
         // Now apply our mapping
-        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        version_info.apply_mapping(owner_space, applied_conditions);
+        version_info.apply_mapping(applied_conditions);
       }
     }
 
@@ -6405,6 +6404,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::return_virtual_instance(unsigned index,
+                                             InstanceSet &refs, bool created)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, SINGLE_RETURN_VIRTUAL_CALL);
+#ifdef DEBUG_LEGION
+      assert(refs.size() == 1);
+      assert(refs[0].is_composite_ref());
+#endif
+      RegionTreeContext virtual_ctx = parent_ctx->get_context();
+      if (created)
+      {
+#ifdef DEBUG_LEGION
+        assert(index >= regions.size());
+        assert((index - regions.size()) < created_requirements.size());
+#endif
+        // No need for the lock when accessing created_requirements, we
+        // know that if we are here then the task is done running so
+        // there will be no more modifications to created requirements
+        CompositeView *composite_view = refs[0].get_composite_view();   
+        runtime->forest->initialize_current_context(virtual_ctx,
+                   created_requirements[index - regions.size()], 
+                   refs, parent_ctx, index, composite_view); 
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(index < regions.size());
+        assert(virtual_mapped[index]);
+#endif
+        // Apply our version state information, put map applied information
+        // in a temporary data structure and then hold the lock when merging
+        // it back into map_applied conditions
+        std::set<RtEvent> temp_map_applied_conditions;
+        RestrictInfo empty_restrict_info;
+        VersionInfo &info = get_version_info(index);
+        runtime->forest->physical_register_only(virtual_ctx, regions[index],
+                                                info, empty_restrict_info, this,
+                                                index, ApEvent::NO_AP_EVENT,
+                                                false/*defer add users*/, 
+                                                temp_map_applied_conditions,refs
+#ifdef DEBUG_LEGION
+                                                , get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
+        info.apply_mapping(temp_map_applied_conditions);
+        if (!temp_map_applied_conditions.empty())
+        {
+          AutoLock o_lock(op_lock);
+          map_applied_conditions.insert(temp_map_applied_conditions.begin(),
+                                        temp_map_applied_conditions.end());
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const std::vector<ApUserEvent> &unmap_events,
@@ -8407,8 +8463,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
 	VersionInfo &version_info = version_infos[idx];
-	version_info.apply_mapping(runtime->address_space,
-				   map_applied_conditions,
+	version_info.apply_mapping(map_applied_conditions,
 				   true /*copy through*/);
       }   
       if (!map_applied_conditions.empty())
@@ -8475,21 +8530,9 @@ namespace Legion {
       // If we mapped, then we are no longer stealable
       stealable = false;
       // Also flush out physical regions
-      if (is_remote())
-      {
-        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          if (!virtual_mapped[idx] && !no_access_regions[idx])
-            version_infos[idx].apply_mapping(owner_space, 
-                                             map_applied_conditions);
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          if (!virtual_mapped[idx] && !no_access_regions[idx])
-            version_infos[idx].apply_mapping(runtime->address_space, 
-                                             map_applied_conditions);
-      }
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        if (!virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].apply_mapping(map_applied_conditions);
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
       if (is_leaf())
@@ -8547,70 +8590,6 @@ namespace Legion {
       need_completion_trigger = false;
       chain_event = completion_event;
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::return_virtual_instance(unsigned index,
-                                                 InstanceSet &refs,bool created)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, INDIVIDUAL_RETURN_VIRTUAL_CALL);
-#ifdef DEBUG_LEGION
-      assert(refs.size() == 1);
-      assert(refs[0].is_composite_ref());
-#endif
-      RegionTreeContext virtual_ctx = parent_ctx->get_context();
-      if (created)
-      {
-#ifdef DEBUG_LEGION
-        assert(index >= regions.size());
-        assert((index - regions.size()) < created_requirements.size());
-#endif
-        // No need for the lock when accessing created_requirements, we
-        // know that if we are here then the task is done running so
-        // there will be no more modifications to created requirements
-        CompositeView *composite_view = refs[0].get_composite_view();   
-        runtime->forest->initialize_current_context(virtual_ctx,
-                   created_requirements[index - regions.size()], 
-                   refs, parent_ctx, index, composite_view); 
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(virtual_mapped[index]);
-#endif
-        // Apply our version state information, put map applied information
-        // in a temporary data structure and then hold the lock when merging
-        // it back into map_applied conditions
-        std::set<RtEvent> temp_map_applied_conditions;
-        RestrictInfo empty_restrict_info;
-        runtime->forest->physical_register_only(virtual_ctx, regions[index],
-                                                version_infos[index], 
-                                                empty_restrict_info, this,
-                                                index, ApEvent::NO_AP_EVENT,
-                                                false/*defer add users*/, 
-                                                temp_map_applied_conditions,refs
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-        if (is_remote())
-        {
-          AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-          version_infos[index].apply_mapping(owner_space, 
-                                             temp_map_applied_conditions);
-        }
-        else
-          version_infos[index].apply_mapping(runtime->address_space, 
-                                             temp_map_applied_conditions);
-        if (!temp_map_applied_conditions.empty())
-        {
-          AutoLock o_lock(op_lock);
-          map_applied_conditions.insert(temp_map_applied_conditions.begin(),
-                                        temp_map_applied_conditions.end());
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -9396,6 +9375,10 @@ namespace Legion {
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
       map_all_regions(point_termination, must_epoch_owner);
+      // Flush out the state for any mapped region requirements
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+        if (!virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].apply_mapping(map_applied_conditions);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf()) 
@@ -9439,28 +9422,6 @@ namespace Legion {
     {
       chain_event = point_termination;
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::return_virtual_instance(unsigned index, InstanceSet &refs,
-                                            bool created)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      if (created)
-      {
-        assert(index >= regions.size());
-        assert((regions.size() + index) < created_requirements.size());
-      }
-      else
-        assert(index < regions.size());
-#endif
-      if (index < regions.size())
-        slice_owner->return_virtual_instance(index, refs, 
-                                             regions[index], false/*created*/);
-      else
-        slice_owner->return_virtual_instance(index, refs,
-                  created_requirements[index-regions.size()], true/*created*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9838,15 +9799,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::return_virtual_instance(unsigned index, 
-                                              InstanceSet &refs, bool created)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -11760,18 +11712,6 @@ namespace Legion {
       }
       if (need_trigger)
       {
-        // At this point, we know that we are mapped, see if we have
-        // any locally mapped slices which we need to apply changes
-        // Note we do this here while we're not holding the lock
-        if (!locally_mapped_slices.empty())
-        {
-          for (std::deque<SliceTask*>::const_iterator it = 
-                locally_mapped_slices.begin(); it != 
-                locally_mapped_slices.end(); it++)
-          {
-            (*it)->apply_local_version_infos(map_applied_conditions);
-          }
-        }
         // Get the mapped precondition note we can now access this
         // without holding the lock because we know we've seen
         // all the responses so no one else will be mutating it.
@@ -12115,19 +12055,6 @@ namespace Legion {
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
       return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::apply_local_version_infos(std::set<RtEvent> &map_conditions)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SLICE_APPLY_VERSION_INFO_CALL);
-      // We know we are local
-      AddressSpaceID owner_space = runtime->address_space; 
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        version_infos[idx].apply_mapping(owner_space, map_conditions);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -12634,49 +12561,6 @@ namespace Legion {
         point->return_privilege_state(this);
       else
         point->return_privilege_state(index_owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::return_virtual_instance(unsigned index, InstanceSet &refs,
-                                     const RegionRequirement &req, bool created)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SLICE_RETURN_VIRTUAL_CALL);
-      // Add it to our state
-#ifdef DEBUG_LEGION
-      assert(refs.size() == 1);
-      assert(refs[0].is_composite_ref());
-#endif
-      RegionTreeContext virtual_ctx = parent_ctx->get_context();
-      if (created)
-      {
-        CompositeView *composite_view = refs[0].get_composite_view();   
-        runtime->forest->initialize_current_context(virtual_ctx,
-                        req, refs, parent_ctx, index, composite_view);
-      }
-      else
-      {
-        std::set<RtEvent> empty_conditions;
-        RestrictInfo empty_restrict_info;
-        // Have to control access to the version info data structure
-        AutoLock o_lock(op_lock);
-        // Hold a reference so it doesn't get deleted
-        temporary_virtual_refs.push_back(refs[0]);
-        runtime->forest->physical_register_only(virtual_ctx, req,
-                                                version_infos[index], 
-                                                empty_restrict_info, this,
-                                                index, ApEvent::NO_AP_EVENT,
-                                                false/*defer add users*/, 
-                                                empty_conditions, refs
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-#ifdef DEBUG_LEGION
-        assert(empty_conditions.empty());
-#endif
-      }
     }
 
     //--------------------------------------------------------------------------

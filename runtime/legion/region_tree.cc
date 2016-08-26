@@ -10624,11 +10624,13 @@ namespace Legion {
         // advance the epoch version numbers
         if (it->is_projection_state())
         {
-#ifdef DEBUG_LEGION
-          assert(closed_node != NULL);
-#endif
           if (!read_only_close && (it->open_state != OPEN_READ_ONLY_PROJ))
+          {
+#ifdef DEBUG_LEGION
+            assert(closed_node != NULL);
+#endif
             state.capture_close_epochs(overlap, closed_node);
+          }
           // If this is a writing or reducing 
           state.advance_projection_epochs(overlap); 
         }
@@ -12274,10 +12276,32 @@ namespace Legion {
                            true/*register now*/);
       // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
-      // Pull down the valid instance views before we do the capture
-      pull_valid_instance_views(ctx_id, state, closing_mask, 
-                                false/*needs space*/, version_info);
-      state->capture_composite_root(result, closing_mask);
+      LegionMap<LogicalView*,FieldMask>::aligned valid_above;
+      // See if we have any valid views above we need to capture
+      if (!version_info.is_upper_bound_node(this))
+      {
+        RegionTreeNode *parent = get_parent();
+        if (parent != NULL)
+        {
+          FieldMask up_mask = closing_mask - state->dirty_mask;
+          if (!!up_mask)
+          {
+            PhysicalState *parent_state = 
+              parent->get_physical_state(version_info);
+            LegionMap<LogicalView*,FieldMask>::aligned local_valid;
+            parent->find_valid_instance_views(ctx_id, parent_state, up_mask, 
+                  up_mask, version_info, false/*needs space*/, local_valid);
+            // Get the subview for this level
+            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator 
+                  it = local_valid.begin(); it != local_valid.end(); it++)
+            {
+              LogicalView *local_view = it->first->get_subview(get_color());
+              valid_above[local_view] = it->second;
+            }
+          }
+        }
+      }
+      state->capture_composite_root(result, closing_mask, valid_above);
       result->finalize_capture();
       // Clear out any reductions
       invalidate_reduction_views(state, closing_mask);

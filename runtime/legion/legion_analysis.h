@@ -237,8 +237,7 @@ namespace Legion {
       // operations that still need to copy state from one 
       // version number to the next even though they didn't
       // modify the physical state object
-      void apply_mapping(AddressSpaceID target,
-                         std::set<RtEvent> &applied_conditions,
+      void apply_mapping(std::set<RtEvent> &applied_conditions,
                          bool copy_through = false);
       void resize(size_t max_depth);
       void clear(void);
@@ -782,14 +781,14 @@ namespace Legion {
       void add_advance_state(VersionState *state, const FieldMask &mask);
     public:
       inline bool is_captured(void) const { return captured; }
-      void capture_state(void);
+      void capture_state(const FieldMask &split_mask);
       inline bool has_advance_states(void) const 
         { return (!advance_states.empty()); } 
-      void apply_state(AddressSpaceID target, 
-                       std::set<RtEvent> &applied_conditions) const; 
+      void apply_state(std::set<RtEvent> &applied_conditions) const; 
     public:
       void capture_composite_root(CompositeView *composite_view,
-                                  const FieldMask &closed_mask);
+                                  const FieldMask &closed_mask,
+        const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
     public:
       PhysicalState* clone(void) const;
     public:
@@ -1054,13 +1053,13 @@ namespace Legion {
                       SingleTask *context, unsigned init_index,
                       const std::vector<LogicalView*> &corresponding);
       void update_path_only_state(PhysicalState *state,
-                                  const FieldMask &update_mask) const;
+                                  const FieldMask &update_mask,
+                                  const FieldMask &split_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
-                                AddressSpaceID target,
                                 std::set<RtEvent> &applied_conditions,
                                 bool need_lock = true);
       void reduce_open_children(const ColorPoint &child_color,

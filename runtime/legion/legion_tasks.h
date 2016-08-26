@@ -565,6 +565,8 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances);
+      void return_virtual_instance(unsigned index, 
+                                   InstanceSet &refs, bool created);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -626,10 +628,7 @@ namespace Legion {
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
-      virtual bool can_early_complete(ApUserEvent &chain_event) = 0;
-      virtual void return_virtual_instance(unsigned index, 
-                                           InstanceSet &refs,
-                                           bool created) = 0;
+      virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -899,8 +898,6 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, 
-                                           InstanceSet &refs, bool created);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -1014,8 +1011,6 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, 
-                                           InstanceSet &refs, bool created);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -1091,8 +1086,6 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index, 
-                                           InstanceSet &refs, bool created);
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
@@ -1443,7 +1436,6 @@ namespace Legion {
     public:
       RtEvent perform_versioning_analysis(void);
       RtEvent perform_must_epoch_version_analysis(MustEpochOp *owner);
-      void apply_local_version_infos(std::set<RtEvent> &map_conditions);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);
     protected:
@@ -1453,8 +1445,6 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void return_privileges(PointTask *point);
-      void return_virtual_instance(unsigned index, InstanceSet &refs,
-                                   const RegionRequirement &req, bool created);
       void record_child_mapped(RtEvent child_complete);
       void record_child_complete(void);
       void record_child_committed(void);
