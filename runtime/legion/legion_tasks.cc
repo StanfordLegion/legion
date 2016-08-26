@@ -8301,6 +8301,8 @@ namespace Legion {
         for (std::vector<unsigned>::const_iterator it = 
               rerun.begin(); it != rerun.end(); it++)
         {
+          // Reset our version info
+          version_infos[*it].clear();
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        restrict_infos[*it],
                                                        version_infos[*it],
@@ -9250,6 +9252,8 @@ namespace Legion {
       // be writing/reducing below in the tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
         // If this is an early mapped region then we don't need to do anything
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
           continue;
@@ -11139,9 +11143,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         rerun_analysis_requirements.clear();
 #endif
+        // Reset our version infos
         for (std::vector<unsigned>::const_iterator it = 
               rerun.begin(); it != rerun.end(); it++)
         {
+          // Reset our version info
+          version_infos[*it].clear();
           runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
                                                        restrict_infos[*it],
                                                        version_infos[*it],

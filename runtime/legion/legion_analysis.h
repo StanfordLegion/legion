@@ -781,7 +781,7 @@ namespace Legion {
       void add_advance_state(VersionState *state, const FieldMask &mask);
     public:
       inline bool is_captured(void) const { return captured; }
-      void capture_state(const FieldMask &split_mask);
+      void capture_state(void);
       inline bool has_advance_states(void) const 
         { return (!advance_states.empty()); } 
       void apply_state(std::set<RtEvent> &applied_conditions) const; 
@@ -1053,8 +1053,7 @@ namespace Legion {
                       SingleTask *context, unsigned init_index,
                       const std::vector<LogicalView*> &corresponding);
       void update_path_only_state(PhysicalState *state,
-                                  const FieldMask &update_mask,
-                                  const FieldMask &split_mask) const;
+                                  const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
     public: // methods for applying state information

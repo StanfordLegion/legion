@@ -1139,7 +1139,7 @@ namespace Legion {
     public:
       void find_sound_domination_mask(RegionTreeNode *logical_node,
                                       const FieldMask &mask,
-                                      FieldMask &dom_fields) const; 
+                                      FieldMask &dom_fields); 
       void compute_local_complete(MaterializedView *dst,
                                   const FieldMask &test_mask,
                                   FieldMask &local_complete);

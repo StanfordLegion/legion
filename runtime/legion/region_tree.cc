@@ -10986,8 +10986,12 @@ namespace Legion {
                 if (overwriting)
                   closer.record_read_only_close(overlap);
                 else
+                {
                   closer.record_close_operation(overlap, state.dirty_below,
                             IS_READ_ONLY(closer.user.usage)/*leave open*/);
+                  state.capture_close_epochs(overlap,
+                                             closer.find_closed_node(this));
+                }
                 // Advance the projection epochs
                 state.advance_projection_epochs(overlap);
               }
@@ -11014,8 +11018,12 @@ namespace Legion {
                   if (overwriting)
                     closer.record_read_only_close(overlap);
                   else
+                  {
                     closer.record_close_operation(overlap, state.dirty_below,
                                                   false/*leave open*/);
+                    state.capture_close_epochs(overlap,
+                                               closer.find_closed_node(this));
+                  }
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11152,8 +11160,8 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_domain) &&
-                  !IS_REDUCE(closer.user.usage))
+                  it->projection_domain_dominates(proj_info.projection_domain) 
+                  && !IS_REDUCE(closer.user.usage))
               {
                 // Update the domain  
                 it->projection_domain = proj_info.projection_domain;
@@ -11171,6 +11179,8 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
                                           IS_READ_ONLY(closer.user.usage));
+                  state.capture_close_epochs(overlap,
+                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11214,6 +11224,8 @@ namespace Legion {
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
                                           IS_READ_ONLY(closer.user.usage));
+                  state.capture_close_epochs(overlap,
+                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -11239,7 +11251,9 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                          IS_READ_ONLY(closer.user.usage));
+                                                false/*leave open*/);
+                  state.capture_close_epochs(overlap,
+                                             closer.find_closed_node(this));
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -12099,6 +12113,8 @@ namespace Legion {
               // Do the close here 
               closer.record_close_operation(overlap, state.dirty_below,
                                             false/*leave open*/);
+              state.capture_close_epochs(overlap,
+                                         closer.find_closed_node(this));
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;

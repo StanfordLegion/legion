@@ -787,7 +787,6 @@ namespace Legion {
       // We only ever need to apply state at the leaves
 #ifdef DEBUG_LEGION
       assert(!physical_states.empty());
-      assert(physical_states.size() == split_masks.size());
 #endif
       unsigned last_idx = physical_states.size() - 1;
       if (copy_through)
@@ -797,7 +796,7 @@ namespace Legion {
         // If we have advance states and we haven't capture, then
         // we need to propagate information
         if (state->has_advance_states() && !state->is_captured())
-          state->capture_state(split_masks[last_idx]);
+          state->capture_state();
       }
       physical_states[last_idx]->apply_state(applied_conditions);
     }
@@ -888,14 +887,24 @@ namespace Legion {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < physical_states.size());
-      assert(physical_states.size() == split_masks.size());
 #endif
       PhysicalState *result = physical_states[depth];
+      // We can make a physical state if it is below our upper bound node
+      if ((result == NULL) && 
+          (upper_bound_node->get_depth() <= node->get_depth()))
+      {
+        result = 
+          legion_new<PhysicalState>(node, (depth < (physical_states.size()-1)));
+        result->capture_state();
+        physical_states[depth] = result;
+        return result;
+      }
 #ifdef DEBUG_LEGION
       assert(result != NULL);
+      assert(result->node == node);
 #endif
       if (!result->is_captured())
-        result->capture_state(split_masks[depth]);
+        result->capture_state();
       return result;
     }
 
@@ -3801,7 +3810,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::capture_state(const FieldMask &split_mask)
+    void PhysicalState::capture_state(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime,
@@ -3815,7 +3824,7 @@ namespace Legion {
         for (PhysicalVersions::iterator it = version_states.begin();
               it != version_states.end(); it++)
         {
-          it->first->update_path_only_state(this, it->second, split_mask);
+          it->first->update_path_only_state(this, it->second);
         }
       }
       else
@@ -4059,6 +4068,7 @@ namespace Legion {
       current_context = NULL;
       remote_valid_fields.clear();
       remote_valid.clear();
+      previous_opens.clear();
       previous_advancers.clear();
       if (!current_version_infos.empty())
         current_version_infos.clear();
@@ -4698,14 +4708,13 @@ namespace Legion {
             previous_advancers[advance_epoch] = mask;
         }
         // Filter out any previous opens if necessary
-        if (!previous_opens.empty())
+        if (dedup_opens && !previous_opens.empty())
         {
           std::vector<ProjectionEpochID> to_delete;
           for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it =
                 previous_opens.begin(); it != previous_opens.end(); it++)
           {
-            if ((dedup_opens && (it->first == open_epoch)) ||
-                (dedup_advances && (it->first == advance_epoch)))
+            if (it->first == open_epoch) // skip our own
               continue;
             it->second -= mask;
             if (!it->second)
@@ -4719,15 +4728,14 @@ namespace Legion {
           }
         }
         // Filter out any previous advancers if necessary  
-        if (!previous_advancers.empty())
+        if (dedup_advances && !previous_advancers.empty())
         {
           std::vector<ProjectionEpochID> to_delete;
           for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it = 
                 previous_advancers.begin(); it != 
                 previous_advancers.end(); it++)
           {
-            if ((dedup_opens && (it->first == open_epoch)) ||
-                (dedup_advances && (it->first == advance_epoch)))
+            if (it->first == advance_epoch) // skip our own
               continue;
             it->second -= mask;
             if (!it->second)
@@ -4879,6 +4887,8 @@ namespace Legion {
                     to_delete.begin(); it != to_delete.end(); it++)
                 info.erase(*it);
             }
+            if (!info.get_valid_mask())
+              to_delete_current.insert(vit->first);
           }
           // Make our new version state object and add if we can
           VersionID next_version = vit->first+1;
@@ -5575,10 +5585,14 @@ namespace Legion {
           assert(local_version_fields * it->second); // better not overlap
           local_version_fields |= it->second;
         }
-        assert(info.get_valid_mask() == local_version_fields); // beter match
+        // They can overapproximate if there is more than one
+        if (info.size() > 1)
+          assert(!(local_version_fields - info.get_valid_mask()));
+        else
+          assert(info.get_valid_mask() == local_version_fields); // beter match
         // Should not overlap with other fields in the current version
-        assert(current_version_fields * info.get_valid_mask());
-        current_version_fields |= info.get_valid_mask();
+        assert(current_version_fields * local_version_fields);
+        current_version_fields |= local_version_fields;
       }
       FieldMask previous_version_fields;
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
@@ -5596,10 +5610,14 @@ namespace Legion {
           assert(local_version_fields * it->second); // better not overlap
           local_version_fields |= it->second;
         }
-        assert(info.get_valid_mask() == local_version_fields); // beter match
+        // They can overapproxminate if there is more than one
+        if (info.size() > 1)
+          assert(!(local_version_fields - info.get_valid_mask()));
+        else
+          assert(info.get_valid_mask() == local_version_fields); // beter match
         // Should not overlap with other fields in the current version
-        assert(previous_version_fields * info.get_valid_mask());
-        previous_version_fields |= info.get_valid_mask();
+        assert(previous_version_fields * local_version_fields);
+        previous_version_fields |= local_version_fields;
       }
     }
 
@@ -5764,37 +5782,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::update_path_only_state(PhysicalState *state,
-                                             const FieldMask &update_mask,
-                                             const FieldMask &split_mask) const
+                                             const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_UPDATE_PATH_ONLY_CALL);
-      // We can't capture valid views that are no longer valid
-      // because the version numbers have been advanced
-      FieldMask view_capture_mask = update_mask - split_mask;
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       // If we are premapping, we only need to update the dirty bits
       // and the valid instance views 
       if (!!dirty_mask)
         state->dirty_mask |= (dirty_mask & update_mask);
-      if (!!view_capture_mask)
+      for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+            track_aligned::const_iterator it = valid_views.begin();
+            it != valid_views.end(); it++)
       {
-        for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-              track_aligned::const_iterator it = valid_views.begin();
-              it != valid_views.end(); it++)
-        {
-          FieldMask overlap = it->second & view_capture_mask;
-          if (!overlap)
-            continue;
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
-            iterator finder = state->valid_views.find(it->first);
-          if (finder == state->valid_views.end())
-            state->valid_views[it->first] = overlap;
-          else
-            finder->second |= overlap;
-        }
+        FieldMask overlap = it->second & update_mask;
+        if (!overlap)
+          continue;
+        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::track_aligned::
+          iterator finder = state->valid_views.find(it->first);
+        if (finder == state->valid_views.end())
+          state->valid_views[it->first] = overlap;
+        else
+          finder->second |= overlap;
       }
     }
 

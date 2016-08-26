@@ -3882,9 +3882,13 @@ namespace Legion {
       update_mask = (copy_mask & dirty_mask) - dominate_mask; 
       if (!!local_dominate)
       {
+        // Remove any local dominate fields from the update mask, we'll
+        // put any that need updates for top_copy_mask back at the 
+        // end of this block when we know if they're complete below or not
+        update_mask -= local_dominate;
+        top_need_copy = local_dominate;
         find_valid_views(update_mask | local_dominate, local_dominate, 
                          current_valid_views, false/*need lock*/);
-        top_need_copy = local_dominate;
         // Check to see if the destination is already in the set of 
         // valid views in which case we don't need a top copy
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -5696,7 +5700,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CompositeNode::find_sound_domination_mask(RegionTreeNode *logical_node,
                                                    const FieldMask &mask,
-                                                   FieldMask &dom_fields) const
+                                                   FieldMask &dom_fields)
     //--------------------------------------------------------------------------
     {
       if (!mask)
@@ -5707,6 +5711,8 @@ namespace Legion {
         dom_fields = mask;
         return;
       }
+      // Have to do our check first
+      perform_ready_check(mask);
       // Need to hold the lock to access these data structures
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       // Partition domination tests are only sound if have all the
