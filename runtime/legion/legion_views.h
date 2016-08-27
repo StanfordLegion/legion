@@ -1147,9 +1147,18 @@ namespace Legion {
                                    const FieldMask &check_mask,
                                    const FieldMask &need_copy_above,
                                    FieldMask &need_temporary,
-                                   FieldMask &already_valid);
+                                   FieldMask &already_valid,
+                                   FieldMask &reductions_below);
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
+      void issue_deferred_reductions_only(const TraversalInfo &info, 
+                                 MaterializedView *dst, 
+                                 const FieldMask &reduce_mask,
+                                 VersionTracker *src_version_tracker,
+              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                    CopyAcrossHelper *helper);
     public:
       RegionTreeNode *const logical_node;
       CompositeBase *const parent;

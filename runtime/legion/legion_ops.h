@@ -981,6 +981,7 @@ namespace Legion {
                       Operation *creator, int req_idx,
                       bool parent_is_upper_bound);
       void set_child_node(RegionTreeNode *child);
+      void set_split_child_mask(const FieldMask &split_mask);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -993,6 +994,7 @@ namespace Legion {
       RegionTreeNode *parent_node;
       RegionTreeNode *child_node; // inclusive
       FieldMask       advance_mask;
+      FieldMask       split_child_mask; // only for partial reductions
       bool parent_is_upper_bound;
     };
 

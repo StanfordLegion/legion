@@ -432,8 +432,7 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, 
-                                           bool has_lock);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1220,8 +1219,7 @@ namespace Legion {
     public:
       virtual unsigned register_new_child_operation(Operation *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op,
-                                           bool has_lock);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 

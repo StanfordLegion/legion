@@ -3631,6 +3631,7 @@ namespace Legion {
       // smallest dominating node) we need to perform the check to
       // see if we are going to need to make a temporary instance
       // We might also discover that they are already valid
+      LegionMap<CompositeNode*,FieldMask>::aligned reduction_only_children;
       if (!!local_dominate)
       {
 #ifdef DEBUG_LEGION
@@ -3651,14 +3652,23 @@ namespace Legion {
             continue;
           // If any fields are already valid below then we can remove
           // them from being needed
+          FieldMask reductions_below;
           FieldMask already_valid = check_mask;
           it->first->perform_overwrite_check(dst, check_mask, 
-                        top_need_copy, need_temporary, already_valid);
+                               top_need_copy, need_temporary, 
+                               already_valid, reductions_below);
 #ifdef DEBUG_LEGION
           assert(already_valid * need_temporary);
 #endif
           if (!!already_valid)
           {
+            if (!!reductions_below)
+            {
+              // We might need to make this child a reduction only child
+              FieldMask reductions_only = already_valid & reductions_below;
+              if (!!reductions_only)
+                reduction_only_children[it->first] = reductions_only;
+            }
             it->second -= already_valid;
             if (!it->second)
               to_delete.push_back(it->first);
@@ -3722,6 +3732,21 @@ namespace Legion {
         }
       }
       // Now we go down if necessary
+      // Do reductions first since we want to minimize the 
+      // number of preconditions they encounter
+      if (!reduction_only_children.empty())
+      {
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              reduction_only_children.begin(); it !=
+              reduction_only_children.end(); it++)
+        {
+          it->first->issue_deferred_reductions_only(info, dst, it->second,
+                                                    src_version_tracker,
+                                                    *below_preconditions,
+                                                    postconditions,
+                                                    postreductions, helper);
+        }
+      }
       if (!children_to_traverse.empty())
       {
         for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
@@ -3744,6 +3769,7 @@ namespace Legion {
                                   below_postconditions.end());
         }
       }
+      
       // Reductions are weird, both preconditions and postconditions
       // end up being preconditions for the reductions at this level
       // as you come back up the tree
@@ -5803,12 +5829,15 @@ namespace Legion {
                                                const FieldMask &check_mask,
                                                const FieldMask &need_copy_above,
                                                FieldMask &need_temporary,
-                                               FieldMask &already_valid)
+                                               FieldMask &already_valid,
+                                               FieldMask &reductions_below)
     //--------------------------------------------------------------------------
     {
       // Have to do our check first
       perform_ready_check(check_mask); 
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      if (!!reduction_mask)
+        reductions_below |= (check_mask & reduction_mask);
       FieldMask local_dirty = dirty_mask & check_mask;
       if (!!local_dirty)
       {
@@ -5866,7 +5895,8 @@ namespace Legion {
           if (!overlap)
             continue;
           it->first->perform_overwrite_check(dst, overlap, local_dirty,
-                                             need_temporary, already_valid);
+                                             need_temporary, already_valid, 
+                                             reductions_below);
         }
       }
       else
@@ -5879,7 +5909,8 @@ namespace Legion {
           if (!overlap)
             continue;
           it->first->perform_overwrite_check(dst, overlap, need_copy_above,
-                                             need_temporary, already_valid);
+                                             need_temporary, already_valid, 
+                                             reductions_below);
         }
       }
     }
@@ -5903,6 +5934,48 @@ namespace Legion {
         else
           finder->second |= overlap;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::issue_deferred_reductions_only(
+        const TraversalInfo &info, MaterializedView *dst,
+        const FieldMask &reduce_mask, VersionTracker *src_version_tracker,
+        const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+              LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+              LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+              CopyAcrossHelper *helper)
+    //--------------------------------------------------------------------------
+    {
+      perform_ready_check(reduce_mask);
+      // See if we have any local reductions to perform
+      // and then continue down the tree for any interfering children
+      FieldMask local_update;
+      LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        local_update = reduce_mask & reduction_mask;
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          FieldMask overlap = it->second & reduce_mask;
+          if (!overlap)
+            continue;
+          // See if the child interferes with our destination
+          if (!it->first->logical_node->intersects_with(dst->logical_node))
+            continue;
+          children_to_traverse[it->first] = overlap;
+        }
+      }
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+           children_to_traverse.begin(); it != children_to_traverse.end(); it++)
+      {
+        it->first->issue_deferred_reductions_only(info, dst, it->second,
+                     src_version_tracker, preconditions, postconditions, 
+                     postreductions, helper);
+      }
+      if (!!local_update)
+        issue_update_reductions(info, dst, local_update, src_version_tracker,
+                      preconditions, postconditions, postreductions, helper);
     }
 
     /////////////////////////////////////////////////////////////

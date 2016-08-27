@@ -2519,12 +2519,13 @@ namespace Legion {
       field_states.clear();
       clear_logical_users(); 
       dirty_fields.clear();
+      reduction_fields.clear();
       dirty_below.clear();
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
-      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+      for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
-        delete it->second;
+        delete *it;
       projection_epochs.clear();
     } 
 
@@ -2580,6 +2581,7 @@ namespace Legion {
         }
       }
       dirty_below -= deleted_mask;
+      reduction_fields -= deleted_mask;
       dirty_fields -= deleted_mask;
     }
 
@@ -2587,62 +2589,44 @@ namespace Legion {
     void CurrentState::advance_projection_epochs(const FieldMask &advance_mask)
     //--------------------------------------------------------------------------
     {
+      // See if we can get some coalescing going on here
       std::map<ProjectionEpochID,ProjectionEpoch*> to_add; 
-      std::set<ProjectionEpochID> to_delete;
-      for (LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::
-            reverse_iterator it = projection_epochs.rbegin(); 
-            it != projection_epochs.rend(); it++) 
+      for (std::list<ProjectionEpoch*>::iterator it = 
+            projection_epochs.begin(); it != 
+            projection_epochs.end(); /*nothing*/)
       {
-        FieldMask overlap = it->second->valid_fields & advance_mask;
+        FieldMask overlap = (*it)->valid_fields & advance_mask;
         if (!overlap)
-          continue;
-        it->second->valid_fields -= overlap;
-        if (!it->second->valid_fields)
-          to_delete.insert(it->first);
-        // See if we can add it to an existing one
-        LegionMap<ProjectionEpochID,ProjectionEpoch*>::aligned::iterator 
-          finder = projection_epochs.find(it->first+1);
-        if (finder != projection_epochs.end())
         {
-          // If we were going to erase it, then don't erase it anymore
-          if (!finder->second->valid_fields)
-          {
-#ifdef DEBUG_LEGION
-            assert(to_delete.find(finder->first) != to_delete.end());
-#endif
-            to_delete.erase(finder->first);
-          }
-          finder->second->valid_fields |= overlap;
+          it++;
+          continue;
+        }
+        const ProjectionEpochID next_epoch_id = (*it)->epoch_id + 1;
+        std::map<ProjectionEpochID,ProjectionEpoch*>::iterator finder = 
+          to_add.find(next_epoch_id);
+        if (finder == to_add.end())
+        {
+          ProjectionEpoch *next_epoch = 
+            new ProjectionEpoch((*it)->epoch_id+1, overlap);
+          to_add[next_epoch_id] = next_epoch;
         }
         else
-          to_add[it->first+1] = new ProjectionEpoch(it->first+1, overlap);
-      }
-      if (!to_delete.empty())
-      {
-        for (std::set<ProjectionEpochID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
+          finder->second->valid_fields |= overlap;
+        // Filter the fields from our old one
+        (*it)->valid_fields -= overlap;
+        if (!((*it)->valid_fields))
         {
-          std::map<ProjectionEpochID,ProjectionEpoch*>::iterator finder =
-            projection_epochs.find(*it);
-#ifdef DEBUG_LEGION
-          assert(finder != projection_epochs.end());
-          // Field should be empty
-          assert(!finder->second->valid_fields);
-#endif
-          delete finder->second;
-          projection_epochs.erase(finder);
+          delete (*it);
+          it = projection_epochs.erase(it);
         }
+        else
+          it++;
       }
       if (!to_add.empty())
       {
         for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
               to_add.begin(); it != to_add.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(projection_epochs.find(it->first) == projection_epochs.end());
-#endif
-          projection_epochs.insert(*it); 
-        }
+          projection_epochs.push_back(it->second);
       }
     }
 
@@ -2654,13 +2638,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!capture_mask);
 #endif
-      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+      for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
-        FieldMask overlap = it->second->valid_fields & capture_mask;
+        FieldMask overlap = (*it)->valid_fields & capture_mask;
         if (!overlap)
           continue;
-        info.record_projection_epoch(it->first, overlap);
+        info.record_projection_epoch((*it)->epoch_id, overlap);
         capture_mask -= overlap;
         if (!capture_mask)
           return;
@@ -2669,7 +2653,7 @@ namespace Legion {
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, capture_mask);
       new_epoch->insert(info.projection, info.projection_domain);
-      projection_epochs[ProjectionEpoch::first_epoch] = new_epoch;
+      projection_epochs.push_back(new_epoch);
       // Record it
       info.record_projection_epoch(ProjectionEpoch::first_epoch, capture_mask);
     }
@@ -2679,13 +2663,13 @@ namespace Legion {
                                             ClosedNode *closed_node) const
     //--------------------------------------------------------------------------
     {
-      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+      for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
-        FieldMask overlap = it->second->valid_fields & capture_mask;
+        FieldMask overlap = (*it)->valid_fields & capture_mask;
         if (!overlap)
           continue;
-        closed_node->record_projections(it->second, overlap);
+        closed_node->record_projections(*it, overlap);
         capture_mask -= overlap;
         if (!capture_mask)
           return;
@@ -2697,13 +2681,13 @@ namespace Legion {
                                                 const ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ProjectionEpochID,ProjectionEpoch*>::const_iterator it = 
+      for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
       {
-        FieldMask overlap = it->second->valid_fields & update_mask;
+        FieldMask overlap = (*it)->valid_fields & update_mask;
         if (!overlap)
           continue;
-        it->second->insert(info.projection, info.projection_domain);
+        (*it)->insert(info.projection, info.projection_domain);
         update_mask -= overlap;
         if (!update_mask)
           return;
@@ -2715,7 +2699,7 @@ namespace Legion {
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
       new_epoch->insert(info.projection, info.projection_domain);
-      projection_epochs[ProjectionEpoch::first_epoch] = new_epoch;
+      projection_epochs.push_back(new_epoch);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3416,7 +3400,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::record_close_operation(const FieldMask &mask, 
                                                const FieldMask &dirty_below,
-                                               bool leave_open)
+                                               bool leave_open, bool projection)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3428,16 +3412,21 @@ namespace Legion {
         root_split_mask |= (dirty_below & mask);
       if (leave_open)
         leave_open_mask |= mask;
+      if (projection)
+        closed_projections |= mask;
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::record_read_only_close(const FieldMask &mask)
+    void LogicalCloser::record_read_only_close(const FieldMask &mask,
+                                               bool projection)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
 #endif
       read_only_close_mask |= mask;
+      if (projection)
+        closed_projections |= mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3633,6 +3622,8 @@ namespace Legion {
       state.dirty_below -= closed_mask;
       root_node->filter_prev_epoch_users(state, closed_mask);
       root_node->filter_curr_epoch_users(state, closed_mask);
+      if (!!closed_projections)
+        state.advance_projection_epochs(closed_projections);
     }
 
     //--------------------------------------------------------------------------
@@ -4629,6 +4620,19 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      // Check to see if we are the owner
+      if (!is_owner)
+      {
+        // First send back the message to the owner to do the advance there
+        RtEvent advanced = send_remote_advance(mask, update_parent_state,
+                                               dedup_opens, open_epoch, 
+                                               dedup_advances, advance_epoch);
+        applied_events.insert(advanced); 
+        // Now filter out any of our current version states that are
+        // no longer valid for the given fields
+        invalidate_version_infos(mask);
+        return;
+      }
       // If we are deduplicating advances, do that now
       // to see if we can avoid any communication
       if (dedup_opens || dedup_advances)
@@ -4656,19 +4660,6 @@ namespace Legion {
               return;
           }
         }
-      }
-      // Check to see if we are the owner
-      if (!is_owner)
-      {
-        // First send back the message to the owner to do the advance there
-        RtEvent advanced = send_remote_advance(mask, update_parent_state,
-                                               dedup_opens, open_epoch, 
-                                               dedup_advances, advance_epoch);
-        applied_events.insert(advanced); 
-        // Now filter out any of our current version states that are
-        // no longer valid for the given fields
-        invalidate_version_infos(mask);
-        return;
       }
       WrapperReferenceMutator mutator(applied_events);
       // If we have to update our parent version info, then we

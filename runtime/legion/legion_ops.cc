@@ -777,7 +777,6 @@ namespace Legion {
         trace->register_operation(this, gen);
       // See if we have any fence dependences
       parent_ctx->register_fence_dependence(this);
-
     }
 
     //--------------------------------------------------------------------------
@@ -4873,6 +4872,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AdvanceOp::set_split_child_mask(const FieldMask &split_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!(split_mask - advance_mask)); // should be dominated
+      assert(split_mask != advance_mask); // should not be the same
+#endif
+      split_child_mask = split_mask;
+    }
+
+    //--------------------------------------------------------------------------
     void AdvanceOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -4888,6 +4898,7 @@ namespace Legion {
     {
       deactivate_internal();
       advance_mask.clear();
+      split_child_mask.clear();
       runtime->free_advance_op(this);
     }
 
@@ -4922,14 +4933,44 @@ namespace Legion {
                                        parent_node->get_row_source(), path);
       // Do the advance
       std::set<RtEvent> advance_events;
-      runtime->forest->advance_version_numbers(this, 0/*idx*/, 
-                                               true/*update parent state*/,
-                                               parent_is_upper_bound,
-                                               false/*dedup opens*/,
-                                               false/*dedup advance*/,
-                                               0/*open id*/, 0/*advance id*/,
-                                               parent_node, path,
-                                               advance_mask, advance_events);
+      if (!split_child_mask)
+      {
+        // Common case
+        runtime->forest->advance_version_numbers(this, 0/*idx*/, 
+                                                 true/*update parent state*/,
+                                                 parent_is_upper_bound,
+                                                 false/*dedup opens*/,
+                                                 false/*dedup advance*/,
+                                                 0/*open id*/, 0/*advance id*/,
+                                                 parent_node, path,
+                                                 advance_mask, advance_events);
+      }
+      else
+      {
+        // This only happens with reductions of multiple fields
+        runtime->forest->advance_version_numbers(this, 0/*idx*/,
+                                                 true/*update parent state*/,
+                                                 parent_is_upper_bound,
+                                                 false/*dedup opens*/,
+                                                 false/*dedup advance*/,
+                                                 0/*open id*/, 0/*advance id*/,
+                                                 parent_node, path,
+                                                 split_child_mask, 
+                                                 advance_events);
+        RegionTreePath one_up_path;
+        runtime->forest->initialize_path(
+                                 child_node->get_parent()->get_row_source(),
+                                 parent_node->get_row_source(), path);
+        runtime->forest->advance_version_numbers(this, 0/*idx*/,
+                                                 true/*update parent state*/,
+                                                 parent_is_upper_bound,
+                                                 false/*dedup opens*/,
+                                                 false/*dedup advance*/,
+                                                 0/*open id*/, 0/*advance id*/,
+                                                 parent_node, one_up_path,
+                                                 advance_mask-split_child_mask,
+                                                 advance_events);
+      }
       // Deviate from the normal pipeline and don't even put this
       // on the ready queue, we are done executing and can be considered
       // mapped once all the advance events have triggered

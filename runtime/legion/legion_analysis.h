@@ -603,10 +603,12 @@ namespace Legion {
       // Fields that we know have been written at the current level
       // (reductions don't count, we want to know they were actually written)
       FieldMask dirty_fields;
+      // Keep track of which fields we've done a reduction to here
+      FieldMask reduction_fields;
       // Fields which we know have been mutated below in the region tree
       FieldMask dirty_below;
       // Keep track of the current projection epoch for each field
-      std::map<ProjectionEpochID,ProjectionEpoch*> projection_epochs;
+      std::list<ProjectionEpoch*> projection_epochs;
     };
 
     typedef DynamicTableAllocator<CurrentState,10,8> CurrentStateAllocator;
@@ -684,8 +686,8 @@ namespace Legion {
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask, 
                                   const FieldMask &dirty_below,
-                                  bool leave_open);
-      void record_read_only_close(const FieldMask &mask);
+                                  bool leave_open, bool projection);
+      void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask,
                                    const FieldMask &dirty_below);
       ClosedNode* find_closed_node(RegionTreeNode *node);
@@ -729,6 +731,7 @@ namespace Legion {
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
       FieldMask root_split_mask; // for normal closes, track dirty below
       FieldMask flush_split_mask; // for flush closes, track dirty below
+      FieldMask closed_projections;
     protected:
       // At most we will ever generate three close operations at a node
       InterCloseOp *normal_close_op;

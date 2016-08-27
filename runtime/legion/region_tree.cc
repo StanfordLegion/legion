@@ -10291,6 +10291,33 @@ namespace Legion {
                                    version_info.is_upper_bound_node(this));
         }
       }
+      else if (arrived && IS_REDUCE(user.usage))
+      {
+        // Special case
+        // If we are the first reduction to dirty fields at this level
+        // we have to advance as well because we need our version 
+        // state objects to register as dirty with their parent, there
+        // might be multiple reductions that need this so we make an
+        // advance operation to handle it for all users. We can skip
+        // this if some other user has already written or reduced
+        FieldMask advance_mask = 
+          user.field_mask - (state.dirty_fields | state.reduction_fields);
+        if (!!advance_mask)
+        {
+          // See which ones we've handled from above
+          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                advances.begin(); it != advances.end(); it++)
+          {
+            advance_mask -= it->second.field_mask;
+            if (!advance_mask)
+              break;
+          }
+          // If we still have fields, then we have to make a new advance
+          if (!!advance_mask)
+            create_logical_advance(state, advance_mask, user, advances,
+                                   version_info.is_upper_bound_node(this));
+        }
+      }
       // We also always do our dependence analysis even if we have
       // already traced because we need to pick up dependences on 
       // any dynamic open, advance, or close operations that we need to do
@@ -10334,6 +10361,69 @@ namespace Legion {
         // reduction at this node in the region tree
         if ((user.usage.redop > 0) && !proj_info.is_projecting())
           record_logical_reduction(state, user.usage.redop, user.field_mask);
+        // Finish dependence analysis for any advance operations
+        // Do this before updating the dirty and reduction fields at this level
+        if (!advances.empty())
+        {
+          // Three cases
+          if (proj_info.is_projecting() && (proj_info.projection->depth > 0))
+          {
+            // We go to this node
+            for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                  advances.begin(); it != advances.end(); it++)
+            {
+              it->first->set_child_node(this);
+              it->first->end_dependence_analysis();
+            }
+          }
+          else if (IS_REDUCE(user.usage) && !proj_info.is_projecting())
+          {
+            // Figure out which advances need to come to this level
+            FieldMask advance_here =
+              user.field_mask - (state.dirty_fields | state.reduction_fields);
+            RegionTreeNode *parent = get_parent();
+            if (!!advance_here)
+            {
+              for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator
+                    it = advances.begin(); it != advances.end(); it++)
+              {
+                FieldMask split_mask = it->second.field_mask & advance_here;
+                if (!!split_mask)
+                {
+                  // Everything to the child, record split fields if necessary
+                  it->first->set_child_node(this);
+                  if (split_mask != it->second.field_mask)
+                    it->first->set_split_child_mask(split_mask);
+                }
+                else // everything to the parent
+                  it->first->set_child_node(parent);
+                it->first->end_dependence_analysis();
+              }
+            }
+            else
+            {
+              // Everything to the parent
+              for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator 
+                    it = advances.begin(); it != advances.end(); it++)
+              {
+                it->first->set_child_node(parent);
+                it->first->end_dependence_analysis();
+              }
+            }
+          }
+          else
+          {
+            // Common case, we go to our parent
+            RegionTreeNode *parent = get_parent();
+            for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
+                  advances.begin(); it != advances.end(); it++)
+            {
+              it->first->set_child_node(parent);
+              it->first->end_dependence_analysis();
+            }
+          }
+        }
+        // Handle any projections that we might have
         // If we're projecting, record any split fields and projection epochs
         if (proj_info.is_projecting())
         {
@@ -10363,22 +10453,10 @@ namespace Legion {
           // we have written this logical region
           state.dirty_fields |= user.field_mask;
         }
-        // Finish dependence analysis for any advance operations
-        if (!advances.empty())
+        else if (IS_REDUCE(user.usage))
         {
-          for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
-                advances.begin(); it != advances.end(); it++)
-          {
-            // Set our final node depending on whether we have a
-            // projection function and if so what its depth is
-            if (proj_info.is_projecting() && 
-                (proj_info.projection->depth > 0))
-              it->first->set_child_node(this);
-            else
-              it->first->set_child_node(get_parent());
-            // Now we can mark that the dependence analysis is done
-            it->first->end_dependence_analysis();
-          }
+          // Not projecting and not writing, see if we are doing a reduction
+          state.reduction_fields |= user.field_mask;
         }
       }
       else 
@@ -10610,20 +10688,10 @@ namespace Legion {
           it++;
           continue;
         }
-        // Recursively perform any close operations
-        FieldMask already_open;
-        perform_close_operations(closer, overlap, state.dirty_below, *it,
-                                 ColorPoint()/*next child*/,
-                                 false/*allow next*/, false/*upgrade*/,
-                                 permit_leave_open,
-                                 read_only_close,
-                                 false/*record close operations*/,
-                                 false/*record closed fields*/,
-                                 new_states, already_open);
-        // If this was a projection field state then we need to 
-        // advance the epoch version numbers
         if (it->is_projection_state())
         {
+          // If this was a projection field state then we need to 
+          // advance the epoch version numbers
           if (!read_only_close && (it->open_state != OPEN_READ_ONLY_PROJ))
           {
 #ifdef DEBUG_LEGION
@@ -10632,7 +10700,21 @@ namespace Legion {
             state.capture_close_epochs(overlap, closed_node);
           }
           // If this is a writing or reducing 
-          state.advance_projection_epochs(overlap); 
+          state.advance_projection_epochs(overlap);
+          it->valid_fields -= overlap;
+        }
+        else
+        {
+          // Recursively perform any close operations
+          FieldMask already_open;
+          perform_close_operations(closer, overlap, state.dirty_below, *it,
+                                   ColorPoint()/*next child*/,
+                                   false/*allow next*/, false/*upgrade*/,
+                                   permit_leave_open,
+                                   read_only_close,
+                                   false/*record close operations*/,
+                                   false/*record closed fields*/,
+                                   new_states, already_open);
         }
         // Remove the state if it is now empty
         if (!it->valid_fields)
@@ -10644,7 +10726,11 @@ namespace Legion {
       if (!new_states.empty())
         merge_new_field_states(state, new_states);
       // We can clear out our dirty fields 
-      state.dirty_fields -= closing_mask;
+      if (!!state.dirty_fields)
+        state.dirty_fields -= closing_mask;
+      // We can clear out our reduction fields
+      if (!!state.reduction_fields)
+        state.reduction_fields -= closing_mask;
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields
@@ -10959,7 +11045,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
 #endif
-                  closer.record_read_only_close(overlap);
+                  closer.record_read_only_close(overlap, true/*projection*/);
                   // Advance the projection epochs
                   state.advance_projection_epochs(overlap);
                 }
@@ -10984,11 +11070,12 @@ namespace Legion {
                 assert(!!overlap);
 #endif
                 if (overwriting)
-                  closer.record_read_only_close(overlap);
+                  closer.record_read_only_close(overlap, true/*projection*/);
                 else
                 {
                   closer.record_close_operation(overlap, state.dirty_below,
-                            IS_READ_ONLY(closer.user.usage)/*leave open*/);
+                            IS_READ_ONLY(closer.user.usage)/*leave open*/,
+                            true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                 }
@@ -11016,11 +11103,12 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   if (overwriting)
-                    closer.record_read_only_close(overlap);
+                    closer.record_read_only_close(overlap, true/*projection*/);
                   else
                   {
                     closer.record_close_operation(overlap, state.dirty_below,
-                                                  false/*leave open*/);
+                                                  false/*leave open*/,
+                                                  true/*projection*/);
                     state.capture_close_epochs(overlap,
                                                closer.find_closed_node(this));
                   }
@@ -11145,7 +11233,8 @@ namespace Legion {
               {
                 // Otherwise we are going to a different mode 
                 // no need to do a close since we're staying in
-                // projection mode.
+                // projection mode, but we do need to advance
+                // the projection epochs.
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
@@ -11178,7 +11267,8 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                          IS_READ_ONLY(closer.user.usage));
+                                          IS_READ_ONLY(closer.user.usage),
+                                          true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                   // Advance the projection epochs
@@ -11223,7 +11313,8 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                          IS_READ_ONLY(closer.user.usage));
+                                          IS_READ_ONLY(closer.user.usage),
+                                          true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                   // Advance the projection epochs
@@ -11251,7 +11342,8 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                                false/*leave open*/);
+                                                false/*leave open*/,
+                                                true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                   // Advance the projection epochs
@@ -11323,18 +11415,34 @@ namespace Legion {
             it++;
             continue;
           }
-          FieldMask closed_child_fields;
-          perform_close_operations(closer, overlap, 
-                                   state.dirty_below, *it,
-                                   next_child, false/*allow_next*/,
-                                   false/*needs upgrade*/,
-                                   false/*permit leave open*/,
-                                   false/*read only close*/,
-                                   record_close_operations,
-                                   true/*record closed fields*/,
-                                   new_states, closed_child_fields);
-          // We only really flushed fields that were actually closed
-          flushed_fields |= closed_child_fields;
+          if (it->is_projection_state())
+          {
+            closer.record_close_operation(overlap, state.dirty_below,
+                                          false/*leave open*/, 
+                                          true/*projection*/);
+            ClosedNode *closed_node = closer.find_closed_node(this); 
+            if (!!state.dirty_fields)
+              closed_node->record_closed_fields(overlap & state.dirty_fields);
+            state.capture_close_epochs(overlap, closed_node);
+            state.advance_projection_epochs(overlap);
+            it->valid_fields -= overlap;
+            flushed_fields |= overlap;
+          }
+          else
+          {
+            FieldMask closed_child_fields;
+            perform_close_operations(closer, overlap, 
+                                     state.dirty_below, *it,
+                                     next_child, false/*allow_next*/,
+                                     false/*needs upgrade*/,
+                                     false/*permit leave open*/,
+                                     false/*read only close*/,
+                                     record_close_operations,
+                                     true/*record closed fields*/,
+                                     new_states, closed_child_fields);
+            // We only really flushed fields that were actually closed
+            flushed_fields |= closed_child_fields;
+          }
           if (!it->valid_fields)
             it = state.field_states.erase(it);
           else
@@ -11410,10 +11518,11 @@ namespace Legion {
               if (record_close_operations)
               {
                 if (read_only_close)
-                  closer.record_read_only_close(close_mask);
+                  closer.record_read_only_close(close_mask,
+                                                false/*projection*/);
                 else
-                  closer.record_close_operation(close_mask,
-                            dirty_below, permit_leave_open);
+                  closer.record_close_operation(close_mask, dirty_below,
+                                permit_leave_open, false/*projection*/);
                 actually_closed = close_mask;
               }
               // Remove the closed fields
@@ -11477,10 +11586,11 @@ namespace Legion {
           if (record_close_operations)
           {
             if (read_only_close)
-              closer.record_read_only_close(close_mask);
+              closer.record_read_only_close(close_mask,
+                                            false/*projection*/);
             else
               closer.record_close_operation(close_mask, dirty_below,
-                                            permit_leave_open);
+                            permit_leave_open, false/*projection*/);
             actually_closed |= close_mask;
           }
           // Remove the close fields
@@ -12096,7 +12206,7 @@ namespace Legion {
           case OPEN_READ_ONLY_PROJ:
             {
               // Do a read only close here 
-              closer.record_read_only_close(overlap);
+              closer.record_read_only_close(overlap, true/*projection*/);
               // Advance the projection epochs
               state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
@@ -12112,7 +12222,8 @@ namespace Legion {
             {
               // Do the close here 
               closer.record_close_operation(overlap, state.dirty_below,
-                                            false/*leave open*/);
+                                            false/*leave open*/,
+                                            true/*projection*/);
               state.capture_close_epochs(overlap,
                                          closer.find_closed_node(this));
               // Advance the projection epochs

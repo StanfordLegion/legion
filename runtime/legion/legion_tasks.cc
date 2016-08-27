@@ -9303,10 +9303,20 @@ namespace Legion {
         if (!IS_READ_ONLY(regions[idx]))
         {
           RegionTreePath advance_path;
-          advance_path.initialize(path.get_min_depth(), path.get_max_depth()-1);
-          for (unsigned idx2 = path.get_min_depth(); 
-                idx2 < (path.get_max_depth()-1); idx2++)
-            advance_path.register_child(idx2, path.get_child(idx2));
+          // If we're a reduction we go all the way to the bottom
+          // otherwise if we're read-write we go to the level above
+          // because our version_analysis call will do the advance
+          // at the destination node
+          if (!IS_REDUCE(regions[idx]))
+          {
+            advance_path.initialize(path.get_min_depth(), 
+                                    path.get_max_depth()-1);
+            for (unsigned idx2 = path.get_min_depth(); 
+                  idx2 < (path.get_max_depth()-1); idx2++)
+              advance_path.register_child(idx2, path.get_child(idx2));
+          }
+          else
+            advance_path = path;
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 
             (slice_req.region == slice_req.parent);
