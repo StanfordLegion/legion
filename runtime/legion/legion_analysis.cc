@@ -7131,6 +7131,8 @@ namespace Legion {
       if (!!dirty_overlap)
       {
         target->record_dirty_fields(dirty_overlap);
+        // TODO: only capture recursive composite instances if we don't
+        // have valid concrete instances for those fields
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               valid_views.begin(); it != valid_views.end(); it++)
         {

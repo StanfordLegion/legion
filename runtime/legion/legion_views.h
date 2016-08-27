@@ -185,7 +185,10 @@ namespace Legion {
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields,
                              CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
+      virtual ApUserEvent reduce_from(PhysicalManager *target,
+                                      RegionTreeNode *target_node,
+                                      ReductionOpID redop, bool &first,
+                                      const FieldMask &reduce_mask, 
                        std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
@@ -276,8 +279,11 @@ namespace Legion {
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
-      virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
-                       std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual ApUserEvent reduce_from(PhysicalManager *target,
+                                      RegionTreeNode *target_node,
+                                      ReductionOpID redop, bool &first,
+                                      const FieldMask &reduce_mask,
+                          std::vector<Domain::CopySrcDstField> &src_fields);
     public:
       void accumulate_events(std::set<ApEvent> &all_events);
     public:
@@ -747,9 +753,11 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields);
-    public:
-      void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
-                       std::vector<Domain::CopySrcDstField> &src_fields);
+      virtual ApUserEvent reduce_from(PhysicalManager *target,
+                                      RegionTreeNode *target_node,
+                                      ReductionOpID redop, bool &first,
+                                      const FieldMask &reduce_mask,
+                          std::vector<Domain::CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

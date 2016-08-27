@@ -1285,7 +1285,8 @@ namespace Legion {
                                        const ReductionOp *o, bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
         local_space, node, inst, inst_domain, own_dom, register_now),
-        op(o), redop(red), logical_field(f)
+        op(o), redop(red), logical_field(f), 
+        manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {  
       if (Runtime::legion_spy_enabled)
@@ -1300,6 +1301,8 @@ namespace Legion {
     ReductionManager::~ReductionManager(void)
     //--------------------------------------------------------------------------
     {
+      manager_lock.destroy_reservation();
+      manager_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1471,6 +1474,94 @@ namespace Legion {
                                        context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ApUserEvent ReductionManager::deduplicate_reductions(
+              PhysicalManager *target, RegionTreeNode *target_node, bool &first)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+      {
+        // See if we've cached the result
+        {
+          AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+          std::map<PhysicalManager*,std::vector<
+            std::pair<RegionTreeNode*,ApUserEvent> > >::const_iterator finder =
+              pending_reductions.find(target);
+          if (finder != pending_reductions.end())
+          {
+            for (std::vector<std::pair<RegionTreeNode*,
+                                       ApUserEvent> >::const_iterator it = 
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              if (it->first == target_node)
+              {
+                first = false;
+                return it->second;
+              }
+              if (!it->first->intersects_with(target_node))
+                continue;
+              if (it->first->dominates(target_node))
+              {
+                first = false;
+                return it->second;
+              }
+              // TODO: Implement partial reduction applications
+              assert(false);
+            }
+          }
+        }
+        // If we get here we have to message the owner node
+        ApUserEvent result;
+        // TODO: Implement this
+        assert(false);
+        // Cache the result
+        if (first)
+        {
+          AutoLock m_lock(manager_lock);
+          // Can result in multiple copies but whatever
+          pending_reductions[target].push_back(
+              std::pair<RegionTreeNode*,ApUserEvent>(target_node, result));
+        }
+        return result;
+      }
+      else
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<PhysicalManager*,std::vector<
+          std::pair<RegionTreeNode*,ApUserEvent> > >::iterator finder = 
+            pending_reductions.find(target);
+        if (finder != pending_reductions.end())
+        {
+          // See if we can find it already
+          for (std::vector<std::pair<RegionTreeNode*,
+                                     ApUserEvent> >::const_iterator it = 
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            if (it->first == target_node)
+            {
+              first = false;
+              return it->second;
+            }
+            if (!it->first->intersects_with(target_node))
+              continue;
+            if (it->first->dominates(target_node))
+            {
+              first = false;
+              return it->second;
+            }
+            // TODO: Implement partial reduction applications
+            assert(false);
+          }
+        }
+        // If we get here, make a new one
+        ApUserEvent result = Runtime::create_ap_user_event();
+        pending_reductions[target].push_back(
+            std::pair<RegionTreeNode*,ApUserEvent>(target_node,result));
+        first = true;
+        return result;
+      }
     }
 
     /////////////////////////////////////////////////////////////

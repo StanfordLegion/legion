@@ -346,9 +346,17 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(SingleTask *context,
                                             AddressSpaceID logical_owner);
     public:
+      ApUserEvent deduplicate_reductions(PhysicalManager *target,
+                                         RegionTreeNode *target_node,
+                                         bool &first);
+    public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const FieldID logical_field;
+    protected:
+      Reservation manager_lock;
+      std::map<PhysicalManager*,std::vector<
+               std::pair<RegionTreeNode*,ApUserEvent> > > pending_reductions;
     };
 
     /**
