@@ -6498,12 +6498,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
+          // Always make reduce-only privileges restricted so that
+          // we always flush data back, this will prevent us from 
+          // needing a post close op later
+          if (IS_REDUCE(regions[idx]))
+            coherence_restrictions.push_back(
+                runtime->forest->create_coherence_restriction(regions[idx],
+                                                  physical_instances[idx]));
           // If we need to add restricted coherence, do that now
           // Not we only need to do this for non-virtually mapped task
-          if ((regions[idx].prop == SIMULTANEOUS) && 
-              ((regions[idx].privilege == READ_ONLY) ||
-               (regions[idx].privilege == READ_WRITE) ||
-               (regions[idx].privilege == WRITE_DISCARD)))
+          else if ((regions[idx].prop == SIMULTANEOUS) && 
+                   ((regions[idx].privilege == READ_ONLY) ||
+                    (regions[idx].privilege == READ_WRITE) ||
+                    (regions[idx].privilege == WRITE_DISCARD)))
             coherence_restrictions.push_back(
                 runtime->forest->create_coherence_restriction(regions[idx],
                                                   physical_instances[idx]));
@@ -7301,7 +7308,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
           // We also don't need to close up read-only instances
-          if (no_access_regions[idx] || IS_READ_ONLY(regions[idx]))
+          // or reduction-only instances (because they are restricted)
+          // so all changes have already been propagated
+          if (!IS_WRITE(regions[idx]))
             continue;
           if (!virtual_mapped[idx])
           {
@@ -9320,7 +9329,7 @@ namespace Legion {
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 
             (slice_req.region == slice_req.parent);
-          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
                 it = proj_epochs.begin(); it != proj_epochs.end(); it++)
           {
             // Advance version numbers from the upper bound to one above
@@ -12057,14 +12066,17 @@ namespace Legion {
         // done this before so there is no need to do it again
         if (version_info.has_physical_states())
           continue;
-        // Compute our privilege path
+        ProjectionInfo &proj_info = projection_infos[idx];
+        const bool partial_traversal = 
+          (proj_info.projection_type == PART_PROJECTION) ||
+          (proj_info.projection->depth > 0);
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, regions[idx]);
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                                      privilege_path,
                                                      version_info,
                                                      ready_events,
-                                                     true/*partial traversal*/);
+                                                     partial_traversal);
       }
       // Now do the analysis for each of our points
       for (unsigned idx = 0; idx < points.size(); idx++)

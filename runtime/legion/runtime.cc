@@ -4997,6 +4997,17 @@ namespace Legion {
                                                      remote_address_space);
               break;
             }
+          case SEND_REDUCTION_DEDUPLICATION_REQUEST:
+            {
+              runtime->handle_reduction_deduplication_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_REDUCTION_DEDUPLICATION_RESPONSE:
+            {
+              runtime->handle_reduction_deduplication_response(derez);
+              break;
+            }
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -14771,6 +14782,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_reduction_deduplication_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REDUCTION_DEDUPLICATION_REQUEST, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_reduction_deduplication_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_REDUCTION_DEDUPLICATION_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15675,6 +15706,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReductionManager::handle_send_manager(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_reduction_deduplication_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ReductionManager::handle_deduplication_request(this, source, derez);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_reduction_deduplication_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ReductionManager::handle_deduplication_response(derez);
     }
 
     //--------------------------------------------------------------------------

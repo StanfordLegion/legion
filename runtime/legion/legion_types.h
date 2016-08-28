@@ -50,7 +50,7 @@ namespace Legion {
   typedef ::legion_allocate_mode_t AllocateMode;
   typedef ::legion_coherence_property_t CoherenceProperty;
   typedef ::legion_region_flags_t RegionFlags;
-  typedef ::legion_handle_type_t HandleType;
+  typedef ::legion_projection_type_t ProjectionType;
   typedef ::legion_partition_kind_t PartitionKind;
   typedef ::legion_dependence_type_t DependenceType;
   typedef ::legion_index_space_kind_t IndexSpaceKind;
@@ -556,6 +556,8 @@ namespace Legion {
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
+      SEND_REDUCTION_DEDUPLICATION_REQUEST,
+      SEND_REDUCTION_DEDUPLICATION_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_SUBVIEW_DID_REQUEST,
@@ -671,6 +673,8 @@ namespace Legion {
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
+        "Send Reduction Deduplication Request",                       \
+        "Send REduction Deduplication Response",                      \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send Subview DID Request",                                   \
@@ -1213,7 +1217,6 @@ namespace Legion {
     struct TraceInfo;
     class ClosedNode;
     class LogicalCloser;
-    class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;
     struct CloseInfo; 
@@ -1342,6 +1345,7 @@ namespace Legion {
   typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, 
                                   size_t&, const void*);
   typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
+  typedef ::legion_projection_type_t HandleType;
   typedef ::legion_address_space_t AddressSpace;
   typedef ::legion_task_priority_t TaskPriority;
   typedef ::legion_garbage_collection_priority_t GCPriority;

@@ -5259,6 +5259,9 @@ namespace Legion {
         owner_did(own_did), node_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      currently_valid = true;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5299,7 +5302,7 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        if (it->first->remove_nested_valid_ref(owner_did))
+        if (it->first->remove_nested_resource_ref(owner_did))
           legion_delete(it->first);
       }
       reduction_views.clear();
@@ -5597,6 +5600,9 @@ namespace Legion {
     void CompositeNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // No need to add valid references to the other things
       // they have their valid references added when they are captured 
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
@@ -5608,6 +5614,10 @@ namespace Legion {
     void CompositeNode::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+      currently_valid = false;
+#endif
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
             version_states.begin(); it != version_states.end(); it++)
         it->first->remove_nested_valid_ref(owner_did, mutator);

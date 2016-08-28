@@ -392,11 +392,13 @@ typedef enum legion_index_space_kind_t {
   DENSE_ARRAY_KIND,
 } legion_index_space_kind_t;
 
-typedef enum legion_handle_type_t {
+typedef enum legion_projection_type_t {
   SINGULAR, // a single logical region
   PART_PROJECTION, // projection from a partition
   REG_PROJECTION, // projection from a region
-} legion_handle_type_t;
+} legion_projection_type_t;
+// For backwards compatibility
+typedef legion_projection_type_t legion_handle_type_t;
 
 typedef enum legion_partition_kind_t {
   DISJOINT_KIND,

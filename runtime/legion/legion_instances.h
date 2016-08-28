@@ -349,6 +349,10 @@ namespace Legion {
       ApUserEvent deduplicate_reductions(PhysicalManager *target,
                                          RegionTreeNode *target_node,
                                          bool &first);
+      static void handle_deduplication_request(Runtime *runtime,
+                                               AddressSpaceID source,
+                                               Deserializer &derez);
+      static void handle_deduplication_response(Deserializer &derez);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;

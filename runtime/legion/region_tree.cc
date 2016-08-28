@@ -1498,8 +1498,8 @@ namespace Legion {
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
       // Update the version info to set the maximum depth
       if (projection_info.is_projecting())
-        version_info.resize(path.get_max_depth() + 
-                            projection_info.projection->depth);
+        version_info.resize(path.get_max_depth(), req.handle_type, 
+                            projection_info.projection);
       else
         version_info.resize(path.get_max_depth());
 #ifdef DEBUG_LEGION
@@ -1536,46 +1536,6 @@ namespace Legion {
       // If we have a restriction, then record it on the region requirement
       if (restrict_info.has_restrictions())
         req.flags |= RESTRICTED_FLAG;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_reduction_close_analysis(Operation *op,
-                                                  unsigned idx,
-                                                  RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      SingleTask *parent_ctx = op->get_parent();
-      RegionTreeContext ctx = parent_ctx->get_context(); 
-#ifdef DEBUG_LEGION
-      assert(ctx.exists());
-      assert(req.privilege == REDUCE);
-#endif
-      RegionNode *parent_node = get_node(req.parent);
-
-      FieldMask user_mask = 
-        parent_node->column_source->get_field_mask(req.privilege_fields);
-      // Then compute the logical user
-      LogicalUser user(op, idx, RegionUsage(req), user_mask);
-      // Make the user read-only so we catch dependences on 
-      // all the outstanding reductions
-      user.usage.privilege = READ_ONLY;
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
-                                     op->get_unique_op_id(), parent_node,
-                                     ctx.get_id(), true/*before*/, 
-                                     false/*premap*/,
-                                     false/*closing*/, true/*logical*/,
-                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
-#endif
-      parent_node->close_reduction_analysis(ctx.get_id(), user); 
-#ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
-                                     op->get_unique_op_id(), parent_node,
-                                     ctx.get_id(), false/*before*/, 
-                                     false/*premap*/,
-                                     false/*closing*/, true/*logical*/,
-                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1626,6 +1586,7 @@ namespace Legion {
       // to do any close operations
       VersionInfo version_info;
       version_info.set_upper_bound_node(parent_node);
+      version_info.resize(path.get_max_depth());
       // Do the traversal
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
                                              path, restrict_info, 
@@ -1905,11 +1866,7 @@ namespace Legion {
       {
         const InstanceRef &ref = instances[idx];
         PhysicalManager *manager = ref.get_manager();
-#ifdef DEBUG_LEGION
-        assert(manager->is_instance_manager());
-#endif
-        InstanceManager *inst = manager->as_instance_manager();
-        result->add_restricted_instance(inst, ref.get_valid_fields());
+        result->add_restricted_instance(manager, ref.get_valid_fields());
       }
       return result;
     }
@@ -10270,7 +10227,10 @@ namespace Legion {
       }
       // See if we need to perform any advance operations
       // because we're going to be writing below this level
-      if (HAS_WRITE(user.usage) && (!arrived || proj_info.is_projecting()))
+      if (HAS_WRITE(user.usage) && (!arrived || 
+            (proj_info.is_projecting() && 
+             ((proj_info.projection_type == PART_PROJECTION) || 
+              (proj_info.projection->depth > 0)))))
       {
         FieldMask advance_mask = user.field_mask - state.dirty_below; 
         if (!!advance_mask)
@@ -10366,7 +10326,8 @@ namespace Legion {
         if (!advances.empty())
         {
           // Three cases
-          if (proj_info.is_projecting() && (proj_info.projection->depth > 0))
+          if (proj_info.is_projecting() && ((proj_info.projection->depth > 0)
+                || (proj_info.projection_type == PART_PROJECTION)))
           {
             // We go to this node
             for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
@@ -10382,6 +10343,9 @@ namespace Legion {
             FieldMask advance_here =
               user.field_mask - (state.dirty_fields | state.reduction_fields);
             RegionTreeNode *parent = get_parent();
+#ifdef DEBUG_LEGION
+            assert(parent != NULL);
+#endif
             if (!!advance_here)
             {
               for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator
@@ -10415,10 +10379,13 @@ namespace Legion {
           {
             // Common case, we go to our parent
             RegionTreeNode *parent = get_parent();
+#ifdef DEBUG_LEGION
+            assert(parent != NULL);
+#endif
             for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
                   advances.begin(); it != advances.end(); it++)
             {
-              it->first->set_child_node(parent);
+              it->first->set_child_node(parent); 
               it->first->end_dependence_analysis();
             }
           }
@@ -10630,25 +10597,6 @@ namespace Legion {
       }
       // Can't filter here because we need our creator to record
       // the same dependences in case it has to generate closes or opens later
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::close_reduction_analysis(ContextID ctx, 
-                                                  const LogicalUser &user)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      LogicalCloser closer(ctx, user, this,
-                           false/*validates*/, false/*captures*/);
-      ColorPoint dummy_next_child;
-      FieldMask dummy_open_below;
-      siphon_logical_children(closer, state, user.field_mask, false/*record*/,
-                              dummy_next_child, dummy_open_below);
-      // Capture dependences on any users at this level
-      perform_closing_checks<CURR_LOGICAL_ALLOC>(closer, false/*read only*/, 
-                                     state.curr_epoch_users, user.field_mask);
-      perform_closing_checks<PREV_LOGICAL_ALLOC>(closer, false/*read only*/,
-                                     state.prev_epoch_users, user.field_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -11297,7 +11245,7 @@ namespace Legion {
                 else
                   it++;
               }
-              else if (proj_info.projection->depth == 1)
+              else if (proj_info.projection->depth == 0)
               {
                 // If we are also disjoint shallow we can stay in this mode
                 open_below |= (it->valid_fields & current_mask);
@@ -15184,46 +15132,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
-      if (IS_REDUCE(info.req))
-      {
-        // Important trick: switch the user to read-only so it picks
-        // up dependences on all the reductions applied to this instance
-        usage.privilege = READ_ONLY;
-        const AddressSpaceID local_space = context->runtime->address_space;
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          InstanceRef &ref = targets[idx];
-          LogicalView *view = convert_reference(ref, info.op->get_parent());
 #ifdef DEBUG_LEGION
-          assert(view->is_instance_view());
-          assert(view->as_instance_view()->is_reduction_view());
+      assert(!IS_REDUCE(info.req));
 #endif
-          ReductionView *target_view = 
-            view->as_instance_view()->as_reduction_view();
-          const FieldMask &user_mask = ref.get_valid_fields();
-          // Flush any reductions from this level, and then flush any
-          // from farther down in the tree
-          ReductionCloser closer(info.ctx, target_view, user_mask, 
-             info.version_info, info.op, info.index, info.map_applied_events);
-          visit_node(&closer);
-          ApEvent ready = target_view->add_user_fused(
-                                               usage, ApEvent::NO_AP_EVENT,
-                                               user_mask, info.op, info.index,
-                                               &info.version_info, local_space,
-                                               info.map_applied_events);
-          ref.set_ready_event(ready);
-        }
-      }
-      else
-      {
-        // All we should actually have to do here is just register
-        // our region because any actualy close operations that would
-        // need to be done would have been issued as part of the 
-        // logical analysis or will be done as part of the registration.
-        RestrictInfo empty_restrict_info;
-        register_region(info, empty_restrict_info, ApEvent::NO_AP_EVENT, 
-                        usage, false/*defer add users*/, targets);
-      }
+      // All we should actually have to do here is just register
+      // our region because any actualy close operations that would
+      // need to be done would have been issued as part of the 
+      // logical analysis or will be done as part of the registration.
+      RestrictInfo empty_restrict_info;
+      register_region(info, empty_restrict_info, ApEvent::NO_AP_EVENT, 
+                      usage, false/*defer add users*/, targets);
     }
 
     //--------------------------------------------------------------------------

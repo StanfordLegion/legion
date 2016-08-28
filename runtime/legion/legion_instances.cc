@@ -1514,8 +1514,31 @@ namespace Legion {
         }
         // If we get here we have to message the owner node
         ApUserEvent result;
-        // TODO: Implement this
-        assert(false);
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target->did);
+          if (target_node->is_region())
+          {
+            rez.serialize<bool>(true);
+            rez.serialize(target_node->as_region_node()->handle);
+          }
+          else
+          {
+            rez.serialize<bool>(false);
+            rez.serialize(target_node->as_partition_node()->handle);
+          }
+          rez.serialize(&result);
+          rez.serialize(&first);
+          rez.serialize(done_event);
+        }
+        runtime->send_reduction_deduplication_request(owner_space, rez);
+        done_event.wait();
+#ifdef DEBUG_LEGION
+        assert(result.exists()); // should have an event when we wake up 
+#endif
         // Cache the result
         if (first)
         {
@@ -1562,6 +1585,84 @@ namespace Legion {
         first = true;
         return result;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionManager::handle_deduplication_request(
+                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent did_ready;
+      PhysicalManager *manager = runtime->find_or_request_physical_manager(did, 
+                                                                    did_ready);
+      DistributedID target_did;
+      derez.deserialize(target_did);
+      RtEvent target_ready;
+      PhysicalManager *target = runtime->find_or_request_physical_manager(
+                                                    target_did, target_ready);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node = NULL;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      ApUserEvent *result_ptr;
+      derez.deserialize(result_ptr);
+      bool *first_ptr;
+      derez.deserialize(first_ptr);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      RtEvent wait_for = Runtime::merge_events(did_ready, target_ready);
+      if (wait_for.exists())
+        wait_for.wait();
+#ifdef DEBUG_LEGION
+      assert(manager->is_reduction_manager());
+      assert(manager->is_owner());
+#endif
+      ReductionManager *owner_manager = manager->as_reduction_manager();
+      bool first_result = true;
+      ApUserEvent result = owner_manager->deduplicate_reductions(target,
+                                              target_node, first_result);
+      // Send the result back
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(result_ptr);
+        rez.serialize(result);
+        rez.serialize(first_ptr);
+        rez.serialize(first_result);
+        rez.serialize(done_event);
+      }
+      runtime->send_reduction_deduplication_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionManager::handle_deduplication_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ApUserEvent *result_ptr;
+      derez.deserialize(result_ptr);
+      derez.deserialize(*result_ptr);
+      bool *first_ptr;
+      derez.deserialize(first_ptr);
+      derez.deserialize(*first_ptr);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////

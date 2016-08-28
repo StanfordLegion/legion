@@ -1179,6 +1179,10 @@ namespace Legion {
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
+#ifdef DEBUG_LEGION
+    protected:
+      bool currently_valid;
+#endif
     };
 
     /**

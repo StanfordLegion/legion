@@ -242,8 +242,6 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        ProjectionInfo &projection_info,
                                        RegionTreePath &path);
-      void perform_reduction_close_analysis(Operation *op, unsigned idx,
-                                       RegionRequirement &req);
       void perform_fence_analysis(RegionTreeContext ctx, Operation *fence,
                                   LogicalRegion handle, bool dominate);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
@@ -1307,8 +1305,6 @@ namespace Legion {
       void perform_advance_analysis(CurrentState &state, AdvanceOp *advance,
                                     const LogicalUser &advance_user,
                                     const LogicalUser &create_user);
-      void close_reduction_analysis(ContextID ctx,
-                                    const LogicalUser &user);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open,

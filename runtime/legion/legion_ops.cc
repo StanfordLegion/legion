@@ -4867,6 +4867,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(child_node == NULL);
+      assert(parent_node->get_depth() <= child->get_depth());
 #endif
       child_node = child;
     }
@@ -5811,22 +5812,13 @@ namespace Legion {
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
       begin_dependence_analysis();
-      // Handle a special case that involves closing to a reduction instance
-      if (requirement.privilege == REDUCE)
-      {
-        runtime->forest->perform_reduction_close_analysis(this, 0/*idx*/,
-                                                          requirement);
-      }
-      else
-      {
-        ProjectionInfo projection_info;
-        runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     restrict_info,
-                                                     version_info,
-                                                     projection_info,
-                                                     privilege_path);
-      }
+      ProjectionInfo projection_info;
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   restrict_info,
+                                                   version_info,
+                                                   projection_info,
+                                                   privilege_path);
       end_dependence_analysis();
     }
 

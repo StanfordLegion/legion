@@ -838,7 +838,7 @@ namespace Legion {
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
       RegionFlags flags; /**< optional flags set for region requirements*/
-      HandleType handle_type; /**< region or partition requirement*/
+      ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
     };
 
@@ -2029,9 +2029,15 @@ namespace Legion {
       /**
        * Specify the depth which this projection function goes
        * for all the points in an index space launch from 
-       * the upper bound node in the region tree.
+       * the upper bound node in the region tree. Depth is
+       * defined as the number of levels of the region tree
+       * crossed from the upper bound logical region or partition.
+       * So depth 0 for a REG_PROJECTION means the same region
+       * while depth 0 for a PART_PROJECTION means a subregion
+       * in the immediate partition. Depth 0 is the default
+       * for the identity projection function.
        */
-      virtual unsigned get_depth(void) const { return 1; };
+      virtual unsigned get_depth(void) const { return 0; };
     private:
       friend class Internal::Runtime;
       // For pre-registered projection functors the runtime will

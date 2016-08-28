@@ -240,6 +240,8 @@ namespace Legion {
       void apply_mapping(std::set<RtEvent> &applied_conditions,
                          bool copy_through = false);
       void resize(size_t max_depth);
+      void resize(size_t path_depth, HandleType req_handle,
+                  ProjectionFunction *function);
       void clear(void);
       void sanity_check(unsigned depth);
       void clone_logical(const VersionInfo &rhs, const FieldMask &mask,
@@ -290,7 +292,7 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void add_restricted_instance(InstanceManager *inst, 
+      void add_restricted_instance(PhysicalManager *inst, 
                                    const FieldMask &restricted_fields);
     public:
       void find_restrictions(RegionTreeNode *node, 
@@ -306,7 +308,7 @@ namespace Legion {
                               FieldMask &remaining_fields);
     public:
       void add_restriction(AttachOp *op, RegionNode *node,
-                InstanceManager *manager, FieldMask &remaining_fields);
+                PhysicalManager *manager, FieldMask &remaining_fields);
       void remove_restriction(DetachOp *op, RegionNode *node,
                               FieldMask &remaining_fields);
 
@@ -325,7 +327,7 @@ namespace Legion {
       // reference to them so there is no need for us to 
       // have a valid reference.
       // Same in RestrictInfo
-      LegionMap<InstanceManager*,FieldMask>::aligned instances;
+      LegionMap<PhysicalManager*,FieldMask>::aligned instances;
     };
 
     /**
@@ -356,7 +358,7 @@ namespace Legion {
                               FieldMask &remaining_fields);
     public:
       void add_restriction(AttachOp *op, RegionNode *node,
-                 InstanceManager *manager, FieldMask &remaining_fields);
+                 PhysicalManager *manager, FieldMask &remaining_fields);
       void remove_restriction(DetachOp *op, RegionNode *node,
                               FieldMask &remaining_fields);
     public:
@@ -408,6 +410,7 @@ namespace Legion {
           const RegionRequirement &req, const Domain &launch_domain);
     public:
       ProjectionFunction *projection;
+      ProjectionType projection_type;
       Domain projection_domain;
     protected:
       // Use this information to deduplicate between different points
@@ -1349,38 +1352,6 @@ namespace Legion {
     };
 
     /**
-     * \class ReductionCloser
-     * A class for performing reduciton close operations
-     */
-    class ReductionCloser : public NodeTraverser {
-    public:
-      ReductionCloser(ContextID ctx, ReductionView *target,
-                      const FieldMask &reduc_mask, 
-                      VersionInfo &version_info, 
-                      Operation *op, unsigned index,
-                      std::set<RtEvent> &map_applied_events);
-      ReductionCloser(const ReductionCloser &rhs);
-      ~ReductionCloser(void);
-    public:
-      virtual bool visit_only_valid(void) const { return true; }
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      ReductionCloser& operator=(const ReductionCloser &rhs);
-      void issue_close_reductions(RegionTreeNode *node);
-    public:
-      const ContextID ctx;
-      ReductionView *const target;
-      const FieldMask close_mask;
-      VersionInfo &version_info;
-      Operation *const op;
-      const unsigned index;
-      std::set<RtEvent> &map_applied_events;
-    protected:
-      std::set<ReductionView*> issued_reductions;
-    };
-
-    /**
      * \class InstanceRef
      * A class for keeping track of references to physical instances
      */
@@ -1545,7 +1516,7 @@ namespace Legion {
       struct DeferRestrictedManagerArgs {
       public:
         HLRTaskID hlr_id;
-        InstanceManager *manager;
+        PhysicalManager *manager;
       };
     public:
       RestrictInfo(void);
@@ -1557,7 +1528,7 @@ namespace Legion {
       inline bool has_restrictions(void) const 
         { return !restrictions.empty(); }
     public:
-      void record_restriction(InstanceManager *inst, const FieldMask &mask);
+      void record_restriction(PhysicalManager *inst, const FieldMask &mask);
       void populate_restrict_fields(FieldMask &to_fill) const;
       void clear(void);
       const InstanceSet& get_instances(void);
@@ -1576,7 +1547,7 @@ namespace Legion {
       // reference to them so there is no need for us to 
       // have a valid reference.
       // // Same in Restriction
-      LegionMap<InstanceManager*,FieldMask>::aligned restrictions;
+      LegionMap<PhysicalManager*,FieldMask>::aligned restrictions;
     protected:
       InstanceSet restricted_instances;
     };
