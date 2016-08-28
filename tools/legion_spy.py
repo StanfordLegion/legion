@@ -3412,7 +3412,7 @@ class LogicalState(object):
                 pass
             elif self.projection_mode == OPEN_READ_WRITE:
                 # Figure out if we are in shallow disjoint mode or not
-                shallow_disjoint = req.projection_function.depth == 1 
+                shallow_disjoint = req.projection_function.depth == 0 
                 same_func_and_rect = True
                 current_rect = op.get_index_launch_rect()
                 for func,rect in self.projection_epoch:
@@ -4969,40 +4969,49 @@ class Operation(object):
                 other.physical_incoming.add(self)
 
     def find_generated_copy(self, field, region, dst, redop=0, intersect=None):
-        if self.realm_copies is None:
-            return None
-        for copy in self.realm_copies:
-            if region is not copy.region:
-                continue
-            if field not in copy.src_fields:
-                continue 
-            if dst not in copy.dsts:
-                continue
-            if redop != 0 and redop not in copy.redops:
-                continue
-            if intersect is not None or copy.intersect is not None:
-                if copy.intersect is not None:
-                    copy_shape = copy.region.intersection(copy.intersect)
-                else:
-                    copy_shape = copy.region.get_point_set()
-                base_shape = region.get_point_set()
-                if intersect is not None:
-                    base_shape = region.intersection(intersect)
-                else:
+        if isinstance(region,LogicalPartition):
+            region = region.parent
+        assert isinstance(region,LogicalRegion)
+        if self.realm_copies:
+            for copy in self.realm_copies:
+                if region is not copy.region:
+                    continue
+                if field not in copy.src_fields:
+                    continue 
+                if dst not in copy.dsts:
+                    continue
+                if redop != 0 and redop not in copy.redops:
+                    continue
+                if intersect is not None or copy.intersect is not None:
+                    if copy.intersect is not None:
+                        copy_shape = copy.region.intersection(copy.intersect)
+                    else:
+                        copy_shape = copy.region.get_point_set()
                     base_shape = region.get_point_set()
-                one = copy_shape - base_shape
-                if not one.empty():
-                    continue
-                two = base_shape - copy_shape
-                if not two.empty():
-                    continue
-            # Record that we analyzed this copy
-            copy.analyzed = True
-            return copy
+                    if intersect is not None:
+                        base_shape = region.intersection(intersect)
+                    else:
+                        base_shape = region.get_point_set()
+                    one = copy_shape - base_shape
+                    if not one.empty():
+                        continue
+                    two = base_shape - copy_shape
+                    if not two.empty():
+                        continue
+                # Record that we analyzed this copy
+                copy.analyzed = True
+                return copy
+        # If we are part of an index space, see if it was premapped
+        if self.index_owner:
+            return self.index_owner.find_generated_copy(src_field, dst_field,
+                                region, src_inst, dst_inst, redop, intersect)
         return None
 
     def find_generated_copy_across(self, src_field, dst_field, region, 
                                    src_inst, dst_inst, redop=0, intersect=None):
+        if isinstance(region,LogicalPartition):
+            region = region.parent
+        assert isinstance(region,LogicalRegion)
         if self.realm_copies:
             for copy in self.realm_copies:
                 if region is not copy.region:
@@ -5043,6 +5052,9 @@ class Operation(object):
         return None
 
     def find_generated_fill(self, field, region, dst, intersect=None):
+        if isinstance(region,LogicalPartition):
+            region = region.parent
+        assert isinstance(region,LogicalRegion)
         if self.realm_fills:
             for fill in self.realm_fills:
                 if region is not fill.region:
@@ -5677,7 +5689,7 @@ class Operation(object):
         for field in req.fields:
             if field.fid not in mappings:
                 print("Missing mapping decision for field "+str(field)+" of "+
-                      "requirement requirement "+str(index)+" of "+str(self))
+                      "requirement requirement "+str(req.index)+" of "+str(self))
                 print("This is a runtime logging bug, please report it.")
             assert field.fid in mappings
             inst = mappings[field.fid]
