@@ -3449,7 +3449,7 @@ namespace Legion {
         finder->second->record_closed_fields(normal_close_mask);
         // Now initialize the operation
         normal_close_op->initialize(creator->get_parent(), req, finder->second,
-                                    trace_info.trace, trace_info.req_idx, 
+                                    trace_info, trace_info.req_idx, 
                                     ver_info, normal_close_mask,
                                     root_split_mask, leave_open_mask, creator);
         // We can clear this now
@@ -3464,7 +3464,7 @@ namespace Legion {
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
         read_only_close_op->initialize(creator->get_parent(), req, 
-                                       trace_info.trace, trace_info.req_idx, 
+                                       trace_info, trace_info.req_idx, 
                                        read_only_close_mask, creator);
       }
       // Finally if we have any fields which are flush only
@@ -3483,7 +3483,7 @@ namespace Legion {
         ClosedNode *closed_tree = new ClosedNode(root_node);
         FieldMask empty_leave_open;
         flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,
-            trace_info.trace, trace_info.req_idx, ver_info, 
+            trace_info, trace_info.req_idx, ver_info, 
             flush_only_close_mask, flush_split_mask, empty_leave_open, creator);
       }
     }
@@ -3513,6 +3513,7 @@ namespace Legion {
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), read_only_close_mask);
         register_dependences(read_only_close_op, read_only_close_user, current,
             open_below, read_only_closed_users, above_users, cusers, pusers);
+        
       }
       if (flush_only_close_op != NULL)
       {
@@ -4022,6 +4023,10 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      // Make a new version state and initialize it, then insert it
+      VersionState *init_state = create_new_version_state(init_version);
+      init_state->initialize(term_event, usage, user_mask, 
+                             targets, context, init_index, corresponding);
       // We do need the lock because sometimes these are virtual
       // mapping results comping back
       AutoLock m_lock(manager_lock);
@@ -4031,30 +4036,9 @@ namespace Legion {
       LegionMap<VersionID,ManagerVersions>::aligned::iterator finder = 
           current_version_infos.find(init_version);
       if (finder == current_version_infos.end())
-      {
-        std::set<RtEvent> dummy_events;
-        VersionState *init_state = create_new_version_state(init_version);
-#ifdef DEBUG_LEGION
-        assert(dummy_events.empty());
-#endif
-        init_state->initialize(term_event, usage, user_mask, 
-                               targets, context, init_index, corresponding);
         current_version_infos[init_version].insert(init_state, user_mask);
-      }
       else
-      {
-#ifdef DEBUG_LEGION
-        assert(finder->second.size() == 1); // should only be one
-#endif
-        ManagerVersions::iterator it = finder->second.begin();
-        VersionState *init_state = it->first;
-#ifdef DEBUG_LEGION
-        assert(node == init_state->logical_node);
-#endif
-        init_state->initialize(term_event, usage, user_mask, targets, 
-                               context, init_index, corresponding);
-        it->second |= user_mask;
-      }
+        finder->second.insert(init_state, user_mask);
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif

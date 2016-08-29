@@ -1288,10 +1288,12 @@ namespace Legion {
       void create_logical_open(ContextID ctx,
                                const FieldMask &open_mask,
                                const LogicalUser &creator,
-                               const RegionTreePath &path);
+                               const RegionTreePath &path,
+                               const TraceInfo &trace_info);
       void create_logical_advance(CurrentState &state,
                                   const FieldMask &advance_mask,
                                   const LogicalUser &creator,
+                                  const TraceInfo &trace_info,
                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                   bool parent_is_upper_bound);
       void register_local_user(CurrentState &state,

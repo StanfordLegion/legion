@@ -901,7 +901,8 @@ namespace Legion {
       InternalOp(Runtime *rt);
       virtual ~InternalOp(void);
     public:
-      void initialize_internal(Operation *creator, int creator_req_idx);
+      void initialize_internal(Operation *creator, int creator_req_idx,
+                               const TraceInfo &trace_info);
       void activate_internal(void);
       void deactivate_internal(void);
     public:
@@ -945,7 +946,8 @@ namespace Legion {
       OpenOp& operator=(const OpenOp &rhs);
     public:
       void initialize(const FieldMask &open_mask, RegionTreeNode *start, 
-                const RegionTreePath &path, Operation *creator, int req_idx);
+                      const RegionTreePath &path, const TraceInfo &trace_info,
+                      Operation *creator, int req_idx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -978,8 +980,8 @@ namespace Legion {
       AdvanceOp& operator=(const AdvanceOp &rhs);
     public:
       void initialize(RegionTreeNode *parent, const FieldMask &advance,
-                      Operation *creator, int req_idx,
-                      bool parent_is_upper_bound);
+                      const TraceInfo &trace_info, Operation *creator, 
+                      int req_idx, bool parent_is_upper_bound);
       void set_child_node(RegionTreeNode *child);
       void set_split_child_mask(const FieldMask &split_mask);
     public:
@@ -1028,7 +1030,8 @@ namespace Legion {
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
                             unsigned parent_req_index,
-                            const RegionRequirement &req);
+                            const RegionRequirement &req,
+                            const TraceInfo &trace_info);
       void perform_logging(void);
     public:
       virtual void activate(void) = 0;
@@ -1062,7 +1065,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      ClosedNode *closed_tree, LegionTrace *trace, 
+                      ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, const FieldMask &split,
                       const FieldMask &leave_open, Operation *create_op);
@@ -1126,7 +1129,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      LegionTrace *trace, int close_idx,
+                      const TraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);

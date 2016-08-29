@@ -10236,7 +10236,8 @@ namespace Legion {
         if (!!advance_mask)
         {
           // These fields are now dirty below
-          state.dirty_below |= advance_mask;
+          if (!arrived || proj_info.is_projecting())
+            state.dirty_below |= advance_mask;
           // Now see which ones are handled from advances from above
           for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
                 advances.begin(); it != advances.end(); it++)
@@ -10247,8 +10248,8 @@ namespace Legion {
           }
           // If we still have fields, then we have to make a new advance
           if (!!advance_mask)
-            create_logical_advance(state, advance_mask, user, advances,
-                                   version_info.is_upper_bound_node(this));
+            create_logical_advance(state, advance_mask, user, trace_info, 
+                advances, version_info.is_upper_bound_node(this));
         }
       }
       else if (arrived && IS_REDUCE(user.usage))
@@ -10274,8 +10275,8 @@ namespace Legion {
           }
           // If we still have fields, then we have to make a new advance
           if (!!advance_mask)
-            create_logical_advance(state, advance_mask, user, advances,
-                                   version_info.is_upper_bound_node(this));
+            create_logical_advance(state, advance_mask, user, trace_info,
+                advances, version_info.is_upper_bound_node(this));
         }
       }
       // We also always do our dependence analysis even if we have
@@ -10442,7 +10443,8 @@ namespace Legion {
           {
             FieldMask open_next = unopened_field_mask - open_below;
             if (!!open_next)
-              child->create_logical_open(ctx, open_next, user, path);
+              child->create_logical_open(ctx, open_next, user, 
+                                         path, trace_info);
             // Update our unopened children mask
             // to reflect any fields which are still open below
             unopened_field_mask &= open_below;
@@ -10450,7 +10452,8 @@ namespace Legion {
           else
           {
             // Open all the unopened fields
-            child->create_logical_open(ctx, unopened_field_mask, user, path);
+            child->create_logical_open(ctx, unopened_field_mask, 
+                                       user, path, trace_info);
             unopened_field_mask.clear();
           }
         }
@@ -10467,12 +10470,14 @@ namespace Legion {
     void RegionTreeNode::create_logical_open(ContextID ctx,
                                              const FieldMask &open_mask,
                                              const LogicalUser &creator,
-                                             const RegionTreePath &path)
+                                             const RegionTreePath &path,
+                                             const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       CurrentState &state = get_current_state(ctx);
       OpenOp *open = context->runtime->get_available_open_op(false); 
-      open->initialize(open_mask, this, path, creator.op, creator.idx);
+      open->initialize(open_mask, this, path, trace_info,
+                       creator.op, creator.idx);
       // Add it to the list of current users
       LogicalUser open_user(open, 0/*idx*/,
             RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), open_mask);
@@ -10495,6 +10500,7 @@ namespace Legion {
     void RegionTreeNode::create_logical_advance(CurrentState &state,
                                                 const FieldMask &advance_mask,
                                                 const LogicalUser &creator,
+                                                const TraceInfo &trace_info,
                            LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                                 bool parent_is_upper_bound) 
     //--------------------------------------------------------------------------
@@ -10502,7 +10508,7 @@ namespace Legion {
       // These are the fields for which we have to issue an advance op
       AdvanceOp *advance = 
         context->runtime->get_available_advance_op(false); 
-      advance->initialize(this, advance_mask, creator.op, 
+      advance->initialize(this, advance_mask, trace_info, creator.op, 
                           creator.idx, parent_is_upper_bound);
       LogicalUser advance_user(advance, 0/*idx*/, 
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), advance_mask);
@@ -11511,11 +11517,10 @@ namespace Legion {
           if (allow_next_child && next_child.is_valid() && 
               ((next_child) == it->first))
           {
-            FieldMask open_fields = close_mask;
-            output_mask |= open_fields;
+            output_mask |= close_mask;
             if (upgrade_next_child)
             {
-              it->second -= open_fields;
+              it->second -= close_mask;
               removed_fields = true;
               if (!it->second)
                 to_delete.push_back(it->first);
@@ -11563,7 +11568,7 @@ namespace Legion {
         }
       }
       // If we have any fields we actually closed, we have to close any
-      // fields which we skipped the first time arounnd because we 
+      // fields which we skipped the first time around because we 
       // don't support partial close operations
       if (!!actually_closed && !state.open_children.empty())
       {

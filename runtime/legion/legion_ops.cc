@@ -4563,7 +4563,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::initialize_internal(Operation *creator, int intern_idx)
+    void InternalOp::initialize_internal(Operation *creator, int intern_idx,
+                                         const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4578,6 +4579,8 @@ namespace Legion {
       create_op = creator;
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
+      if (trace_info.trace != NULL)
+        set_trace(trace_info.trace, !trace_info.already_traced);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_internal_op_creator(unique_op_id, 
                                            creator->get_unique_op_id(), 
@@ -4676,13 +4679,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void OpenOp::initialize(const FieldMask &mask, RegionTreeNode *start, 
-                    const RegionTreePath &path, Operation *creator, int req_idx)
+                        const RegionTreePath &path, const TraceInfo &trace_info,
+                        Operation *creator, int req_idx)
     //--------------------------------------------------------------------------
     {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_open_operation(creator->get_parent()->get_unique_id(),
                                       unique_op_id);
-      initialize_internal(creator, req_idx);
+      initialize_internal(creator, req_idx, trace_info);
 #ifdef DEBUG_LEGION
       assert(start_node == NULL);
 #endif
@@ -4818,13 +4822,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AdvanceOp::initialize(RegionTreeNode *parent, const FieldMask &advance,
-                               Operation *creator, int req_idx, bool is_upper)
+                               const TraceInfo &trace_info, Operation *creator, 
+                               int req_idx, bool is_upper)
     //--------------------------------------------------------------------------
     {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_advance_operation(creator->get_parent()->get_unique_id(),
                                          unique_op_id);
-      initialize_internal(creator, req_idx);
+      initialize_internal(creator, req_idx, trace_info);
 #ifdef DEBUG_LEGION
       assert(parent_node == NULL);
 #endif
@@ -5073,13 +5078,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CloseOp::initialize_close(Operation *creator, unsigned idx,
                                    unsigned parent_req_index,
-                                   const RegionRequirement &req)
+                                   const RegionRequirement &req,
+                                   const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
-      initialize_internal(creator, idx);
+      initialize_internal(creator, idx, trace_info);
       // We always track this so get the close index
       context_index = parent_ctx->register_new_close_operation(this);
       parent_task = parent_ctx;
@@ -5196,7 +5202,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                              ClosedNode *closed_t, LegionTrace *trace, 
+                              ClosedNode *closed_t, const TraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
                               const FieldMask &close_m, const FieldMask &split,
                               const FieldMask &leave_m, Operation *creator)
@@ -5206,7 +5212,7 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, false/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      initialize_close(creator, close_idx, parent_req_index, req);
+      initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
       leave_open_mask = leave_m;
       closed_tree = closed_t;
@@ -5644,7 +5650,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReadCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                 LegionTrace *trace, int close_idx,
+                                 const TraceInfo &trace_info, int close_idx,
                                  const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
@@ -5652,7 +5658,7 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        true/*inter close*/, true/*read only*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      initialize_close(creator, close_idx, parent_req_index, req);
+      initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
       if (Runtime::legion_spy_enabled)
         perform_logging();
@@ -6131,6 +6137,13 @@ namespace Legion {
       // Pass the reference back to the parent task
       parent_ctx->return_virtual_instance(parent_idx, composite_refs,
                                           created_requirement); 
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::set<FieldID>::const_iterator it = 
+              requirement.privilege_fields.begin(); it !=
+              requirement.privilege_fields.end(); it++)
+          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,0/*iid*/);
+      }
       // Then we can mark that we are mapped and executed
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
