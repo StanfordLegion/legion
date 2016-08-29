@@ -608,7 +608,7 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      find_local_copy_preconditions(redop, reading, copy_mask, child_color, 
+      find_local_copy_preconditions_above(redop, reading, copy_mask,child_color,
                                     origin_node, versions, creator_op_id, index,
                                     source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
@@ -649,10 +649,10 @@ namespace Legion {
         RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
         FieldMask observed, non_dominated;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions(copy_mask, usage, child_color, origin_node,
-                                   creator_op_id, index, preconditions,
-                                   dead_events, filter_current_users,
-                                   observed, non_dominated);
+        find_current_preconditions<true/*track*/>(copy_mask, usage, child_color,
+                               origin_node, creator_op_id, index, preconditions,
+                               dead_events, filter_current_users,
+                               observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -676,16 +676,16 @@ namespace Legion {
           // any users in the list of current users so we can skip them
           const FieldMask current_mask = copy_mask - write_skip_mask;
           if (!!current_mask)
-            find_current_preconditions(current_mask, usage, child_color,
-                                       origin_node, creator_op_id, index, 
-                                       preconditions, dead_events, 
+            find_current_preconditions<true/*track*/>(current_mask, usage, 
+                                       child_color, origin_node, creator_op_id,
+                                       index, preconditions, dead_events, 
                                        filter_current_users,
                                        observed, non_dominated);
         }
         else // the normal case with no write-skip
-          find_current_preconditions(copy_mask, usage, child_color, 
-                                     origin_node, creator_op_id, index, 
-                                     preconditions, dead_events, 
+          find_current_preconditions<true/*track*/>(copy_mask, usage, 
+                                     child_color, origin_node, creator_op_id,
+                                     index, preconditions, dead_events, 
                                      filter_current_users, 
                                      observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
@@ -717,6 +717,93 @@ namespace Legion {
                 filter_current_users.begin(); it !=
                 filter_current_users.end(); it++)
             filter_current_user(it->first, it->second);
+        if (!advance_versions.empty() || !add_versions.empty())
+          apply_version_updates(filter_mask, advance_versions, 
+                                add_versions, source, applied_events);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_local_copy_preconditions_above(
+                                                  ReductionOpID redop, 
+                                                  bool reading,
+                                                  const FieldMask &copy_mask,
+                                                  const ColorPoint &child_color,
+                                                  RegionNode *origin_node,
+                                                  VersionTracker *versions,
+                                                  const UniqueID creator_op_id,
+                                                  const unsigned index,
+                                                  const AddressSpaceID source,
+                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      // If we are not the logical owner, we need to see if we are up to date 
+      if (!is_logical_owner())
+        perform_remote_valid_check(copy_mask, versions, reading);  
+      FieldMask filter_mask;
+      std::set<ApEvent> dead_events;
+      LegionMap<ApEvent,FieldMask>::aligned filter_current_users; 
+      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
+      if (reading)
+      {
+        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
+        FieldMask observed, non_dominated;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        find_current_preconditions<false/*track*/>(copy_mask, usage, 
+                                   child_color, origin_node, creator_op_id, 
+                                   index, preconditions, dead_events, 
+                                   filter_current_users,observed,non_dominated);
+        // No domination above
+        find_previous_preconditions(copy_mask, usage, child_color,
+                                    origin_node, creator_op_id, index, 
+                                    preconditions, dead_events);
+      }
+      else
+      {
+        RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
+        FieldMask observed, non_dominated, write_skip_mask;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // Find any version updates as well our write skip mask
+        find_version_updates(copy_mask, versions, write_skip_mask, 
+            filter_mask, advance_versions, add_versions, redop > 0);
+        if (!!write_skip_mask)
+        {
+          // If we have a write skip mask we know we won't interfere with
+          // any users in the list of current users so we can skip them
+          const FieldMask current_mask = copy_mask - write_skip_mask;
+          if (!!current_mask)
+            find_current_preconditions<false/*track*/>(current_mask, usage, 
+                                       child_color, origin_node, creator_op_id,
+                                       index, preconditions, dead_events, 
+                                       filter_current_users,
+                                       observed, non_dominated);
+        }
+        else // the normal case with no write-skip
+          find_current_preconditions<false/*track*/>(copy_mask, usage, 
+                                     child_color, origin_node, creator_op_id,
+                                     index, preconditions, dead_events, 
+                                     filter_current_users, 
+                                     observed, non_dominated);
+        // No domination above
+        find_previous_preconditions(copy_mask, usage, child_color,
+                                    origin_node, creator_op_id, index, 
+                                    preconditions, dead_events);
+      }
+#ifdef DEBUG_LEGION
+      assert(filter_current_users.empty());
+#endif
+      if (!dead_events.empty() || 
+          !advance_versions.empty() || !add_versions.empty())
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
         if (!advance_versions.empty() || !add_versions.empty())
           apply_version_updates(filter_mask, advance_versions, 
                                 add_versions, source, applied_events);
@@ -914,8 +1001,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
-      find_local_user_preconditions(usage, term_event, child_color, origin_node,
-          versions, op_id, index, user_mask, preconditions, applied_events);
+      find_local_user_preconditions_above(usage, term_event, child_color, 
+                          origin_node, versions, op_id, index, user_mask, 
+                          preconditions, applied_events);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -953,10 +1041,10 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
-        find_current_preconditions(user_mask, usage, child_color, origin_node,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated);
+        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
+                                   origin_node, term_event, op_id, index, 
+                                   preconditions, dead_events, 
+                                   filter_current_users,observed,non_dominated);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -970,10 +1058,10 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
-        find_current_preconditions(user_mask, usage, child_color, origin_node,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated);
+        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
+                                   origin_node, term_event, op_id, index, 
+                                   preconditions, dead_events, 
+                                   filter_current_users,observed,non_dominated);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -1002,6 +1090,70 @@ namespace Legion {
                 filter_current_users.begin(); it !=
                 filter_current_users.end(); it++)
             filter_current_user(it->first, it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_local_user_preconditions_above(
+                                                const RegionUsage &usage,
+                                                ApEvent term_event,
+                                                const ColorPoint &child_color,
+                                                RegionNode *origin_node,
+                                                VersionTracker *versions,
+                                                const UniqueID op_id,
+                                                const unsigned index,
+                                                const FieldMask &user_mask,
+                                              std::set<ApEvent> &preconditions,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      // If we are not the logical owner, we need to see if we are up to date 
+      const bool read_only = IS_READ_ONLY(usage);
+      if (!is_logical_owner())
+        perform_remote_valid_check(user_mask, versions, read_only);
+      std::set<ApEvent> dead_events;
+      LegionMap<ApEvent,FieldMask>::aligned filter_current_users;
+      if (read_only)
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        FieldMask observed, non_dominated;
+        find_current_preconditions<false/*track*/>(user_mask, usage, 
+                                   child_color, origin_node,
+                                   term_event, op_id, index, preconditions, 
+                                   dead_events, filter_current_users, 
+                                   observed, non_dominated);
+        // No domination above
+        find_previous_preconditions(user_mask, usage, child_color, 
+                                    origin_node, term_event, op_id, index,
+                                    preconditions, dead_events);
+      }
+      else
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        FieldMask observed, non_dominated;
+        find_current_preconditions<false/*track*/>(user_mask, usage, 
+                                   child_color, origin_node,
+                                   term_event, op_id, index, preconditions, 
+                                   dead_events, filter_current_users, 
+                                   observed, non_dominated);
+        // No domination above
+        find_previous_preconditions(user_mask, usage, child_color, 
+                                    origin_node, term_event, op_id, index,
+                                    preconditions, dead_events);
+      }
+#ifdef DEBUG_LEGION
+      assert(filter_current_users.empty());
+#endif
+      if (!dead_events.empty())
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
       }
     }
 
@@ -1246,8 +1398,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
-      find_local_user_preconditions(usage, term_event, child_color, origin_node,
-          versions, op_id, index, user_mask, preconditions, applied_events);
+      find_local_user_preconditions_above(usage, term_event, child_color, 
+                          origin_node, versions, op_id, index, user_mask, 
+                          preconditions, applied_events);
       bool need_update_above = false;
       if (need_version_update)
       {
@@ -2263,6 +2416,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool TRACK_DOM>
     void MaterializedView::find_current_preconditions(
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
@@ -2300,7 +2454,7 @@ namespace Legion {
         const FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
           continue;
-        else
+        else if (TRACK_DOM)
           observed |= overlap;
         if (event_users.single)
         {
@@ -2308,9 +2462,10 @@ namespace Legion {
                                      child_color, op_id, index, origin_node))
           {
             preconditions.insert(cit->first);
-            filter_events[cit->first] = overlap;
+            if (TRACK_DOM)
+              filter_events[cit->first] = overlap;
           }
-          else
+          else if (TRACK_DOM)
             non_dominated |= overlap;
         }
         else
@@ -2326,9 +2481,10 @@ namespace Legion {
                                        op_id, index, origin_node))
             {
               preconditions.insert(cit->first);
-              filter_events[cit->first] |= user_overlap;
+              if (TRACK_DOM)
+                filter_events[cit->first] |= user_overlap;
             }
-            else
+            else if (TRACK_DOM)
               non_dominated |= user_overlap;
           }
         }
@@ -2395,6 +2551,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool TRACK_DOM>
     void MaterializedView::find_current_preconditions(
                                                  const FieldMask &user_mask,
                                                  const RegionUsage &usage,
@@ -2429,7 +2586,7 @@ namespace Legion {
         const FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
           continue;
-        else
+        else if (TRACK_DOM)
           observed |= overlap;
         if (event_users.single)
         {
@@ -2442,9 +2599,10 @@ namespace Legion {
               preconditions[cit->first] = overlap;
             else
               finder->second |= overlap;
-            filter_events[cit->first] = overlap;
+            if (TRACK_DOM)
+              filter_events[cit->first] = overlap;
           }
-          else
+          else if (TRACK_DOM)
             non_dominated |= overlap;
         }
         else
@@ -2465,9 +2623,10 @@ namespace Legion {
                 preconditions[cit->first] = overlap;
               else
                 finder->second |= overlap;
-              filter_events[cit->first] |= user_overlap;
+              if (TRACK_DOM)
+                filter_events[cit->first] |= user_overlap;
             }
-            else
+            else if (TRACK_DOM)
               non_dominated |= user_overlap;
           }
         }

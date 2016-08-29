@@ -323,6 +323,16 @@ namespace Legion {
                                          const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events);
+      void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
+                                         const FieldMask &copy_mask,
+                                         const ColorPoint &child_color,
+                                         RegionNode *origin_node,
+                                         VersionTracker *version_tracker,
+                                         const UniqueID creator_op_id,
+                                         const unsigned index,
+                                         const AddressSpaceID source,
+                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<RtEvent> &applied_events);
     public:
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
@@ -370,6 +380,16 @@ namespace Legion {
                                          std::set<ApEvent> &preconditions,
                                          std::set<RtEvent> &applied_events);
       void find_local_user_preconditions(const RegionUsage &usage,
+                                         ApEvent term_event,
+                                         const ColorPoint &child_color,
+                                         RegionNode *origin_node,
+                                         VersionTracker *version_tracker,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &user_mask,
+                                         std::set<ApEvent> &preconditions,
+                                         std::set<RtEvent> &applied_events);
+      void find_local_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -477,6 +497,7 @@ namespace Legion {
       void filter_previous_user(ApEvent user_event, 
                                 const FieldMask &filter_mask);
     protected:
+      template<bool TRACK_DOM>
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
@@ -499,6 +520,7 @@ namespace Legion {
                                       std::set<ApEvent> &preconditions,
                                       std::set<ApEvent> &dead_events);
       // Overloaded versions for being precise about copy preconditions
+      template<bool TRACK_DOM>
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
                                       const ColorPoint &child_color,
