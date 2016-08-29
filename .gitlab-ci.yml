@@ -1,0 +1,228 @@
+###
+### Variables
+###
+
+# Global variables (will be set in every job):
+variables:
+  WARN_AS_ERROR: "1"
+  REALM_BACKTRACE: "1"
+  REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
+
+# Local variables (included on a case-by-case basis in each job):
+.gcc49: &gcc48
+  CXX: "g++-4.8"
+.gcc49: &gcc49
+  CXX: "g++-4.9"
+.gcc5: &gcc5
+  CXX: "g++-5"
+.gcc6: &gcc6
+  CXX: "g++-6"
+
+.clang35: &clang35
+  CXX: "clang++-3.5"
+.clang38: &clang38
+  CXX: "clang++-3.8"
+
+.terra35: &terra35
+  LLVM_CONFIG: "llvm-config-3.5"
+  TERRA_DIR: "/usr/local/terra35"
+.terra38: &terra38
+  LLVM_CONFIG: "llvm-config-3.8"
+  TERRA_DIR: "/usr/local/terra38"
+
+.debug: &debug
+  DEBUG: "1"
+.release: &release
+  DEBUG: "0"
+
+.cxx98_normal: &cxx98_normal
+  CC_FLAGS: "-std=c++98"
+.cxx98_checks: &cxx98_checks
+  CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+.cxx98_spy: &cxx98_spy
+  CC_FLAGS: "-std=c++98 -DLEGION_SPY"
+  TEST_SPY: "1"
+.cxx11_normal: &cxx11_normal
+  CC_FLAGS: "-std=c++11"
+
+###
+### Setup
+###
+
+# These commands will run before each job.
+before_script:
+  - uname -a
+  - |
+    if [[ "$(uname)" = "Linux" ]]; then
+      export THREADS=$(nproc --all)
+    elif [[ "$(uname)" = "Darwin" ]]; then
+      export THREADS=$(sysctl -n hw.ncpu)
+    else
+      echo "Unknown platform. Setting THREADS to 1."
+      export THREADS=1
+    fi
+  # - |
+  #   if [[ "$(uname)" = "Darwin" ]]; then
+  #     brew update
+  #     brew install pypy homebrew/versions/llvm35
+  #   fi
+  - |
+    if [[ "$USE_GASNET" -eq 1 ]]; then
+      export CONDUIT=mpi
+      export GASNET_ROOT="$PWD/gasnet/release"
+      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
+      unset WARN_AS_ERROR
+      git clone https://github.com/StanfordLegion/gasnet.git gasnet
+      pushd gasnet
+      make -j$THREADS
+      popd
+    fi
+
+###
+### Tags
+###
+
+.linux: &linux
+  tags:
+    - linux
+.macos: &macos
+  tags:
+    - macos
+
+###
+### Docker Image
+###
+
+# Each job will run in a fresh container with this image.
+.image: &image
+  image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+
+###
+### Tests
+###
+
+# Each job will run this set of tests.
+.tests: &tests
+  script:
+    - export LG_RT_DIR=$PWD/runtime
+    - ./language/travis.py
+    - |
+      make -s -C tutorial/00_hello_world -j$THREADS
+      tutorial/00_hello_world/hello_world -logfile out_%.log
+      make -s -C tutorial/01_tasks_and_futures
+      tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
+      make -s -C tutorial/02_index_tasks
+      tutorial/02_index_tasks/index_tasks -logfile out_%.log
+      make -s -C tutorial/03_global_vars
+      tutorial/03_global_vars/global_vars -logfile out_%.log
+      make -s -C tutorial/04_logical_regions
+      tutorial/04_logical_regions/logical_regions -logfile out_%.log
+      make -s -C tutorial/05_physical_regions
+      tutorial/05_physical_regions/physical_regions -logfile out_%.log
+      make -s -C tutorial/06_privileges
+      tutorial/06_privileges/privileges -logfile out_%.log
+      make -s -C tutorial/07_partitioning
+      tutorial/07_partitioning/partitioning -logfile out_%.log
+      make -s -C tutorial/08_multiple_partitions
+      tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
+      make -s -C tutorial/09_custom_mapper
+      tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
+    - |
+      make -s -C examples/full_circuit
+      examples/full_circuit/ckt_sim -logfile out_%.log
+      make -s -C examples/full_ghost
+      examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+    - |
+      # if [[ "$TEST_SPY" -eq 1 ]]; then
+      if [[ "$DEBUG" -eq 1 ]]; then
+        git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
+        pushd fuzz-tester
+        WARN_AS_ERROR=0 python main.py
+        popd
+      fi
+    - |
+      if [[ "$DEBUG" -eq 0 ]]; then
+        make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+        make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+      fi
+    - |
+      if [[ "$DEBUG" -eq 0 ]]; then
+        make -s -C test/performance/realm SHARED_LOWLEVEL=0 clean_all
+        make -s -C test/performance/realm SHARED_LOWLEVEL=0 run_all
+      fi
+
+###
+### Jobs
+###
+
+# Each item below defines a job.
+
+# There are two tiers of tests.
+#  1. Full test suite (small number of compilers).
+#  2. Minimal test suite (other compilers).
+
+# Run the full test suite on GCC 4.9 and Clang 3.5.
+
+# Linux with GCC 4.9
+linux_gcc49_terra35_cxx98_release:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *release, *cxx98_normal]
+linux_gcc49_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks]
+linux_gcc49_terra35_cxx98_debug_spy:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_spy]
+linux_gcc49_terra35_cxx11_release:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *release, *cxx11_normal]
+
+# Linux with Clang 3.5
+linux_clang35_terra35_cxx98_release:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *release, *cxx98_normal]
+linux_clang35_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks]
+linux_clang35_terra35_cxx98_debug_spy:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_spy]
+linux_clang35_terra35_cxx11_release:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *release, *cxx11_normal]
+
+# # macOS with Clang 3.5
+# macos_clang35_cxx98_debug_checks:
+#   <<: [*macos, *tests]
+#   variables:
+#     <<: [*clang35, *debug, *cxx98_checks]
+
+# Run minimal tests on other compilers.
+
+# Linux with GCC 4.8, 5, 6
+linux_gcc48_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc48, *terra35, *debug, *cxx98_checks]
+linux_gcc5_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc5, *terra35, *debug, *cxx98_checks]
+linux_gcc6_terra35_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc6, *terra35, *debug, *cxx98_checks]
+
+# Linux with Clang 3.8
+linux_clang38_terra38_cxx98_debug_checks:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks]

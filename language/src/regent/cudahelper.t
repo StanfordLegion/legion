@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 local config = require("regent/config")
-local log = require("regent/log")
+local report = require("common/report")
 
 local cudahelper = {}
 cudahelper.check_cuda_available = function() return false end
@@ -122,7 +122,7 @@ local terra init_cuda() : int32
     r = DriverAPI.cuCtxGetDevice(&d)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    r = DriverAPI.cuDeviceGet(&d, 0)
+    var stderr = C.fdopen(2, "w")
     assert(r == 0, "CUDA error in cuDeviceGet")
     r = DriverAPI.cuCtxCreate_v2(&cx, 0, d)
     assert(r == 0, "CUDA error in cuCtxCreate_v2")
@@ -147,13 +147,14 @@ struct fat_bin_t {
   filename : &opaque,
 }
 
-local terra compile_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
+local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
   var fat_bin : &fat_bin_t
   -- TODO: this line is leaking memory
   fat_bin = [&fat_bin_t](C.malloc(sizeof(fat_bin_t)))
   fat_bin.magic = 1234
   fat_bin.versions = 5678
-  fat_bin.data = ptxc
+  fat_bin.data = C.malloc(ptxSize + 1)
+  C.memcpy(fat_bin.data, ptxc, ptxSize + 1)
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -170,9 +171,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   local device = init_cuda()
   local version = get_cuda_version(device)
   local ptx = cudalib.toptx(module, nil, version)
-  local ptxc = terralib.constant(ptx)
-  local ptxSize = ptx:len() + 1
-  local handle = compile_ptx(ptx, ptxSize, version)
+  local handle = register_ptx(ptx, #ptx, version)
 
   for k, v in pairs(kernels) do
     register_function(handle, k, v.name)

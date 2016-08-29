@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "4", "-fflow-spmd", "1"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -127,7 +127,7 @@ task main()
   end
 
   __demand(__spmd)
-  for t = 0, 10 do
+  for t = 0, 3 do
     for i = 0, pieces do
       avg_ac(p[i], q[i])
     end
@@ -164,14 +164,14 @@ task main()
     c.printf("x %d %d %d %d %d %d\n", x.a1, x.a2, x.b1, x.b2, x.c1, x.c2)
   end
 
-  regentlib.assert(x0.a1 ==  7976, "test failed")
-  regentlib.assert(x1.a1 == 12127, "test failed")
-  regentlib.assert(x2.a1 ==  7910, "test failed")
-  regentlib.assert(x3.a1 == 12050, "test failed")
+  regentlib.assert(x0.a1 ==  9550, "test failed")
+  regentlib.assert(x1.a1 == 10598, "test failed")
+  regentlib.assert(x2.a1 ==  9409, "test failed")
+  regentlib.assert(x3.a1 == 10660, "test failed")
 
-  regentlib.assert(x0.a2 == -1957, "test failed")
-  regentlib.assert(x1.a2 ==  1815, "test failed")
-  regentlib.assert(x2.a2 == -1184, "test failed")
-  regentlib.assert(x3.a2 ==  2260, "test failed")
+  regentlib.assert(x0.a2 == -534, "test failed")
+  regentlib.assert(x1.a2 ==  706, "test failed")
+  regentlib.assert(x2.a2 == -176, "test failed")
+  regentlib.assert(x3.a2 ==  940, "test failed")
 end
 regentlib.start(main)

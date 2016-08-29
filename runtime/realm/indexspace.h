@@ -665,6 +665,23 @@ namespace Realm {
         return d;
       }
 
+      // Only works for structured DomainPoint.
+      static Domain from_domain_point(const DomainPoint &p) {
+        switch (p.dim) {
+          case 0:
+            assert(false);
+          case 1:
+            return Domain::from_point<1>(p.get_point<1>());
+          case 2:
+            return Domain::from_point<2>(p.get_point<2>());
+          case 3:
+            return Domain::from_point<3>(p.get_point<3>());
+          default:
+            assert(false);
+        }
+        return Domain::NO_DOMAIN;
+      }
+
       size_t compute_size(void) const
       {
         size_t result;
@@ -833,6 +850,40 @@ namespace Realm {
             return Domain::from_rect<2>(get_rect<2>().intersection(other.get_rect<2>()));
           case 3:
             return Domain::from_rect<3>(get_rect<3>().intersection(other.get_rect<3>()));
+          default:
+            assert(false);
+        }
+        return Domain::NO_DOMAIN;
+      }
+
+      // Returns the bounding box for this Domain and a point.
+      // WARNING: only works with structured Domain.
+      Domain convex_hull(const DomainPoint &p) const
+      {
+        assert(dim == p.dim);
+
+        switch (dim)
+        {
+          case 0:
+            assert(false);
+          case 1:
+            {
+              LegionRuntime::Arrays::Point<1> pt = p.get_point<1>();
+              return Domain::from_rect<1>(get_rect<1>().convex_hull(
+                    LegionRuntime::Arrays::Rect<1>(pt, pt)));
+             }
+          case 2:
+            {
+              LegionRuntime::Arrays::Point<2> pt = p.get_point<2>();
+              return Domain::from_rect<2>(get_rect<2>().convex_hull(
+                    LegionRuntime::Arrays::Rect<2>(pt, pt)));
+            }
+          case 3:
+            {
+              LegionRuntime::Arrays::Point<3> pt = p.get_point<3>();
+              return Domain::from_rect<3>(get_rect<3>().convex_hull(
+                    LegionRuntime::Arrays::Rect<3>(pt, pt)));
+            }
           default:
             assert(false);
         }

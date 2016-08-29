@@ -15,7 +15,7 @@
 -- Regent AST Validator
 
 local ast = require("regent/ast")
-local log = require("regent/log")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -41,7 +41,7 @@ end
 function context:intern_variable(node, symbol)
   assert(ast.is_node(node))
   if not std.is_symbol(symbol) then
-    log.error(node, "expected a symbol, got " .. tostring(symbol))
+    report.error(node, "expected a symbol, got " .. tostring(symbol))
   end
   self.env[#self.env]:insert(node, symbol, symbol)
 end
@@ -55,21 +55,21 @@ function context:check_variable(node, symbol, expected_type)
   assert(ast.is_node(node))
 
   if not std.is_symbol(symbol) then
-    log.error(node, "expected symbol, got " .. tostring(symbol))
+    report.error(node, "expected symbol, got " .. tostring(symbol))
   end
 
   self.env[#self.env]:lookup(node, symbol)
 
   if not terralib.types.istype(symbol:hastype()) then
-    log.error(node, "expected typed symbol, got untyped symbol " .. tostring(symbol))
+    report.error(node, "expected typed symbol, got untyped symbol " .. tostring(symbol))
   end
 
   if not std.type_eq(symbol:gettype(), std.as_read(symbol:gettype())) then
-    log.error(node, "expected non-reference symbol type, got " .. tostring(symbol:gettype()))
+    report.error(node, "expected non-reference symbol type, got " .. tostring(symbol:gettype()))
   end
 
   if not std.type_eq(symbol:gettype(), std.as_read(expected_type)) then
-    log.error(node, "expected " .. tostring(std.as_read(expected_type)) .. ", got " .. tostring(symbol:gettype()))
+    report.error(node, "expected " .. tostring(std.as_read(expected_type)) .. ", got " .. tostring(symbol:gettype()))
   end
 end
 
@@ -86,7 +86,7 @@ local function validate_vars_node(cx)
         value_type:is_ptr() and
         not std.get_field(value_type.index_type.base_type, node.field_name)
       then
-        log.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
+        report.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
       end
       continuation(node, true)
 
@@ -127,6 +127,7 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
@@ -137,6 +138,8 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AttachHDF5) or
+      node:is(ast.typed.expr.DetachHDF5) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
@@ -252,7 +255,9 @@ local function validate_vars_node(cx)
       node:is(ast.typed.stat.UnmapRegions) or
       node:is(ast.typed.Block) or
       node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       continuation(node, true)
 

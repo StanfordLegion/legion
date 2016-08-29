@@ -15,12 +15,15 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
+--    "-fflow-spmd", "1"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
+--    "-fflow-spmd", "1"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
+--    "-fflow-spmd", "1"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1374,19 +1377,8 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
-    local main, names = regentlib.setup(main_task, extra_setup_thunk)
-    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
-
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    end
-  end
-
-  saveobj(toplevel, "pennant", "executable", cpennant.register_mappers)
+  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
-  cpennant.register_mappers()
-  regentlib.start(toplevel)
+  regentlib.start(toplevel, cpennant.register_mappers)
 end

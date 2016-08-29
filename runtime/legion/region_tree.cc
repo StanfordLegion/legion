@@ -1498,9 +1498,6 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask); 
-      // Check to see if we need to do any restricted tests
-      if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
-        restrict_info.set_check();
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req); 
 #ifdef DEBUG_LEGION
@@ -1514,56 +1511,10 @@ namespace Legion {
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
-      parent_node->register_logical_user(ctx.get_id(), user, path, version_info,
-                                         restrict_info, trace_info, 
-                                         (req.handle_type != SINGULAR), 
+      parent_node->register_logical_user(ctx.get_id(), user, path, 
+                                         version_info, trace_info, 
+                                         (req.handle_type != SINGULAR),
                                          true/*report uninitialized*/);
-      // Once we are done we can clear out the list of recorded dependences
-      op->clear_logical_records();
-      // If we have a restriction, then record it on the region requirement
-      if (restrict_info.has_restrictions())
-      {
-        req.flags |= RESTRICTED_FLAG;
-        if (IS_REDUCE(req))
-        {
-          switch (op->get_operation_kind())
-          {
-            case Operation::MAP_OP_KIND:
-              {
-                log_run.error("Illegal restricted reduction region requirement "
-                              "requested for region requirement %d of inline "
-                              "mapping operation (ID %lld) in parent task "
-                              "(ID %lld).", idx, op->get_unique_op_id(),
-                              op->get_parent()->get_unique_op_id());
-                break;
-              }
-            case Operation::COPY_OP_KIND:
-              {
-                log_run.error("Illegal restricted reduction region requirement "
-                              "requested for region requirement %d of explicit "
-                              "copy operation (ID %lld) in parent task "
-                              "(ID %lld).", idx, op->get_unique_op_id(),
-                              op->get_parent()->get_unique_op_id());
-                break;
-              }
-            case Operation::TASK_OP_KIND:
-              {
-                TaskOp *task = static_cast<TaskOp*>(op);
-                log_run.error("Illegal restricted reduction region requirement "
-                              "requested for region requirement %d of task %s "
-                              "(ID %lld).", idx, task->get_task_name(),
-                              task->get_unique_op_id());
-                break;
-              }
-            default:
-              assert(false);
-          }
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_ILLEGAL_RESTRICTED_REDUCTION);
-        }
-      }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1572,6 +1523,14 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+      // Once we are done we can clear out the list of recorded dependences
+      op->clear_logical_records();
+      // Do our check for restricted coherence
+      if (parent_ctx->has_restrictions())
+        parent_ctx->perform_restricted_analysis(req, restrict_info);
+      // If we have a restriction, then record it on the region requirement
+      if (restrict_info.has_restrictions())
+        req.flags |= RESTRICTED_FLAG;
     }
 
     //--------------------------------------------------------------------------
@@ -1654,11 +1613,6 @@ namespace Legion {
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask);
-      // Check to see if we need to do any restricted tests
-      if (parent_ctx->has_tree_restriction(req.parent.get_tree_id(),user_mask))
-      {
-        restrict_info.set_check();
-      }
       version_info.set_upper_bound_node(parent_node);
       TraceInfo trace_info(op->already_traced(), op->get_trace(), idx, req);
 #ifdef DEBUG_LEGION
@@ -1682,43 +1636,6 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::restrict_user_coherence(RegionTreeContext ctx,
-                                                   SingleTask *parent_ctx,
-                                                   LogicalRegion handle,
-                                                const std::set<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = get_node(handle);
-      FieldMask restrict_mask = node->column_source->get_field_mask(fields);
-      RestrictionMutator mutator(ctx.get_id(), restrict_mask, true/*restrict*/);
-      node->visit_node(&mutator);
-      // Tell the parent task about the restriction on this region tree
-      parent_ctx->add_tree_restriction(handle.get_tree_id(), restrict_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::acquire_user_coherence(RegionTreeContext ctx,
-                                                  LogicalRegion handle,
-                                                const std::set<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = get_node(handle);
-      FieldMask restrict_mask = node->column_source->get_field_mask(fields);
-      RestrictionMutator mutator(ctx.get_id(),restrict_mask, false/*restrict*/);
-      node->visit_node(&mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_restrictions(LogicalRegion handle, 
-                                            const RestrictInfo &info,
-                                            const std::set<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = get_node(handle);
-      return info.has_restrictions(handle, node, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,6 +1829,197 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Restriction* RegionTreeForest::create_coherence_restriction(
+                     const RegionRequirement &req, const InstanceSet &instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);  
+      Restriction *result = new Restriction(node);    
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const InstanceRef &ref = instances[idx];
+        PhysicalManager *manager = ref.get_manager();
+#ifdef DEBUG_LEGION
+        assert(manager->is_instance_manager());
+#endif
+        InstanceManager *inst = manager->as_instance_manager();
+        result->add_restricted_instance(inst, ref.get_valid_fields());
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::add_acquisition(
+                                    const std::list<Restriction*> &restrictions,
+                                    AcquireOp *op, const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);
+      FieldMask acquired_fields = 
+        node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID tid = req.region.get_tree_id();
+      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        // If the tree IDs are different, we don't even bother
+        if ((*it)->tree_id != tid)
+          continue;
+        (*it)->add_acquisition(op, node, acquired_fields);
+        if (!acquired_fields)
+          return true;
+      }
+      // Return true if don't have any more fields to acquired
+      return !acquired_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::remove_acquisition(
+                                    const std::list<Restriction*> &restrictions,
+                                    ReleaseOp *op, const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);
+      FieldMask released_fields = 
+        node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID tid = req.region.get_tree_id();
+      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        // If the tree IDs are different, we don't even bother
+        if ((*it)->tree_id != tid)
+          continue;
+        (*it)->remove_acquisition(op, node, released_fields);
+        if (!released_fields)
+          return true;
+      }
+      // Return true if we don't have any more fields to release
+      return !released_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::add_restriction(
+                            std::list<Restriction*> &restrictions, AttachOp *op,
+                            InstanceManager *inst, const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);
+      FieldMask restricted_fields = 
+        node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID tid = req.region.get_tree_id();
+      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        // If the tree IDs are different, we don't even bother 
+        if ((*it)->tree_id != tid)
+          continue;
+        (*it)->add_restriction(op, node, inst, restricted_fields);
+        if (!restricted_fields)
+          return;
+      }
+      // If we still had any restricted fields we can make a new restriction
+      if (!!restricted_fields)
+      {
+        Restriction *restriction = new Restriction(node);
+        restriction->add_restricted_instance(inst, restricted_fields);
+        restrictions.push_back(restriction);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::remove_restriction(
+                                     std::list<Restriction*> &restrictions, 
+                                     DetachOp *op, const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);
+      FieldMask released_fields = 
+        node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID tid = req.region.get_tree_id();
+      for (std::list<Restriction*>::iterator it = restrictions.begin();
+            it != restrictions.end(); /*nothing*/)
+      {
+        // If the tree IDs are different, we don't even bother
+        if ((*it)->tree_id != tid)
+        {
+          it++;
+          continue;
+        }
+        // Try ot match it first
+        if ((*it)->matches(op, node, released_fields))
+        {
+          it = restrictions.erase(it);
+          if (!released_fields)
+            return true;
+          continue;
+        }
+        // Otherwise try to remove it internally
+        (*it)->remove_restriction(op, node, released_fields);
+        if (!released_fields)
+          return true;
+        it++;
+      }
+      return !released_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::perform_restricted_analysis(
+                      const std::list<Restriction*> &restrictions,
+                      const RegionRequirement &req, RestrictInfo &restrict_info)
+    //--------------------------------------------------------------------------
+    {
+      // Don't compute this until we need to
+      RegionTreeNode *node = NULL;
+      FieldMask possibly_restricted;
+      const RegionTreeID tid = req.parent.get_tree_id();
+      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        // Skip the same tree ID
+        if ((*it)->tree_id != tid)
+          continue;
+        // If we get here we have to do the analysis, if we haven't
+        // computed our node and fields yet, do that now
+        if (node == NULL)
+        {
+          if (req.handle_type == PART_PROJECTION)
+          {
+            PartitionNode *part_node = get_node(req.partition);
+            possibly_restricted = 
+              part_node->column_source->get_field_mask(req.privilege_fields);
+            node = part_node;
+          }
+          else
+          {
+            RegionNode *reg_node = get_node(req.region);
+            possibly_restricted = 
+              reg_node->column_source->get_field_mask(req.privilege_fields);
+            node = reg_node;
+          }
+        }
+        // Now we can do the analysis
+        (*it)->find_restrictions(node, possibly_restricted, restrict_info);
+        // See if we are done early
+        if (!possibly_restricted)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::physical_traverse_path(RegionTreeContext ctx,
                                                  RegionTreePath &path,
                                                  const RegionRequirement &req,
@@ -1977,6 +2085,7 @@ namespace Legion {
                                                  RegionTreePath &path,
                                                  const RegionRequirement &req,
                                                  VersionInfo &version_info,
+                                                 RestrictInfo &restrict_info,
                                                  Operation *op, unsigned index,
                                                  ApEvent term_event,
                                                  bool defer_add_users,
@@ -2000,7 +2109,7 @@ namespace Legion {
 #endif
                              );
       // Now we can do the registration
-      physical_register_only(ctx, req, version_info, op, index, 
+      physical_register_only(ctx, req, version_info, restrict_info, op, index,
                              term_event, defer_add_users, map_applied, targets
 #ifdef DEBUG_LEGION
                              , log_name, uid
@@ -2052,6 +2161,7 @@ namespace Legion {
     void RegionTreeForest::physical_register_only(RegionTreeContext ctx,
                                                  const RegionRequirement &req,
                                                  VersionInfo &version_info,
+                                                 RestrictInfo &restrict_info,
                                                  Operation *op, unsigned index,
                                                  ApEvent term_event,
                                                  bool defer_add_users,
@@ -2094,8 +2204,8 @@ namespace Legion {
                                      version_info, user_mask);
       }
       else // this is the normal path
-        child_node->register_region(info, term_event, usage, 
-                                    defer_add_users, targets);
+        child_node->register_region(info, restrict_info, term_event, 
+                                    usage, defer_add_users, targets);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
@@ -2110,7 +2220,9 @@ namespace Legion {
                                   Operation *op, ApEvent term_event,
                                   const std::vector<RegionRequirement> &regions,
                                   const std::vector<bool> &to_skip,
-                                  const std::vector<VersionInfo> &version_infos,
+                                  std::vector<VersionInfo> &version_infos,
+                                  std::vector<RestrictInfo> &restrict_infos,
+                                 const std::vector<RegionTreeContext> &contexts,
                                   std::deque<InstanceSet> &target_sets,
                                   std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -2161,15 +2273,57 @@ namespace Legion {
         if (to_skip[idx1])
           continue;
         const RegionRequirement &req = regions[idx1];
-        const VersionInfo &info = version_infos[idx1];
+        VersionInfo &info = version_infos[idx1];
         InstanceSet &targets = target_sets[idx1];
         std::vector<InstanceView*> &target_views = views[idx1];
         RegionUsage usage(req);
+        // Information for dealing with restrictions
+        FieldMask restricted_fields;
+        LegionMap<LogicalView*,FieldMask>::aligned copy_out_views;
+        LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
+        if (restrict_infos[idx1].has_restrictions())
+          restrict_infos[idx1].populate_restrict_fields(restricted_fields);
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
+        {
+          InstanceRef &ref = targets[idx2];
           target_views[idx2]->add_user(usage, term_event, 
-                        targets[idx2].get_valid_fields(), 
-                        op, idx1, runtime->address_space,
-                        info, map_applied_events);
+                                       ref.get_valid_fields(), 
+                                       op, idx1, runtime->address_space,
+                                       info, map_applied_events);
+          if (!!restricted_fields)
+          {
+            FieldMask restricted = ref.get_valid_fields() & restricted_fields;
+            if (!!restricted)
+            {
+              if (target_views[idx2]->is_reduction_view())
+              {
+                ReductionView *reduction_view = 
+                  target_views[idx2]->as_reduction_view();
+                reduce_out_views[reduction_view] = restricted;
+              }
+              else
+                copy_out_views[target_views[idx2]] = restricted;
+            }
+          }
+        }
+        // Handle any restricted copy out operations we need to do
+        if (!copy_out_views.empty() || !reduce_out_views.empty())
+        {
+          RegionNode *node = get_node(req.region); 
+          TraversalInfo traversal_info(contexts[idx1].get_id(), op, idx1, req,
+                                 info, restricted_fields, map_applied_events);
+          const InstanceSet &restricted_instances = 
+            restrict_infos[idx1].get_instances();
+          std::vector<MaterializedView*> restricted_views(
+                                             restricted_instances.size());
+          node->convert_target_views(restricted_instances,ctx,restricted_views);
+          if (!copy_out_views.empty())
+            node->issue_restricted_copies(traversal_info, restricted_instances,
+                                          restricted_views, copy_out_views);
+          if (!reduce_out_views.empty())
+            node->issue_restricted_reductions(traversal_info, 
+                restricted_instances, restricted_views, reduce_out_views);
+        }
       }
     }
 
@@ -2434,17 +2588,23 @@ namespace Legion {
         }
       }
       // Also record the src preconditions
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+#ifdef DEBUG_LEGION
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      if (!src_fields.empty())
       {
-        if (int(idx) == src_composite_index)
-          continue;
-        copy_preconditions.insert(src_targets[idx].get_ready_event());
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+        {
+          if (int(idx) == src_composite_index)
+            continue;
+          copy_preconditions.insert(src_targets[idx].get_ready_event());
+        }
+        ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
+        ApEvent copy_post = dst_node->issue_copy(op, src_fields, 
+                                                 dst_fields, copy_pre);
+        if (copy_post.exists())
+          result_events.insert(copy_post);
       }
-      ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
-      ApEvent copy_post = dst_node->issue_copy(op, src_fields, 
-                                               dst_fields, copy_pre);
-      if (copy_post.exists())
-        result_events.insert(copy_post);
       // Return the merge of all the result events
       return Runtime::merge_events(result_events);
     }
@@ -2846,45 +3006,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_convert_restricted(Operation *op,
-                                        const RegionRequirement &req,
-                                        const InstanceSet &restricted_instances,
-                                              InstanceSet &result)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
-#ifdef DEBUG_LEGION
-      // Can be a part projection if we are closing to a partition node
-      assert((req.handle_type == SINGULAR) || 
-              (req.handle_type == PART_PROJECTION));
-#endif
-      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
-        static_cast<RegionTreeNode*>(get_node(req.region)) : 
-        static_cast<RegionTreeNode*>(get_node(req.partition));      
-      // Get the field mask for the fields we need
-      FieldMask needed_fields = 
-                tree_node->column_source->get_field_mask(req.privilege_fields);
-      for (unsigned idx = 0; idx < restricted_instances.size(); idx++)
-      {
-        const InstanceRef &ref = restricted_instances[idx];
-        const FieldMask &valid_fields = ref.get_valid_fields();
-        FieldMask inst_fields = needed_fields & valid_fields;
-        if (!inst_fields)
-          continue;
-        result.add_instance(InstanceRef(ref.get_manager(), inst_fields));
-        needed_fields -= inst_fields;
-        if (!needed_fields)
-          break;
-      }
-#ifdef DEBUG_LEGION
-      assert(!needed_fields); // should be empty at this point
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
                                                 const RegionRequirement &req,
-                                                const InstanceSet &targets)
+                                                const InstanceSet &targets,
+                                                bool postmapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2904,6 +3029,9 @@ namespace Legion {
         node->get_field_ids(valid_mask, valid_fields);
         if (manager->is_virtual_manager())
         {
+#ifdef DEBUG_LEGION
+          assert(!postmapping);
+#endif
           for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
                 it != valid_fields.end(); it++)
             LegionSpy::log_mapping_decision(uid, index, *it, 0/*iid*/);
@@ -2912,7 +3040,14 @@ namespace Legion {
         {
           for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
                 it != valid_fields.end(); it++)
-            LegionSpy::log_mapping_decision(uid,index,*it,manager->instance.id);
+          {
+            if (postmapping)
+              LegionSpy::log_post_mapping_decision(uid, index, *it,
+                                                   manager->instance.id);
+            else
+              LegionSpy::log_mapping_decision(uid, index, *it,
+                                              manager->instance.id);
+          }
         }
       }
     }
@@ -3098,9 +3233,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InstanceManager* RegionTreeForest::create_file_instance(AttachOp *attach_op,
+                                                   const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *attach_node = get_node(req.region);
+      return attach_node->column_source->create_file_instance(
+          req.privilege_fields, attach_node, attach_op);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::attach_file(RegionTreeContext ctx,
+                                              SingleTask *parent_ctx,
                                               const RegionRequirement &req,
-                                              AttachOp *attach_op,
+                                              InstanceManager *file_instance,
                                               VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
@@ -3109,11 +3258,10 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *attach_node = get_node(req.region);
-      FieldMask attach_mask = 
-        attach_node->column_source->get_field_mask(req.privilege_fields);
       // Perform the attachment
-      return attach_node->attach_file(ctx.get_id(), attach_mask, req, 
-                                      attach_op, version_info);
+      return attach_node->attach_file(ctx.get_id(), parent_ctx, 
+                                      file_instance->layout->allocated_fields, 
+                                      req, file_instance, version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -4661,7 +4809,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(void)
-      : depth(0), color(ColorPoint()), context(NULL)
+      : depth(0), color(ColorPoint()), context(NULL), destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -4669,7 +4817,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(ColorPoint c, unsigned d, 
                                  RegionTreeForest *ctx)
-      : depth(d), color(c), context(ctx), 
+      : depth(d), color(c), context(ctx), destroyed(false),
         node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -5032,7 +5180,8 @@ namespace Legion {
 	} else {
 	  std::set<Domain>::const_iterator it = right_set.begin();
 	  assert(it != right_set.end());
-	  const Realm::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  const Realm::ElementMask *maskp = 
+            &(it->get_index_space().get_valid_mask());
 	  int first_elmt = maskp->first_enabled();
 	  int last_elmt = maskp->last_enabled();
 	  while(++it != right_set.end())
@@ -5040,7 +5189,8 @@ namespace Legion {
 	    maskp = &(it->get_index_space().get_valid_mask());
 	    int new_first = maskp->first_enabled();
 	    int new_last = maskp->last_enabled();
-	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	    if ((new_first != -1) && 
+                ((first_elmt == -1) || (first_elmt > new_first)))
 	      first_elmt = new_first;
 	    if ((new_last != -1) && (last_elmt < new_last))
 	      last_elmt = new_last;
@@ -5160,15 +5310,17 @@ namespace Legion {
                     it != left_set.end(); it++)
               {
                 Rect<2> left_rect = it->get_rect<2>();
-                rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
-                                         left_rect.hi[0], left_rect.hi[1]);
+                if (left_rect.volume() > 0)
+                  rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
+                                           left_rect.hi[0], left_rect.hi[1]);
               }
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
                 Rect<2> right_rect = it->get_rect<2>();
-                if (!rectangles.covers(right_rect.lo[0], right_rect.lo[1],
+                if (right_rect.volume() > 0 &&
+                    !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
                                        right_rect.hi[0], right_rect.hi[1]))
                 {
                   dominates = false;
@@ -5939,15 +6091,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_index_space_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
-      for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
-            it != logical_nodes.end(); it++)
+      if (!destroyed)
       {
-        (*it)->destroy_node(source);
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+        for (std::set<RegionNode*>::const_iterator it = logical_nodes.begin();
+              it != logical_nodes.end(); it++)
+        {
+          (*it)->destroy_node(source);
+        }
       }
     }
 
@@ -5992,6 +6162,8 @@ namespace Legion {
     bool IndexSpaceNode::intersects_with(IndexSpaceNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
@@ -6201,6 +6373,8 @@ namespace Legion {
     bool IndexSpaceNode::dominates(IndexSpaceNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,bool>::const_iterator finder = 
@@ -6390,12 +6564,9 @@ namespace Legion {
         // Also check to see if we need to go down
         if (down && child_creation.contains(target))
           down = false;
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           // Now we need to send a destruction
           context->runtime->send_index_space_destruction(handle, target);
-          destruction_set.add(target);
-        }
         // If we need to go down, make a copy of the valid children
         if (down)
           valid_copy = valid_map;
@@ -7278,7 +7449,30 @@ namespace Legion {
         else
           child_domains.insert(it->second->get_domain_blocking());
       }
-      bool result = compute_dominates(child_domains, parent_domains);
+      bool result = false;
+      if (is_disjoint())
+      {
+	// if the partition is disjoint, we can determine completeness by
+	//  seeing if the total volume of the child domains matches the volume
+	//  of the parent domains
+	size_t parent_volume = 0;
+	for (std::set<Domain>::const_iterator it = parent_domains.begin();
+	     it != parent_domains.end();
+	     ++it)
+	  parent_volume += it->get_volume();
+	size_t child_volume = 0;
+	for (std::set<Domain>::const_iterator it = child_domains.begin();
+	     it != child_domains.end();
+	     ++it)
+	  child_volume += it->get_volume();
+	result = (child_volume == parent_volume);
+      } 
+      else 
+      {
+	// if not disjoint, we have to do a considerably-more-expensive test
+	//  that handles overlap (i.e. double-counting) in the child domains
+	result = compute_dominates(child_domains, parent_domains);
+      }
       if (can_cache)
       {
         AutoLock n_lock(node_lock);
@@ -7334,15 +7528,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_index_partition_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
-      for (std::set<PartitionNode*>::const_iterator it = logical_nodes.begin();
-             it != logical_nodes.end(); it++)
+      if (!destroyed)
       {
-        (*it)->destroy_node(source);
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+        for (std::set<PartitionNode*>::const_iterator it = 
+              logical_nodes.begin(); it != logical_nodes.end(); it++)
+        {
+          (*it)->destroy_node(source);
+        }
       }
     }
 
@@ -7705,6 +7917,8 @@ namespace Legion {
     bool IndexPartNode::intersects_with(IndexPartNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
@@ -7845,6 +8059,8 @@ namespace Legion {
     bool IndexPartNode::dominates(IndexPartNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<IndexTreeNode*,bool>::const_iterator finder = 
@@ -7920,12 +8136,9 @@ namespace Legion {
         // See if we need to go down
         if (down && child_creation.contains(target))
           down = false;
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           // Send the deletion notification
           context->runtime->send_index_partition_destruction(handle, target);
-          destruction_set.add(target);
-        }
         if (down)
           valid_copy = valid_map;
       }
@@ -8105,7 +8318,8 @@ namespace Legion {
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), context(ctx)
+        owner(sp.id % ctx->runtime->runtime_stride), 
+        context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -8118,7 +8332,8 @@ namespace Legion {
                                    Deserializer &derez)
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), context(ctx)
+        owner(sp.id % ctx->runtime->runtime_stride), 
+        context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -8554,6 +8769,7 @@ namespace Legion {
       {
         Serializer rez;
         {
+	  RezCheck z(rez);
           rez.serialize(handle);
           rez.serialize(fid);
           rez.serialize(tag);
@@ -9312,15 +9528,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_field_space_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       std::vector<LogicalRegion> to_check;
       {
         AutoLock n_lock(node_lock);
-        destruction_set.add(source);
-        to_check.insert(to_check.end(), 
-                        logical_trees.begin(), logical_trees.end());
+        if (!destroyed)
+        {
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_check.insert(to_check.end(), 
+                          logical_trees.begin(), logical_trees.end());
+        }
       }
       for (std::vector<LogicalRegion>::const_iterator it = 
             to_check.begin(); it != to_check.end(); it++)
@@ -9412,9 +9646,12 @@ namespace Legion {
         {
           FieldID fid = create_fields[idx];
           std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
-#ifdef DEBUG_LEGION
-          assert(finder != fields.end());
-#endif
+	  // Catch unknown fields here for now
+	  if (finder == fields.end())
+	  {
+	    log_run.fatal() << "ERROR: unknown field ID " << fid << " requested during instance creation";
+	    assert(0);
+	  }
           field_sizes[idx] = 
             std::pair<FieldID,size_t>(fid, finder->second.field_size);
           index_map[finder->second.idx] = idx;
@@ -9507,7 +9744,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceManager* FieldSpaceNode::create_file_instance(
                                          const std::set<FieldID> &create_fields, 
-                                         const FieldMask &attach_mask,
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
     {
@@ -9542,6 +9778,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
+      assert(layout->constraints->specialized_constraint.is_file());
 #endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
       MemoryManager *memory = 
@@ -9551,10 +9788,8 @@ namespace Legion {
                                          context->runtime->address_space,
                                          memory, inst, dom, false/*own*/,
                                          node, layout, pointer_constraint,
-                                         RtUserEvent::NO_RT_USER_EVENT,
                                          true/*register now*/, 
-                                         ApEvent::NO_AP_EVENT,
-                                         InstanceManager::ATTACH_FILE_FLAG);
+                                         ApEvent::NO_AP_EVENT);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -9723,11 +9958,8 @@ namespace Legion {
         creation_set.add(target);
       }
       // Send any deletions if necessary
-      if (!destruction_set.contains(target))
-      {
+      if (destroyed)
         context->runtime->send_field_space_destruction(handle, target);
-        destruction_set.add(target);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -9927,7 +10159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
-      : context(ctx), column_source(column_src)
+      : context(ctx), column_source(column_src), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation(); 
@@ -9952,16 +10184,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (tid % runtime->runtime_stride);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::set_restricted_fields(ContextID ctx,
-                                               FieldMask &child_restricted)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      if (!!state.restricted_fields)
-        child_restricted = state.restricted_fields;
     }
 
     //--------------------------------------------------------------------------
@@ -10144,7 +10366,6 @@ namespace Legion {
                                                const LogicalUser &user,
                                                RegionTreePath &path,
                                                VersionInfo &version_info,
-                                               RestrictInfo &restrict_info,
                                                const TraceInfo &trace_info,
                                                const bool projecting,
                                                const bool report_uninitialized)
@@ -10183,8 +10404,8 @@ namespace Legion {
           // Generate the close operations         
           // We need to record the version numbers for this node as well
           closer.record_top_version_numbers(this, state);
-          closer.initialize_close_operations(this, user.op, version_info, 
-                                             restrict_info, trace_info);
+          closer.initialize_close_operations(this, user.op, 
+                                             version_info, trace_info);
           if (!arrived)
             closer.add_next_child(next_child);
           // Perform dependence analysis for all the close operations
@@ -10238,9 +10459,8 @@ namespace Legion {
           // Compute the fat tree path for this operation and then do the
           // traversal over the entire sub-tree
           FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
-          register_logical_fat_path(ctx, user, fat_path, 
-                                    version_info, restrict_info, trace_info,
-                                    report_uninitialized);
+          register_logical_fat_path(ctx, user, fat_path, version_info, 
+                                    trace_info, report_uninitialized);
           delete fat_path;
         }
         else
@@ -10302,16 +10522,6 @@ namespace Legion {
           // reduction at this node in the region tree
           if (user.usage.redop > 0)
             record_logical_reduction(state, user.usage.redop, user.field_mask);
-          // Record any restrictions we have on mappings if necessary
-          if (restrict_info.needs_check())
-          {
-            FieldMask restricted = user.field_mask & state.restricted_fields;
-            if (!!restricted)
-            {
-              RegionNode *local_this = as_region_node();
-              restrict_info.add_restriction(local_this->handle, restricted);
-            }
-          }
         }
         // Here is the only difference with tracing.  If we already
         // traced then we don't need to register ourselves as a user
@@ -10396,10 +10606,10 @@ namespace Legion {
         RegionTreeNode *child = get_tree_child(next_child);
         if (!open_below)
           child->open_logical_node(ctx, user, path, version_info,
-                        restrict_info, trace_info.already_traced, projecting);
+                                   trace_info.already_traced, projecting);
         else
           child->register_logical_user(ctx, user, path, version_info, 
-                                       restrict_info, trace_info, projecting);
+                                       trace_info, projecting);
       }
     }
 
@@ -10408,7 +10618,6 @@ namespace Legion {
                                              const LogicalUser &user,
                                              RegionTreePath &path,
                                              VersionInfo &version_info,
-                                             RestrictInfo &restrict_info,
                                              const bool already_traced,
                                              const bool projecting)
     //--------------------------------------------------------------------------
@@ -10432,8 +10641,7 @@ namespace Legion {
           // Compute the fat tree path for this operation and then do the
           // traversal over the entire sub-tree
           FatTreePath *fat_path = user.op->compute_fat_path(user.idx); 
-          open_logical_fat_path(ctx, user, fat_path, 
-                                version_info, restrict_info);
+          open_logical_fat_path(ctx, user, fat_path, version_info);
           delete fat_path;
         }
         else
@@ -10447,16 +10655,6 @@ namespace Legion {
           // reduction at this node in the region tree
           if (user.usage.redop > 0)
             record_logical_reduction(state, user.usage.redop, user.field_mask);
-          // Record any restrictions we have on mappings if necessary
-          if (restrict_info.needs_check())
-          {
-            FieldMask restricted = user.field_mask & state.restricted_fields;
-            if (!!restricted)
-            {
-              RegionNode *local_this = as_region_node();
-              restrict_info.add_restriction(local_this->handle, restricted);
-            }
-          }
         }
         if (!already_traced)
         {
@@ -10503,7 +10701,7 @@ namespace Legion {
         // Then continue the traversal
         RegionTreeNode *child_node = get_tree_child(next_child);
         child_node->open_logical_node(ctx, user, path, version_info, 
-                                     restrict_info, already_traced, projecting);
+                                      already_traced, projecting);
       }
     }
 
@@ -10512,7 +10710,6 @@ namespace Legion {
                                                    const LogicalUser &user,
                                                    FatTreePath *fat_path,
                                                    VersionInfo &version_info,
-                                                   RestrictInfo &restrict_info,
                                                    const TraceInfo &trace_info,
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
@@ -10559,8 +10756,8 @@ namespace Legion {
           // Generate the close operations         
           // We need to record the version numbers for this node as well
           closer.record_top_version_numbers(this, state);
-          closer.initialize_close_operations(this, user.op, version_info, 
-                                             restrict_info, trace_info);
+          closer.initialize_close_operations(this, user.op, 
+                                             version_info, trace_info);
           if (!arrived)
           {
             for (std::map<ColorPoint,FatTreePath*>::const_iterator it = 
@@ -10661,16 +10858,6 @@ namespace Legion {
         // reduction at this node in the region tree
         if (user.usage.redop > 0)
           record_logical_reduction(state, user.usage.redop, user.field_mask);
-        // Record any restrictions we have on mappings if necessary
-        if (restrict_info.needs_check())
-        {
-          FieldMask restricted = user.field_mask & state.restricted_fields;
-          if (!!restricted)
-          {
-            RegionNode *local_this = as_region_node();
-            restrict_info.add_restriction(local_this->handle, restricted);
-          }
-        }
       }
       else
       {
@@ -10745,11 +10932,10 @@ namespace Legion {
         {
           RegionTreeNode *child = get_tree_child(it->first);
           if (open_only[it->first])
-            child->open_logical_fat_path(ctx, user, it->second, 
-                                         version_info, restrict_info);
+            child->open_logical_fat_path(ctx, user, it->second, version_info);
           else
             child->register_logical_fat_path(ctx, user, it->second,
-                                       version_info, restrict_info, trace_info);
+                                             version_info, trace_info);
         }
       }
     }
@@ -10758,8 +10944,7 @@ namespace Legion {
     void RegionTreeNode::open_logical_fat_path(ContextID ctx,
                                                const LogicalUser &user,
                                                FatTreePath *fat_path,
-                                               VersionInfo &version_info,
-                                               RestrictInfo &restrict_info)
+                                               VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,
@@ -10785,16 +10970,6 @@ namespace Legion {
         // reduction at this node in the region tree
         if (user.usage.redop > 0)
           record_logical_reduction(state, user.usage.redop, user.field_mask);
-        // Record any restrictions we have on mappings if necessary
-        if (restrict_info.needs_check())
-        {
-          FieldMask restricted = user.field_mask & state.restricted_fields;
-          if (!!restricted)
-          {
-            RegionNode *local_this = as_region_node();
-            restrict_info.add_restriction(local_this->handle, restricted);
-          }
-        }
       }
       else
       {
@@ -10832,8 +11007,7 @@ namespace Legion {
 #endif
 
           RegionTreeNode *child = get_tree_child(it->first);
-          child->open_logical_fat_path(ctx, user, it->second, 
-                                       version_info, restrict_info);
+          child->open_logical_fat_path(ctx, user, it->second, version_info);
         }
       }
     }
@@ -11775,42 +11949,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::add_restriction(ContextID ctx, 
-                                         const FieldMask &restricted_mask)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      state.restricted_fields |= restricted_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::release_restriction(ContextID ctx,
-                                             const FieldMask &restricted_mask)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      state.restricted_fields -= restricted_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::record_logical_restrictions(ContextID ctx,
-                                                    RestrictInfo &restrict_info,
-                                                    const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_region());
-#endif
-      CurrentState &state = get_current_state(ctx);
-      FieldMask restricted = mask & state.restricted_fields;
-      if (!!restricted)
-      {
-        RegionNode *local_this = as_region_node();
-        restrict_info.add_restriction(local_this->handle, restricted);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_deletion(ContextID ctx,
                                                    const LogicalUser &user,
                                                    const FieldMask &check_mask,
@@ -11843,8 +11981,8 @@ namespace Legion {
             // Generate the close operations         
             // We need to record the version numbers for this node as well
             closer.record_top_version_numbers(this, state);
-            closer.initialize_close_operations(this, user.op, version_info, 
-                                               restrict_info, trace_info);
+            closer.initialize_close_operations(this, user.op, 
+                                               version_info, trace_info);
             if (!arrived)
               closer.add_next_child(next_child);
             // Perform dependence analysis for all the close operations
@@ -12277,8 +12415,6 @@ namespace Legion {
         rez.serialize(send_dirty);
         FieldMask send_partial = state.partially_closed & send_mask;
         rez.serialize(send_partial);
-        FieldMask send_restricted = state.restricted_fields & send_mask;
-        rez.serialize(send_restricted);
         
         rez.serialize(done_event);
       }
@@ -12449,9 +12585,6 @@ namespace Legion {
       FieldMask partial;
       derez.deserialize(partial);
       state.partially_closed |= partial;
-      FieldMask restricted;
-      derez.deserialize(restricted);
-      state.restricted_fields |= restricted;
     }
 
     //--------------------------------------------------------------------------
@@ -13452,6 +13585,73 @@ namespace Legion {
             it != to_delete.end(); it++)
       {
         state->reduction_views.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::issue_restricted_copies(const TraversalInfo &info,
+        const InstanceSet &restricted_instances,
+        const std::vector<MaterializedView*> &restricted_views,
+        const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask src_fields;
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            copy_out_views.begin(); it != copy_out_views.end(); it++)
+        src_fields |= it->second;
+      // For each one of our restricted views, issue an update copy
+      for (unsigned idx = 0; idx < restricted_views.size(); idx++)
+      {
+        FieldMask overlap = src_fields & 
+                              restricted_instances[idx].get_valid_fields();
+        if (!overlap)
+          continue;
+        src_fields -= overlap;
+        // If it's already the same there is nothing to do
+        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder =
+          copy_out_views.find(restricted_views[idx]);
+        if (finder != copy_out_views.end())
+        {
+          overlap -= finder->second;
+          if (!overlap)
+          {
+            if (!src_fields)
+              break;
+            continue;
+          }
+        }
+        // Issue the update copy
+        issue_update_copies(info, restricted_views[idx], 
+                            overlap, copy_out_views);
+        if (!src_fields)
+          break;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::issue_restricted_reductions(const TraversalInfo &info,
+        const InstanceSet &restricted_instances,
+        const std::vector<MaterializedView*> &restricted_views,
+        const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask reduction_fields;
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduce_out_views.begin(); it != reduce_out_views.end(); it++)
+        reduction_fields |= it->second;
+      // Issue updates for any of reductions to the targets
+      for (unsigned idx = 0; idx < restricted_views.size(); idx++)
+      {
+        FieldMask overlap = reduction_fields &
+                              restricted_instances[idx].get_valid_fields();
+        if (!overlap)
+          continue;
+        issue_update_reductions(restricted_views[idx], overlap, 
+                                info.version_info, reduce_out_views,
+                                info.op, info.index, info.map_applied_events);
+        reduction_fields -= overlap;
+        if (!reduction_fields)
+          break;
       }
     }
 
@@ -14539,11 +14739,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_logical_region_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      destruction_set.add(source);
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
+      bool release_tree_instances = false;
+      {
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
+        {
+          destroyed = true;
+          // If we are the top of the region tree, tell the
+          // memories that they can remove any pinned references
+          // for any instances in this region tree
+          if (parent == NULL)
+            release_tree_instances = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+        }
+      }
+      if (release_tree_instances)
+        context->runtime->release_tree_instances(handle.get_tree_id());
     }
 
     //--------------------------------------------------------------------------
@@ -14935,6 +15163,8 @@ namespace Legion {
     bool RegionNode::intersects_with(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_region())
         return row_source->intersects_with(
                   other->as_region_node()->row_source);
@@ -14947,6 +15177,8 @@ namespace Legion {
     bool RegionNode::dominates(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_region())
         return row_source->dominates(other->as_region_node()->row_source);
       else
@@ -14966,7 +15198,6 @@ namespace Legion {
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                               const VersionInfo &close_info,
                                               const VersionInfo &version_info,
-                                              const RestrictInfo &restrict_info,
                                               const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -14982,8 +15213,7 @@ namespace Legion {
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets, 
                      trace_info.trace, trace_info.req_idx, 
-                     close_info, version_info, restrict_info, 
-                     closing_mask, creator);
+                     close_info, version_info, closing_mask, creator);
       return op;
     }
 
@@ -15024,11 +15254,8 @@ namespace Legion {
           continue_up = true;
           creation_set.add(target);
         }
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           send_deletion = true;
-          destruction_set.add(target);
-        }
       }
       if (continue_up)
       {
@@ -15073,9 +15300,7 @@ namespace Legion {
         }
       }
       if (send_deletion)
-      {
         context->runtime->send_logical_region_destruction(handle, target);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -15145,6 +15370,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::register_region(const TraversalInfo &info,
+                                     RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
                                    bool defer_add_users, InstanceSet &targets)
     //--------------------------------------------------------------------------
@@ -15152,6 +15378,22 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
+      // Get any restricted fields
+      FieldMask restricted_fields;
+      InstanceSet restricted_instances;
+      std::vector<MaterializedView*> restricted_views;
+      if (restrict_info.has_restrictions())
+      {
+        restrict_info.populate_restrict_fields(restricted_fields);
+        // We only need to get these things if we are not read-only
+        if (!IS_READ_ONLY(info.req))
+        {
+          restricted_instances = restrict_info.get_instances();
+          restricted_views.resize(restricted_instances.size());
+          convert_target_views(restricted_instances, 
+                               info.op->get_parent(), restricted_views);
+        }
+      }
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -15167,6 +15409,7 @@ namespace Legion {
         std::vector<ReductionView*> new_views;
         if (!defer_add_users && (targets.size() > 1))
           new_views.resize(targets.size());
+        LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
@@ -15181,7 +15424,15 @@ namespace Legion {
           ReductionView *new_view = 
             view->as_instance_view()->as_reduction_view();
           const FieldMask &user_mask = ref.get_valid_fields(); 
-          update_reduction_views(state, user_mask, new_view);
+          // Only add reductions which are not restricted
+          if (!!restricted_fields)
+          {
+            FieldMask unrestricted = user_mask - restricted_fields;
+            if (!!unrestricted)
+              update_reduction_views(state, unrestricted, new_view);
+          }
+          else // the normal path here
+            update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
           if (defer_add_users || (targets.size() > 1))
             continue;
@@ -15202,6 +15453,12 @@ namespace Legion {
                                          local_space, info.map_applied_events);
             ref.set_ready_event(ready);
           }
+          if (!defer_add_users && !!restricted_fields)
+          {
+            FieldMask restricted = restricted_fields & user_mask;
+              if (!!restricted)
+                reduce_out_views[new_view] = restricted;
+          }
         }
         if (!defer_add_users && (targets.size() > 1))
         {
@@ -15214,6 +15471,9 @@ namespace Legion {
                                    info.version_info, info.map_applied_events);
           }
         }
+        if (!reduce_out_views.empty())
+          issue_restricted_reductions(info, restricted_instances, 
+                                      restricted_views, reduce_out_views);
       }
       else
       {
@@ -15275,8 +15535,17 @@ namespace Legion {
               issue_update_copies(info, view, valid_fields, valid_views);
             }
             // Finally add this to the set of valid views for the state
-            update_valid_views(state, valid_fields, 
-                               !IS_READ_ONLY(info.req)/*dirty*/, view); 
+            if (!!restricted_fields)
+            {
+              // We can only update instances which aren't restricted
+              FieldMask unrestricted = valid_fields - restricted_fields;
+              if (!!unrestricted)
+                update_valid_views(state, unrestricted,
+                                   !IS_READ_ONLY(info.req)/*dirty*/, view);
+            }
+            else // The normal path
+              update_valid_views(state, valid_fields, 
+                                 !IS_READ_ONLY(info.req)/*dirty*/, view); 
           }
         }
         else
@@ -15295,8 +15564,24 @@ namespace Legion {
           // state with the new instance views while invalidating
           // any old instances with views that interfere with the
           // dirty mask
-          update_valid_views(state, info.traversal_mask, 
-                             new_views, targets);
+          if (!!restricted_fields)
+          {
+            // If we have restricted fields, we have to update them
+            // one by one to make sure that we only add instances
+            // which aren't restricted
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+            {
+              const InstanceRef &ref = targets[idx];
+              FieldMask unrestricted = 
+                ref.get_valid_fields() - restricted_fields;
+              if (!!unrestricted)
+                update_valid_views(state, unrestricted,
+                                   true/*dirty*/, new_views[idx]); 
+            }
+          }
+          else // The normal path
+            update_valid_views(state, info.traversal_mask, 
+                               new_views, targets);
         }
         // Finally we have to update our instance references
         // to get the ready events
@@ -15305,6 +15590,7 @@ namespace Legion {
           // If there is exactly one instance, then we can do
           // the fused analysis and register user, otherwise we
           // have to make two passes in order to avoid event cycles 
+          LegionMap<LogicalView*,FieldMask>::aligned copy_out_views;
           if (targets.size() == 1)
           {
             InstanceRef &ref = targets[0];
@@ -15316,6 +15602,12 @@ namespace Legion {
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
                 info.version_info, local_space, info.map_applied_events);
             ref.set_ready_event(ready);
+            if (!!restricted_fields)
+            {
+              FieldMask restricted = ref.get_valid_fields() & restricted_fields;
+              if (!!restricted)
+                copy_out_views[new_views[0]] = restricted;
+            }
           }
           else
           {
@@ -15339,10 +15631,26 @@ namespace Legion {
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
                        local_space, info.version_info, info.map_applied_events);
+              if (!!restricted_fields)
+              {
+                FieldMask restricted = 
+                  ref.get_valid_fields() & restricted_fields;
+                if (!!restricted)
+                  copy_out_views[new_views[idx]] = restricted;
+              }
             }
           }
+          // If we have to do any copy out operations, then we do that now
+          if (!copy_out_views.empty())
+            issue_restricted_copies(info, restricted_instances, 
+                                    restricted_views, copy_out_views);
         }
       }
+      // If we have any restricted instances, we can now update the state
+      // to reflect that they are going to be the valid instances
+      if (!!restricted_fields && !IS_READ_ONLY(info.req))
+        update_valid_views(state, restricted_fields, 
+                           restricted_views, restricted_instances);
     }
 
     //--------------------------------------------------------------------------
@@ -15417,8 +15725,9 @@ namespace Legion {
         // our region because any actualy close operations that would
         // need to be done would have been issued as part of the 
         // logical analysis or will be done as part of the registration.
-        register_region(info, ApEvent::NO_AP_EVENT, usage, 
-                        false/*defer add users*/, targets);
+        RestrictInfo empty_restrict_info;
+        register_region(info, empty_restrict_info, ApEvent::NO_AP_EVENT, 
+                        usage, false/*defer add users*/, targets);
       }
     }
 
@@ -15506,8 +15815,7 @@ namespace Legion {
       FillView *fill_view = 
         legion_new<FillView>(context, did, context->runtime->address_space,
                              context->runtime->address_space, this, 
-                             fill_value, RtUserEvent::NO_RT_USER_EVENT,
-                             true/*register now*/);
+                             fill_value, true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
       // Invalidate any open children and any reductions
@@ -15579,20 +15887,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::attach_file(ContextID ctx, 
+    InstanceRef RegionNode::attach_file(ContextID ctx, SingleTask *parent_ctx, 
                                         const FieldMask &attach_mask,
                                         const RegionRequirement &req,
-                                        AttachOp *attach_op,
+                                        InstanceManager *manager,
                                         VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      // Create a new instance view based on the file
-      InstanceManager *manager = 
-        column_source->create_file_instance(req.privilege_fields,
-                                            attach_mask, this, attach_op);
       // Wrap it in a view
-      MaterializedView *view = attach_op->get_parent()->
-        create_instance_top_view(manager, 
+      MaterializedView *view = parent_ctx->create_instance_top_view(manager, 
             context->runtime->address_space)->as_materialized_view();
 #ifdef DEBUG_LEGION
       assert(view != NULL);
@@ -16317,11 +16620,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PartitionNode::DestructionFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      runtime->send_logical_partition_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
       AutoLock n_lock(node_lock);
-      destruction_set.add(source);
+      if (!destroyed)
+      {
+        destroyed = true;
+        if (!creation_set.empty())
+        {
+          DestructionFunctor functor(handle, context->runtime);
+          creation_set.map(functor);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -16554,6 +16875,8 @@ namespace Legion {
     bool PartitionNode::intersects_with(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_region())
         return row_source->intersects_with(
                     other->as_region_node()->row_source);
@@ -16566,6 +16889,8 @@ namespace Legion {
     bool PartitionNode::dominates(RegionTreeNode *other)
     //--------------------------------------------------------------------------
     {
+      if (other == this)
+        return true;
       if (other->is_region())
         return row_source->dominates(other->as_region_node()->row_source);
       else
@@ -16585,7 +16910,6 @@ namespace Legion {
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                                  const VersionInfo &close_info,
                                                  const VersionInfo &ver_info,
-                                                 const RestrictInfo &res_info,
                                                  const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -16601,7 +16925,7 @@ namespace Legion {
       // Now initialize the operation
       op->initialize(creator->get_parent(), req, targets,
                      trace_info.trace, trace_info.req_idx, 
-                     close_info, ver_info, res_info, closing_mask, creator);
+                     close_info, ver_info, closing_mask, creator);
       return op;
     }
 
@@ -16642,11 +16966,8 @@ namespace Legion {
           continue_up = true;
           creation_set.add(target);
         }
-        if (!destruction_set.contains(target))
-        {
+        if (destroyed)
           send_deletion = true;
-          destruction_set.add(target);
-        }
       }
       if (continue_up)
       {
@@ -16672,9 +16993,7 @@ namespace Legion {
         }
       }
       if (send_deletion)
-      {
         context->runtime->send_logical_partition_destruction(handle, target);
-      }
     }
 
     //--------------------------------------------------------------------------

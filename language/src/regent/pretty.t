@@ -78,6 +78,7 @@ function render.top(cx, node)
 end
 
 function render.entry(cx, node)
+  if not cx then cx = context.new_render_scope() end
   return render.top(cx, node):concat("\n")
 end
 
@@ -167,7 +168,7 @@ end
 
 function pretty.expr_condition(cx, node)
   return join({
-      join(node.conditions, true), "(", pretty.expr(cx, node.value), ")"})
+      join(node.conditions:map(tostring), true), "(", pretty.expr(cx, node.value), ")"})
 end
 
 function pretty.expr_region_root(cx, node)
@@ -441,6 +442,13 @@ function pretty.expr_list_range(cx, node)
       ")"})
 end
 
+function pretty.expr_list_ispace(cx, node)
+  return join({
+      "list_ispace(",
+      commas({pretty.expr(cx, node.ispace)}),
+      ")"})
+end
+
 function pretty.expr_phase_barrier(cx, node)
   return join({
       "phase_barrier(", commas({pretty.expr(cx, node.value)}), ")"})
@@ -515,6 +523,24 @@ function pretty.expr_release(cx, node)
       ")"})
 end
 
+function pretty.expr_attach_hdf5(cx, node)
+  return join({
+      "attach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region),
+              pretty.expr(cx, node.filename),
+              pretty.expr(cx, node.mode)}),
+      ")"})
+end
+
+function pretty.expr_detach_hdf5(cx, node)
+  return join({
+      "detach(",
+      commas({"hdf5",
+              pretty.expr_region_root(cx, node.region)}),
+      ")"})
+end
+
 function pretty.expr_allocate_scratch_fields(cx, node)
   return join({
       "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
@@ -534,9 +560,14 @@ function pretty.expr_unary(cx, node)
 end
 
 function pretty.expr_binary(cx, node)
-  local loose = node.op == "or" or node.op == "and"
-  return join({
-      "(", join({pretty.expr(cx, node.lhs), node.op, pretty.expr(cx, node.rhs)}, loose), ")"})
+  if node.op == "min" or node.op == "max" then
+    return join({
+        node.op, "(", commas({pretty.expr(cx, node.lhs), pretty.expr(cx, node.rhs)}), ")"})
+  else
+    local loose = node.op == "or" or node.op == "and"
+    return join({
+        "(", join({pretty.expr(cx, node.lhs), node.op, pretty.expr(cx, node.rhs)}, loose), ")"})
+  end
 end
 
 function pretty.expr_deref(cx, node)
@@ -552,6 +583,7 @@ function pretty.expr_future_get_result(cx, node)
 end
 
 function pretty.expr(cx, node)
+  if not cx then cx = context.new_render_scope() end
   if node:is(ast.typed.expr.ID) then
     return pretty.expr_id(cx, node)
 
@@ -663,6 +695,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.ListRange) then
     return pretty.expr_list_range(cx, node)
 
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return pretty.expr_list_ispace(cx, node)
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return pretty.expr_phase_barrier(cx, node)
 
@@ -692,6 +727,12 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return pretty.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return pretty.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return pretty.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return pretty.expr_allocate_scratch_fields(cx, node)
@@ -895,6 +936,7 @@ function pretty.stat_raw_delete(cx, node)
 end
 
 function pretty.stat(cx, node)
+  if not cx then cx = context.new_global_scope() end
   if node:is(ast.typed.stat.If) then
     return pretty.stat_if(cx, node)
 
@@ -986,12 +1028,38 @@ function pretty.top_task_privileges(cx, node)
   return result
 end
 
-function pretty.top_task_coherence_modes(cx, node)
-  return node:map(function(coherence_mode) tostring(coherence_mode) end)
+function pretty.top_task_coherence_modes(cx, node, mapping)
+  local result = terralib.newlist()
+  for region, coherence_modes in node:items() do
+    for field_path, coherence_mode in coherence_modes:items() do
+      result:insert(join({
+        tostring(coherence_mode),
+        "(",
+        terralib.newlist({
+            mapping[region],
+            unpack(field_path)}):concat("."),
+        ")"}))
+    end
+  end
+  return result
 end
 
-function pretty.top_task_flags(cx, node)
-  return node:map(function(flag) return tostring(flag) end)
+function pretty.top_task_flags(cx, node, mapping)
+  local result = terralib.newlist()
+  for region, flags in node:items() do
+    for field_path, flag in flags:items() do
+      flag:map(function(flag)
+        result:insert(join({
+          tostring(flag),
+          "(",
+          terralib.newlist({
+              mapping[region],
+              unpack(field_path)}):concat("."),
+          ")"}))
+      end)
+    end
+  end
+  return result
 end
 
 function pretty.top_task_conditions(cx, node)
@@ -1007,7 +1075,11 @@ end
 function pretty.top_task_constraints(cx, node)
   if not node then return terralib.newlist() end
   return node:map(
-    function(constraint) return text.Line { value = tostring(constraint) } end)
+    function(constraint)
+      return join({tostring(constraint.lhs), tostring(constraint.op),
+                   tostring(constraint.rhs)},
+        true)
+    end)
 end
 
 function pretty.task_config_options(cx, node)
@@ -1026,10 +1098,16 @@ function pretty.top_task(cx, node)
   if node.return_type ~= terralib.types.unit then
     return_type = " : " .. tostring(node.return_type)
   end
+  local mapping = {}
+  node.privileges:map(function(privileges)
+    privileges:map(function(privilege)
+      mapping[privilege.region:gettype()] = tostring(privilege.region)
+    end)
+  end)
   local meta = terralib.newlist()
   meta:insertall(pretty.top_task_privileges(cx, node.privileges))
-  meta:insertall(pretty.top_task_coherence_modes(cx, node.coherence_modes))
-  meta:insertall(pretty.top_task_flags(cx, node.flags))
+  meta:insertall(pretty.top_task_coherence_modes(cx, node.coherence_modes, mapping))
+  meta:insertall(pretty.top_task_flags(cx, node.flags, mapping))
   meta:insertall(pretty.top_task_conditions(cx, node.conditions))
   meta:insertall(pretty.top_task_constraints(cx, node.constraints))
   local config_options = pretty.task_config_options(cx, node.config_options)
@@ -1069,6 +1147,8 @@ function pretty.entry(node)
   local cx = context.new_global_scope()
   return render.entry(cx:new_render_scope(), pretty.top(cx, node))
 end
+
+pretty.render = render
 
 return pretty
 

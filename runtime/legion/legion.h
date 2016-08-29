@@ -1602,7 +1602,7 @@ namespace Legion {
     public:
       AcquireLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1615,6 +1615,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1635,7 +1636,7 @@ namespace Legion {
     public:
       ReleaseLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1648,6 +1649,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1865,7 +1867,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1888,7 +1889,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;

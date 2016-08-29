@@ -44,10 +44,15 @@ void top_level_task(const Task *task,
   // available through the runtime 'get_input_args' call.  We'll 
   // use this to get the number of Fibonacci numbers to compute.
   const InputArgs &command_args = Runtime::get_input_args();
-  if (command_args.argc > 1)
-  {
-    num_fibonacci = atoi(command_args.argv[1]);
+  for (int i = 1; i < command_args.argc; i++) {
+    if (command_args.argv[i][0] == '-') {
+      i++;
+      continue;
+    }
+
+    num_fibonacci = atoi(command_args.argv[i]);
     assert(num_fibonacci >= 0);
+    break;
   }
   printf("Computing the first %d Fibonacci numbers...\n", num_fibonacci);
 
@@ -58,6 +63,16 @@ void top_level_task(const Task *task,
   // as many tasks as possible to the Legion runtime to
   // maximize performance.
   std::vector<Future> fib_results;
+
+  // We'll also time how long these tasks take to run.  Since
+  // tasks in Legion execute in a deferred fashion, we ask the
+  // runtime for the "current_time" for our context, which doesn't
+  // actually record it until some other Future becomes ready.
+  // We are given a Future that will hold the timer value once it
+  // has been recorded so that we can keep issuing more tasks.
+  Future fib_start_time = runtime->get_current_time(ctx);
+  std::vector<Future> fib_finish_times;
+  
   // Compute the first num_fibonacci numbers
   for (int i = 0; i < num_fibonacci; i++)
   {
@@ -81,6 +96,9 @@ void top_level_task(const Task *task,
     // be reused to launch as many tasks as desired, and can be modified 
     // immediately after the 'execute_task' call returns.
     fib_results.push_back(runtime->execute_task(ctx, launcher));
+    // We can use the future for the task's result to make sure we record
+    // the execution time only once that task has finished
+    fib_finish_times.push_back(runtime->get_current_time(ctx, fib_results.back()));
   }
   
   // Print out our results
@@ -105,7 +123,11 @@ void top_level_task(const Task *task,
     // way of using features requires blocking this task, we examine a 
     // non-blocking way of using future below.
     int result = fib_results[i].get_result<int>(); 
-    printf("Fibonacci(%d) = %d\n", i, result);
+    // We used 'get_current_time', which returns a double containing the
+    // number of seconds since the runtime started up.
+    double elapsed = (fib_finish_times[i].get_result<double>() -
+                      fib_start_time.get_result<double>());
+    printf("Fibonacci(%d) = %d (elapsed = %.2f s)\n", i, result, elapsed);
   }
   
   // Implementation detail for those who are interested: since futures

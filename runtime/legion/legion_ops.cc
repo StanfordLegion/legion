@@ -436,8 +436,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result->is_instance_manager());
 #endif
-      InstanceView *view = 
-        parent_ctx->create_instance_top_view(result, runtime->address_space);
+      InstanceView *view = parent_ctx->create_instance_top_view(result, 
+                                                runtime->address_space);
       return view->as_materialized_view();
     }
 
@@ -1128,14 +1128,15 @@ namespace Legion {
                                       std::vector<MappingInstance> &input_valid)
     //--------------------------------------------------------------------------
     {
-      input_valid.resize(valid.size());
+      unsigned offset = input_valid.size();
+      input_valid.resize(offset + valid.size());
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
 #ifdef DEBUG_LEGION
         assert(!ref.is_composite_ref());
 #endif
-        MappingInstance &inst = input_valid[idx];
+        MappingInstance &inst = input_valid[offset+idx];
         inst = ref.get_mapping_instance();
       }
     }
@@ -1146,8 +1147,9 @@ namespace Legion {
                                       std::vector<MappingInstance> &input_valid)
     //--------------------------------------------------------------------------
     {
-      input_valid.reserve(valid.size());
-      unsigned next_index = 0;
+      unsigned offset = input_valid.size();
+      input_valid.reserve(offset+valid.size());
+      unsigned next_index = offset;
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
@@ -1894,6 +1896,7 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
+      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -1940,7 +1943,6 @@ namespace Legion {
       // First compute our parent region requirement
       compute_parent_index();  
       begin_dependence_analysis();
-      RestrictInfo restrict_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
@@ -1969,32 +1971,13 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       InstanceSet mapped_instances;
-      // If we are restricted we know the answer
-      if (requirement.is_restricted())
-      {
-        InstanceSet restricted_insts;
-        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
-        runtime->forest->physical_convert_restricted(this, requirement,
-                                            restricted_insts, mapped_instances);
-        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                               requirement, version_info, 
-                                               this, 0/*idx*/, 
-                                               termination_event, 
-                                               false/*defer add users*/,
-                                               map_applied_conditions,
-                                               mapped_instances
-#ifdef DEBUG_LEGION
-                                               , get_logging_name()
-                                               , unique_op_id
-#endif
-                                               );
-      }
-      // If we are remapping then we also know the answer
-      else if (remap_region)
+      // If we are remapping then we know the answer
+      if (remap_region)
       {
         region.impl->get_references(mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info,
+                                               restrict_info,
                                                this, 0/*idx*/, 
                                                termination_event,
                                                false/*defer add users*/,
@@ -2026,7 +2009,8 @@ namespace Legion {
         invoke_mapper(valid_instances, mapped_instances);
         // Then we can register our mapped instances
         runtime->forest->physical_register_only(physical_ctx, requirement,
-                                                version_info, this, 0/*idx*/,
+                                                version_info, restrict_info,
+                                                this, 0/*idx*/,
                                                 termination_event, 
                                                 false/*defer add users*/,
                                                 map_applied_conditions,
@@ -2431,7 +2415,12 @@ namespace Legion {
     {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
-      if (!requirement.is_no_access())
+      if (restrict_info.has_restrictions())
+      {
+        prepare_for_mapping(restrict_info.get_instances(), 
+                            input.valid_instances);
+      }
+      else if (!requirement.is_no_access())
       {
         std::set<Memory> visible_memories;
         runtime->find_visible_memories(parent_ctx->get_executing_processor(),
@@ -2487,9 +2476,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -2745,6 +2735,8 @@ namespace Legion {
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
       dst_versions.resize(launcher.dst_requirements.size());
+      src_restrict_infos.resize(launcher.src_requirements.size());
+      dst_restrict_infos.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -2999,6 +2991,8 @@ namespace Legion {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
+      src_restrict_infos.clear();
+      dst_restrict_infos.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -3048,18 +3042,14 @@ namespace Legion {
       // Register a dependence on our predicate
       register_predicate_dependence();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        RestrictInfo restrict_info;
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_versions[idx],
-                                                     restrict_info,
+                                                     src_restrict_infos[idx],
                                                      src_privilege_paths[idx]);
-      }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
-        RestrictInfo restrict_info;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -3068,7 +3058,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
-                                                     restrict_info,
+                                                     dst_restrict_infos[idx],
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3153,9 +3143,6 @@ namespace Legion {
       {
         src_contexts[idx] = parent_ctx->find_enclosing_context(
                                                     src_parent_indexes[idx]);
-        // No need to find the valid instances if this is restricted
-        if (src_requirements[idx].is_restricted())
-          continue;
         InstanceSet &valid_instances = valid_src_instances[idx];
         runtime->forest->physical_traverse_path(src_contexts[idx],
                                                 src_privilege_paths[idx],
@@ -3171,15 +3158,16 @@ namespace Legion {
                                                 );
         // Convert these to the valid set of mapping instances
         // No need to filter for copies
-        prepare_for_mapping(valid_instances, input.src_instances[idx]);
+        if (src_restrict_infos[idx].has_restrictions())
+          prepare_for_mapping(src_restrict_infos[idx].get_instances(), 
+                              input.src_instances[idx]);
+        else
+          prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_contexts[idx] = parent_ctx->find_enclosing_context(
                                                     dst_parent_indexes[idx]);
-        // No need to find the valid instances if this is restricted
-        if (dst_requirements[idx].is_restricted())
-          continue;
         InstanceSet &valid_instances = valid_dst_instances[idx];
         runtime->forest->physical_traverse_path(dst_contexts[idx],
                                                 dst_privilege_paths[idx],
@@ -3194,7 +3182,14 @@ namespace Legion {
 #endif
                                                 );
         // No need to filter for copies
-        prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+        if (dst_restrict_infos[idx].has_restrictions())
+        {
+          prepare_for_mapping(dst_restrict_infos[idx].get_instances(), 
+                              input.dst_instances[idx]);
+          assert(!input.dst_instances[idx].empty());
+        }
+        else
+          prepare_for_mapping(valid_instances, input.dst_instances[idx]);
       }
       // Now we can ask the mapper what to do
       if (mapper == NULL)
@@ -3234,79 +3229,50 @@ namespace Legion {
         // and add it to the set of copy complete events
         ApUserEvent local_completion = Runtime::create_ap_user_event();
         copy_complete_events.insert(local_completion);
-        if (!src_requirements[idx].is_restricted())
-        {
-          // Do the conversion and check for errors
-          src_composite = 
-            perform_conversion<true/*src*/>(idx, src_requirements[idx],
-                                            output.src_instances[idx],
-                                            src_targets,
-                                            IS_REDUCE(dst_requirements[idx]));
-          if (Runtime::legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, idx, 
-                                                  src_requirements[idx],
-                                                  src_targets);
-          // If we have a compsite reference, we need to map it
-          // as a virtual region
-          if (src_composite >= 0)
-          {
-            // No need to do the registration here
-            runtime->forest->map_virtual_region(src_contexts[idx],
+        // Do the conversion and check for errors
+        src_composite = 
+          perform_conversion<true/*src*/>(idx, src_requirements[idx],
+                                          output.src_instances[idx],
+                                          src_targets,
+                                          IS_REDUCE(dst_requirements[idx]));
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                 src_requirements[idx],
-                                                src_targets[src_composite],
-                                                src_versions[idx],
-                                                parent_ctx, this,
-                                                false/*needs fields*/
+                                                src_targets);
+        // If we have a compsite reference, we need to map it
+        // as a virtual region
+        if (src_composite >= 0)
+        {
+          // No need to do the registration here
+          runtime->forest->map_virtual_region(src_contexts[idx],
+                                              src_requirements[idx],
+                                              src_targets[src_composite],
+                                              src_versions[idx],
+                                              parent_ctx, this,
+                                              false/*needs fields*/
 #ifdef DEBUG_LEGION
-                                                , idx, get_logging_name()
-                                                , unique_op_id
+                                              , idx, get_logging_name()
+                                              , unique_op_id
 #endif
-                                                );
-          }
-          else
-          {
-            // Now do the registration
-            set_mapping_state(idx, true/*src*/);
-            runtime->forest->physical_register_only(src_contexts[idx],
-                                                    src_requirements[idx],
-                                                    src_versions[idx],
-                                                    this, idx, local_completion,
-                                                    false/*defer add users*/,
-                                                    map_applied_conditions,
-                                                    src_targets
-#ifdef DEBUG_LEGION
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-          }
+                                              );
         }
         else
         {
-          // Restricted case, get the instances from the parent
-          InstanceSet restricted_instances;
-          parent_ctx->get_physical_references(src_parent_indexes[idx],
-                                              restricted_instances);
-          runtime->forest->physical_convert_restricted(this, 
-              src_requirements[idx], restricted_instances, src_targets);
-          if (Runtime::legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, idx, 
-                                                  src_requirements[idx],
-                                                  src_targets);
+          // Now do the registration
           set_mapping_state(idx, true/*src*/);
-          runtime->forest->traverse_and_register(src_contexts[idx],
-                                                 src_privilege_paths[idx],
-                                                 src_requirements[idx],
-                                                 src_versions[idx], this, idx,
-                                                 local_completion, 
-                                                 false/*defer add users*/,
-                                                 map_applied_conditions,
-                                                 src_targets
+          runtime->forest->physical_register_only(src_contexts[idx],
+                                                  src_requirements[idx],
+                                                  src_versions[idx],
+                                                  src_restrict_infos[idx],
+                                                  this, idx, local_completion,
+                                                  false/*defer add users*/,
+                                                  map_applied_conditions,
+                                                  src_targets
 #ifdef DEBUG_LEGION
-                                                 , get_logging_name()
-                                                 , unique_op_id
+                                                  , get_logging_name()
+                                                  , unique_op_id
 #endif
-                                                 );
+                                                  );
         }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -3314,50 +3280,24 @@ namespace Legion {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
           dst_requirements[idx].privilege = READ_WRITE;
-        // Common case is not restricted
-        if (!dst_requirements[idx].is_restricted())
-        {
-          perform_conversion<false/*src*/>(idx, dst_requirements[idx],
-                                           output.dst_instances[idx],
-                                           dst_targets);
-          // Now do the registration
-          set_mapping_state(idx, false/*src*/);
-          runtime->forest->physical_register_only(dst_contexts[idx],
-                                                  dst_requirements[idx],
-                                                  dst_versions[idx],
-                                                  this, idx, local_completion,
-                                                  false/*defer add users*/,
-                                                  map_applied_conditions,
-                                                  dst_targets
+        perform_conversion<false/*src*/>(idx, dst_requirements[idx],
+                                         output.dst_instances[idx],
+                                         dst_targets);
+        // Now do the registration
+        set_mapping_state(idx, false/*src*/);
+        runtime->forest->physical_register_only(dst_contexts[idx],
+                                                dst_requirements[idx],
+                                                dst_versions[idx],
+                                                dst_restrict_infos[idx],
+                                                this, idx, local_completion,
+                                                false/*defer add users*/,
+                                                map_applied_conditions,
+                                                dst_targets
 #ifdef DEBUG_LEGION
-                                                  , get_logging_name()
-                                                  , unique_op_id
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                                  );
-        }
-        else
-        {
-          // Restricted case, get the instances from the parent
-          InstanceSet restricted_instances;
-          parent_ctx->get_physical_references(dst_parent_indexes[idx],
-                                              restricted_instances);
-          runtime->forest->physical_convert_restricted(this, 
-              dst_requirements[idx], restricted_instances, dst_targets);
-          set_mapping_state(idx, false/*src*/);
-          runtime->forest->traverse_and_register(dst_contexts[idx],
-                                                 dst_privilege_paths[idx],
-                                                 dst_requirements[idx],
-                                                 dst_versions[idx], this, idx,
-                                                 local_completion, 
-                                                 false/*defer add users*/, 
-                                                 map_applied_conditions,
-                                                 dst_targets
-#ifdef DEBUG_LEGION
-                                                 , get_logging_name()
-                                                 , unique_op_id
-#endif
-                                                 );
-        }
+                                                );
         if (Runtime::legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, 
              idx + src_requirements.size(), dst_requirements[idx], dst_targets);
@@ -3410,8 +3350,11 @@ namespace Legion {
           Runtime::trigger_event(local_completion, across_done);
         }
         // Apply our changes to the version states
-        src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
-                            runtime->address_space, map_applied_conditions);
+        // Don't apply changes to the source if we have a composite instance
+        // because it is unsound to mutate the region tree that way
+        if (src_composite == -1)
+          src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
+                              runtime->address_space, map_applied_conditions);
         dst_versions[idx].apply_mapping(dst_contexts[idx].get_id(),
                             runtime->address_space, map_applied_conditions); 
       }
@@ -3891,9 +3834,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -4964,7 +4908,6 @@ namespace Legion {
                                   LegionTrace *trace, int close, 
                                   const VersionInfo &close_info,
                                   const VersionInfo &ver_info,
-                                  const RestrictInfo &res_info,
                                   const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------
     {
@@ -4973,8 +4916,9 @@ namespace Legion {
       // Merge in the two different version informations
       version_info.merge(close_info, close_m);
       version_info.merge(ver_info, close_m);
-      restrict_info.merge(res_info, close_m);
       parent_req_index = create->find_parent_index(close_idx);
+      if (parent_ctx->has_restrictions())
+        parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)
       {
         perform_logging(true/*is intermediate close op*/, false/*read only*/);
@@ -5051,12 +4995,7 @@ namespace Legion {
         composite_idx = invoke_mapper(valid_instances, chosen_instances);
       }
       else
-      {
-        InstanceSet restricted_insts;
-        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
-        runtime->forest->physical_convert_restricted(this, requirement,
-                                            restricted_insts, chosen_instances);
-      }
+        chosen_instances = restrict_info.get_instances();
       // Now we can perform our close operation
       ApEvent close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
@@ -5192,7 +5131,11 @@ namespace Legion {
       Mapper::MapCloseInput input;
       Mapper::MapCloseOutput output;
       // No need to filter for close operations
-      prepare_for_mapping(valid_instances, input.valid_instances);
+      if (restrict_info.has_restrictions())
+        prepare_for_mapping(restrict_info.get_instances(), 
+                            input.valid_instances);
+      else
+        prepare_for_mapping(valid_instances, input.valid_instances);
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -5250,9 +5193,10 @@ namespace Legion {
               it != missing_fields.end(); it++)
         {
           const void *name; size_t name_size;
-          runtime->retrieve_semantic_information(
-              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size, false, false);
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -5892,44 +5836,6 @@ namespace Legion {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region); 
-      // Do a little bit of error checking
-      {
-        const RegionRequirement &physical_req = 
-          launcher.physical_region.impl->get_requirement();
-        if (!runtime->forest->is_subregion(launcher.logical_region, 
-                                           physical_req.region))
-        {
-          log_task.error("ERROR: Acquire operation requested privileges "
-                         "on logical region (%x,%d,%d) which is "
-                         "not a subregion of the physical instance "
-                         "region (%x,%d,%d)",
-                         launcher.logical_region.index_space.id,
-                         launcher.logical_region.field_space.id,
-                         launcher.logical_region.get_tree_id(),
-                         physical_req.region.index_space.id,
-                         physical_req.region.field_space.id,
-                         physical_req.region.get_tree_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_ACQUIRE_MISMATCH);
-        }
-        for (std::set<FieldID>::const_iterator it = launcher.fields.begin();
-              it != launcher.fields.end(); it++)
-        {
-          if (physical_req.privilege_fields.find(*it) == 
-              physical_req.privilege_fields.end())
-          {
-            log_task.error("ERROR: Acquire operation requested on "
-                           "field %d which is not contained in the "
-                           "requested physical instance", *it);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_ACQUIRE_MISMATCH);
-          }
-        }
-      }
       if (launcher.fields.empty())
       {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
@@ -5943,7 +5849,6 @@ namespace Legion {
       parent_region = launcher.parent_region;
       fields = launcher.fields; 
       // Mark the requirement restricted
-      region = launcher.physical_region;
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -5998,14 +5903,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();  
-      // Remove our reference to the physical region
-      region = PhysicalRegion();
       privilege_path.clear();
       fields.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -6054,17 +5958,13 @@ namespace Legion {
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
-      RestrictInfo restrict_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
                                                    privilege_path);
-      // Now tell the forest that we have user-level coherence
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->acquire_user_coherence(ctx, requirement.region,
-                                              requirement.privilege_fields);
+      // Tell the parent that we've done an acquisition
+      parent_ctx->add_acquisition(this, requirement);
       end_dependence_analysis();
     }
 
@@ -6128,18 +6028,13 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
-      InstanceSet mapped_instances;
-      {
-        InstanceSet restricted_insts;
-        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
-        runtime->forest->physical_convert_restricted(this, requirement,
-                                            restricted_insts, mapped_instances);
-      }
+      InstanceSet mapped_instances = restrict_info.get_instances();
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
+                                             restrict_info,
                                              this, 0/*idx*/, completion_event, 
                                              false/*defer add users*/,
                                              map_applied_conditions,
@@ -6474,44 +6369,6 @@ namespace Legion {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region); 
-      // Do a little bit of error checking
-      {
-        const RegionRequirement &physical_req = 
-          launcher.physical_region.impl->get_requirement();
-        if (!runtime->forest->is_subregion(launcher.logical_region, 
-                                           physical_req.region))
-        {
-          log_task.error("ERROR: Release operation requested privileges "
-                               "on logical region (%x,%d,%d) which is "
-                               "not a subregion of the physical instance "
-                               "region (%x,%d,%d)",
-                               launcher.logical_region.index_space.id,
-                               launcher.logical_region.field_space.id,
-                               launcher.logical_region.get_tree_id(),
-                               physical_req.region.index_space.id,
-                               physical_req.region.field_space.id,
-                               physical_req.region.get_tree_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_RELEASE_MISMATCH);
-        }
-        for (std::set<FieldID>::const_iterator it = launcher.fields.begin();
-              it != launcher.fields.end(); it++)
-        {
-          if (physical_req.privilege_fields.find(*it) == 
-              physical_req.privilege_fields.end())
-          {
-            log_task.error("ERROR: Release operation requested on "
-                                 "field %d which is not contained in the "
-                                 "requested physical instance", *it);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_RELEASE_MISMATCH);
-          }
-        }
-      }
       if (launcher.fields.empty())
       {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF RELEASE OPERATION"
@@ -6524,7 +6381,6 @@ namespace Legion {
       logical_region = launcher.logical_region;
       parent_region = launcher.parent_region;
       fields = launcher.fields; 
-      region = launcher.physical_region;
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
@@ -6579,14 +6435,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();
-      // Remove our reference to the physical region
-      region = PhysicalRegion();
       privilege_path.clear();
       fields.clear();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -6634,19 +6489,14 @@ namespace Legion {
       begin_dependence_analysis();
       // Register a dependence on our predicate
       register_predicate_dependence();
-      // First register any mapping dependences that we have
-      RestrictInfo restrict_info;
+      // Tell the parent that we did the release
+      parent_ctx->remove_acquisition(this, requirement);
+      // Register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    version_info,
                                                    restrict_info,
                                                    privilege_path);
-      // Now tell the forest that we are relinquishing user-level coherence
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->restrict_user_coherence(ctx, parent_ctx, 
-                                               requirement.region,
-                                               requirement.privilege_fields);
       end_dependence_analysis();
     }
 
@@ -6709,18 +6559,13 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       // We already know what the answer has to be here 
-      InstanceSet mapped_instances;
-      {
-        InstanceSet restricted_insts;
-        parent_ctx->get_physical_references(parent_req_index, restricted_insts);
-        runtime->forest->physical_convert_restricted(this, requirement,
-                                            restricted_insts, mapped_instances);
-      }
+      InstanceSet mapped_instances = restrict_info.get_instances();
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
+                                             restrict_info,
                                              this, 0/*idx*/, completion_event, 
                                              false/*defer add users*/,
                                              map_applied_conditions,
@@ -7106,7 +6951,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), runtime->address_space,
-            runtime->address_space, RtUserEvent::NO_RT_USER_EVENT, this));
+            runtime->address_space, this));
       collective = dc;
       return future;
     }
@@ -8079,6 +7924,7 @@ namespace Legion {
       }
       dependences.clear();
       single_task_map.clear();
+      mapping_dependences.clear();
       input.tasks.clear();
       input.constraints.clear();
       output.task_processors.clear();
@@ -8186,6 +8032,7 @@ namespace Legion {
         // Iterate over all the recorded dependences
         std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
         constraints.resize(dependences.size());
+        mapping_dependences.resize(single_tasks.size());
         // Clear the dependence map now, we'll fill it in again
         // with a different set of points
         dependence_map.clear();
@@ -8199,6 +8046,7 @@ namespace Legion {
           assert((*it)->op_indexes.size() == (*it)->req_indexes.size());
 #endif
           // Add constraints for all the different elements
+          std::set<unsigned> single_indexes;
           for (unsigned idx = 0; idx < (*it)->op_indexes.size(); idx++)
           {
             unsigned req_index = (*it)->req_indexes[idx];
@@ -8215,6 +8063,17 @@ namespace Legion {
               // Update the dependence map
               std::pair<unsigned,unsigned> key(single_task_map[*sit],req_index);
               dependence_map[key] = constraint_idx;
+              single_indexes.insert(key.first);
+            }
+          }
+          // Record the mapping dependences
+          for (std::set<unsigned>::const_iterator it1 = 
+                single_indexes.begin(); it1 != single_indexes.end(); it1++)
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  single_indexes.begin(); it2 != it1; it2++)
+            {
+              mapping_dependences[*it1].insert(*it2);
             }
           }
         }
@@ -8282,13 +8141,20 @@ namespace Legion {
           task->target_proc = proc;
         }
       }
+      // If we have an slices we need to do our prewalks before we map points
+      if (!slice_tasks.empty())
+      {
+        for (std::set<SliceTask*>::const_iterator it = slice_tasks.begin();
+              it != slice_tasks.end(); it++)
+          (*it)->prewalk_slice();
+      }
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
-        if (!mapper.map_tasks(single_tasks))
+        if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
+        mapping_dependences.clear();
       }
-
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       std::set<RtEvent> tasks_all_mapped;
@@ -8643,7 +8509,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochTriggerer::MustEpochTriggerer(MustEpochOp *own)
-      : owner(own)
+      : current_proc(own->get_parent()->get_executing_processor()), owner(own)
     //--------------------------------------------------------------------------
     {
       trigger_lock = Reservation::create_reservation();
@@ -8651,7 +8517,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochTriggerer::MustEpochTriggerer(const MustEpochTriggerer &rhs)
-      : owner(rhs.owner)
+      : current_proc(rhs.current_proc), owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8757,6 +8623,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_individual(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
+      task->set_target_proc(current_proc);
       if (!task->trigger_execution())
       {
         AutoLock t_lock(trigger_lock);
@@ -8768,6 +8635,7 @@ namespace Legion {
     void MustEpochTriggerer::trigger_index(IndexTask *task)
     //--------------------------------------------------------------------------
     {
+      task->set_target_proc(current_proc);
       if (!task->trigger_execution())
       {
         AutoLock t_lock(trigger_lock);
@@ -8827,25 +8695,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks)
+    bool MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
+                            const std::vector<std::set<unsigned> > &dependences)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> wait_events;   
+#ifdef DEBUG_LEGION
+      assert(single_tasks.size() == dependences.size());
+#endif
       MustEpochMapArgs args;
       args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
-      for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
-            it != single_tasks.end(); it++)
+      // For correctness we still have to abide by the mapping dependences
+      // computed on the individual tasks while we are mapping them
+      std::vector<RtEvent> mapped_events(single_tasks.size());
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
-        args.task = *it;
-        RtEvent wait = 
-          owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                                  HLR_MUST_MAP_ID, 
-                                                  HLR_THROUGHPUT_PRIORITY,
-                                                  owner);
-        if (wait.exists())
-          wait_events.insert(wait);
+        // Figure out our preconditions
+        std::set<RtEvent> preconditions;
+        for (std::set<unsigned>::const_iterator it = 
+              dependences[idx].begin(); it != dependences[idx].end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it) < idx);
+#endif
+          preconditions.insert(mapped_events[*it]);          
+        }
+        args.task = single_tasks[idx];
+        if (!preconditions.empty())
+        {
+          RtEvent precondition = Runtime::merge_events(preconditions);
+          mapped_events[idx] = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                    HLR_MUST_MAP_ID,
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner, precondition); 
+        }
+        else
+          mapped_events[idx] = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                    HLR_MUST_MAP_ID,
+                                                    HLR_THROUGHPUT_PRIORITY,
+                                                    owner);
       }
+      std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
@@ -9983,13 +9875,10 @@ namespace Legion {
         InstanceSet mapped_instances;
         if (restrict_info.has_restrictions())
         {
-          InstanceSet restricted_instances;
-          parent_ctx->get_physical_references(parent_req_index, 
-                                              restricted_instances);
-          runtime->forest->physical_convert_restricted(this, requirement,
-                                      restricted_instances, mapped_instances);
+          mapped_instances = restrict_info.get_instances();
           runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                  requirement, version_info, 
+                                                 restrict_info,
                                                  this, 0/*idx*/, 
                                                  ApEvent::NO_AP_EVENT,
                                                  false/*defer add users*/,
@@ -10077,13 +9966,10 @@ namespace Legion {
       InstanceSet mapped_instances;
       if (restrict_info.has_restrictions())
       {
-        InstanceSet restricted_instances;
-        parent_ctx->get_physical_references(parent_req_index, 
-                                            restricted_instances);
-        runtime->forest->physical_convert_restricted(this, requirement,
-                                    restricted_instances, mapped_instances);
+        mapped_instances = restrict_info.get_instances();
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
+                                               restrict_info,
                                                this, 0/*idx*/, 
                                                ApEvent::NO_AP_EVENT, 
                                                false/*defer add users*/,
@@ -10403,6 +10289,22 @@ namespace Legion {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
       return region;
     }
 
@@ -10441,6 +10343,22 @@ namespace Legion {
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
       return region;
     }
 
@@ -10450,6 +10368,7 @@ namespace Legion {
     {
       activate_operation();
       file_name = NULL;
+      file_instance = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -10525,13 +10444,9 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_FILE_ATTACH);
       }
-      // After we are done with our dependence analysis, then we 
-      // need to add restricted coherence on the logical region 
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->restrict_user_coherence(ctx, parent_ctx, 
-                                               requirement.region,
-                                               requirement.privilege_fields);
+      // Tell the parent that we added the restriction
+      file_instance = runtime->forest->create_file_instance(this, requirement);
+      parent_ctx->add_restriction(this, file_instance, requirement);
       end_dependence_analysis();
     }
 
@@ -10568,7 +10483,9 @@ namespace Legion {
 #endif
                                               );
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
-                                                        requirement, this,
+                                                        parent_ctx,
+                                                        requirement,
+                                                        file_instance,
                                                         version_info);
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
@@ -10620,10 +10537,9 @@ namespace Legion {
              const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
-      // TODO: Update attach operation to fill in 
-      // constraints for different file types
-      assert(false);
-      if (file_type == HDF5_FILE) {
+      PhysicalInstance result = PhysicalInstance::NO_INST;
+      if (file_type == HDF5_FILE) 
+      {
         // First build the set of field paths
         std::vector<const char*> field_files(field_map.size());
         unsigned idx = 0;
@@ -10633,20 +10549,39 @@ namespace Legion {
           field_files[idx] = it->second;
         }
         // Now ask the low-level runtime to create the instance
-        PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
-                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
+        result = dom.create_hdf5_instance(file_name, sizes,
+                            field_files, (file_mode == LEGION_FILE_READ_ONLY));
+        constraints.specialized_constraint = 
+          SpecializedConstraint(HDF5_FILE_SPECIALIZE);
+      } 
+      else if (file_type == NORMAL_FILE) 
+      {
+        result = dom.create_file_instance(file_name, sizes, file_mode);
+        constraints.specialized_constraint = 
+          SpecializedConstraint(GENERIC_FILE_SPECIALIZE);
+      }
+      else // unknown file type
+        assert(false);
 #ifdef DEBUG_LEGION
       assert(result.exists());
-#endif
-        return result;
-      } else if (file_type == NORMAL_FILE) {
-        PhysicalInstance result = 
-          dom.create_file_instance(file_name, sizes, file_mode);
-        return result;
-      } else {
-        assert(0);
-        return PhysicalInstance::NO_INST;
+#endif      
+      constraints.field_constraint = 
+        FieldConstraint(requirement.privilege_fields, 
+                        false/*contiguous*/, false/*inorder*/);
+      constraints.memory_constraint = 
+        MemoryConstraint(result.get_location().kind());
+      // TODO: Fill in the other constraints: 
+      // OrderingConstraint, SplittingConstraints DimensionConstraints,
+      // AlignmentConstraints, OffsetConstraints
+      // Fill in the rest of the constraints
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::set<FieldID>::const_iterator it = 
+              requirement.privilege_fields.begin(); it !=
+              requirement.privilege_fields.end(); it++)
+          LegionSpy::log_mapping_decision(unique_op_id,0/*idx*/,*it,result.id);
       }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10840,6 +10775,22 @@ namespace Legion {
       // Delay getting a reference until trigger_execution().  This means we
       //  have to keep region
       this->region = region;
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
+                                        unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10889,12 +10840,8 @@ namespace Legion {
       // First compute the parent index
       compute_parent_index();
       begin_dependence_analysis();
-      // Before we do our dependence analysis, we can remove the 
-      // restricted coherence on the logical region
-      RegionTreeContext ctx = 
-        parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->acquire_user_coherence(ctx, requirement.region,
-                                              requirement.privilege_fields);
+      // Tell the parent that we've release the restriction
+      parent_ctx->remove_restriction(this, requirement);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    version_info,
@@ -11047,12 +10994,12 @@ namespace Legion {
     Future TimingOp::initialize(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = ABSOLUTE_MEASUREMENT;
       precondition = pre; 
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 
@@ -11060,12 +11007,12 @@ namespace Legion {
     Future TimingOp::initialize_microseconds(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = MICROSECOND_MEASUREMENT;
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 
@@ -11073,12 +11020,12 @@ namespace Legion {
     Future TimingOp::initialize_nanoseconds(SingleTask *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
+      initialize_operation(ctx, true/*track*/);
       kind = NANOSECOND_MEASUREMENT;
       precondition = pre;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, 
-                  RtUserEvent::NO_RT_USER_EVENT, this));
+                  runtime->address_space, runtime->address_space, this));
       return result;
     }
 
@@ -11134,10 +11081,10 @@ namespace Legion {
       {
         ApEvent wait_on = precondition.impl->get_ready_event();
         DeferredExecuteArgs args;
-        args.hlr_id = HLR_DEFERRED_EXECUTE_ID;
+        args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         args.proxy_this = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_EXECUTE_ID,
+                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
                                          HLR_LATENCY_PRIORITY, this, 
                                          Runtime::protect_event(wait_on));
       }

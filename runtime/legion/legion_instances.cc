@@ -309,6 +309,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<FieldID,unsigned>::const_iterator 
+	     it = field_indexes.begin(); it != field_indexes.end(); ++it)
+	fields.insert(it->first);
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutDescription::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -499,10 +508,9 @@ namespace Legion {
                                      AddressSpaceID local_space,
                                      RegionNode *node,
                                      PhysicalInstance inst, const Domain &d, 
-                                     bool own, RtUserEvent dest_event, 
-                                     bool register_now)
+                                     bool own, bool register_now)
       : DistributedCollectable(ctx->runtime, did, 
-                         owner_space, local_space, dest_event, register_now), 
+                               owner_space, local_space, register_now), 
         context(ctx), memory_manager(memory), region_node(node), layout(desc),
         instance(inst), instance_domain(d), 
         own_domain(own), pointer_constraint(constraint)
@@ -510,25 +518,18 @@ namespace Legion {
     {
       if (region_node != NULL)
         region_node->register_physical_manager(this);
-      // If we are not the owner, add a resource reference
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
     }
 
     //--------------------------------------------------------------------------
     PhysicalManager::~PhysicalManager(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(MANAGER_VIRTUAL_CHANNEL);
       if (region_node != NULL)
         region_node->unregister_physical_manager(this);
-      // If we're the owner remove our resource references
-      if (is_owner())
-      {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
-      else
+      // Remote references removed by DistributedCollectable destructor
+      if (!is_owner())
         memory_manager->unregister_remote_instance(this);
       // If we own our domain, then we need to delete it now
       if (own_domain)
@@ -536,6 +537,64 @@ namespace Legion {
         Realm::IndexSpace is = instance_domain.get_index_space();
         is.destroy();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::log_instance_creation(UniqueID creator_id,
+                Processor proc, const std::vector<LogicalRegion> &regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(Runtime::legion_spy_enabled);
+#endif
+      LegionSpy::log_physical_instance_creator(instance.id, creator_id,proc.id);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        LegionSpy::log_physical_instance_creation_region(instance.id, 
+                                                         regions[idx]);
+      const LayoutConstraints *constraints = layout->constraints;
+      LegionSpy::log_instance_specialized_constraint(instance.id,
+          constraints->specialized_constraint.kind, 
+          constraints->specialized_constraint.redop);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(constraints->memory_constraint.has_kind);
+#endif
+      LegionSpy::log_instance_memory_constraint(instance.id,
+          constraints->memory_constraint.kind);
+      LegionSpy::log_instance_field_constraint(instance.id,
+          constraints->field_constraint.contiguous, 
+          constraints->field_constraint.inorder,
+          constraints->field_constraint.field_set.size());
+      for (std::vector<FieldID>::const_iterator it = 
+            constraints->field_constraint.field_set.begin(); it !=
+            constraints->field_constraint.field_set.end(); it++)
+        LegionSpy::log_instance_field_constraint_field(instance.id, *it);
+      LegionSpy::log_instance_ordering_constraint(instance.id,
+          constraints->ordering_constraint.contiguous,
+          constraints->ordering_constraint.ordering.size());
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraints->ordering_constraint.ordering.begin(); it !=
+            constraints->ordering_constraint.ordering.end(); it++)
+        LegionSpy::log_instance_ordering_constraint_dimension(instance.id, *it);
+      for (std::vector<SplittingConstraint>::const_iterator it = 
+            constraints->splitting_constraints.begin(); it !=
+            constraints->splitting_constraints.end(); it++)
+        LegionSpy::log_instance_splitting_constraint(instance.id,
+                                it->kind, it->value, it->chunks);
+      for (std::vector<DimensionConstraint>::const_iterator it = 
+            constraints->dimension_constraints.begin(); it !=
+            constraints->dimension_constraints.end(); it++)
+        LegionSpy::log_instance_dimension_constraint(instance.id,
+                                    it->kind, it->eqk, it->value);
+      for (std::vector<AlignmentConstraint>::const_iterator it = 
+            constraints->alignment_constraints.begin(); it !=
+            constraints->alignment_constraints.end(); it++)
+        LegionSpy::log_instance_alignment_constraint(instance.id,
+                                it->fid, it->eqk, it->alignment);
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            constraints->offset_constraints.begin(); it != 
+            constraints->offset_constraints.end(); it++)
+        LegionSpy::log_instance_offset_constraint(instance.id,
+                                          it->fid, it->offset);
     }
 
     //--------------------------------------------------------------------------
@@ -862,7 +921,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      log_garbage.info("Deleting physical instance " IDFMT " in memory " 
+      log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
@@ -921,13 +980,10 @@ namespace Legion {
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
-                                     RtUserEvent destruction_event, 
-                                     bool register_now, ApEvent u_event, 
-                                     InstanceFlag flags/*=NO_INSTANCE_FLAGS*/)
+                                     bool register_now, ApEvent u_event) 
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
-                        own, destruction_event, register_now),
-        use_event(u_event), instance_flags(flags)
+                        own, register_now),use_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -953,8 +1009,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0, NULL,
-                    PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, 
-                    RtUserEvent::NO_RT_USER_EVENT, false),
+                    PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, false),
         use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1042,9 +1097,7 @@ namespace Legion {
                                            logical_owner, region_node,
                                            const_cast<InstanceManager*>(this),
                                            (MaterializedView*)NULL/*parent*/, 
-                                           context_uid,
-                                           RtUserEvent::NO_RT_USER_EVENT, 
-                                           true/*register now*/);
+                                           context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
     }
@@ -1146,7 +1199,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1157,13 +1209,11 @@ namespace Legion {
         rez.serialize(instance_domain);
         rez.serialize(region_node->handle);
         rez.serialize(use_event);
-        rez.serialize(instance_flags);
-        rez.serialize(destroy_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
       }
       context->runtime->send_instance_manager(target, rez);
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1186,10 +1236,6 @@ namespace Legion {
       derez.deserialize(handle);
       ApEvent use_event;
       derez.deserialize(use_event);
-      InstanceFlag flags;
-      derez.deserialize(flags);
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
       RegionNode *target_node = runtime->forest->get_node(handle);
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
@@ -1204,15 +1250,14 @@ namespace Legion {
                                              owner_space,runtime->address_space,
                                              memory, inst, inst_domain, 
                                              false/*owns*/, target_node, layout,
-                                             pointer_constraint, destroy_event,
-                                             false/*reg now*/, use_event,flags);
+                                             pointer_constraint,
+                                             false/*reg now*/, use_event);
       else
         man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
                                     runtime->address_space, memory, inst,
                                     inst_domain, false/*owns*/,
                                     target_node, layout, pointer_constraint, 
-                                    destroy_event, false/*reg now*/, 
-                                    use_event, flags);
+                                    false/*reg now*/, use_event);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1221,7 +1266,7 @@ namespace Legion {
     bool InstanceManager::is_attached_file(void) const
     //--------------------------------------------------------------------------
     {
-      return (instance_flags & ATTACH_FILE_FLAG);
+      return layout->constraints->specialized_constraint.is_file();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1237,10 +1282,9 @@ namespace Legion {
                                        const PointerConstraint &constraint,
                                        const Domain &inst_domain, bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
-                                       const ReductionOp *o, 
-                                       RtUserEvent dest_event,bool register_now)
+                                       const ReductionOp *o, bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
-        local_space, node, inst, inst_domain, own_dom, dest_event,register_now),
+        local_space, node, inst, inst_domain, own_dom, register_now),
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     {  
@@ -1256,6 +1300,13 @@ namespace Legion {
     ReductionManager::~ReductionManager(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionManager::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(logical_field);
     }
 
     //--------------------------------------------------------------------------
@@ -1293,7 +1344,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
-      RtUserEvent destroy_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1308,13 +1358,12 @@ namespace Legion {
         rez.serialize<bool>(is_foldable());
         rez.serialize(get_pointer_space());
         rez.serialize(get_use_event());
-        rez.serialize(destroy_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
       }
       // Now send the message
       context->runtime->send_reduction_manager(target, rez);
-      register_remote_instance(target, destroy_event);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1345,8 +1394,6 @@ namespace Legion {
       derez.deserialize(ptr_space);
       ApEvent use_event;
       derez.deserialize(use_event);
-      RtUserEvent destroy_event;
-      derez.deserialize(destroy_event);
       RegionNode *target_node = runtime->forest->get_node(handle);
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
@@ -1369,7 +1416,7 @@ namespace Legion {
                                                     pointer_constraint, 
                                                     inst_dom, false/*owner*/,
                                                     target_node, redop, op,
-                                                    use_event, destroy_event,
+                                                    use_event,
                                                     false/*reg now*/);
         else
           man = legion_new<FoldReductionManager>(runtime->forest, 
@@ -1377,8 +1424,7 @@ namespace Legion {
                                            runtime->address_space, memory, inst,
                                            layout, pointer_constraint, inst_dom,
                                            false/*own*/, target_node, redop, op,
-                                           use_event, destroy_event, 
-                                           false/*reg now*/);
+                                           use_event, false/*reg now*/);
       }
       else
       {
@@ -1393,16 +1439,15 @@ namespace Legion {
                                                     pointer_constraint, 
                                                     inst_dom, false/*owner*/,
                                                     target_node, redop, op,
-                                                    ptr_space, destroy_event,
+                                                    ptr_space,
                                                     false/*reg now*/);
         else
           man = legion_new<ListReductionManager>(runtime->forest, did, 
                                            logical_field, owner_space, 
                                            runtime->address_space, memory, inst,
-                                           layout, pointer_constraint, inst_dom, 
+                                           layout, pointer_constraint, inst_dom,
                                            false/*own*/, target_node, redop,op,
-                                           ptr_space, destroy_event, 
-                                           false/*reg now*/);
+                                           ptr_space, false/*reg now*/);
       }
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1423,9 +1468,7 @@ namespace Legion {
                                        owner_space, owner_space, 
                                        logical_owner, region_node, 
                                        const_cast<ReductionManager*>(this),
-                                       context_uid, 
-                                       RtUserEvent::NO_RT_USER_EVENT,
-                                       true/*register now*/);
+                                       context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
     }
@@ -1449,11 +1492,10 @@ namespace Legion {
                                                ReductionOpID red,
                                                const ReductionOp *o, 
                                                Domain dom, 
-                                               RtUserEvent dest_event,
                                                bool register_now)
       : ReductionManager(ctx, encode_reduction_list_did(did), f, owner_space, 
                          local_space, mem, inst, desc, cons, d, own_dom, node, 
-                         red, o, dest_event, register_now), ptr_space(dom)
+                         red, o, register_now), ptr_space(dom)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1472,8 +1514,7 @@ namespace Legion {
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, 
-                         RtUserEvent::NO_RT_USER_EVENT, false),
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
     {
@@ -1612,11 +1653,10 @@ namespace Legion {
                                                ReductionOpID red,
                                                const ReductionOp *o,
                                                ApEvent u_event,
-                                               RtUserEvent dest_event,
                                                bool register_now)
       : ReductionManager(ctx, encode_reduction_fold_did(did), f, owner_space, 
                          local_space, mem, inst, desc, cons, d, own_dom, node, 
-                         red, o, dest_event, register_now), use_event(u_event)
+                         red, o, register_now), use_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1635,8 +1675,7 @@ namespace Legion {
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, 
-                         RtUserEvent::NO_RT_USER_EVENT, false),
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1764,8 +1803,7 @@ namespace Legion {
                                    DistributedID did,AddressSpaceID local_space)
       : PhysicalManager(ctx, NULL/*memory*/, desc, constraint, did, local_space,
                         local_space, NULL/*region*/, PhysicalInstance::NO_INST,
-                        Domain::NO_DOMAIN, false/*own domain*/, 
-                        RtUserEvent::NO_RT_USER_EVENT, true/*reg now*/)
+                        Domain::NO_DOMAIN, false/*own domain*/, true/*reg now*/)
     //--------------------------------------------------------------------------
     {
     }
@@ -1773,8 +1811,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(const VirtualManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0,
-               NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, 
-               RtUserEvent::NO_RT_USER_EVENT, false)
+               NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1835,6 +1872,13 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualManager::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      // do nothing - can't really insert "all fields"
     }
 
     //--------------------------------------------------------------------------
@@ -1975,7 +2019,6 @@ namespace Legion {
                                                  instance, instance_domain, 
                                                  own_domain, ancestor, layout, 
                                                  pointer_constraint, 
-                                                 RtUserEvent::NO_RT_USER_EVENT,
                                                  true/*register now*/, ready);
             break;
           }
@@ -2016,7 +2059,6 @@ namespace Legion {
                                               instance_domain, own_domain,
                                               ancestor, redop_id,
                                               reduction_op, filled_and_ready,
-                                              RtUserEvent::NO_RT_USER_EVENT,
                                               true/*register now*/); 
             break;
           }

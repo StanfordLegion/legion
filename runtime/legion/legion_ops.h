@@ -655,6 +655,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
+      RestrictInfo restrict_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
@@ -734,6 +735,8 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
+      std::vector<RestrictInfo>   src_restrict_infos;
+      std::vector<RestrictInfo>   dst_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -996,7 +999,6 @@ namespace Legion {
                       LegionTrace *trace, int close_idx, 
                       const VersionInfo &close_info,
                       const VersionInfo &version_info,
-                      const RestrictInfo &restrict_info,
                       const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
@@ -1194,6 +1196,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1261,6 +1264,7 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
+      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1542,6 +1546,7 @@ namespace Legion {
                unsigned/*dependence index*/> dependence_map;
       std::vector<DependenceRecord*> dependences;
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
+      std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     };
 
     /**
@@ -1578,6 +1583,7 @@ namespace Legion {
       static void handle_individual(const void *args);
       static void handle_index(const void *args);
     private:
+      const Processor current_proc;
       MustEpochOp *const owner;
       Reservation trigger_lock;
       std::set<IndividualTask*> failed_individual_tasks;
@@ -1603,7 +1609,8 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      bool map_tasks(const std::deque<SingleTask*> &single_tasks);
+      bool map_tasks(const std::deque<SingleTask*> &single_tasks,
+            const std::vector<std::set<unsigned> > &dependences);
       void map_task(SingleTask *task);
     public:
       static void handle_map_task(const void *args);
@@ -2044,6 +2051,7 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
+      InstanceManager *file_instance;
     };
 
     /**

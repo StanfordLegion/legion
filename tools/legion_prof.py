@@ -219,9 +219,9 @@ class BaseRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for r in self.subranges:
-            r.update_task_stats(stat)
+            r.update_task_stats(stat, proc)
 
     def active_time(self):
         total = 0
@@ -374,9 +374,9 @@ class MessageRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()
@@ -415,9 +415,9 @@ class MapperCallRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()
@@ -456,9 +456,9 @@ class RuntimeCallRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()

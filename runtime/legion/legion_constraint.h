@@ -221,6 +221,11 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
+      bool is_normal(void) const;
+      bool is_virtual(void) const;
+      bool is_reduction(void) const;
+      bool is_file(void) const;
+    public:
       SpecializedKind kind;
       ReductionOpID  redop;
     };

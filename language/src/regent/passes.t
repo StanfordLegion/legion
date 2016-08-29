@@ -22,9 +22,11 @@ local parser = require("regent/parser")
 local passes_hooks = require("regent/passes_hooks")
 local pretty = require("regent/pretty")
 local specialize = require("regent/specialize")
+local normalize = require("regent/normalize")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
 local validate = require("regent/validate")
+local profile = require("regent/profile")
 
 local passes = {}
 
@@ -32,17 +34,25 @@ function passes.optimize(node)
   return passes_hooks.run_optimizations(node)
 end
 
+function passes.codegen(node, allow_pretty)
+  if allow_pretty == nil then allow_pretty = true end
+
+  if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
+  if std.config["validate"] then validate.entry(node) end
+  return codegen.entry(node)
+end
+
 function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
-    local node = specialize.entry(env, node)
+    local node = profile("specialize", node, specialize.entry)(env, node)
+    node = profile("normalize1", node, normalize.entry)(node)
     alpha_convert.entry(node) -- Run this here to avoid bitrot (discard result).
-    node = type_check.entry(node)
-    check_annotations.entry(node)
+    node = profile("type check", node, type_check.entry)(node)
+    node = profile("normalize2", node, normalize.entry)(node)
+    node = profile("check annotations", node, check_annotations.entry)(node)
     node = passes.optimize(node)
-    if allow_pretty and std.config["pretty"] then print(pretty.entry(node)) end
-    if std.config["validate"] then validate.entry(node) end
-    return codegen.entry(node)
+    return profile("codegen", node, passes.codegen)(node, allow_pretty)
   end
   return ctor
 end

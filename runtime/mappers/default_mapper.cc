@@ -55,10 +55,10 @@ namespace Legion {
       : Mapper(rt), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
-        next_local_io(0), next_local_cpu(0), next_local_gpu(0),
+        next_local_io(0), next_local_cpu(0), next_local_gpu(0), next_local_procset(0),
         next_global_io(Processor::NO_PROC), next_global_cpu(Processor::NO_PROC),
-        next_global_gpu(Processor::NO_PROC), 
-        global_io_query(NULL), global_cpu_query(NULL), global_gpu_query(NULL),
+        next_global_gpu(Processor::NO_PROC), next_global_procset(Processor::NO_PROC), 
+        global_io_query(NULL), global_cpu_query(NULL), global_gpu_query(NULL), global_procset_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -127,6 +127,11 @@ namespace Legion {
                 local_ios.push_back(*it);
                 break;
               }
+            case Processor::PROC_SET:
+              {
+                local_procsets.push_back(*it);
+                break;
+              }
             default: // ignore anything else
               break;
           }
@@ -160,6 +165,15 @@ namespace Legion {
                 remote_ios[node] = *it;
               break;
             }
+          case Processor::PROC_SET:
+            {
+              // See if we already have a target processor set for this node
+              if (node >= remote_procsets.size())
+                remote_procsets.resize(node+1, Processor::NO_PROC);
+              if (!remote_procsets[node].exists())
+                remote_procsets[node] = *it;
+              break;
+            }
           default: // ignore anything else
             break;
         }
@@ -175,7 +189,7 @@ namespace Legion {
           assert(false);
         }
       }
-      total_nodes = remote_cpus.size() + 1;
+      total_nodes = remote_cpus.size();
       if (!local_gpus.empty()) {
         for (unsigned idx = 0; idx < remote_gpus.size(); idx++) {
 	  if (idx == node_id) continue;  // ignore our own node
@@ -287,12 +301,17 @@ namespace Legion {
                                             MapperContext ctx, const Task &task)
     //--------------------------------------------------------------------------
     {
+      if (have_procset_variant(ctx, task.task_id)) {
+        return default_get_next_global_procset();
+      }
+ 
       VariantInfo info = 
         default_find_preferred_variant(task, ctx, false/*needs tight*/);
       // If we are the right kind and this is an index space task launch
       // then we return ourselves
       if (task.is_index_space && (info.proc_kind == local_kind))
         return local_proc;
+      
       // Otherwise we round-robin onto the other processors in the machine
       // TODO: Fix this when we implement a good stealing algorithm
       // to instead encourage locality
@@ -417,6 +436,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_procset(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_procsets[next_local_procset++];
+      if (next_local_procset == local_procsets.size())
+        next_local_procset = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_procset(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_procset();
+      if (!next_global_procset.exists())
+      {
+        global_procset_query = new Machine::ProcessorQuery(machine);
+        global_procset_query->only_kind(Processor::PROC_SET);
+        next_global_procset = global_procset_query->first();
+      }
+      Processor result = next_global_procset;
+      next_global_procset = global_procset_query->next(result);
+      if (!next_global_procset.exists())
+      {
+        delete global_procset_query;
+        global_procset_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     DefaultMapper::VariantInfo DefaultMapper::default_find_preferred_variant(
                                      const Task &task, MapperContext ctx, 
                                      bool needs_tight_bound, bool cache_result,
@@ -429,6 +480,26 @@ namespace Legion {
       if (finder != preferred_variants.end() && 
           (!needs_tight_bound || finder->second.tight_bound))
         return finder->second;
+
+      Machine::ProcessorQuery all_procsets(machine);
+      all_procsets.only_kind(Processor::PROC_SET);
+      Machine::ProcessorQuery::iterator procset_finder = all_procsets.begin();
+
+
+      /* if we have a procset variant use it */
+      if (have_procset_variant(ctx, task.task_id)) {
+        std::vector<VariantID> variants;
+        runtime->find_valid_variants(ctx, task.task_id, variants, Processor::PROC_SET);
+        if (variants.size() > 0) {
+          VariantInfo result;
+          result.proc_kind = Processor::PROC_SET;
+          result.variant = variants[0];
+          result.tight_bound = (variants.size() == 1);
+          result.is_inner = false;
+          return result;
+        }
+      }
+
       // Otherwise we actually need to pick one
       // Ask the runtime for the variant IDs for the given task type
       std::vector<VariantID> variants;
@@ -469,6 +540,12 @@ namespace Legion {
               case Processor::IO_PROC:
                 {
                   if (local_ios.empty())
+                    continue;
+                  break;
+                }
+              case Processor::PROC_SET:
+                {
+                  if (local_procsets.empty())
                     continue;
                   break;
                 }
@@ -653,6 +730,7 @@ namespace Legion {
         if (task.regions[it->first].is_restricted())
         {
           output.premapped_instances.insert(*it);
+          runtime->acquire_instances(ctx, it->second);
           has_restricted_regions = true;
           continue;
         }
@@ -718,6 +796,23 @@ namespace Legion {
                 }
                 break;
               }
+            case Processor::PROC_SET:
+              {
+                if (task.index_domain.get_volume() > local_procsets.size())
+                {
+                  if (!global_memory.exists())
+                  {
+                    log_mapper.error("Default mapper failure. No memory found "
+                        "for ProcessorSet task %s (ID %lld) which is visible "
+                        "for all point in the index space.",
+                        task.get_task_name(), task.get_unique_id());
+                    assert(false);
+                  }
+                  else
+                    target_memory = global_memory;
+                }
+                break;
+              }
             default:
               assert(false); // unrecognized processor kind
           }
@@ -756,6 +851,7 @@ namespace Legion {
         {
           case Processor::IO_PROC:
           case Processor::LOC_PROC:
+          case Processor::PROC_SET:
             {
               visible_memories.only_kind(Memory::SYSTEM_MEM);
               if (visible_memories.count() == 0)
@@ -824,6 +920,43 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default slice_task in %s", get_mapper_name());
+
+      std::vector<VariantID> variants;
+      runtime->find_valid_variants(ctx, task.task_id, variants);
+      /* find if we have a procset variant for task */
+      for(unsigned i = 0; i < variants.size(); i++)
+      {
+        const ExecutionConstraintSet exset =
+           runtime->find_execution_constraints(ctx, task.task_id, variants[i]);
+        if(exset.processor_constraint.kind == Processor::PROC_SET) {
+
+           // Before we do anything else, see if it is in the cache
+           std::map<Domain,std::vector<TaskSlice> >::const_iterator finder =
+             procset_slices_cache.find(input.domain);
+           if (finder != procset_slices_cache.end()) {
+                   output.slices = finder->second;
+                   return;
+           }
+
+          output.slices.resize(input.domain.get_volume());
+          unsigned idx = 0;
+          LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
+          for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
+              pir; pir++, idx++)
+          {
+            Rect<1> slice(pir.p, pir.p);
+            output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+              remote_procsets[idx % remote_cpus.size()],
+              false/*recurse*/, false/*stealable*/);
+          }
+
+          // Save the result in the cache
+          procset_slices_cache[input.domain] = output.slices;
+          return;
+        }
+      }
+ 
+
       // Whatever kind of processor we are is the one this task should
       // be scheduled on as determined by select initial task
       Processor::Kind target_kind =
@@ -846,6 +979,12 @@ namespace Legion {
           {
             default_slice_task(task, local_ios, remote_ios, 
                                input, output, io_slices_cache);
+            break;
+          }
+        case Processor::PROC_SET:
+          {
+            default_slice_task(task, local_procsets, remote_procsets, 
+                               input, output, procset_slices_cache);
             break;
           }
         default:
@@ -1128,41 +1267,56 @@ namespace Legion {
       // We don't even both caching these since they are so simple
       if (chosen.is_inner)
       {
-        std::vector<unsigned> reduction_indexes;
+        // Check to see if we have any relaxed coherence modes in which
+        // case we can no longer do virtual mappings so we'll fall through
+        bool has_relaxed_coherence = false;
         for (unsigned idx = 0; idx < task.regions.size(); idx++)
         {
-          // As long as this isn't a reduction-only region requirement
-          // we will do a virtual mapping, for reduction-only instances
-          // we will actually make a physical instance because the runtime
-          // doesn't allow virtual mappings for reduction-only privileges
-          if (task.regions[idx].privilege == REDUCE)
-            reduction_indexes.push_back(idx);
-          else
-            output.chosen_instances[idx].push_back(
-                PhysicalInstance::get_virtual_instance());
-        }
-        if (!reduction_indexes.empty())
-        {
-          const TaskLayoutConstraintSet &layout_constraints =
-              runtime->find_task_layout_constraints(ctx,
-                                    task.task_id, output.chosen_variant);
-          Memory target_memory = default_policy_select_target_memory(ctx, 
-                                                       task.target_proc);
-          for (std::vector<unsigned>::const_iterator it = 
-                reduction_indexes.begin(); it != reduction_indexes.end(); it++)
+          if (task.regions[idx].prop != EXCLUSIVE)
           {
-            std::set<FieldID> copy = task.regions[*it].privilege_fields;
-            if (!default_create_custom_instances(ctx, task.target_proc,
-                target_memory, task.regions[*it], *it, copy, 
-                layout_constraints, false/*needs constraint check*/, 
-                output.chosen_instances[*it]))
-            {
-              default_report_failed_instance_creation(task, *it, 
-                                          task.target_proc, target_memory);
-            }
+            has_relaxed_coherence = true;
+            break;
           }
         }
-        return;
+        if (!has_relaxed_coherence)
+        {
+          std::vector<unsigned> reduction_indexes;
+          for (unsigned idx = 0; idx < task.regions.size(); idx++)
+          {
+            // As long as this isn't a reduction-only region requirement
+            // we will do a virtual mapping, for reduction-only instances
+            // we will actually make a physical instance because the runtime
+            // doesn't allow virtual mappings for reduction-only privileges
+            if (task.regions[idx].privilege == REDUCE)
+              reduction_indexes.push_back(idx);
+            else
+              output.chosen_instances[idx].push_back(
+                  PhysicalInstance::get_virtual_instance());
+          }
+          if (!reduction_indexes.empty())
+          {
+            const TaskLayoutConstraintSet &layout_constraints =
+                runtime->find_task_layout_constraints(ctx,
+                                      task.task_id, output.chosen_variant);
+            Memory target_memory = default_policy_select_target_memory(ctx, 
+                                                         task.target_proc);
+            for (std::vector<unsigned>::const_iterator it = 
+                  reduction_indexes.begin(); it != 
+                  reduction_indexes.end(); it++)
+            {
+              std::set<FieldID> copy = task.regions[*it].privilege_fields;
+              if (!default_create_custom_instances(ctx, task.target_proc,
+                  target_memory, task.regions[*it], *it, copy, 
+                  layout_constraints, false/*needs constraint check*/, 
+                  output.chosen_instances[*it]))
+              {
+                default_report_failed_instance_creation(task, *it, 
+                                            task.target_proc, target_memory);
+              }
+            }
+          }
+          return;
+        }
       }
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);
@@ -1346,6 +1500,11 @@ namespace Legion {
                     local_ios.begin(), local_ios.end());
               else
                 target_procs.push_back(task.target_proc);
+              break;
+            }
+          case Processor::PROC_SET:
+            {
+              target_procs.push_back(task.target_proc);
               break;
             }
           default:
@@ -2587,6 +2746,24 @@ namespace Legion {
       }
     }
 
+   //--------------------------------------------------------------------------
+   bool DefaultMapper::have_procset_variant(const MapperContext ctx, TaskID id)
+   //--------------------------------------------------------------------------
+   {
+     std::vector<VariantID> variants;
+     runtime->find_valid_variants(ctx, id, variants);
+
+     for(unsigned i = 0; i < variants.size(); i++)
+     {
+       const ExecutionConstraintSet exset =
+         runtime->find_execution_constraints(ctx, id, variants[i]);
+       if(exset.processor_constraint.kind == Processor::PROC_SET)
+               return true;
+     }
+     return false; 
+   }
+
+
     //--------------------------------------------------------------------------
     void DefaultMapper::map_must_epoch(const MapperContext           ctx,
                                        const MapMustEpochInput&      input,
@@ -2600,20 +2777,43 @@ namespace Legion {
       if (total_nodes > 1)
       {
         Machine::ProcessorQuery all_procs(machine);
+        Machine::ProcessorQuery all_procsets(machine);
         all_procs.only_kind(Processor::LOC_PROC);
+        all_procsets.only_kind(Processor::PROC_SET);
         Machine::ProcessorQuery::iterator proc_finder = all_procs.begin();
-        for (unsigned idx = 0; idx < input.tasks.size(); idx++, proc_finder++)
+        Machine::ProcessorQuery::iterator procset_finder = all_procsets.begin();
+        for (unsigned idx = 0; idx < input.tasks.size(); idx++)
         {
-          if (proc_finder == all_procs.end())
+          const Task *task = input.tasks[idx];
+          /* if we have a procset variant use it */
+          if (have_procset_variant(ctx, task->task_id)) 
           {
-            log_mapper.error("Default mapper error. Not enough CPUs for must "
+            if (procset_finder == all_procsets.end())
+            {
+              log_mapper.error("Default mapper error. Not enough procsets for must "
                              "epoch launch of task %s with %ld tasks", 
                              input.tasks[0]->get_task_name(),
                              input.tasks.size());
-            assert(false);
+              assert(false);
+            }
+            output.task_processors[idx] = *procset_finder;
+            proc_map[input.tasks[idx]] = *procset_finder;
+            procset_finder++;
+          } 
+          else 
+          {  
+            if (proc_finder == all_procs.end())
+            {
+              log_mapper.error("Default mapper error. Not enough CPUs for must "
+                             "epoch launch of task %s with %ld tasks", 
+                             input.tasks[0]->get_task_name(),
+                             input.tasks.size());
+              assert(false);
+            }
+            output.task_processors[idx] = *proc_finder;
+            proc_map[input.tasks[idx]] = *proc_finder;
+            proc_finder++;
           }
-          output.task_processors[idx] = *proc_finder;
-          proc_map[input.tasks[idx]] = *proc_finder;
         }
       }
       else

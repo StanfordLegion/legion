@@ -28,8 +28,8 @@
 -- these properties.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 
 local context = {}
 context.__index = context
@@ -58,7 +58,7 @@ local function check(cx, node, allowed_set)
     if ast.is_node(value) and not value:is(ast.annotation.Allow) and
       not allowed_set[option]
     then
-      log.error(node, "option " .. render_option(option, value) ..
+      report.error(node, "option " .. render_option(option, value) ..
                   " is not permitted")
     end
   end
@@ -68,7 +68,7 @@ local function check_annotations_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.Call) then
-      check(cx, node, data.set({"inline"}))
+      check(cx, node, data.set({"parallel", "inline"}))
 
     elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
@@ -107,6 +107,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
@@ -117,6 +118,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AttachHDF5) or
+      node:is(ast.typed.expr.DetachHDF5) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
@@ -167,12 +170,18 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "inline"}))
+      check(cx, node, data.set({"cuda", "inline", "parallel"}))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or
       node:is(ast.location) or
       node:is(ast.annotation) or
+      node:is(ast.constraint_kind) or
+      node:is(ast.privilege_kind) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind) or
+      node:is(ast.constraint) or
+      node:is(ast.privilege) or
       node:is(ast.TaskConfigOptions)
     then
       -- Pass

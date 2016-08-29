@@ -1017,6 +1017,7 @@ namespace Realm {
 	local_cpu_kinds.insert(Processor::LOC_PROC);
 	local_cpu_kinds.insert(Processor::UTIL_PROC);
 	local_cpu_kinds.insert(Processor::IO_PROC);
+	local_cpu_kinds.insert(Processor::PROC_SET);
 
 	for(std::set<Processor::Kind>::const_iterator it = local_cpu_kinds.begin();
 	    it != local_cpu_kinds.end();
@@ -1115,11 +1116,13 @@ namespace Realm {
 	  if(*it) {
 	    Processor p = (*it)->me;
 	    Processor::Kind k = (*it)->me.kind();
+        int num_cores = (*it)->num_cores;
 
 	    num_procs++;
 	    adata[apos++] = NODE_ANNOUNCE_PROC;
 	    adata[apos++] = p.id;
 	    adata[apos++] = k;
+        adata[apos++] = num_cores;
 
 	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
 	    machine->get_proc_mem_affinity(pmas, p);

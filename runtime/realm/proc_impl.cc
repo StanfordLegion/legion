@@ -110,6 +110,11 @@ namespace Realm {
       grp->get_group_members(members);
     }
 
+    int Processor::get_num_cores(void) const
+    {
+      return get_runtime()->get_processor_impl(*this)->num_cores;
+    }
+
     Event Processor::spawn(TaskFuncID func_id, const void *args, size_t arglen,
 			   //std::set<RegionInstance> instances_needed,
 			   Event wait_on, int priority) const
@@ -369,6 +374,8 @@ namespace Realm {
           return "IO_PROC";
         case PROC_GROUP:
           return "PROC_GROUP";
+        case PROC_SET:
+          return "PROC_SET";
         default:
           assert(0);
       }
@@ -381,8 +388,9 @@ namespace Realm {
   // class ProcessorImpl
   //
 
-    ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind)
-      : me(_me), kind(_kind)
+    ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind,
+                                 int _num_cores)
+      : me(_me), kind(_kind), num_cores(_num_cores)
     {
     }
 
@@ -708,8 +716,9 @@ namespace Realm {
   // class RemoteProcessor
   //
 
-    RemoteProcessor::RemoteProcessor(Processor _me, Processor::Kind _kind)
-      : ProcessorImpl(_me, _kind)
+    RemoteProcessor::RemoteProcessor(Processor _me, Processor::Kind _kind,
+                                     int _num_cores)
+      : ProcessorImpl(_me, _kind, _num_cores)
     {
     }
 
@@ -763,8 +772,9 @@ namespace Realm {
   // class LocalTaskProcessor
   //
 
-  LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind)
-    : ProcessorImpl(_me, _kind)
+  LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind,
+                                         int _num_cores)
+    : ProcessorImpl(_me, _kind, _num_cores)
     , sched(0)
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {

@@ -24,7 +24,7 @@
 --     avoid any potential bad behavior.
 
 local ast = require("regent/ast")
-local log = require("regent/log")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -58,7 +58,7 @@ end
 function context:intern_variable(node, symbol)
   assert(ast.is_node(node))
   if not std.is_symbol(symbol) then
-    log.error(node, "expected a symbol, got " .. tostring(symbol))
+    report.error(node, "expected a symbol, got " .. tostring(symbol))
   end
   self.env[#self.env]:insert(node, symbol, symbol)
 end
@@ -66,7 +66,7 @@ end
 function context:replace_variable(node, symbol)
   assert(ast.is_node(node))
   if not std.is_symbol(symbol) then
-    log.error(node, "expected a symbol, got " .. tostring(symbol))
+    report.error(node, "expected a symbol, got " .. tostring(symbol))
   end
 
   local new_symbol = std.newsymbol(symbol:hasname())
@@ -90,15 +90,18 @@ end
 
 local function alpha_convert_node(cx)
   return function(node, continuation)
-    if node:is(ast.specialized.region.Bare) then
+    if node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
+    then
+      return continuation(node, true)
+
+    elseif node:is(ast.specialized.region.Bare) then
       return node { value = cx:update_symbol(node, node.value) }
 
     elseif node:is(ast.specialized.region.Root) then
       return node { value = cx:update_symbol(node, node.value) }
 
-    elseif node:is(ast.specialized.region.Field) or
-      node:is(ast.specialized.condition_kind)
-    then
+    elseif node:is(ast.specialized.region.Field) then
       return continuation(node, true)
 
     elseif node:is(ast.specialized.expr.ID) then
@@ -167,6 +170,7 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.expr.ListPhaseBarriers) or
       node:is(ast.specialized.expr.ListInvert) or
       node:is(ast.specialized.expr.ListRange) or
+      node:is(ast.specialized.expr.ListIspace) or
       node:is(ast.specialized.expr.PhaseBarrier) or
       node:is(ast.specialized.expr.DynamicCollective) or
       node:is(ast.specialized.expr.DynamicCollectiveGetResult) or
@@ -177,6 +181,8 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.expr.Fill) or
       node:is(ast.specialized.expr.Acquire) or
       node:is(ast.specialized.expr.Release) or
+      node:is(ast.specialized.expr.AttachHDF5) or
+      node:is(ast.specialized.expr.DetachHDF5) or
       node:is(ast.specialized.expr.AllocateScratchFields) or
       node:is(ast.specialized.expr.WithScratchFields) or
       node:is(ast.specialized.expr.RegionRoot) or
@@ -188,7 +194,7 @@ local function alpha_convert_node(cx)
       return continuation(node, true)
 
     elseif node:is(ast.specialized.expr.LuaTable) then
-      log.error(node, "unable to specialize value of type table")
+      report.error(node, "unable to specialize value of type table")
 
     elseif node:is(ast.specialized.stat.If) then
       local cond = continuation(node.cond)

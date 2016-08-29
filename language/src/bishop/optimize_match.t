@@ -18,7 +18,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
-local data = require("regent/data")
+local data = require("common/data")
 local automata = require("bishop/automata")
 local regex = require("bishop/regex")
 

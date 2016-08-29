@@ -1195,47 +1195,105 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RestrictInfo::RestrictInfo(void)
-      : perform_check(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     RestrictInfo::RestrictInfo(const RestrictInfo &rhs)
-      : perform_check(rhs.perform_check), restrictions(rhs.restrictions)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(restrictions.empty());
+#endif
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            rhs.restrictions.begin(); it != rhs.restrictions.end(); it++)
+      {
+        it->first->add_base_gc_ref(RESTRICTED_REF);
+        restrictions.insert(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
     RestrictInfo::~RestrictInfo(void)
     //--------------------------------------------------------------------------
     {
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+      {
+        if (it->first->remove_base_gc_ref(RESTRICTED_REF))
+          legion_delete(it->first);
+      }
+      restrictions.clear();
     }
 
     //--------------------------------------------------------------------------
     RestrictInfo& RestrictInfo::operator=(const RestrictInfo &rhs)
     //--------------------------------------------------------------------------
     {
-      // Only need to copy over perform_check and restrictions
-      perform_check = rhs.perform_check;
-      restrictions = rhs.restrictions;
+#ifdef DEBUG_LEGION
+      assert(restrictions.empty());
+#endif
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            rhs.restrictions.begin(); it != rhs.restrictions.end(); it++)
+      {
+        it->first->add_base_gc_ref(RESTRICTED_REF);
+        restrictions.insert(*it);
+      }
       return *this;
     }
 
     //--------------------------------------------------------------------------
-    bool RestrictInfo::has_restrictions(LogicalRegion handle, RegionNode *node,
-                                        const std::set<FieldID> &fields) const
+    void RestrictInfo::record_restriction(InstanceManager *inst, 
+                                          const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator finder = 
-        restrictions.find(handle);
-      if (finder != restrictions.end())
+      LegionMap<InstanceManager*,FieldMask>::aligned::iterator finder = 
+        restrictions.find(inst);
+      if (finder == restrictions.end())
       {
-        FieldMask mask = node->column_source->get_field_mask(fields);
-        return (!(mask * finder->second));
+        inst->add_base_gc_ref(RESTRICTED_REF);
+        restrictions[inst] = mask;
       }
-      return false;
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void RestrictInfo::populate_restrict_fields(FieldMask &to_fill) const
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+        to_fill |= it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void RestrictInfo::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+      {
+        if (it->first->remove_base_gc_ref(RESTRICTED_REF))
+          legion_delete(it->first);
+      }
+      restrictions.clear();
+      restricted_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    const InstanceSet& RestrictInfo::get_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      if (restricted_instances.size() == restrictions.size())
+        return restricted_instances;
+      restricted_instances.resize(restrictions.size());
+      unsigned idx = 0;
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++, idx++)
+        restricted_instances[idx] = InstanceRef(it->first, it->second);
+      return restricted_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -1243,30 +1301,563 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(restrictions.size());
-      for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it = 
             restrictions.begin(); it != restrictions.end(); it++)
       {
-        rez.serialize(it->first);
+        rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
     }
 
     //--------------------------------------------------------------------------
-    void RestrictInfo::unpack_info(Deserializer &derez, AddressSpaceID source,
-                                   RegionTreeForest *forest)
+    void RestrictInfo::unpack_info(Deserializer &derez, Runtime *runtime,
+                                   std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       size_t num_restrictions;
       derez.deserialize(num_restrictions);
-      FieldSpaceNode *field_node = NULL;
       for (unsigned idx = 0; idx < num_restrictions; idx++)
       {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        FieldMask &mask = restrictions[handle];
-        derez.deserialize(mask);
-        if (field_node == NULL)
-          field_node = forest->get_node(handle)->column_source;
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        InstanceManager *manager = static_cast<InstanceManager*>( 
+          runtime->find_or_request_physical_manager(did, ready));
+        derez.deserialize(restrictions[manager]);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferRestrictedManagerArgs args;
+          args.hlr_id = HLR_DEFER_RESTRICTED_MANAGER_TASK_ID;
+          args.manager = manager;
+          ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
+              HLR_DEFER_RESTRICTED_MANAGER_TASK_ID, HLR_LATENCY_PRIORITY,
+              NULL, ready);
+          ready_events.insert(ready);
+        }
+        else
+        {
+          WrapperReferenceMutator mutator(ready_events);
+          manager->add_base_gc_ref(RESTRICTED_REF, &mutator);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RestrictInfo::handle_deferred_reference(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRestrictedManagerArgs *margs = 
+        (const DeferRestrictedManagerArgs*)args;
+      LocalReferenceMutator mutator;
+      margs->manager->add_base_gc_ref(RESTRICTED_REF, &mutator);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Restriction 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Restriction::Restriction(RegionNode *n)
+      : tree_id(n->handle.get_tree_id()), local_node(n)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Restriction::Restriction(const Restriction &rhs)
+      : tree_id(rhs.tree_id), local_node(rhs.local_node)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    Restriction::~Restriction(void)
+    //--------------------------------------------------------------------------
+    {
+      // Delete our acquisitions
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+        delete (*it);
+      acquisitions.clear();
+      // Remove references on any of our instances
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator it =
+            instances.begin(); it != instances.end(); it++)
+      {
+        if (it->first->remove_base_gc_ref(RESTRICTED_REF))
+          legion_delete(it->first);
+      }
+      instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    Restriction& Restriction::operator=(const Restriction &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void* Restriction::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<Restriction,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::add_restricted_instance(InstanceManager *inst,
+                                              const FieldMask &inst_fields)
+    //--------------------------------------------------------------------------
+    {
+      // Always update the restricted fields
+      restricted_fields |= inst_fields;
+      LegionMap<InstanceManager*,FieldMask>::aligned::iterator finder = 
+        instances.find(inst);
+      if (finder == instances.end())
+      {
+        inst->add_base_gc_ref(RESTRICTED_REF);
+        instances[inst] = inst_fields;
+      }
+      else
+        finder->second |= inst_fields; 
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::find_restrictions(RegionTreeNode *node, 
+              FieldMask &possibly_restricted, RestrictInfo &restrict_info) const
+    //--------------------------------------------------------------------------
+    {
+      if (!local_node->intersects_with(node))    
+        return;
+      // See if we have any acquires that make this alright
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        (*it)->find_restrictions(node, possibly_restricted, restrict_info);
+        if (!possibly_restricted)
+          return;
+      }
+      // If we make it here then we are restricted
+      FieldMask restricted = possibly_restricted & restricted_fields;
+      if (!!restricted)
+      {
+        // Record the restrictions
+        for (LegionMap<InstanceManager*,FieldMask>::aligned::const_iterator
+              it = instances.begin(); it != instances.end(); it++)
+        {
+          FieldMask overlap = it->second & restricted;
+          if (!overlap)
+            continue;
+          restrict_info.record_restriction(it->first, overlap);
+        }
+        // Remove the restricted fields
+        possibly_restricted -= restricted;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool Restriction::matches(DetachOp *op, RegionNode *node,
+                              FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      // Not the same node, then we aren't going to match
+      if (local_node != node)
+        return false;
+      FieldMask overlap = remaining_fields & restricted_fields;
+      if (!overlap)
+        return false;
+      // If we have any acquired fields here, we can't match
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        (*it)->remove_acquired_fields(overlap);
+        if (!overlap)
+          return false;
+      }
+      // These are the fields that we match for
+      remaining_fields -= overlap;
+      restricted_fields -= overlap;
+      // We've been removed, deletion will clean up the references
+      if (!restricted_fields)
+        return true;
+      // Filter out the overlapped instances
+      std::vector<InstanceManager*> to_delete;
+      for (LegionMap<InstanceManager*,FieldMask>::aligned::iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<InstanceManager*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          instances.erase(*it);
+          if ((*it)->remove_base_gc_ref(RESTRICTED_REF))
+            legion_delete(*it);
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::remove_restricted_fields(FieldMask &remaining) const
+    //--------------------------------------------------------------------------
+    {
+      remaining -= restricted_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::add_acquisition(AcquireOp *op, RegionNode *node,
+                                      FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask overlap = restricted_fields & remaining_fields;
+      if (!overlap)
+        return;
+      // If we don't dominate then we can't help
+      if (!local_node->dominates(node))
+      {
+        if (local_node->intersects_with(node))
+        {
+          log_run.error("Illegal partial acquire operation (ID %lld) "
+                        "performed in task %s (ID %lld)", op->get_unique_id(),
+                        op->get_parent()->get_task_name(),
+                        op->get_parent()->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_PARTIAL_ACQUISITION);
+        }
+        return;
+      }
+      // At this point we know we'll be handling the fields one 
+      // way or another so remove them for the original set
+      remaining_fields -= overlap;
+      // Try adding it to any of the acquires
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        (*it)->add_acquisition(op, node, overlap);
+        if (!overlap)
+          return;
+      }
+      // If we still have any remaining fields, we can add them here
+      acquisitions.insert(new Acquisition(node, overlap));
+    }
+    
+    //--------------------------------------------------------------------------
+    void Restriction::remove_acquisition(ReleaseOp *op, RegionNode *node,
+                                         FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (restricted_fields * remaining_fields)
+        return;
+      if (!local_node->intersects_with(node))
+        return;
+      std::vector<Acquisition*> to_delete;
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        if ((*it)->matches(op, node, remaining_fields))
+          to_delete.push_back(*it);
+        else if (!!remaining_fields)
+          (*it)->remove_acquisition(op, node, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<Acquisition*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          acquisitions.erase(*it);
+          delete (*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Restriction::add_restriction(AttachOp *op, RegionNode *node,
+                             InstanceManager *inst, FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (restricted_fields * remaining_fields)
+        return;
+      if (!local_node->intersects_with(node))
+        return;
+      // Try adding it to any of our acquires
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        (*it)->add_restriction(op, node, inst, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+      // It's bad if we get here
+      log_run.error("Illegal interfering restriction performed by attach "
+                    "operation (ID %lld) in task %s (ID %lld)",
+                    op->get_unique_op_id(), op->get_parent()->get_task_name(),
+                    op->get_parent()->get_unique_op_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_ILLEGAL_INTERFERING_RESTRICTIONS);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Restriction::remove_restriction(DetachOp *op, RegionNode *node,
+                                         FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (restricted_fields * remaining_fields)
+        return;
+      if (!local_node->dominates(node))
+        return;
+      for (std::set<Acquisition*>::const_iterator it = acquisitions.begin();
+            it != acquisitions.end(); it++)
+      {
+        (*it)->remove_restriction(op, node, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Acquisition 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Acquisition::Acquisition(RegionNode *node, const FieldMask &acquired)
+      : local_node(node), acquired_fields(acquired)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    Acquisition::Acquisition(const Acquisition &rhs)
+      : local_node(rhs.local_node)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    Acquisition::~Acquisition(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+        delete (*it);
+      restrictions.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    Acquisition& Acquisition::operator=(const Acquisition &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void* Acquisition::operator new(size_t count)
+    //--------------------------------------------------------------------------
+    {
+      return legion_alloc_aligned<Acquisition,true/*bytes*/>(count);
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::operator delete(void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::find_restrictions(RegionTreeNode *node,
+                                        FieldMask &possibly_restricted,
+                                        RestrictInfo &restrict_info) const
+    //--------------------------------------------------------------------------
+    {
+      if (acquired_fields * possibly_restricted)
+        return;
+      if (!local_node->intersects_with(node))
+        return;
+      // Check to see if it is restricted below
+      for (std::set<Restriction*>::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+      {
+        (*it)->find_restrictions(node, possibly_restricted, restrict_info);
+        if (!possibly_restricted)
+          return;
+      }
+      FieldMask overlap = acquired_fields & possibly_restricted;
+      // If we dominate and they weren't restricted below, we know
+      // that they are acquired
+      if (!!overlap && local_node->dominates(node))
+        possibly_restricted -= overlap;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Acquisition::matches(ReleaseOp *op, RegionNode *node,
+                              FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (local_node != node)
+        return false;
+      FieldMask overlap = remaining_fields & acquired_fields;
+      if (!overlap)
+        return false;
+      // If we have any restricted fields below, then we can't match
+      for (std::set<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        (*it)->remove_restricted_fields(overlap);
+        if (!overlap)
+          return false;
+      }
+      // These are the fields that we match for
+      remaining_fields -= overlap;
+      acquired_fields -= overlap;
+      if (!acquired_fields)
+        return true;
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::remove_acquired_fields(FieldMask &remaining_fields) const
+    //--------------------------------------------------------------------------
+    {
+      remaining_fields -= acquired_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::add_acquisition(AcquireOp *op, RegionNode *node,
+                                      FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (acquired_fields * remaining_fields)
+        return;
+      if (!local_node->intersects_with(node))
+        return;
+      for (std::set<Restriction*>::const_iterator it = 
+            restrictions.begin(); it != restrictions.end(); it++)
+      {
+        (*it)->add_acquisition(op, node, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+      // It's bad if we get here
+      log_run.error("Illegal interfering acquire operation performed by "
+                    "acquire operation (ID %lld) in task %s (ID %lld)",
+                    op->get_unique_op_id(), op->get_parent()->get_task_name(),
+                    op->get_parent()->get_unique_op_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_ILLEGAL_INTERFERING_ACQUISITIONS);
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::remove_acquisition(ReleaseOp *op, RegionNode *node,
+                                         FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (acquired_fields * remaining_fields)
+        return;
+      if (!local_node->dominates(node))
+        return;
+      for (std::set<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        (*it)->remove_acquisition(op, node, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::add_restriction(AttachOp *op, RegionNode *node,
+                          InstanceManager *manager, FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask overlap = remaining_fields & acquired_fields;
+      if (!overlap)
+        return;
+      if (!local_node->dominates(node))
+      {
+        if (local_node->intersects_with(node))
+        {
+          log_run.error("Illegal partial restriction operation performed by "
+                        "attach operation (ID %lld) in task %s (ID %lld)",
+                        op->get_unique_op_id(), 
+                        op->get_parent()->get_task_name(),
+                        op->get_parent()->get_unique_op_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_PARTIAL_RESTRICTION);
+        }
+        return;
+      }
+      // At this point we know we'll be able to do the restriction
+      remaining_fields -= overlap;
+      for (std::set<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        (*it)->add_restriction(op, node, manager, overlap);
+        if (!overlap)
+          return;
+      }
+      Restriction *restriction = new Restriction(node);
+      restriction->add_restricted_instance(manager, overlap);
+      restrictions.insert(restriction); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Acquisition::remove_restriction(DetachOp *op, RegionNode *node,
+                                         FieldMask &remaining_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (acquired_fields * remaining_fields)
+        return;
+      if (!local_node->intersects_with(node))
+        return;
+      std::vector<Restriction*> to_delete;
+      for (std::set<Restriction*>::const_iterator it = restrictions.begin();
+            it != restrictions.end(); it++)
+      {
+        if ((*it)->matches(op, node, remaining_fields))
+          to_delete.push_back(*it);
+        else if (!!remaining_fields)
+          (*it)->remove_restriction(op, node, remaining_fields);
+        if (!remaining_fields)
+          return;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<Restriction*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          restrictions.erase(*it);
+          delete (*it);
+        }
       }
     }
 
@@ -1633,47 +2224,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // RestrictionMutator
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RestrictionMutator::RestrictionMutator(ContextID c, const FieldMask &mask,
-                                           bool add)
-      : ctx(c), restrict_mask(mask), add_restrict(add)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionMutator::visit_only_valid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionMutator::visit_region(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      if (add_restrict)
-        node->add_restriction(ctx, restrict_mask);
-      else
-        node->release_restriction(ctx, restrict_mask);
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RestrictionMutator::visit_partition(PartitionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      if (add_restrict)
-        node->add_restriction(ctx, restrict_mask);
-      else
-        node->release_restriction(ctx, restrict_mask);
-      return true;
-    } 
-
-    /////////////////////////////////////////////////////////////
     // ReductionCloser 
     /////////////////////////////////////////////////////////////
 
@@ -1872,11 +2422,6 @@ namespace Legion {
       : owner(node), state_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
-      // This first time we create the state, we need to pull down
-      // any restricted instances from our parent state
-      RegionTreeNode *parent = node->get_parent();
-      if (parent != NULL)
-        parent->set_restricted_fields(ctx, restricted_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1978,7 +2523,6 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
-      restricted_fields.clear();
       dirty_below.clear();
       partially_closed.clear();
       if (!current_version_infos.empty())
@@ -2241,7 +2785,6 @@ namespace Legion {
       }
       dirty_below -= deleted_mask;
       partially_closed -= deleted_mask;
-      restricted_fields -= deleted_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3541,7 +4084,6 @@ namespace Legion {
     void LogicalCloser::initialize_close_operations(RegionTreeNode *target, 
                                                    Operation *creator,
                                                    const VersionInfo &ver_info,
-                                                   const RestrictInfo &res_info,
                                                    const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -3552,7 +4094,7 @@ namespace Legion {
         LegionList<ClosingSet>::aligned closes;
         compute_close_sets(closed_children, closes);
         create_normal_close_operations(target, creator, closed_version_info, 
-                                       ver_info, res_info, trace_info, closes);
+                                       ver_info, trace_info, closes);
       }
       if (!read_only_children.empty())
       {
@@ -3570,8 +4112,7 @@ namespace Legion {
                                                          flush_only_fields,
                                                          empty_children,
                                                          closed_version_info,
-                                                         ver_info, res_info,
-                                                         trace_info);
+                                                         ver_info, trace_info);
         normal_closes[flush_op] = LogicalUser(flush_op, 0/*idx*/,
                               RegionUsage(flush_op->get_region_requirement()),
                               flush_only_fields);
@@ -3670,7 +4211,6 @@ namespace Legion {
     void LogicalCloser::create_normal_close_operations(RegionTreeNode *target,
                               Operation *creator, const VersionInfo &local_info,
                               const VersionInfo &version_info,
-                              const RestrictInfo &restrict_info, 
                               const TraceInfo &trace_info,
                               LegionList<ClosingSet>::aligned &close_sets)
     //--------------------------------------------------------------------------
@@ -3685,7 +4225,6 @@ namespace Legion {
                                                        it->children,
                                                        local_info,
                                                        version_info,
-                                                       restrict_info, 
                                                        trace_info);
         normal_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
                       RegionUsage(close_op->get_region_requirement()),
@@ -3976,7 +4515,6 @@ namespace Legion {
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
                                    root, composite_info, 
-                                   RtUserEvent::NO_RT_USER_EVENT, 
                                    true/*register now*/);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
@@ -5054,20 +5592,17 @@ namespace Legion {
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, AddressSpaceID local_sp, 
                                RegionTreeNode *node, bool register_now)
-      : DistributedCollectable(rt, id, own_sp, local_sp, 
-          RtUserEvent::NO_RT_USER_EVENT, register_now), version_number(vid), 
-        logical_node(node), state_lock(Reservation::create_reservation())
+      : DistributedCollectable(rt, id, own_sp, local_sp, register_now), 
+        version_number(vid), logical_node(node), 
+        state_lock(Reservation::create_reservation())
 #ifdef DEBUG_LEGION
         , currently_active(true), currently_valid(true)
 #endif
     //--------------------------------------------------------------------------
     {
-      // If we are not the owner, add a valid and resource reference
+      // If we are not the owner, add a valid reference
       if (!is_owner())
-      {
         add_base_valid_ref(REMOTE_DID_REF);
-        add_base_resource_ref(REMOTE_DID_REF);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Version State %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -5088,21 +5623,14 @@ namespace Legion {
     VersionState::~VersionState(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       state_lock.destroy_reservation();
       state_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(!currently_valid);
 #endif 
-      // If we are the owner, then remote resource 
-      // references on our remote instances 
-      if (is_owner())
-      {
-        // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL); 
-        map_over_remote_instances(functor);
-      }
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -7676,7 +8204,15 @@ namespace Legion {
           single = false;
           shared = false;
         }
-        // Otherwise new size is 1 so we don't need to do anything
+        else if (refs.single == NULL)
+        {
+          // New size is 1 but we were empty before
+          CollectableRef *next = legion_new<CollectableRef>();
+          next->add_reference();
+          refs.single = next;
+          single = true;
+          shared = false;
+        }
       }
       else
       {

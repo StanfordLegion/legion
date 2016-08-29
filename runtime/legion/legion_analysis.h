@@ -198,65 +198,97 @@ namespace Legion {
       bool packed;
       void *packed_buffer;
       size_t packed_size;
+    }; 
+
+    /**
+     * \class Restriction
+     * A class for tracking restrictions that occur as part of
+     * relaxed coherence and with tracking external resources
+     */
+    class Restriction {
+    public:
+      Restriction(RegionNode *node);
+      Restriction(const Restriction &rhs);
+      ~Restriction(void);
+    public:
+      Restriction& operator=(const Restriction &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      void add_restricted_instance(InstanceManager *inst, 
+                                   const FieldMask &restricted_fields);
+    public:
+      void find_restrictions(RegionTreeNode *node, 
+                             FieldMask &possibly_restricted,
+                             RestrictInfo &restrict_info) const;
+      bool matches(DetachOp *op, RegionNode *node,
+                   FieldMask &remaining_fields); 
+      void remove_restricted_fields(FieldMask &remaining_fields) const;
+    public:
+      void add_acquisition(AcquireOp *op, RegionNode *node,
+                           FieldMask &remaining_fields);
+      void remove_acquisition(ReleaseOp *op, RegionNode *node,
+                              FieldMask &remaining_fields);
+    public:
+      void add_restriction(AttachOp *op, RegionNode *node,
+                InstanceManager *manager, FieldMask &remaining_fields);
+      void remove_restriction(DetachOp *op, RegionNode *node,
+                              FieldMask &remaining_fields);
+
+    public:
+      const RegionTreeID tree_id;
+      RegionNode *const local_node;
+    protected:
+      FieldMask restricted_fields;
+      std::set<Acquisition*> acquisitions;
+      // We only need garbage collection references on these
+      // instances because we know one of two things is always
+      // true: either they are attached files so they aren't 
+      // subject to memories in which garbage collection will
+      // occur, or they are simultaneous restricted, so that
+      // enclosing context of the parent task has a valid 
+      // reference to them so there is no need for us to 
+      // have a valid reference.
+      // Same in RestrictInfo
+      LegionMap<InstanceManager*,FieldMask>::aligned instances;
     };
 
     /**
-     * \class RestrictInfo
-     * A class for tracking mapping restrictions based 
-     * on region usage.
+     * \class Acquisition
+     * A class for tracking when restrictions are relaxed by
+     * explicit acquisitions of a region
      */
-    class RestrictInfo {
+    class Acquisition {
     public:
-      RestrictInfo(void);
-      RestrictInfo(const RestrictInfo &rhs); 
-      ~RestrictInfo(void);
+      Acquisition(RegionNode *node, const FieldMask &acquired_fields);
+      Acquisition(const Acquisition &rhs);
+      ~Acquisition(void);
     public:
-      RestrictInfo& operator=(const RestrictInfo &rhs);
+      Acquisition& operator=(const Acquisition &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
-      inline bool needs_check(void) const { return perform_check; }
-      inline void set_check(void) { perform_check = true; } 
-      inline void add_restriction(LogicalRegion handle, const FieldMask &mask)
-      {
-        LegionMap<LogicalRegion,FieldMask>::aligned::iterator finder = 
-          restrictions.find(handle);
-        if (finder == restrictions.end())
-          restrictions[handle] = mask;
-        else
-          finder->second |= mask;
-      }
-      inline bool has_restrictions(void) const { return !restrictions.empty(); }
-      bool has_restrictions(LogicalRegion handle, RegionNode *node,
-                            const std::set<FieldID> &fields) const;
-      inline void clear(void)
-      {
-        perform_check = false;
-        restrictions.clear();
-      }
-      inline void merge(const RestrictInfo &rhs, const FieldMask &mask)
-      {
-        perform_check = rhs.perform_check;
-        for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
-              rhs.restrictions.begin(); it != rhs.restrictions.end(); it++)
-        {
-          FieldMask overlap = it->second & mask;
-          if (!overlap)
-            continue;
-          restrictions[it->first] = overlap;
-        }
-      }
-      inline void populate_restrict_fields(FieldMask &to_fill) const
-      {
-        for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
-              restrictions.begin(); it != restrictions.end(); it++)
-          to_fill |= it->second;
-      }
+      void find_restrictions(RegionTreeNode *node, 
+                             FieldMask &possibly_restricted,
+                             RestrictInfo &restrict_info) const;
+      bool matches(ReleaseOp *op, RegionNode *node, 
+                   FieldMask &remaining_fields);
+      void remove_acquired_fields(FieldMask &remaining_fields) const;
     public:
-      void pack_info(Serializer &rez);
-      void unpack_info(Deserializer &derez, AddressSpaceID source, 
-                       RegionTreeForest *forest);
+      void add_acquisition(AcquireOp *op, RegionNode *node,
+                           FieldMask &remaining_fields);
+      void remove_acquisition(ReleaseOp *op, RegionNode *node,
+                              FieldMask &remaining_fields);
+    public:
+      void add_restriction(AttachOp *op, RegionNode *node,
+                 InstanceManager *manager, FieldMask &remaining_fields);
+      void remove_restriction(DetachOp *op, RegionNode *node,
+                              FieldMask &remaining_fields);
+    public:
+      RegionNode *const local_node;
     protected:
-      bool perform_check;
-      LegionMap<LogicalRegion,FieldMask>::aligned restrictions;
+      FieldMask acquired_fields;
+      std::set<Restriction*> restrictions;
     };
 
     /**
@@ -313,7 +345,7 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, unsigned index, 
-                    const RegionRequirement &req, VersionInfo &version_info, 
+                    const RegionRequirement &req, VersionInfo &version_info,
                     const FieldMask &traversal_mask, 
                     std::set<RtEvent> &map_applied_events);
     public:
@@ -468,9 +500,6 @@ namespace Legion {
       FieldMask dirty_below;
       // Fields that have already undergone at least a partial close
       FieldMask partially_closed;
-      // Fields on which the user has 
-      // asked for explicit coherence
-      FieldMask restricted_fields;
     protected:
       Reservation state_lock; 
     };
@@ -555,7 +584,6 @@ namespace Legion {
       void initialize_close_operations(RegionTreeNode *target, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
-                                       const RestrictInfo &restrict_info,
                                        const TraceInfo &trace_info);
       void add_next_child(const ColorPoint &next_child);
       void perform_dependence_analysis(const LogicalUser &current,
@@ -576,7 +604,6 @@ namespace Legion {
       void create_normal_close_operations(RegionTreeNode *target, 
                           Operation *creator, const VersionInfo &local_info,
                           const VersionInfo &version_info,
-                          const RestrictInfo &restrict_info, 
                           const TraceInfo &trace_info,
                           LegionList<ClosingSet>::aligned &close_sets);
       void create_read_only_close_operations(RegionTreeNode *target, 
@@ -1078,24 +1105,6 @@ namespace Legion {
     };
 
     /**
-     * \class RestrictionMutator
-     * A class for mutating the state of restrction fields
-     */
-    class RestrictionMutator : public NodeTraverser {
-    public:
-      RestrictionMutator(ContextID ctx, const FieldMask &mask,
-                         bool add_restrict);
-    public:
-      virtual bool visit_only_valid(void) const;
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    protected:
-      const ContextID ctx;
-      const FieldMask &restrict_mask;
-      const bool add_restrict;
-    }; 
-
-    /**
      * \class ReductionCloser
      * A class for performing reduciton close operations
      */
@@ -1338,6 +1347,52 @@ namespace Legion {
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
+     * \class RestrictInfo
+     * A class for tracking mapping restrictions based 
+     * on region usage.
+     */
+    class RestrictInfo {
+    public:
+      struct DeferRestrictedManagerArgs {
+      public:
+        HLRTaskID hlr_id;
+        InstanceManager *manager;
+      };
+    public:
+      RestrictInfo(void);
+      RestrictInfo(const RestrictInfo &rhs); 
+      ~RestrictInfo(void);
+    public:
+      RestrictInfo& operator=(const RestrictInfo &rhs);
+    public:
+      inline bool has_restrictions(void) const 
+        { return !restrictions.empty(); }
+    public:
+      void record_restriction(InstanceManager *inst, const FieldMask &mask);
+      void populate_restrict_fields(FieldMask &to_fill) const;
+      void clear(void);
+      const InstanceSet& get_instances(void);
+    public:
+      void pack_info(Serializer &rez);
+      void unpack_info(Deserializer &derez, Runtime *runtime,
+                       std::set<RtEvent> &ready_events);
+      static void handle_deferred_reference(const void *args);
+    protected:
+      // We only need garbage collection references on these
+      // instances because we know one of two things is always
+      // true: either they are attached files so they aren't 
+      // subject to memories in which garbage collection will
+      // occur, or they are simultaneous restricted, so that
+      // enclosing context of the parent task has a valid 
+      // reference to them so there is no need for us to 
+      // have a valid reference.
+      // // Same in Restriction
+      LegionMap<InstanceManager*,FieldMask>::aligned restrictions;
+    protected:
+      InstanceSet restricted_instances;
     };
 
   }; // namespace Internal 

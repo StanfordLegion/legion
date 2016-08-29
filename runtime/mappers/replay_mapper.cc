@@ -648,9 +648,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);
-      std::pair<TunableID,MappingTagID> key(input.tunable_id,input.mapping_tag);
-      assert(mapping->tunables.find(key) != mapping->tunables.end());
-      mapping->tunables[key]->set_tunable(output.value, output.size); 
+      assert(mapping->next_tunable < mapping->tunables.size());
+      mapping->tunables[mapping->next_tunable++]->set_tunable(output.value,
+                                                              output.size);
     }
 
     //--------------------------------------------------------------------------
@@ -1014,19 +1014,15 @@ namespace Legion {
       unsigned num_temporaries;
       ignore_result(fread(&num_temporaries, sizeof(num_temporaries), 1, f));
       for (unsigned idx = 0; idx < num_temporaries; idx++)
+        info->temporaries[idx] = unpack_temporary(f);
+      unsigned num_tunables;
+      ignore_result(fread(&num_tunables, sizeof(num_tunables), 1, f));
+      info->tunables.resize(num_tunables);
+      for (unsigned idx = 0; idx < num_tunables; idx++)
       {
         unsigned index;
         ignore_result(fread(&index, sizeof(index), 1, f));
-        info->temporaries[idx] = unpack_temporary(f);
-      }
-      unsigned num_tunables;
-      ignore_result(fread(&num_tunables, sizeof(num_tunables), 1, f));
-      for (unsigned idx = 0; idx < num_tunables; idx++)
-      {
-        std::pair<TunableID,MappingTagID> key;
-        ignore_result(fread(&key.first, sizeof(key.first), 1, f));
-        ignore_result(fread(&key.second, sizeof(key.second), 1, f));
-        info->tunables[key] = unpack_tunable(f);
+        info->tunables[index] = unpack_tunable(f);
       }
       unsigned num_operations;
       ignore_result(fread(&num_operations, sizeof(num_operations), 1, f));
@@ -1192,7 +1188,30 @@ namespace Legion {
       ignore_result(fread(&tunable->tunable_size, 
                           sizeof(tunable->tunable_size), 1, f));
       tunable->tunable_value = malloc(tunable->tunable_size);
-      ignore_result(fread(&tunable->tunable_value, tunable->tunable_size, 1,f));
+      unsigned string_length;
+      ignore_result(fread(&string_length, sizeof(string_length), 1, f));
+      char *string = (char*)malloc(string_length);
+      ignore_result(fread(string, string_length, 1, f));
+      // Now convert the hex string back into the value
+      unsigned byte_index = 0;
+      unsigned *target = (unsigned*)tunable->tunable_value;
+      for (unsigned word_idx = 0; 
+            word_idx < (tunable->tunable_size/4); word_idx++)
+      {
+        unsigned next_word = 0;
+        for (unsigned i = 0; i < (8*sizeof(next_word)/4); i++, byte_index++)
+        {
+          unsigned next = 0;
+          if (string[byte_index] >= 'A')
+            next = (string[byte_index] - 'A') + 10;
+          else
+            next = string[byte_index] - '0';
+          next_word |= (next << (i*4));
+        }
+        target[word_idx] = next_word;
+      }
+
+      free(string);
       return tunable;
     }
 

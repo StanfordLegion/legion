@@ -18,7 +18,7 @@ local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
 local regex = require("bishop/regex")
-local data = require("regent/data")
+local data = require("common/data")
 local regent_std = require("regent/std")
 local regent_codegen_hooks = require("regent/codegen_hooks")
 
@@ -372,7 +372,7 @@ local function merge_region_properties(rules, signature)
     for key, value in pairs(default_region_properties) do
       properties[key] = value
     end
-    if regent_std.is_reduce(signature.reqs[idx].privilege) then
+    if regent_std.is_reduction_op(signature.reqs[idx].privilege) then
       properties.create.value = "demand"
     end
     for ridx = 1, #rules do

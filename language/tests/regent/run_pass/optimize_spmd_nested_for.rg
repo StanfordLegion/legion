@@ -105,7 +105,7 @@ task test()
     c.printf("x %d %d %d\n", x.a, x.b, x.c)
   end
 
-  var outer = 10
+  var outer = 3
   var inner = 3
   var pieces = 4
 
@@ -156,10 +156,10 @@ task test()
     c.printf("x %d %d %d\n", x.a, x.b, x.c)
   end
 
-  regentlib.assert(x0.a ==  6521, "test failed")
-  regentlib.assert(x1.a == 13329, "test failed")
-  regentlib.assert(x2.a ==  6858, "test failed")
-  regentlib.assert(x3.a == 13223, "test failed")
+  regentlib.assert(x0.a ==  9019, "test failed")
+  regentlib.assert(x1.a == 10854, "test failed")
+  regentlib.assert(x2.a ==  9040, "test failed")
+  regentlib.assert(x3.a == 10900, "test failed")
 end
 
 task main()

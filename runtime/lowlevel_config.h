@@ -49,6 +49,7 @@ typedef enum legion_lowlevel_processor_kind_t {
   UTIL_PROC, // Utility core
   IO_PROC, // I/O core
   PROC_GROUP, // Processor group
+  PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
 } legion_lowlevel_processor_kind_t;
 
 // Different Memory types

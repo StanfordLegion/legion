@@ -102,7 +102,9 @@ namespace Legion {
                               unsigned index, const FieldMask &needed_fields);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -138,7 +140,8 @@ namespace Legion {
       void pack_restrict_infos(Serializer &rez, 
                                std::vector<RestrictInfo> &infos);
       void unpack_restrict_infos(Deserializer &derez,
-                                 std::vector<RestrictInfo> &infos);
+                                 std::vector<RestrictInfo> &infos,
+                                 std::set<RtEvent> &ready_events);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -316,6 +319,15 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *op;
       };
+      struct RemoteCreateViewArgs {
+      public:
+        HLRTaskID hlr_id;
+        SingleTask *proxy_this;
+        PhysicalManager *manager;
+        InstanceView **target;
+        RtUserEvent to_trigger;
+        AddressSpaceID source;
+      };
       struct PostEndArgs {
       public:
         HLRTaskID hlr_id;
@@ -364,6 +376,8 @@ namespace Legion {
         { return executing_processor; }
       inline void set_executing_processor(Processor p)
         { executing_processor = p; }
+      inline unsigned get_tunable_index(void)
+        { return total_tunable_count++; }
     public:
       // These two functions are only safe to call after
       // the task has had its variant selected
@@ -507,8 +521,16 @@ namespace Legion {
                                       FieldID &bad_field, 
                                       bool skip_privileges) const;
     public:
-      bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
-      void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
+      void add_acquisition(AcquireOp *op, const RegionRequirement &req);
+      void remove_acquisition(ReleaseOp *op, const RegionRequirement &req);
+      void add_restriction(AttachOp *op, InstanceManager *instance,
+                           const RegionRequirement &req);
+      void remove_restriction(DetachOp *op, const RegionRequirement &req);
+      void release_restrictions(void);
+      inline bool has_restrictions(void) const 
+        { return !coherence_restrictions.empty(); }
+      void perform_restricted_analysis(const RegionRequirement &req, 
+                                       RestrictInfo &restrict_info);
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
@@ -537,7 +559,8 @@ namespace Legion {
       void invalidate_region_tree_contexts(void);
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
-                                             AddressSpaceID source); 
+                         AddressSpaceID source, RtEvent *ready = NULL); 
+      static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
       void convert_virtual_instance_top_views(
@@ -654,6 +677,7 @@ namespace Legion {
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count;
+      unsigned total_tunable_count;
       unsigned outstanding_children_count;
       bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
@@ -686,6 +710,9 @@ namespace Legion {
       unsigned pending_frames;
       // Event used to order operations to the runtime
       RtEvent context_order_event;
+      // Track whether this context is current active for scheduling
+      // indicating that it is no longer far enough ahead
+      bool currently_active_context;
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
@@ -701,8 +728,8 @@ namespace Legion {
       // Some help for performing fast safe casts
       std::map<IndexSpace,Domain> safe_cast_domains;
     protected:
-      // Information for tracking restrictions
-      LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
+      // For tracking restricted coherence
+      std::list<Restriction*> coherence_restrictions;
 #ifdef LEGION_SPY
     public:
       RtEvent update_previous_mapped_event(RtEvent next);
@@ -746,7 +773,9 @@ namespace Legion {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool map_and_launch(void) = 0;
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
@@ -845,7 +874,9 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -956,7 +987,9 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual void recapture_version_info(unsigned idx);
       virtual bool is_inline_task(void) const;
     public:

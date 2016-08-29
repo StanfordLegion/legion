@@ -13,12 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_parallel.rg:23: option __demand(__parallel) is not permitted
--- task f() end
---    ^
+-- type_mismatch_attach3.rg:24: type mismatch in argument 3: expected uint32 but got &int8
+--   attach(hdf5, r, "asdf.hdf", "create")
+--        ^
 
 import "regent"
 
-__demand(__parallel)
-task f() end
+task f()
+  var r = region(ispace(int1d, 5), int)
+  attach(hdf5, r, "asdf.hdf", "create")
+end
 f:compile()

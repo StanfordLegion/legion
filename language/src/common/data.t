@@ -138,7 +138,12 @@ end
 function data.flatmap(fn, list)
   local result = terralib.newlist()
   for i, elt in ipairs(list) do
-    result:insertall(fn(elt))
+    elt = fn(elt)
+    if terralib.islist(elt) then
+      result:insertall(elt)
+    else
+      result:insert(elt)
+    end
   end
   return result
 end

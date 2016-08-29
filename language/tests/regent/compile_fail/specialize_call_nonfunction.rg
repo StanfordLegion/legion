@@ -13,15 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:25: unable to specialize complex expression in function call position
---   x[0]("hello %d\n", 6)
---    ^
+-- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
+--   x(5)
+--   ^
 
 import "regent"
 
 task f()
-  var x : ({rawstring, int} -> {})[1]
-  x[0] = regentlib.c.printf
-  x[0]("hello %d\n", 6)
+  var x = 20
+  x(5)
 end
 f:compile()

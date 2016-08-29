@@ -14,7 +14,7 @@
 
 -- Regent Standard Library - Base Layer
 
-local data = require("regent/data")
+local data = require("common/data")
 
 local base = {}
 

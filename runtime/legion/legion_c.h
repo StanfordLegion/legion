@@ -255,7 +255,6 @@ typedef long long int coord_t;
   typedef struct legion_phase_barrier_t {
     // From Realm::Event
     legion_lowlevel_id_t id;
-    legion_lowlevel_event_gen_t gen;
     // From Realm::Barrier
     legion_lowlevel_barrier_timestamp_t timestamp;
   } legion_phase_barrier_t;
@@ -267,7 +266,6 @@ typedef long long int coord_t;
     // From Legion::PhaseBarrier
     //   From Realm::Event
     legion_lowlevel_id_t id;
-    legion_lowlevel_event_gen_t gen;
     //   From Realm::Barrier
     legion_lowlevel_barrier_timestamp_t timestamp;
     // From Legion::DynamicCollective
@@ -773,6 +771,13 @@ typedef long long int coord_t;
                                    legion_domain_t domain);
 
   /**
+   * @see Legion::Runtime::has_multiple_domains().
+   */
+  bool
+  legion_index_space_has_multiple_domains(legion_runtime_t runtime,
+                                          legion_index_space_t handle);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::Runtime::get_index_space_domain()
@@ -1230,6 +1235,13 @@ typedef long long int coord_t;
   legion_color_t
   legion_logical_region_get_color(legion_runtime_t runtime,
                                   legion_logical_region_t handle);
+
+  /**
+   * @see Legion::Runtime::get_logical_region_color_point()
+   */
+  legion_domain_point_t
+  legion_logical_region_get_color_domain_point(legion_runtime_t runtime_,
+                                               legion_logical_region_t handle_);
 
   /**
    * @see Legion::Runtime::has_parent_logical_partition()
@@ -1803,6 +1815,14 @@ typedef long long int coord_t;
   legion_future_from_bytes(legion_runtime_t runtime,
 			   const void *buffer,
 			   size_t size);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Future::Future()
+   */
+  legion_future_t
+  legion_future_copy(legion_future_t handle);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
@@ -2471,7 +2491,6 @@ typedef long long int coord_t;
   legion_acquire_launcher_create(
     legion_logical_region_t logical_region,
     legion_logical_region_t parent_region,
-    legion_physical_region_t physical_region,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);
@@ -2529,7 +2548,6 @@ typedef long long int coord_t;
   legion_release_launcher_create(
     legion_logical_region_t logical_region,
     legion_logical_region_t parent_region,
-    legion_physical_region_t physical_region,
     legion_predicate_t pred /* = legion_predicate_true() */,
     legion_mapper_id_t id /* = 0 */,
     legion_mapping_tag_id_t tag /* = 0 */);

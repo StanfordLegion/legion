@@ -13,15 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_call_parallel.rg:25: option __demand(__parallel) is not permitted
---   __demand(__parallel, f())
---                          ^
+-- fspace_field_mixed2.rg:25: some entries in constructor are named while others are not
+--   var x = s { a = 1, 2 }
+--             ^
 
 import "regent"
 
-task f() end
+fspace s { a : int, b : int }
 
-task g()
-  __demand(__parallel, f())
+task f()
+  var x = s { a = 1, 2 }
 end
-g:compile()
+f:compile()

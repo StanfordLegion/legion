@@ -14,8 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "4", "-fflow-spmd", "1"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -53,7 +53,7 @@ task main()
   end
 
   var tinit = 0
-  var tfinal = 10
+  var tfinal = 3
 
   __demand(__spmd)
   for t = tinit, tfinal do
@@ -69,7 +69,8 @@ task main()
   end
 
   for x in r do
-    regentlib.assert(@x == 73210, "test failed")
+    regentlib.c.printf("%d\n", @x)
+    regentlib.assert(@x == 70963, "test failed")
   end
 end
 regentlib.start(main)

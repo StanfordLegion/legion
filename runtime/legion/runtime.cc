@@ -394,9 +394,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
                            AddressSpaceID own_space, AddressSpaceID loc_space,
-                           RtUserEvent destroy_event, Operation *o /*= NULL*/)
-      : DistributedCollectable(rt, did, own_space, loc_space, 
-                               destroy_event, register_now),
+                           Operation *o /*= NULL*/)
+      : DistributedCollectable(rt, did, own_space, loc_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
@@ -407,10 +406,6 @@ namespace Legion {
     {
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
-      // If we're not the owner, add a resource reference on ourself that
-      // will be removed when the owner cleans up
-      if (!is_owner())
-        add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Future %ld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -433,14 +428,8 @@ namespace Legion {
     FutureImpl::~FutureImpl(void)
     //--------------------------------------------------------------------------
     {
-      // If we are the owner, remove our resource references on all
-      // the instances on remote nodes
-      if (is_owner())
-      {
-        UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> 
-          functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       // don't want to leak events
       if (!ready_event.has_triggered())
         Runtime::trigger_event(ready_event);
@@ -2285,7 +2274,6 @@ namespace Legion {
     {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
-      
     }
 
     //--------------------------------------------------------------------------
@@ -2317,6 +2305,11 @@ namespace Legion {
         for (std::vector<PhysicalManager*>::const_iterator it = 
               instances.begin(); it != instances.end(); it++)
         {
+          // Tell these instances that they are no longer registered
+          // with the runtime to avoid them sending messages when they
+          // are deleted
+          if ((*it)->is_registered())
+            (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
           if ((*it)->try_active_deletion())
             record_deleted_instance(*it);
           // Remove our base resource reference
@@ -2486,6 +2479,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2538,6 +2533,8 @@ namespace Legion {
                                                      regions, creator_id);
         if (manager != NULL)
         {
+          if (Runtime::legion_spy_enabled)
+            manager->log_instance_creation(creator_id, processor, regions);
           record_created_instance(manager, acquire, mapper_id, processor,
                                   priority, remote);
           result = MappingInstance(manager);
@@ -2607,6 +2604,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // We're definitely going to succeed one way or another
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -2687,6 +2686,8 @@ namespace Legion {
                                                        regions, creator_id);
           if (manager != NULL)
           {
+            if (Runtime::legion_spy_enabled)
+              manager->log_instance_creation(creator_id, processor, regions);
             // If we make it here we're definitely going to succeed
             success = true;
             // To maintain the illusion that this is atomic we have to
@@ -2797,6 +2798,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::release_tree_instances(RegionTreeID tree_id)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not the owner, then there is nothing to do
+      if (!is_owner)
+        return;
+      // Take the manager lock and see if there are any managers
+      // we can release now
+      std::map<PhysicalManager*,bool> to_release;
+      {
+        AutoLock m_lock(manager_lock);
+        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
+        {
+          // If the region for the instance is not for the tree then
+          // we get to skip it
+          if (it->first->region_node->handle.get_tree_id() != tree_id)
+            continue;
+          // If it's already been deleted, then there is nothing to do
+          if (it->second.current_state == ACTIVE_COLLECTED_STATE)
+            continue;
+          // Add a resource reference for ourself
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          to_release[it->first] = 
+            (it->second.min_priority == GC_NEVER_PRIORITY);
+#ifdef DEBUG_LEGION
+          // We might have lost a race with adding NEVER_GC_REF
+          // after release the manager lock if we hit this assertion
+          if (it->second.min_priority == GC_NEVER_PRIORITY)
+            assert(it->second.current_state == VALID_STATE);
+#endif
+          it->second.mapper_priorities.clear();
+          it->second.min_priority = GC_MAX_PRIORITY;
+        }
+      }
+      for (std::map<PhysicalManager*,bool>::const_iterator it = 
+            to_release.begin(); it != to_release.end(); it++)
+      {
+        if (it->second)
+          it->first->remove_base_valid_ref(NEVER_GC_REF);
+        if (it->first->try_active_deletion())
+          record_deleted_instance(it->first);
+        // Now we can release our resource reference
+        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::set_garbage_collection_priority(
                                 PhysicalManager *manager, MapperID mapper_id, 
                                 Processor processor, GCPriority priority)
@@ -2810,7 +2860,7 @@ namespace Legion {
         bool remove_never_gc_ref = false;
         std::pair<MapperID,Processor> key(mapper_id,processor);
         // Check to see if this is or is going to be a max priority instance
-        if (priority == NEVER_GC_REF)
+        if (priority == GC_NEVER_PRIORITY)
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
@@ -2832,7 +2882,7 @@ namespace Legion {
             current_instances.find(manager);
           if (finder != current_instances.end())
           {
-            if (finder->second.min_priority == NEVER_GC_REF)
+            if (finder->second.min_priority == GC_NEVER_PRIORITY)
             {
               finder->second.mapper_priorities.erase(key);
               if (finder->second.mapper_priorities.empty())
@@ -3055,7 +3105,7 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
-                bool min_priority = (priority == NEVER_GC_REF);
+                bool min_priority = (priority == GC_NEVER_PRIORITY);
                 rez.serialize<bool>(min_priority);
                 if (min_priority)
                 {
@@ -3104,7 +3154,7 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
-                bool min_priority = (priority == NEVER_GC_REF);
+                bool min_priority = (priority == GC_NEVER_PRIORITY);
                 rez.serialize<bool>(min_priority);
                 if (min_priority)
                 {
@@ -3160,7 +3210,7 @@ namespace Legion {
                 rez.serialize<bool>(created);
                 if (created)
                 {
-                  bool min_priority = (priority == NEVER_GC_REF);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -3219,7 +3269,7 @@ namespace Legion {
                 rez.serialize<bool>(created);
                 if (created)
                 {
-                  bool min_priority = (priority == NEVER_GC_REF);
+                  bool min_priority = (priority == GC_NEVER_PRIORITY);
                   rez.serialize<bool>(min_priority);
                   if (min_priority)
                   {
@@ -3380,11 +3430,11 @@ namespace Legion {
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == NEVER_GC_REF)
+            if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate_valid = true;
             else
-              info.min_priority = NEVER_GC_REF;
-            info.mapper_priorities[key] = NEVER_GC_REF;
+              info.min_priority = GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
         }
         if (remove_duplicate_valid && 
@@ -3416,11 +3466,11 @@ namespace Legion {
           if (min_priority)
           {
             InstanceInfo &info = current_instances[manager];
-            if (info.min_priority == NEVER_GC_REF)
+            if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate_valid = true;
             else
-              info.min_priority = NEVER_GC_REF;
-            info.mapper_priorities[key] = NEVER_GC_REF;
+              info.min_priority = GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
         }
         if (remove_duplicate_valid && 
@@ -4213,8 +4263,9 @@ namespace Legion {
           manager->add_base_valid_ref(REMOTE_DID_REF);
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-      }
-      if (priority == NEVER_GC_REF)
+      } 
+      // If we have a GC_NEVER_PRIORITY then we have to add the valid reference
+      if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
@@ -4316,7 +4367,7 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == NEVER_GC_REF)
+      if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
@@ -4359,7 +4410,7 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == NEVER_GC_REF)
+      if (priority == GC_NEVER_PRIORITY)
         manager->add_base_valid_ref(NEVER_GC_REF);
     }
 
@@ -4443,7 +4494,7 @@ namespace Legion {
         size_t max_message_size, bool profile)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        observed_recent(false), profile_messages(profile)
+        observed_recent(true), profile_messages(profile)
     //--------------------------------------------------------------------------
     //
     {
@@ -4593,6 +4644,30 @@ namespace Legion {
       else
         header = FULL_MESSAGE;
       packaged_messages = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualChannel::confirm_shutdown(ShutdownManager *shutdown_manager,
+                                          bool phase_one)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(send_lock);
+      if (phase_one)
+      {
+        if (packaged_messages > 0)
+          shutdown_manager->record_recent_message();
+        // This is only sound because we know we are on the owner
+        // node for the event, otherwise Realm could lie to us
+        if (!last_message_event.has_triggered())
+          shutdown_manager->record_pending_message(last_message_event);
+        else
+          observed_recent = false;
+      }
+      else
+      {
+        if (observed_recent || (packaged_messages > 0))
+          shutdown_manager->record_recent_message();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4901,6 +4976,11 @@ namespace Legion {
           case DISTRIBUTED_CREATE_REMOVE:
             {
               runtime->handle_did_create_remove(derez);
+              break;
+            }
+          case DISTRIBUTED_UNREGISTER:
+            {
+              runtime->handle_did_remote_unregister(derez);
               break;
             }
           case SEND_ATOMIC_RESERVATION_REQUEST:
@@ -5222,12 +5302,12 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
-              runtime->handle_shutdown_notification(remote_address_space);
+              runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
-              runtime->handle_shutdown_response(derez, remote_address_space);
+              runtime->handle_shutdown_response(derez);
               break;
             }
           default:
@@ -5281,27 +5361,6 @@ namespace Legion {
       receiving_index += arglen;
     }
 
-    //--------------------------------------------------------------------------
-    RtEvent VirtualChannel::notify_pending_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-      return last_message_event;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VirtualChannel::has_recent_messages(void) const
-    //--------------------------------------------------------------------------
-    {
-      return observed_recent;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualChannel::clear_recent_messages(void)
-    //--------------------------------------------------------------------------
-    {
-      observed_recent = false;
-    }
-
     /////////////////////////////////////////////////////////////
     // Message Manager 
     /////////////////////////////////////////////////////////////
@@ -5314,6 +5373,9 @@ namespace Legion {
                       malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(remote != runtime->address_space);
+#endif
       // Figure out which processor to send to based on our address
       // space ID.  If there is an explicit utility processor for one
       // of the processors in our set then we use that.  Otherwise we
@@ -5375,38 +5437,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MessageManager::notify_pending_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> wait_events;
-      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-      {
-        wait_events.insert(channels[idx].notify_pending_shutdown());
-      }
-      return Runtime::merge_events(wait_events);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MessageManager::has_recent_messages(void) const
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-      {
-        if (channels[idx].has_recent_messages())
-          return true;
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void MessageManager::clear_recent_messages(void)
-    //--------------------------------------------------------------------------
-    {
-      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
-        channels[idx].clear_recent_messages();
-    }
-
-    //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
                                       VirtualChannelKind channel, bool flush)
     //--------------------------------------------------------------------------
@@ -5427,23 +5457,32 @@ namespace Legion {
                                         remote_address_space);
     }
 
+    //--------------------------------------------------------------------------
+    void MessageManager::confirm_shutdown(ShutdownManager *shutdown_manager, 
+                                          bool phase_one)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
+        channels[idx].confirm_shutdown(shutdown_manager, phase_one);
+    }
+
     /////////////////////////////////////////////////////////////
     // Shutdown Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShutdownManager::ShutdownManager(Runtime *rt, AddressSpaceID s,
-                                     MessageManager *m)
-      : runtime(rt), source(s), source_manager(m),
+    ShutdownManager::ShutdownManager(bool one, Runtime *rt, AddressSpaceID s, 
+                                     unsigned r, ShutdownManager *own)
+      : phase_one(one), runtime(rt), source(s), radix(r), owner(own),
         shutdown_lock(Reservation::create_reservation()), 
-        observed_responses(0), result(true)
+        needed_responses(0), result(true)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ShutdownManager::ShutdownManager(const ShutdownManager &rhs)
-      : runtime(NULL), source(0), source_manager(NULL)
+      : phase_one(false), runtime(NULL), source(0), radix(0), owner(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5468,88 +5507,171 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShutdownManager::has_managers(void) const
+    bool ShutdownManager::attempt_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      // No need for the lock
-      return !managers.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void ShutdownManager::add_manager(AddressSpaceID target, 
-                                      MessageManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      // No need for the lock
-#ifdef DEBUG_LEGION
-      assert(target != source);
-      assert(managers.find(target) == managers.end());
-#endif
-      managers[target] = manager;
-    }
-
-    //--------------------------------------------------------------------------
-    void ShutdownManager::send_notifications(void)
-    //--------------------------------------------------------------------------
-    {
-      NotificationArgs args;
-      args.hlr_id = HLR_SHUTDOWN_NOTIFICATION_TASK_ID;
-      // Clean out our managers and then send the messages
-      for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
-            managers.begin(); it != managers.end(); it++)
+      // Do the broadcast tree to the other nodes
+      // Figure out who we have to send messages to
+      std::vector<AddressSpaceID> targets;
+      const AddressSpaceID local_space = runtime->address_space;
+      // shift up by 1 for 1-based indexing
+      // do the math
+      // shift back down by 1
+      AddressSpaceID start = ((local_space+1) * radix) - 1;
+      for (unsigned idx = 0; idx < radix; idx++)
       {
-        log_shutdown.info("Sending notification from node %d to %d",
-                          runtime->address_space, it->first);
-        it->second->clear_recent_messages();
-        RtEvent precondition = it->second->notify_pending_shutdown();
-        args.manager = it->second;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
-                                         HLR_LATENCY_PRIORITY, 
-                                         NULL, precondition);
+        AddressSpaceID next = start+idx;
+        if (next < runtime->total_address_spaces)
+          targets.push_back(next);
+        else
+          break;
+      }
+      
+      if (!targets.empty())
+      {
+        // Set the number of needed_responses
+        needed_responses = targets.size();
+        Serializer rez;
+        rez.serialize(this);
+        rez.serialize<bool>(phase_one);
+        for (std::vector<AddressSpaceID>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
+          runtime->send_shutdown_notification(*it, rez); 
+        return false;
+      }
+      else // no messages means we can finalize right now
+      {
+        finalize();
+        return true;
       }
     }
 
     //--------------------------------------------------------------------------
-    void ShutdownManager::send_response(void)
+    bool ShutdownManager::handle_response(bool success,
+                                          const std::set<RtEvent> &to_add)
     //--------------------------------------------------------------------------
     {
+      bool done = false;
+      {
+        AutoLock s_lock(shutdown_lock);
+        if (result && !success)
+          result = false;
+        wait_for.insert(to_add.begin(), to_add.end()); 
 #ifdef DEBUG_LEGION
-      assert(source_manager != NULL);
+        assert(needed_responses > 0);
 #endif
-      log_shutdown.info("Sending response from node %d to %d",
-                        runtime->address_space, source);
-      ResponseArgs args;
-      args.hlr_id = HLR_SHUTDOWN_RESPONSE_TASK_ID;
-      args.target = source_manager;
-      args.result = result;
-      RtEvent precondition = source_manager->notify_pending_shutdown();
-      runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                       HLR_SHUTDOWN_RESPONSE_TASK_ID, 
-                                       HLR_LATENCY_PRIORITY, NULL,
-                                       precondition);
+        needed_responses--;
+        done = (needed_responses == 0);
+      }
+      if (done)
+      {
+        finalize();
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    bool ShutdownManager::handle_response(AddressSpaceID sender, bool res)
+    void ShutdownManager::finalize(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(managers.find(sender) != managers.end());
-#endif
-      log_shutdown.info("Received response on node %d from %d",
-                        runtime->address_space, sender);
-      AutoLock shut(shutdown_lock);
-      if (!res)
+      // Do our local check
+      runtime->confirm_runtime_shutdown(this, phase_one);
+#ifdef DEBUG_SHUTDOWN_HANG
+      if (!result)
       {
-        result = false;
-#ifdef DEBUG_SHTUDOWN_HANG
-        log_shutdown.info("Received shutdown failure from %d on %d", sender,
-                          runtime->address_space);
-#endif
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
       }
-      observed_responses++;
-      return (observed_responses == managers.size());
+#endif
+      if (result && (runtime->address_space == source))
+      {
+        if (phase_one)
+        {
+          log_shutdown.info("SHUTDOWN PHASE 1 SUCCESS!");
+          runtime->initiate_runtime_shutdown(source, false/*phase one*/);
+        }
+        else
+        {
+          log_shutdown.info("SHUTDOWN SUCCEEDED!");
+          runtime->finalize_runtime_shutdown();
+        }
+      }
+      else if (runtime->address_space != source)
+      {
+#ifdef DEBUG_LEGION
+        assert(owner != NULL);
+#endif
+        // Send the message back
+        Serializer rez;
+        rez.serialize(owner);
+        rez.serialize<bool>(result);
+        rez.serialize<size_t>(wait_for.size());
+        for (std::set<RtEvent>::const_iterator it = 
+              wait_for.begin(); it != wait_for.end(); it++)
+          rez.serialize(*it);
+        runtime->send_shutdown_response(source, rez);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!result);
+#endif
+        log_shutdown.info("FAILED SHUTDOWN! Trying again...");
+        RtEvent precondition;
+        if (!wait_for.empty())
+          precondition = Runtime::merge_events(wait_for);
+        // We failed, launch a task to retry phase 1 
+        HLRTaskID hlr_id = HLR_RETRY_SHUTDOWN_TASK_ID;
+        runtime->issue_runtime_meta_task(&hlr_id, sizeof(hlr_id),
+            HLR_RETRY_SHUTDOWN_TASK_ID, HLR_THROUGHPUT_PRIORITY, 
+            NULL, precondition);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShutdownManager::handle_shutdown_notification(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShutdownManager *owner;
+      derez.deserialize(owner);
+      bool phase_one;
+      derez.deserialize(phase_one);
+      ShutdownManager *shutdown_manager = 
+        new ShutdownManager(phase_one, runtime, source, 
+                            LEGION_SHUTDOWN_RADIX, owner);
+      if (shutdown_manager->attempt_shutdown())
+        delete shutdown_manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShutdownManager::handle_shutdown_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShutdownManager *shutdown_manager;
+      derez.deserialize(shutdown_manager);
+      bool success;
+      derez.deserialize(success);
+      size_t num_events;
+      derez.deserialize(num_events);
+      std::set<RtEvent> wait_for;
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        RtEvent event;
+        derez.deserialize(event);
+        wait_for.insert(event);
+      }
+      if (shutdown_manager->handle_response(success, wait_for))
+        delete shutdown_manager;
     }
 
     //--------------------------------------------------------------------------
@@ -5576,64 +5698,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShutdownManager::finalize(void)
+    void ShutdownManager::record_recent_message(void)
     //--------------------------------------------------------------------------
     {
-      if (result && !managers.empty())
-      {
-        // Check our managers for messages
-        for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
-              managers.begin(); it != managers.end(); it++)
-        {
-          if (it->second->has_recent_messages())
-          {
-            result = false;
+      // Instant death
+      result = false;
 #ifdef DEBUG_SHUTDOWN_HANG
-            log_shutdown.info("Recent messages from %d to %d",
-              it->second->remote_address_space, runtime->address_space);
+      log_shutdown.info("Outstanding message on node %d", 
+                        runtime->address_space);
 #endif
-            break;
-          }
-        }
-      }
-      // No need for the lock here
-      if (source != runtime->address_space)
-      {
+    }
+
+    //--------------------------------------------------------------------------
+    void ShutdownManager::record_pending_message(RtEvent pending_event)
+    //--------------------------------------------------------------------------
+    {
+      // Instant death
+      result = false;
+      wait_for.insert(pending_event);
 #ifdef DEBUG_SHUTDOWN_HANG
-        HLR_TASK_DESCRIPTIONS(task_descs);
-        // Only need to see tasks less than this 
-        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
-        {
-          if (runtime->outstanding_counts[idx] == 0)
-            continue;
-          log_shutdown.info("Meta-Task %s: %d outstanding",
-                task_descs[idx], runtime->outstanding_counts[idx]);
-        }
+      log_shutdown.info("Pending message on node %d", runtime->address_space);
 #endif
-        send_response();
-      }
-      else if (result)
-      {
-        // We succeeded so shutdown the runtime
-        runtime->finalize_runtime_shutdown();
-      }
-      else
-      {
-#ifdef DEBUG_SHUTDOWN_HANG
-        HLR_TASK_DESCRIPTIONS(task_descs);
-        // Only need to see tasks less than this 
-        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
-        {
-          if (runtime->outstanding_counts[idx] == 0)
-            continue;
-          log_shutdown.info("Meta-Task %s: %d outstanding",
-                task_descs[idx], runtime->outstanding_counts[idx]);
-        }
-#endif
-        // We failed, so try again
-        log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
-        runtime->issue_runtime_shutdown_attempt();
-      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7048,7 +7133,8 @@ namespace Legion {
                      const std::map<Processor,AddressSpaceID> &processor_spaces)
       : external(new Legion::Runtime(this)),
         mapper_runtime(new Legion::Mapping::MapperRuntime()),
-        machine(m), address_space(unique),
+        machine(m), address_space(unique), 
+        total_address_spaces(address_spaces.size()),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
@@ -7056,8 +7142,6 @@ namespace Legion {
         outstanding_task_lock(Reservation::create_reservation()),
 #endif
         total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
-        shutdown_manager(NULL),
-        shutdown_lock(Reservation::create_reservation()),
         local_procs(locals), local_utils(local_utilities),
         memory_manager_lock(Reservation::create_reservation()),
         message_manager_lock(Reservation::create_reservation()),
@@ -7219,8 +7303,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Runtime::Runtime(const Runtime &rhs)
       : external(NULL), mapper_runtime(NULL), machine(rhs.machine), 
-        address_space(0), runtime_stride(0), profiler(NULL), forest(NULL),
-        has_explicit_utility_procs(false),
+        address_space(0), total_address_spaces(0), runtime_stride(0), 
+        profiler(NULL), forest(NULL), has_explicit_utility_procs(false),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
     //--------------------------------------------------------------------------
     {
@@ -7591,9 +7675,6 @@ namespace Legion {
       gc_epoch_lock = Reservation::NO_RESERVATION;
       context_lock.destroy_reservation();
       context_lock = Reservation::NO_RESERVATION;
-      shutdown_lock.destroy_reservation();
-      shutdown_lock = Reservation::NO_RESERVATION;
-
 #ifdef DEBUG_LEGION
       outstanding_task_lock.destroy_reservation();
       outstanding_task_lock = Reservation::NO_RESERVATION;
@@ -10879,8 +10960,7 @@ namespace Legion {
         }
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -11087,8 +11167,7 @@ namespace Legion {
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/, 
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT);
+          get_available_distributed_id(true), address_space, address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -11160,8 +11239,7 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT));
+          get_available_distributed_id(true), address_space, address_space));
       IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -11265,8 +11343,7 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
-          get_available_distributed_id(true), address_space, 
-          address_space, RtUserEvent::NO_RT_USER_EVENT));
+          get_available_distributed_id(true), address_space, address_space));
       IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
@@ -12817,20 +12894,23 @@ namespace Legion {
 #endif
       FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
                               get_available_distributed_id(true),
-                              address_space, address_space, 
-                              RtUserEvent::NO_RT_USER_EVENT, ctx);
+                              address_space, address_space, ctx);
+      // Make this here to get a local reference on it now
+      Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs args;
       args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
+      if (legion_spy_enabled)
+        args.tunable_index = ctx->get_tunable_index();
       args.task = ctx;
       args.result = result;
       issue_runtime_meta_task(&args, sizeof(args),
                               HLR_SELECT_TUNABLE_TASK_ID, 
                               HLR_LATENCY_PRIORITY, ctx);
-      return Future(result);
+      return result_future;
     }
 
     //--------------------------------------------------------------------------
@@ -12839,7 +12919,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Future f = select_tunable_value(ctx, tid, mid, tag);
-      return f.get_result<int>();
+      int result = f.get_result<int>();
+      if (legion_spy_enabled)
+      {
+        unsigned index = ctx->get_tunable_index();
+        LegionSpy::log_tunable_value(ctx->get_unique_op_id(), index,
+                                     &result, sizeof(result));
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -12856,6 +12943,9 @@ namespace Legion {
       output.value = NULL;
       output.size = 0;
       mapper->invoke_select_tunable_value(args->task, &input, &output);
+      if (legion_spy_enabled)
+        LegionSpy::log_tunable_value(args->task->get_unique_op_id(), 
+            args->tunable_index, output.value, output.size);
       // Set and complete the future
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, true/*own*/);
@@ -13617,6 +13707,10 @@ namespace Legion {
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
                                                   registrar, ret, realm,
                                                   user_data, user_data_size);
+      if (legion_spy_enabled)
+        LegionSpy::log_task_variant(registrar.task_id, vid, 
+                                    impl->is_inner(), impl->is_leaf(),
+                                    impl->is_idempotent(), impl->get_name());
       // Add this variant to the owner
       task_impl->add_variant(impl);
       AutoLock tv_lock(task_variant_lock);
@@ -14230,7 +14324,7 @@ namespace Legion {
         rez.serialize(handle);
       }
       find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, false/*flush*/);
+                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14245,7 +14339,7 @@ namespace Legion {
       }
       find_messenger(target)->send_message(rez, 
         INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_SPACE_VIRTUAL_CHANNEL,
-                                                             false/*flush*/);
+                                                             true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14260,7 +14354,7 @@ namespace Legion {
       }
       find_messenger(target)->send_message(rez, 
           FIELD_SPACE_DESTRUCTION_MESSAGE, FIELD_SPACE_VIRTUAL_CHANNEL,
-                                                              false/*flush*/);
+                                                              true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14275,7 +14369,7 @@ namespace Legion {
       }
       find_messenger(target)->send_message(rez, 
           LOGICAL_REGION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
-                                                              false/*flush*/);
+                                                              true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14290,7 +14384,7 @@ namespace Legion {
       }
       find_messenger(target)->send_message(rez, 
           LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
-                                                                false/*flush*/);
+                                                                true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14408,6 +14502,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_REMOVE,
                                            DEFAULT_VIRTUAL_CHANNEL, flush);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_remote_unregister(AddressSpaceID target, 
+                                         Serializer &rez, VirtualChannelKind vc)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_UNREGISTER,
+                                           vc, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14898,6 +15001,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_shutdown_notification(AddressSpaceID target, 
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_shutdown_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -15253,6 +15373,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remove_create(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_remote_unregister(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_unregister_collectable(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15799,29 +15926,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_shutdown_notification(AddressSpaceID source)
+    void Runtime::handle_shutdown_notification(Deserializer &derez,
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      initiate_runtime_shutdown(source);
+      ShutdownManager::handle_shutdown_notification(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_shutdown_response(Deserializer &derez, 
-                                            AddressSpaceID source)
+    void Runtime::handle_shutdown_response(Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
-      bool result;
-      derez.deserialize(result);
-#ifdef DEBUG_LEGION
-      assert(shutdown_manager != NULL);
-#endif
-      if (shutdown_manager->handle_response(source, result))
-      {
-        ShutdownManager *local = shutdown_manager;
-        shutdown_manager = NULL;
-        local->finalize();
-        delete local;
-      }
+      ShutdownManager::handle_shutdown_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15913,6 +16029,20 @@ namespace Legion {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_physical_instance(constraints, regions, 
                                      result, acquire, tight_region_bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_tree_instances(RegionTreeID tree_id)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Memory,MemoryManager*> copy_managers;
+      {
+        AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+        copy_managers = memory_managers;
+      }
+      for (std::map<Memory,MemoryManager*>::const_iterator it = 
+            copy_managers.begin(); it != copy_managers.end(); it++)
+        it->second->release_tree_instances(tree_id);
     }
 
     //--------------------------------------------------------------------------
@@ -16514,8 +16644,7 @@ namespace Legion {
       }
       AddressSpaceID owner_space = determine_owner(did);
       FutureImpl *result = legion_new<FutureImpl>(this, false/*register*/, did,
-                                                 owner_space, address_space,
-                                                 RtUserEvent::NO_RT_USER_EVENT);
+                                                 owner_space, address_space);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -16629,7 +16758,7 @@ namespace Legion {
     void Runtime::issue_runtime_shutdown_attempt(void)
     //--------------------------------------------------------------------------
     {
-      HLRTaskID hlr_id = HLR_SHUTDOWN_ATTEMPT_TASK_ID; 
+      HLRTaskID hlr_id = HLR_RETRY_SHUTDOWN_TASK_ID; 
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
       issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, 
@@ -16646,112 +16775,88 @@ namespace Legion {
       // As long as we still don't have any top-level tasks, 
       // keep trying to shutdown the runtime
       if (__sync_fetch_and_add(&outstanding_top_level_tasks,0) == 0)
-        initiate_runtime_shutdown(address_space);
+        initiate_runtime_shutdown(address_space, true/*phase one*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::initiate_runtime_shutdown(AddressSpaceID source)
+    void Runtime::initiate_runtime_shutdown(AddressSpaceID source,
+                                            bool phase_one)
     //--------------------------------------------------------------------------
     {
-      log_shutdown.info("Received notification on node %d from node %d",
-                        address_space, source);
-      // Launch our last garbage collection epoch and wait for it to
-      // finish so we can try to have no outstanding tasks
-      RtEvent gc_done;
+      if (phase_one)
+        log_shutdown.info("Received notification on node %d for phase one",
+                          address_space);
+      else
+        log_shutdown.info("Received notification on node %d for phase two",
+                          address_space);
+      // If this is the first phase, do all our normal stuff
+      if (phase_one)
       {
-        AutoLock gc(gc_epoch_lock);
-        if (current_gc_epoch != NULL)
+        // Launch our last garbage collection epoch and wait for it to
+        // finish so we can try to have no outstanding tasks
+        RtEvent gc_done;
         {
-          gc_done = current_gc_epoch->launch();
-          current_gc_epoch = NULL;
-        }
-      }
-      // Also try deleting any instances we have outstanding
-      std::vector<MemoryManager*> mem_managers;
-      {
-        AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
-        mem_managers.resize(memory_managers.size());
-        unsigned idx = 0;
-        for (std::map<Memory,MemoryManager*>::const_iterator it = 
-              memory_managers.begin(); it != memory_managers.end(); it++, idx++)
-          mem_managers[idx] = it->second;
-      }
-      for (std::vector<MemoryManager*>::const_iterator it = 
-            mem_managers.begin(); it != mem_managers.end(); it++)
-      {
-        (*it)->prepare_for_shutdown();
-      }
-      if (!gc_done.has_triggered())
-        gc_done.wait();
-      ShutdownManager *local_manager = 
-        new ShutdownManager(this, source, message_managers[source]);
-      // IMPORTANT: always send messages to remote nodes
-      // so that they can begin their shutdown process which
-      // may be a pre-requisite for some of our oustanding
-      // tasks being able to run.
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
-      {
-        if (idx == source)
-          continue;
-        if (message_managers[idx] != NULL)
-          local_manager->add_manager(idx, message_managers[idx]);
-      }
-
-      // Record if we have any outstanding tasks
-      if (has_outstanding_tasks())
-      {
-#ifdef DEBUG_LEGION
-        {
-          AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
-          for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
-                outstanding_task_counts.begin(); it != 
-                outstanding_task_counts.end(); it++)
+          AutoLock gc(gc_epoch_lock);
+          if (current_gc_epoch != NULL)
           {
-            if (it->second == 0)
-              continue;
-            log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
-                            address_space, it->second, it->first.second ? 
-                             "meta" : "application", it->first.first);
-
+            gc_done = current_gc_epoch->launch();
+            current_gc_epoch = NULL;
           }
         }
-#endif
-        local_manager->record_outstanding_tasks();
+        // Also try deleting any instances we have outstanding
+        std::vector<MemoryManager*> mem_managers;
+        {
+          AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+          mem_managers.resize(memory_managers.size());
+          unsigned idx = 0;
+          for (std::map<Memory,MemoryManager*>::const_iterator it = 
+                memory_managers.begin(); it != memory_managers.end(); it++, idx++)
+            mem_managers[idx] = it->second;
+        }
+        for (std::vector<MemoryManager*>::const_iterator it = 
+              mem_managers.begin(); it != mem_managers.end(); it++)
+        {
+          (*it)->prepare_for_shutdown();
+        }
+        if (!gc_done.has_triggered())
+          gc_done.wait();
       }
+      ShutdownManager *shutdown_manager = 
+        new ShutdownManager(phase_one, this, source, LEGION_SHUTDOWN_RADIX);
+      if (shutdown_manager->attempt_shutdown())
+        delete shutdown_manager;
+    }
 
+    //--------------------------------------------------------------------------
+    void Runtime::confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
+                                           bool phase_one)
+    //--------------------------------------------------------------------------
+    {
+      if (has_outstanding_tasks())
+      {
+        shutdown_manager->record_outstanding_tasks();
+#ifdef DEBUG_LEGION
+        AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
+        for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
+              outstanding_task_counts.begin(); it != 
+              outstanding_task_counts.end(); it++)
+        {
+          if (it->second == 0)
+            continue;
+          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
+                          address_space, it->second, it->first.second ? 
+                           "meta" : "application", it->first.first);
+        }
+#endif
+      }
       // Record if we have any outstanding profiling requests
       if (profiler != NULL && profiler->has_outstanding_requests())
-        local_manager->record_outstanding_profiling_requests();
-
-      // Check to see if we have any remote nodes
-      if (local_manager->has_managers())
+        shutdown_manager->record_outstanding_profiling_requests();
+      // Check all our message managers for outstanding messages 
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        // Make a shutdown manager and see if we can register it
-        bool already_marked = false;
-        // Don't need to make a shutdown manager if we only have
-        // one incoming direction from the source
-        {
-          AutoLock shut(shutdown_lock);
-          if (shutdown_manager == NULL)
-            shutdown_manager = local_manager;
-          else
-            already_marked = true;
-        }
-        // If we were already marked we can send the response now
-        if (already_marked)
-        {
-          local_manager->send_response();
-          delete local_manager;
-        }
-        else
-        {
-          local_manager->send_notifications();
-        }
-      }
-      else
-      {
-        local_manager->finalize();
-        delete local_manager;
+        if (message_managers[idx] != NULL)
+          message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
       }
     }
 
@@ -16763,7 +16868,6 @@ namespace Legion {
       // Launch tasks to shutdown all the runtime instances
       Machine::ProcessorQuery all_procs(machine);
       Realm::ProfilingRequestSet empty_requests;
-      // TODO: Make this work with Sam's internal collective framework
       if (Runtime::separate_runtime_instances)
       {
         // If we are doing separate runtime instances, run it once on every
@@ -16773,7 +16877,6 @@ namespace Legion {
         {
           shutdown_events.insert(
               RtEvent(it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests)));
-                                  
         }
       }
       else
@@ -18181,8 +18284,7 @@ namespace Legion {
     {
       return Future(legion_new<FutureImpl>(this, true/*register*/,
                                      get_available_distributed_id(true),
-                                     address_space, address_space, 
-                                     RtUserEvent::NO_RT_USER_EVENT, op));
+                                     address_space, address_space, op));
     }
 
     //--------------------------------------------------------------------------
@@ -19686,9 +19788,10 @@ namespace Legion {
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
-      Processor::Kind kinds[4] = { Processor::TOC_PROC, Processor::LOC_PROC,
-                                   Processor::UTIL_PROC, Processor::IO_PROC };
-      for (unsigned idx = 0; idx < 4; idx++)
+      Processor::Kind kinds[5] = { Processor::TOC_PROC, Processor::LOC_PROC,
+                                   Processor::UTIL_PROC, Processor::IO_PROC,
+                                   Processor::PROC_SET };
+      for (unsigned idx = 0; idx < 5; idx++)
       {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
@@ -20486,30 +20589,21 @@ namespace Legion {
             VersionState::process_remove_version_state_ref(args);
             break;
           }
-        case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
+        case HLR_DEFER_RESTRICTED_MANAGER_TASK_ID:
           {
-            Runtime::get_runtime(p)->attempt_runtime_shutdown();
+            RestrictInfo::handle_deferred_reference(args);
             break;
           }
-        case HLR_SHUTDOWN_NOTIFICATION_TASK_ID:
+        case HLR_REMOTE_VIEW_CREATION_TASK_ID:
           {
-            ShutdownManager::NotificationArgs *notification_args = 
-              (ShutdownManager::NotificationArgs*)args;
-            Serializer rez;
-            notification_args->manager->send_message(rez, 
-                SEND_SHUTDOWN_NOTIFICATION, 
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/); 
+            SingleTask::handle_remote_view_creation(args);
             break;
           }
-        case HLR_SHUTDOWN_RESPONSE_TASK_ID:
+        case HLR_RETRY_SHUTDOWN_TASK_ID:
           {
-            ShutdownManager::ResponseArgs *response_args = 
-              (ShutdownManager::ResponseArgs*)args;
-            Serializer rez;
-            rez.serialize(response_args->result);
-            response_args->target->send_message(rez,
-                SEND_SHUTDOWN_RESPONSE,
-                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+            Runtime *runtime = Runtime::get_runtime(p);
+            runtime->initiate_runtime_shutdown(runtime->address_space,
+                                               true/*phase one*/);
             break;
           }
         default:

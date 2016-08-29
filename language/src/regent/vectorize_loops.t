@@ -18,8 +18,8 @@
 --
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -114,7 +114,7 @@ function context:join_expr_type(node, fact)
 end
 
 function context:report_error_when_demanded(node, error_msg)
-  if self.demanded then log.error(node, error_msg) end
+  if self.demanded then report.error(node, error_msg) end
 end
 
 function context:add_substitution(from, to)

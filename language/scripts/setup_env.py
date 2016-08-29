@@ -88,7 +88,7 @@ if __name__ == '__main__':
     if 'LG_RT_DIR' in os.environ:
         raise Exception('Please unset LG_RT_DIR in your environment')
 
-    root_dir = os.path.dirname(os.path.realpath(__file__))
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
     thread_count = multiprocessing.cpu_count()
@@ -124,7 +124,7 @@ if __name__ == '__main__':
 
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'pizdaint')
+        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-ppopp17-snapshot')
         build_terra(terra_dir, llvm_install_dir, thread_count)
 
     install.install(

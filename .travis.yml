@@ -10,12 +10,13 @@ compiler:
 env:
   global:
   - WARN_AS_ERROR=1
+  - REALM_SYNTHETIC_CORE_MAP=""
   matrix:
-  - CC_FLAGS= DEBUG=0
-  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
-  - CC_FLAGS=-DLEGION_SPY DEBUG=1 TEST_SPY=1
-  - CC_FLAGS=-std=c++0x DEBUG=0
-  # - CC_FLAGS= DEBUG=1 USE_GASNET=1 USE_LLVM=1
+  - CC_FLAGS="-std=c++98" DEBUG=0
+  - CC_FLAGS="-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
+  - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 TEST_SPY=1
+  - CC_FLAGS="-std=c++0x" DEBUG=0
+  # - CC_FLAGS="-std=c++98" DEBUG=1 USE_GASNET=1 USE_LLVM=1 DISABLE_INNER=1
 matrix:
   exclude:
     - os: osx
@@ -26,16 +27,18 @@ branches:
     - stable
     - master
 before_install:
+  - export THREADS=2
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+      sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy openmpi
+      brew install pypy homebrew/versions/llvm35
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
@@ -44,48 +47,69 @@ before_install:
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
-      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
+      export LAUNCHER="mpirun -n 2 -bind-to none -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
-      make -j2
+      make -j$THREADS
       popd
     fi
 script:
+  - export LG_RT_DIR=$PWD/runtime
+
+  # Regent
   - ./language/travis.py
+
+  # Legion tutorials
   - |
-    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime clean
-    make -s -C tutorial/00_hello_world LG_RT_DIR=../../runtime -j2
-    tutorial/00_hello_world/hello_world
-    make -s -C tutorial/01_tasks_and_futures LG_RT_DIR=../../runtime
-    tutorial/01_tasks_and_futures/tasks_and_futures
-    make -s -C tutorial/02_index_tasks LG_RT_DIR=../../runtime
-    tutorial/02_index_tasks/index_tasks
-    make -s -C tutorial/03_global_vars LG_RT_DIR=../../runtime
-    tutorial/03_global_vars/global_vars
-    make -s -C tutorial/04_logical_regions LG_RT_DIR=../../runtime
-    tutorial/04_logical_regions/logical_regions
-    make -s -C tutorial/05_physical_regions LG_RT_DIR=../../runtime
-    tutorial/05_physical_regions/physical_regions
-    make -s -C tutorial/06_privileges LG_RT_DIR=../../runtime
-    tutorial/06_privileges/privileges
-    make -s -C tutorial/07_partitioning LG_RT_DIR=../../runtime
-    tutorial/07_partitioning/partitioning
-    make -s -C tutorial/08_multiple_partitions LG_RT_DIR=../../runtime
-    tutorial/08_multiple_partitions/multiple_partitions
-    make -s -C tutorial/09_custom_mapper LG_RT_DIR=../../runtime
-    tutorial/09_custom_mapper/custom_mapper
-    make -s -C examples/full_circuit LG_RT_DIR=../../runtime
-    examples/full_circuit/ckt_sim
-    make -s -C examples/full_ghost LG_RT_DIR=../../runtime
-    examples/full_ghost/ghost -ll:cpu 4
+    make -s -C tutorial/00_hello_world -j$THREADS
+    tutorial/00_hello_world/hello_world -logfile out_%.log
+    make -s -C tutorial/01_tasks_and_futures
+    tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
+    make -s -C tutorial/02_index_tasks
+    tutorial/02_index_tasks/index_tasks -logfile out_%.log
+    make -s -C tutorial/03_global_vars
+    tutorial/03_global_vars/global_vars -logfile out_%.log
+    make -s -C tutorial/04_logical_regions
+    tutorial/04_logical_regions/logical_regions -logfile out_%.log
+    make -s -C tutorial/05_physical_regions
+    tutorial/05_physical_regions/physical_regions -logfile out_%.log
+    make -s -C tutorial/06_privileges
+    tutorial/06_privileges/privileges -logfile out_%.log
+    make -s -C tutorial/07_partitioning
+    tutorial/07_partitioning/partitioning -logfile out_%.log
+    make -s -C tutorial/08_multiple_partitions
+    tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
+    make -s -C tutorial/09_custom_mapper
+    tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
+
+  # Legion examples
+  - |
+    make -s -C examples/full_circuit
+    examples/full_circuit/ckt_sim -logfile out_%.log
+    make -s -C examples/full_ghost
+    examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+    make -s -C examples/spmd_cgsolver
+    examples/spmd_cgsolver/cgsolver -ll:cpu 4 -perproc -logfile out_%.log
+
+  # Legion fuzz tester
+  - |
+    # if [[ "$TEST_SPY" -eq 1 ]]; then
+    if [[ "$DEBUG" -eq 1 ]]; then
+      git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
+      pushd fuzz-tester
+      WARN_AS_ERROR=0 python main.py
+      popd
+    fi
+
+  # Realm
   - |
     if [[ "$DEBUG" -eq 0 ]]; then
-      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-      make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+      make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+      make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
     fi
   - |
     if [[ "$DEBUG" -eq 0 ]]; then
-      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-      make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+      make -s -C test/performance/realm SHARED_LOWLEVEL=0 clean_all
+      make -s -C test/performance/realm SHARED_LOWLEVEL=0 run_all
     fi
