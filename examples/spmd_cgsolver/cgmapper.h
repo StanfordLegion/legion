@@ -1,11 +1,12 @@
 // mapper for SPMD CG solver
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
+using namespace Legion::Mapping;
 
-class CGMapper : public DefaultMapper {
+class CGMapper : public ShimMapper {
 public:
   CGMapper(Machine machine, HighLevelRuntime *rt, Processor local);
   virtual ~CGMapper(void);
@@ -29,10 +30,6 @@ public:
   virtual void select_task_options(Task *task);
 
   virtual bool pre_map_task(Task *task);
-
-  virtual bool map_must_epoch(const std::vector<Task*> &tasks,
-			      const std::vector<MappingConstraint> &constraints,
-			      MappingTagID tag);
 
   virtual void notify_mapping_result(const Mappable *mappable);
 

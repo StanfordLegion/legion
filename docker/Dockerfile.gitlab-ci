@@ -1,0 +1,26 @@
+# Build Image for Gitlab CI
+
+FROM ubuntu:14.04
+
+MAINTAINER Elliott Slaughter <slaughter@cs.stanford.edu>
+
+ENV DEBIAN_FRONTEND noninteractive
+
+RUN apt-get update -qq && \
+    apt-get install -qq software-properties-common && \
+    add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
+    add-apt-repository ppa:pypy/ppa -y && \
+    apt-get update -qq && \
+    apt-get install -qq \
+      build-essential git pypy time wget \
+      g++-4.8 g++-4.9 g++-5 g++-6 \
+      clang-3.5 libclang-3.5-dev llvm-3.5-dev \
+      clang-3.8 libclang-3.8-dev llvm-3.8-dev \
+      libncurses5-dev zlib1g-dev \
+      openmpi-bin libopenmpi-dev libblas-dev liblapack-dev && \
+    apt-get clean
+
+RUN git clone https://github.com/zdevito/terra.git && \
+    cp -r terra /usr/local/terra35 && LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 && \
+    cp -r terra /usr/local/terra38 && LLVM_CONFIG=llvm-config-3.8 make -C /usr/local/terra38 && \
+    rm -rf terra

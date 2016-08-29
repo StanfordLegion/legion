@@ -14,7 +14,7 @@
 
 -- Regent Standard Library - Base Layer
 
-local data = require("regent/data")
+local data = require("common/data")
 
 local base = {}
 
@@ -271,6 +271,10 @@ end
 
 function base.task:gettaskid()
   return self.taskid
+end
+
+function base.task:settaskid(id)
+  self.taskid = id
 end
 
 function base.task:getname()

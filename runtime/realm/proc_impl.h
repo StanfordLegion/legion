@@ -39,7 +39,7 @@ namespace Realm {
 
     class ProcessorImpl {
     public:
-      ProcessorImpl(Processor _me, Processor::Kind _kind);
+      ProcessorImpl(Processor _me, Processor::Kind _kind, int _num_cores=1);
 
       virtual ~ProcessorImpl(void);
 
@@ -69,13 +69,14 @@ namespace Realm {
     public:
       Processor me;
       Processor::Kind kind;
+      int num_cores;
     }; 
 
     // generic local task processor - subclasses must create and configure a task
     // scheduler and pass in with the set_scheduler() method
     class LocalTaskProcessor : public ProcessorImpl {
     public:
-      LocalTaskProcessor(Processor _me, Processor::Kind _kind);
+      LocalTaskProcessor(Processor _me, Processor::Kind _kind, int num_cores=1);
       virtual ~LocalTaskProcessor(void);
 
       virtual void enqueue_task(Task *task);
@@ -151,7 +152,7 @@ namespace Realm {
 
     class RemoteProcessor : public ProcessorImpl {
     public:
-      RemoteProcessor(Processor _me, Processor::Kind _kind);
+      RemoteProcessor(Processor _me, Processor::Kind _kind, int _num_cores=1);
       virtual ~RemoteProcessor(void);
 
       virtual void enqueue_task(Task *task);
@@ -259,13 +260,11 @@ namespace Realm {
       // Employ some fancy struct packing here to fit in 64 bytes
       struct RequestArgs : public BaseMedium {
 	Processor proc;
-	Event::id_t start_id;
-	Event::id_t finish_id;
+	Event start_event;
+	Event finish_event;
 	size_t user_arglen;
 	int priority;
 	Processor::TaskFuncID func_id;
-	Event::gen_t start_gen;
-	Event::gen_t finish_gen;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);

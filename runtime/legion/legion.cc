@@ -3695,6 +3695,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_projection_functor(ProjectionID pid,
+                                                        ProjectionFunctor *func)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_projection_functor(pid, func);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
                                    const void *buffer, size_t size, bool is_mut)
     //--------------------------------------------------------------------------
@@ -4149,25 +4157,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::get_serdez_redop_table();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::
-      register_region_projection_function(ProjectionID handle, void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::register_region_projection_function(handle, 
-                                                                func_ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ProjectionID Runtime::
-      register_partition_projection_function(ProjectionID handle, 
-                                             void *func_ptr)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::Runtime::register_partition_projection_function(handle,
-                                                                   func_ptr);
     }
 
     //--------------------------------------------------------------------------

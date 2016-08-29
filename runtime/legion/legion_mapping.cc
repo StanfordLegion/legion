@@ -118,6 +118,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintID PhysicalInstance::get_layout_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->layout->constraints->layout_id;
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {
@@ -165,6 +174,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalInstance::get_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->get_fields(fields);
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalInstance::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -194,6 +211,14 @@ namespace Legion {
       if (impl == NULL)
         return;
       impl->remove_space_fields(fields);
+    }
+
+    //--------------------------------------------------------------------------
+    /*friend*/ std::ostream& operator<<(std::ostream& os,
+					const PhysicalInstance& p)
+    //--------------------------------------------------------------------------
+    {
+      return os << p.impl->get_instance();
     }
 
     /////////////////////////////////////////////////////////////
@@ -273,18 +298,35 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperRuntime::send_message(MapperContext ctx, Processor target,
-                                 const void *message, size_t message_size) const
+          const void *message, size_t message_size, unsigned message_kind) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->send_message(ctx, target, message, message_size);
+      ctx->manager->send_message(ctx, target, 
+                                 message, message_size, message_kind);
     }
 
     //--------------------------------------------------------------------------
     void MapperRuntime::broadcast(MapperContext ctx, const void *message,
-                                           size_t message_size, int radix) const
+                    size_t message_size, unsigned message_kind, int radix) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->broadcast(ctx, message, message_size, radix);
+      ctx->manager->broadcast(ctx, message, message_size, message_kind, radix);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::pack_physical_instance(MapperContext ctx, 
+                               Serializer &rez, PhysicalInstance instance) const 
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->pack_physical_instance(ctx, rez, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::unpack_physical_instance(MapperContext ctx,
+                          Deserializer &derez, PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->unpack_physical_instance(ctx, derez, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -764,6 +806,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalPartition MapperRuntime::get_logical_partition_by_color(
+           MapperContext ctx, LogicalRegion par, const DomainPoint &color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_logical_partition_by_color(ctx, par, color);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalPartition MapperRuntime::get_logical_partition_by_tree(
                                       MapperContext ctx, IndexPartition part,
                                       FieldSpace fspace, RegionTreeID tid) const
@@ -783,6 +833,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalRegion MapperRuntime::get_logical_subregion_by_color(
                      MapperContext ctx, LogicalPartition par, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->get_logical_subregion_by_color(ctx, par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperRuntime::get_logical_subregion_by_color(
+        MapperContext ctx, LogicalPartition par, const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_subregion_by_color(ctx, par, color);
@@ -838,73 +896,80 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
         TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
         bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, task_id, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, task_id,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+      return ctx->manager->retrieve_semantic_information(ctx, handle,
+					  tag, result,
                                           size, can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, fid, tag,result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, fid, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+    bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------
-    void MapperRuntime::retrieve_semantic_information(MapperContext ctx,
+   bool MapperRuntime::retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready)
     //--------------------------------------------------------------------------
     {
-      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
-                                          size, can_fail, wait_until_ready);
+      return ctx->manager->retrieve_semantic_information(ctx, handle, tag,
+					  result, size,
+                                          can_fail, wait_until_ready);
     }
 
     //--------------------------------------------------------------------------

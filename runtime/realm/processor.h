@@ -59,17 +59,18 @@ namespace Realm {
         UTIL_PROC = ::UTIL_PROC, // Utility core
         IO_PROC = ::IO_PROC, // I/O core
         PROC_GROUP = ::PROC_GROUP, // Processor group
+        PROC_SET = ::PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
       };
 
       // Return what kind of processor this is
       Kind kind(void) const;
       // Return the address space for this processor
       AddressSpace address_space(void) const;
-      // Return the local ID within the address space
-      id_t local_id(void) const;
 
       static Processor create_group(const std::vector<Processor>& members);
       void get_group_members(std::vector<Processor>& members);
+
+      int get_num_cores(void) const;
 
       // special task IDs
       enum {

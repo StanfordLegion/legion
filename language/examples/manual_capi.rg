@@ -102,7 +102,7 @@ terra top_level_task(task : c.legion_task_t,
   c.legion_coloring_add_point(coloring, 2, ptr1)
 
   var isp = c.legion_index_partition_create_coloring(
-    runtime, ctx, is, coloring, true, -1)
+    runtime, ctx, is, coloring, false, -1)
   var lp = c.legion_logical_partition_create(runtime, ctx, r, isp)
   c.legion_coloring_destroy(coloring)
 
@@ -138,6 +138,8 @@ terra top_level_task(task : c.legion_task_t,
   c.legion_index_space_destroy(runtime, ctx, is)
 end
 
+local args = require("manual_capi_args")
+
 terra main()
   c.printf("in main...\n")
   c.legion_runtime_register_task_void(
@@ -161,6 +163,7 @@ terra main()
     "sub_task",
     sub_task)
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
-  c.legion_runtime_start(0, [&rawstring](0), false)
+  [args.argv_setup]
+  c.legion_runtime_start(args.argc, args.argv, false)
 end
 main()

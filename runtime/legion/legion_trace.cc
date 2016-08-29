@@ -552,14 +552,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* TraceCaptureOp::get_logging_name(void)
+    const char* TraceCaptureOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[TRACE_CAPTURE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TraceCaptureOp::get_operation_kind(void)
+    Operation::OpKind TraceCaptureOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return TRACE_CAPTURE_OP_KIND;
@@ -640,14 +640,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* TraceCompleteOp::get_logging_name(void)
+    const char* TraceCompleteOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
     {
       return op_names[TRACE_COMPLETE_OP_KIND];
     }
 
     //--------------------------------------------------------------------------
-    Operation::OpKind TraceCompleteOp::get_operation_kind(void)
+    Operation::OpKind TraceCompleteOp::get_operation_kind(void) const
     //--------------------------------------------------------------------------
     {
       return TRACE_COMPLETE_OP_KIND; 

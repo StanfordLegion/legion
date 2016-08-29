@@ -47,6 +47,7 @@ namespace LegionRuntime {
     public:
       CUDAPREFIX Point(void) {}
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<DIM>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
       CUDAPREFIX Point& operator=(const Point<DIM>& other) 

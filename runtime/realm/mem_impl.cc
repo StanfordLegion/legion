@@ -38,14 +38,13 @@ namespace Realm {
 
     AddressSpace Memory::address_space(void) const
     {
-      // limitations in the current newmap implementation require that all memories
-      //  be managed by the HLR instance on the first node
-      return 0; //ID(id).node();
-    }
-
-    ID::IDType Memory::local_id(void) const
-    {
-      return ID(id).index();
+      // this is a hack for the Legion runtime
+      ID id(*this);
+      unsigned n = id.memory.owner_node;
+      if(n <= ID::MAX_NODE_ID)
+        return n;
+      else
+        return 0;  // claim node 0 owns "global" things
     }
 
     Memory::Kind Memory::kind(void) const
@@ -236,7 +235,7 @@ namespace Realm {
     off_t MemoryImpl::alloc_bytes_remote(size_t size)
     {
       // RPC over to owner's node for allocation
-      return RemoteMemAllocRequest::send_request(ID(me).node(), me, size);
+      return RemoteMemAllocRequest::send_request(ID(me).memory.owner_node, me, size);
     }
 
     void MemoryImpl::free_bytes_remote(off_t offset, size_t size)
@@ -278,11 +277,10 @@ namespace Realm {
 
       // SJT: think about this more to see if there are any race conditions
       //  with an allocator temporarily having the wrong ID
-      RegionInstance i = ID(ID::ID_INSTANCE, 
-			    ID(me).node(),
-			    ID(me).index_h(),
-			    0).convert<RegionInstance>();
-
+      RegionInstance i = ID::make_instance(ID(me).memory.owner_node,
+					   ID(me).memory.owner_node, // TODO: allow other creators
+					   ID(me).memory.mem_idx,
+					   0).convert<RegionInstance>();
 
       //RegionMetaDataImpl *r_impl = get_runtime()->get_metadata_impl(r);
       DomainLinearization linear;
@@ -296,25 +294,29 @@ namespace Realm {
                                                               parent_inst);
 
       // find/make an available index to store this in
-      ID::IDType index;
       {
 	AutoHSLLock al(mutex);
 
 	size_t size = instances.size();
-	for(index = 0; index < size; index++)
-	  if(!instances[index]) {
-	    i.id |= index;
-	    i_impl->me = i;
-	    instances[index] = i_impl;
-	    break;
-	  }
-        assert(index < (((ID::IDType)1) << ID::INDEX_L_BITS));
+	ID::IDType index = 0;
+	while((index < size) && instances[index]) index++;
 
-	i.id |= index;
+	i = ID::make_instance(ID(me).memory.owner_node,
+			      ID(me).memory.owner_node, // TODO: allow other creators
+			      ID(me).memory.mem_idx,
+			      index).convert<RegionInstance>();
+	// make sure it fit
+	assert(ID(i.id).instance.inst_idx == index);
+
 	i_impl->me = i;
 	i_impl->lock.me = ID(i.id).convert<Reservation>(); // have to change the lock's ID too!
-	if(index >= size) instances.push_back(i_impl);
+	if(index < size)
+	  instances[index] = i_impl;
+	else
+	  instances.push_back(i_impl);
       }
+
+      i_impl->record_instance_usage();
 
       log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %zd+%zd (redop=%d list_size=%zd parent_inst=" IDFMT " block_size=%zd)",
 		    i.id, me.id, inst_offset, bytes_needed, redopid, list_size,
@@ -337,7 +339,7 @@ namespace Realm {
       CreateInstanceRequest::Result resp;
 
       CreateInstanceRequest::send_request(&resp,
-					  ID(me).node(), me, r,
+					  ID(me).memory.owner_node, me, r,
 					  parent_inst, bytes_needed,
 					  block_size, element_size,
 					  list_size, redopid,
@@ -356,7 +358,7 @@ namespace Realm {
                                                                 linear, block_size, element_size, field_sizes, reqs,
                                                                 resp.count_offset, list_size, parent_inst);
 
-        unsigned index = ID(resp.i).index_l();
+        unsigned index = ID(resp.i).instance.inst_idx;
         // resize array if needed
         if(index >= instances.size()) {
           AutoHSLLock a(mutex);
@@ -377,7 +379,7 @@ namespace Realm {
       ID id(i);
 
       // have we heard of this one before?  if not, add it
-      unsigned index = id.index_l();
+      unsigned index = id.instance.inst_idx;
       if(index >= instances.size()) { // lock not held - just for early out
 	AutoHSLLock a(mutex);
 	if(index >= instances.size()) // real check
@@ -398,7 +400,7 @@ namespace Realm {
       log_inst.info("destroying local instance: mem=" IDFMT " inst=" IDFMT "", me.id, i.id);
 
       // all we do for now is free the actual data storage
-      unsigned index = ID(i).index_l();
+      unsigned index = ID(i).instance.inst_idx;
       assert(index < instances.size());
 
       RegionInstanceImpl *iimpl = instances[index];
@@ -429,7 +431,7 @@ namespace Realm {
     {
       // if we're the original destroyer of the instance, tell the owner
       if(local_destroy) {
-	int owner = ID(me).node();
+	int owner = ID(me).memory.owner_node;
 
 	log_inst.debug("destroying remote instance: node=%d inst=" IDFMT "", owner, i.id);
 
@@ -601,7 +603,7 @@ namespace Realm {
 #ifdef USE_GASNET
       assert(kind == MemoryImpl::MKIND_RDMA);
       void *srcptr = ((char *)regbase) + offset;
-      gasnet_get(dst, ID(me).node(), srcptr, size);
+      gasnet_get(dst, ID(me).memory.owner_node, srcptr, size);
 #else
       assert(0 && "no remote get_bytes without GASNET");
 #endif
@@ -614,7 +616,7 @@ namespace Realm {
 
     int RemoteMemory::get_home_node(off_t offset, size_t size)
     {
-      return ID(me).node();
+      return ID(me).memory.owner_node;
     }
 
 
@@ -1009,7 +1011,7 @@ namespace Realm {
     args.m = memory;
     args.r = ispace;
     args.parent_inst = parent_inst;
-    log_inst.debug("creating remote instance: node=%d", ID(memory).node());
+    log_inst.debug() << "creating remote instance: node=" << ID(memory).memory.owner_node;
 
     HandlerReplyFuture<Result> result_future;
     args.resp_ptr = &result_future;
@@ -1505,7 +1507,7 @@ namespace Realm {
       // if we don't have a destination pointer, we need to use the LMB, which
       //  may require chopping this request into pieces
       if(!dstptr) {
-	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
 
 	if(datalen > max_xfer_size) {
 	  log_copy.info("breaking large send into pieces");
@@ -1518,7 +1520,7 @@ namespace Realm {
 
 	  int count = 1;
 	  while(datalen > max_xfer_size) {
-	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	    RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 						 pos, max_xfer_size,
 						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	    args.offset += max_xfer_size;
@@ -1528,7 +1530,7 @@ namespace Realm {
 	  }
 
 	  // last send includes whatever's left
-	  RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	  RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					       pos, datalen, 
 					       make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	  return count;
@@ -1543,7 +1545,7 @@ namespace Realm {
 	args.offset = offset;
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
-	RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					     data, datalen,
 					     (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP),
 					     dstptr);
@@ -1571,7 +1573,7 @@ namespace Realm {
       // if we don't have a destination pointer, we need to use the LMB, which
       //  may require chopping this request into pieces
       if(!dstptr) {
-	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
 	size_t max_lines_per_xfer = max_xfer_size / datalen;
 	assert(max_lines_per_xfer > 0);
 
@@ -1586,7 +1588,7 @@ namespace Realm {
 
 	  int count = 1;
 	  while(lines > max_lines_per_xfer) {
-	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	    RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 						 pos, datalen,
 						 stride, max_lines_per_xfer,
 						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
@@ -1597,7 +1599,7 @@ namespace Realm {
 	  }
 
 	  // last send includes whatever's left
-	  RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	  RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					       pos, datalen, stride, lines,
 					       make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	  return count;
@@ -1613,7 +1615,7 @@ namespace Realm {
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
-	RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					     data, datalen, stride, lines,
 					     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
 					     dstptr);
@@ -1641,7 +1643,7 @@ namespace Realm {
       // if we don't have a destination pointer, we need to use the LMB, which
       //  may require chopping this request into pieces
       if(!dstptr) {
-	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
 
 	if(datalen > max_xfer_size) {
 	  log_copy.info("breaking large send into pieces");
@@ -1663,7 +1665,7 @@ namespace Realm {
               const char *pos = (const char *)(it->first);
               size_t left = it->second;
               while(left > max_xfer_size) {
-		RemoteWriteMessage::Message::request(ID(mem).node(), args,
+		RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 						     pos, max_xfer_size,
 						     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 		args.offset += max_xfer_size;
@@ -1671,7 +1673,7 @@ namespace Realm {
 		left -= max_xfer_size;
 		count++;
 	      }
-	      RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	      RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 						   pos, left,
 						   make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	      args.offset += left;
@@ -1695,7 +1697,7 @@ namespace Realm {
 	    // if we didn't get at least one span, we won't make forward progress
 	    assert(!subspans.empty());
 
-	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	    RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 						 subspans, xfer_size,
 						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	    args.offset += xfer_size;
@@ -1716,7 +1718,7 @@ namespace Realm {
         args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
-	RemoteWriteMessage::Message::request(ID(mem).node(), args,
+	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					     spans, datalen,
 					     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
 					     dstptr);
@@ -1734,7 +1736,7 @@ namespace Realm {
       size_t field_size = serdez_op->sizeof_field_type;
       log_copy.debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
                      mem.id, offset, field_size, count, serdez_id);
-      size_t max_xfer_size = get_lmb_size(ID(mem).node());
+      size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
       // create a intermediate buf with same size as max_xfer_size
       char* buffer_start = (char*) malloc(max_xfer_size);
       const char *pos = (const char *)data;
@@ -1766,7 +1768,7 @@ namespace Realm {
         args.serdez_id = serdez_id;
         args.sender = gasnet_mynode();
         args.sequence_id = sequence_id;
-        RemoteSerdezMessage::Message::request(ID(mem).node(), args,
+        RemoteSerdezMessage::Message::request(ID(mem).memory.owner_node, args,
                                               buffer_start, cur_size, PAYLOAD_COPY);
         xfers ++;
       }
@@ -1791,7 +1793,7 @@ namespace Realm {
       // reductions always have to bounce off an intermediate buffer, so are subject to
       //  LMB limits
       {
-	size_t max_xfer_size = get_lmb_size(ID(mem).node());
+	size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
 	size_t max_elmts_per_xfer = max_xfer_size / rhs_size;
 	assert(max_elmts_per_xfer > 0);
 
@@ -1811,7 +1813,7 @@ namespace Realm {
 
 	  int xfers = 1;
 	  while(count > max_elmts_per_xfer) {
-	    RemoteReduceMessage::Message::request(ID(mem).node(), args,
+	    RemoteReduceMessage::Message::request(ID(mem).memory.owner_node, args,
 						  pos, rhs_size,
 						  src_stride, max_elmts_per_xfer,
 						  make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
@@ -1822,7 +1824,7 @@ namespace Realm {
 	  }
 
 	  // last send includes whatever's left
-	  RemoteReduceMessage::Message::request(ID(mem).node(), args,
+	  RemoteReduceMessage::Message::request(ID(mem).memory.owner_node, args,
 						pos, rhs_size, src_stride, count,
 						make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 	  return xfers;
@@ -1842,7 +1844,7 @@ namespace Realm {
 	args.sender = gasnet_mynode();
 	args.sequence_id = sequence_id;
 
-	RemoteReduceMessage::Message::request(ID(mem).node(), args,
+	RemoteReduceMessage::Message::request(ID(mem).memory.owner_node, args,
 					      data, rhs_size, src_stride, count,
 					      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
 
@@ -1865,7 +1867,7 @@ namespace Realm {
       //  probably indicative of badness elsewhere, barf on it for now
       assert(num_writes > 0);
 
-      RemoteWriteFenceMessage::send_request(ID(mem).node(), mem, sequence_id,
+      RemoteWriteFenceMessage::send_request(ID(mem).memory.owner_node, mem, sequence_id,
 					    num_writes, fence);
     }
   

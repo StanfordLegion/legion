@@ -161,6 +161,10 @@ void top_level_task(const void *args, size_t arglen,
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - insufficient capacity";
       continue;
     }
+    if(m.kind() == Memory::GLOBAL_MEM) {
+      log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - slow global memory";
+      continue;
+    }
 
     log_app.print() << "Memory: " << m << " Kind:" << m.kind() << " Capacity: " << capacity;
     std::vector<size_t> field_sizes(1, sizeof(void *));

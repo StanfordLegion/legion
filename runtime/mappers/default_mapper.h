@@ -41,13 +41,14 @@ namespace Legion {
     class DefaultMapper : public Mapper {
     public:
       enum DefaultTunables { // tunable IDs recognized by the default mapper
-        DEFAULT_TUNABLE_NODE_COUNT,
-        DEFAULT_TUNABLE_LOCAL_CPUS,
-        DEFAULT_TUNABLE_LOCAL_GPUS,
-        DEFAULT_TUNABLE_LOCAL_IOS,
-        DEFAULT_TUNABLE_GLOBAL_CPUS,
-        DEFAULT_TUNABLE_GLOBAL_GPUS,
-        DEFAULT_TUNABLE_GLOBAL_IOS,
+        DEFAULT_TUNABLE_NODE_COUNT = 0,
+        DEFAULT_TUNABLE_LOCAL_CPUS = 1,
+        DEFAULT_TUNABLE_LOCAL_GPUS = 2,
+        DEFAULT_TUNABLE_LOCAL_IOS = 3,
+        DEFAULT_TUNABLE_GLOBAL_CPUS = 4,
+        DEFAULT_TUNABLE_GLOBAL_GPUS = 5,
+        DEFAULT_TUNABLE_GLOBAL_IOS = 6,
+        DEFAULT_TUNABLE_LAST = 7, // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
@@ -135,6 +136,11 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
+      virtual void create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -150,6 +156,11 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
+      virtual void create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -162,6 +173,11 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
+      virtual void create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
@@ -173,10 +189,15 @@ namespace Legion {
                              const Close&              close,
                              const MapCloseInput&      input,
                                    MapCloseOutput&     output);
-      virtual void select_close_sources(const MapperContext        ctx,
-                                        const Close&               close,
+      virtual void select_close_sources(const MapperContext         ctx,
+                                        const Close&                close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
+      virtual void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output);
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -200,6 +221,11 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
+      virtual void create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output);
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
@@ -288,8 +314,12 @@ namespace Legion {
                                     const PhysicalInstance &target,
                                     const std::vector<PhysicalInstance> &source,
                                     std::deque<PhysicalInstance> &ranking);
-      virtual bool default_policy_select_close_virtual(const MapperContext,
-                                                       const Close &);
+      virtual bool default_policy_select_close_virtual(const MapperContext ctx,
+                                                       const Close &close);
+      virtual PhysicalInstance default_policy_create_temporary(
+                                    const MapperContext ctx, 
+                                    LogicalRegion region,
+                                    PhysicalInstance target_instance);
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
@@ -302,6 +332,8 @@ namespace Legion {
       Processor default_get_next_global_gpu(void);
       Processor default_get_next_local_io(void);
       Processor default_get_next_global_io(void);
+      Processor default_get_next_local_procset(void);
+      Processor default_get_next_global_procset(void);
       VariantInfo default_find_preferred_variant(
                                  const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
@@ -338,6 +370,7 @@ namespace Legion {
                               std::vector<PhysicalInstance> &instances);
       LogicalRegion default_find_common_ancestor(MapperContext ctx,
                                       const std::set<LogicalRegion> &regions);
+      bool have_procset_variant(const MapperContext ctx, TaskID id);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
@@ -348,7 +381,7 @@ namespace Legion {
                               bool recurse, bool stealable,
                               std::vector<TaskSlice> &slices);
       template<int DIM>
-      static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
+      static LegionRuntime::Arrays::Point<DIM> default_select_num_blocks(
                             long long int factor, const LegionRuntime::Arrays::
                             Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
@@ -373,19 +406,23 @@ namespace Legion {
       std::vector<Processor> local_ios;
       std::vector<Processor> local_cpus;
       std::vector<Processor> local_gpus;
+      std::vector<Processor> local_procsets;
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_gpus;
+      std::vector<Processor> remote_procsets;
     protected:
       // For doing round-robining of tasks onto processors
-      unsigned next_local_io, next_local_cpu, next_local_gpu;
-      Processor next_global_io,next_global_cpu,next_global_gpu;
+      unsigned next_local_io, next_local_cpu, next_local_gpu, next_local_procset;
+      Processor next_global_io,next_global_cpu,next_global_gpu,next_global_procset;
       Machine::ProcessorQuery *global_io_query, *global_cpu_query,
-                              *global_gpu_query;
+                              *global_gpu_query, *global_procset_query;
     protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,
-                                               gpu_slices_cache,io_slices_cache;
+                                               gpu_slices_cache,
+                                               io_slices_cache,
+                                               procset_slices_cache;
       std::map<TaskID,VariantInfo>             preferred_variants; 
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;

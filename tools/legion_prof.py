@@ -27,7 +27,9 @@ meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0
 copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
+inst_create_pat = re.compile(prefix + r'Prof Inst Create (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+)')
+inst_usage_pat = re.compile(prefix + r'Prof Inst Usage (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+)')
+inst_timeline_pat = re.compile(prefix + r'Prof Inst Timeline (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
 task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
@@ -217,9 +219,9 @@ class BaseRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for r in self.subranges:
-            r.update_task_stats(stat)
+            r.update_task_stats(stat, proc)
 
     def active_time(self):
         total = 0
@@ -372,9 +374,9 @@ class MessageRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()
@@ -413,9 +415,9 @@ class MapperCallRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()
@@ -454,9 +456,9 @@ class RuntimeCallRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         for subrange in self.subranges:
-            subrange.update_task_stats(stat)
+            subrange.update_task_stats(stat, proc)
 
     def active_time(self):
         return self.total_time()
@@ -581,7 +583,7 @@ class Memory(object):
     def init_time_range(self, last_time):
         # Fill in any of our instances that are not complete with the last time
         for inst in self.instances:
-            if not inst.complete:
+            if inst.destroy is None:
                 inst.destroy = last_time
         self.last_time = last_time 
 
@@ -1043,15 +1045,14 @@ class Fill(object):
                 ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
 
 class Instance(object):
-    def __init__(self, inst_id, mem, op, size):
+    def __init__(self, inst_id, op):
         self.inst_id = inst_id
-        self.mem = mem
         self.op = op
-        self.size = size
+        self.mem = None
+        self.size = None
         self.create = None
         self.destroy = None
         self.level = None
-        self.complete = False
 
     def get_color(self):
         # Get the color from the operation
@@ -1059,9 +1060,9 @@ class Instance(object):
 
     def __repr__(self):
         # Check to see if we got a profiling callback
-        if self.complete:
+        if self.size is not None:
             unit = 'B'
-            unit_size = self.size;
+            unit_size = self.size
             if self.size > (1024*1024*1024):
                 unit = 'GB'
                 unit_size /= (1024*1024*1024)
@@ -1071,14 +1072,28 @@ class Instance(object):
             elif self.size > 1024:
                 unit = 'KB'
                 unit_size /= 1024
-            return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
-                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
-                ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
+            size_pretty = str(unit_size) + unit
         else:
-            # if we never got a callback we don't know how big it is
-            return 'Instance '+str(hex(self.inst_id))+' Size=Unknown'+ \
-                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
-                ' us created='+str(self.create)+' us destroyed=Never'
+            size_pretty = 'Unknown'
+        if self.create is None:
+            created_pretty = 'Unknown'
+            destroyed_pretty = 'Unknown'
+            total_pretty = 'Unknown'
+        else:
+            created_pretty = '{:d} us'.format(self.create)
+            if self.destroy is None:
+                destroyed_pretty = 'Never'
+                total_pretty = 'Unknown'
+            else:
+                destroyed_pretty = '{:d} us'.format(self.destroy)
+                total_pretty = '{:d} us'.format(self.destroy - self.create)
+        return ("Instance {} Size={} Created by='{}' total={} created={} destroyed={}"
+                .format(str(hex(self.inst_id)),
+                        size_pretty,
+                        repr(self.op),
+                        total_pretty,
+                        created_pretty,
+                        destroyed_pretty))
 
 class MessageKind(object):
     def __init__(self, message_id, desc):
@@ -1328,6 +1343,7 @@ class State(object):
         self.mapper_calls = {}
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
+        self.instances = {}
 
     def parse_log_file(self, file_name, verbose):
         skipped = 0
@@ -1389,14 +1405,25 @@ class State(object):
                                        read_time(m.group('start')),
                                        read_time(m.group('stop')))
                     continue
-                m = inst_info_pat.match(line)
+                m = inst_create_pat.match(line)
                 if m is not None:
-                    self.log_inst_info(long(m.group('opid')),
-                                       int(m.group('inst'),16),
-                                       int(m.group('mem'),16),
-                                       long(m.group('bytes')),
-                                       read_time(m.group('create')),
-                                       read_time(m.group('destroy')))
+                    self.log_inst_create(long(m.group('opid')),
+                                         int(m.group('inst'),16),
+                                         read_time(m.group('create')))
+                    continue
+                m = inst_usage_pat.match(line)
+                if m is not None:
+                    self.log_inst_usage(long(m.group('opid')),
+                                        int(m.group('inst'),16),
+                                        int(m.group('mem'),16),
+                                        long(m.group('bytes')))
+                    continue
+                m = inst_timeline_pat.match(line)
+                if m is not None:
+                    self.log_inst_timeline(long(m.group('opid')),
+                                           int(m.group('inst'),16),
+                                           read_time(m.group('create')),
+                                           read_time(m.group('destroy')))
                     continue
                 m = user_info_pat.match(line)
                 if m is not None:
@@ -1594,23 +1621,29 @@ class State(object):
         channel = self.find_channel(None, dst)
         channel.add_copy(fill)
 
-    def log_inst_info(self, op_id, inst_id, mem_id, size, 
-                      create, destroy):
+    def log_inst_create(self, op_id, inst_id, create):
+        op = self.find_op(op_id)
+        inst = self.create_instance(inst_id, op)
+        # don't overwrite if we have already captured the (more precise)
+        #  timeline info
+        if inst.destroy is None:
+            inst.create = create
+
+    def log_inst_usage(self, op_id, inst_id, mem_id, size):
         op = self.find_op(op_id)
         mem = self.find_memory(mem_id)
-        inst = self.create_instance(inst_id, mem, op, size)
-        inst.create = create
-        if destroy == 0:
-            # Only overwrite if we haven't seen it before
-            if inst.destroy is None:
-                inst.destroy = 0
-        else:
-            assert create <= destroy
-            inst.destroy = destroy
-            inst.complete = True
-            if destroy > self.last_time:
-                self.last_time = destroy 
+        inst = self.create_instance(inst_id, op)
+        inst.mem = mem
+        inst.size = size
         mem.add_instance(inst)
+
+    def log_inst_timeline(self, op_id, inst_id, create, destroy):
+        op = self.find_op(op_id)
+        inst = self.create_instance(inst_id, op)
+        inst.create = create
+        inst.destroy = destroy
+        if destroy > self.last_time:
+            self.last_time = destroy 
 
     def log_user_info(self, proc_id, start, stop, name):
         proc = self.find_processor(proc_id)
@@ -1810,8 +1843,15 @@ class State(object):
     def create_fill(self, dst, op):
         return Fill(dst, op)
 
-    def create_instance(self, inst_id, mem, op, size):
-        return Instance(inst_id, mem, op, size)
+    def create_instance(self, inst_id, op):
+        # neither instance id nor op id are unique on their own
+        key = (inst_id, op.op_id)
+        if key not in self.instances:
+            inst = Instance(inst_id, op)
+            self.instances[key] = inst
+        else:
+            inst = self.instances[key]
+        return inst
 
     def create_user_marker(self, name):
         return UserMarker(name)

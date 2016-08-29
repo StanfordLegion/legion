@@ -34,7 +34,104 @@ namespace Legion {
      * we want to replay the same execution of a program over and
      * over to discover the source of a runtime bug.
      */
-    class ReplayMapper : public Mapper {
+    class ReplayMapper : public Mapper { 
+    public:
+      struct InstanceInfo {
+      public:
+        InstanceInfo(void) : original_id(0), 
+            creating_instance(false), instance_valid(false) { }
+      public:
+        PhysicalInstance get_instance(MapperRuntime *runtime,
+                                      MapperContext ctx, LogicalRegion handle);
+        void create_instance(MapperRuntime *runtime, MapperContext ctx,
+                             LogicalRegion handle);
+        void record_created_instance(MapperRuntime *runtime, MapperContext ctx,
+                                     PhysicalInstance result);
+        void decrement_use_count(MapperRuntime *runtime, MapperContext ctx);
+      public:
+        unsigned long original_id;
+        unsigned num_uses;
+        Processor creator;
+        bool is_owner;
+      public:
+        Memory target_memory;
+        LayoutConstraintSet layout_constraints;
+        std::vector<std::vector<DomainPoint> > region_paths;
+      public:
+        PhysicalInstance instance;
+        bool creating_instance;
+        bool instance_valid;
+        MapperEvent request_event;
+      };
+      struct RequirementMapping {
+      public:
+        void map_requirement(MapperRuntime *runtime, MapperContext ctx,
+           LogicalRegion handle, std::vector<PhysicalInstance> &targets);
+      public:
+        std::vector<InstanceInfo*> instances;
+      };
+      struct TemporaryMapping {
+      public:
+        void map_temporary(MapperRuntime *runtime, MapperContext ctx,
+                           LogicalRegion handle, unsigned long original_dst,
+                           PhysicalInstance &result);
+      public:
+        std::map<unsigned long/*original dst*/,InstanceInfo*> instances;
+      };
+      struct TunableMapping {
+      public:
+        void set_tunable(void *&value, size_t &size);
+      public:
+        unsigned tunable_size;
+        void *tunable_value;
+      };
+      struct TaskMappingInfo {
+      public:
+        TaskMappingInfo(void) : next_tunable(0) { }
+      public:
+        UniqueID original_unique_id;
+        Processor target_proc;
+        VariantID variant;
+        TaskPriority priority;
+        unsigned next_tunable;
+      public:
+        std::map<unsigned,RequirementMapping*> premappings;
+        std::vector<RequirementMapping*> mappings;
+        std::map<unsigned,RequirementMapping*> postmappings;
+        std::map<unsigned,TemporaryMapping*> temporaries;
+        std::vector<TunableMapping*> tunables;
+        std::vector<UniqueID/*original*/> operation_ids;
+        std::vector<UniqueID/*original*/> close_ids; 
+      };
+      struct InlineMappingInfo {
+      public:
+        RequirementMapping *mapping;
+        TemporaryMapping *temporary;
+      };
+      struct CopyMappingInfo {
+      public:
+        std::vector<RequirementMapping*> src_mappings;
+        std::vector<RequirementMapping*> dst_mappings;
+        std::map<unsigned,TemporaryMapping*> src_temporaries;
+        std::map<unsigned,TemporaryMapping*> dst_temporaries;
+      };
+      struct CloseMappingInfo {
+      public:
+        RequirementMapping *mapping;
+        TemporaryMapping* temporary;
+      };
+      struct ReleaseMappingInfo {
+      public:
+        TemporaryMapping *temporary;
+      };
+    public:
+      enum ReplayMessageKind {
+        ID_MAPPING_MESSAGE,
+        INSTANCE_MAPPING_MESSAGE,
+        CREATE_INSTANCE_MESSAGE,
+        INSTANCE_CREATION_MESSAGE,
+        DECREMENT_USE_MESSAGE,
+      };
     public:
       ReplayMapper(MapperRuntime *rt, Machine machine, Processor local, 
                    const char *replay_file, const char *mapper_name = NULL);
@@ -75,6 +172,11 @@ namespace Legion {
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
+      virtual void create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -90,6 +192,11 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
+      virtual void create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -102,6 +209,11 @@ namespace Legion {
                                        const Copy&                  copy,
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output);
+      virtual void create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output);
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
@@ -117,6 +229,11 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
+      virtual void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output);
       virtual void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -140,6 +257,11 @@ namespace Legion {
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
+      virtual void create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output);
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
@@ -178,9 +300,52 @@ namespace Legion {
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result);
     protected:
+      unsigned long find_original_instance_id(MapperContext ctx, 
+                                              unsigned long current_id);
+      void update_original_instance_id(MapperContext ctx, 
+                      unsigned long current_id, unsigned long original_id);
+    protected:
+      InstanceInfo* unpack_instance(FILE *f) const;
+      TaskMappingInfo* unpack_task_mapping(FILE *f) const;
+      InlineMappingInfo* unpack_inline_mapping(FILE *f) const;
+      CopyMappingInfo* unpack_copy_mapping(FILE *f) const;
+      CloseMappingInfo* unpack_close_mapping(FILE *f) const;
+      ReleaseMappingInfo* unpack_release_mapping(FILE *f) const;
+      RequirementMapping* unpack_requirement(FILE *f) const;
+      TemporaryMapping* unpack_temporary(FILE *f) const;
+      TunableMapping* unpack_tunable(FILE *f) const;
+    protected:
+      TaskMappingInfo* find_task_mapping(MapperContext ctx, const Task &task,
+                                  const DomainPoint &p, bool parent = false);
+      InlineMappingInfo* find_inline_mapping(MapperContext ctx,
+                                             const InlineMapping &inline_op);
+      CopyMappingInfo* find_copy_mapping(MapperContext ctx, const Copy &copy);
+      CloseMappingInfo* find_close_mapping(MapperContext ctx, 
+                                           const Close &close);
+      ReleaseMappingInfo* find_release_mapping(MapperContext ctx,
+                                               const Release &release);
+    protected:
+      template<typename T>
+      static inline void ignore_result(T arg) { }
+    protected:
       const Machine machine;
       const Processor local_proc;
       const char *const mapper_name;
+    protected:
+      std::map<unsigned long,InstanceInfo*>              instance_infos;
+      std::map<std::pair<UniqueID/*original*/,DomainPoint>,TaskMappingInfo*>
+                                                         task_mappings;
+      std::map<UniqueID/*original*/,InlineMappingInfo*>  inline_mappings;
+      std::map<UniqueID/*original*/,CopyMappingInfo*>    copy_mappings;
+      std::map<UniqueID/*original*/,CloseMappingInfo*>   close_mappings;
+      std::map<UniqueID/*original*/,ReleaseMappingInfo*> release_mappings;
+    protected:
+      std::map<UniqueID/*current*/,UniqueID/*original*/> original_mappings;
+      std::map<UniqueID/*current*/,MapperEvent>          pending_task_ids;
+    protected:
+      std::map<unsigned long/*current*/,unsigned long/*original*/> 
+                                                         original_instances;
+      std::map<unsigned long/*current*/,MapperEvent>     pending_instance_ids;
     };
 
   }; // namespace Mapping

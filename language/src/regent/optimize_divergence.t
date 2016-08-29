@@ -50,9 +50,7 @@ end
 
 local function analyze_region_divergence_node(cx)
   return function(node)
-    if node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.Deref)
-    then
+    if node:is(ast.typed.expr.Deref) then
       local value_type = std.as_read(node.value.expr_type)
       if std.is_bounded_type(value_type) and #value_type:bounds() > 1 then
         cx:mark_region_divergence(unpack(value_type:bounds()))
@@ -101,5 +99,7 @@ function optimize_divergence.entry(node)
   local cx = context.new_global_scope()
   return optimize_divergence.top(cx, node)
 end
+
+optimize_divergence.pass_name = "optimize_divergence"
 
 return optimize_divergence

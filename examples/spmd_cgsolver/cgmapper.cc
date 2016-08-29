@@ -6,7 +6,7 @@ LegionRuntime::Logger::Category log_cgmap("cgmapper");
 
 // thanks to the wonders of ADL, this template has to be in either the Realm or std
 //  namespace to be found...
-namespace Realm {
+namespace std {
   template <typename T>
   std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
   {
@@ -34,7 +34,7 @@ namespace Realm {
 };
 
 CGMapper::CGMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+  : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
   , shard_per_proc(false)
   , runtime(rt)
 {
@@ -133,7 +133,7 @@ CGMapper::~CGMapper(void)
 
 void CGMapper::select_task_options(Task *task)
 {
-  log_cgmap.print() << "select_task_options: id=" << task->task_id << " tag=" << task->tag;
+  log_cgmap.info() << "select_task_options: id=" << task->task_id << " tag=" << task->tag;
 
   // is this a sharded task?
   if(task->tag >= TAG_SHARD_BASE) {
@@ -163,16 +163,16 @@ void CGMapper::select_task_options(Task *task)
   }
 
   // fall through to default mapper's logic
-  DefaultMapper::select_task_options(task);
+  ShimMapper::select_task_options(task);
 }
 
 bool CGMapper::pre_map_task(Task *task)
 {
   // assume that all must_early_map regions have an existing instance and just use that
   for(unsigned idx = 0; idx < task->regions.size(); idx++)
-    if(task->regions[idx].must_early_map || (task->regions[idx].prop == SIMULTANEOUS)) {
-      log_cgmap.print() << "pre_map_task needs early map: id " << task->task_id << " tag=" << task->tag 
-			<< ": #" << idx << ": " << task->regions[idx].region << " (" << task->regions[idx].current_instances.size() << " current)";
+    if(task->regions[idx].early_map || (task->regions[idx].prop == SIMULTANEOUS)) {
+      log_cgmap.info() << "pre_map_task needs early map: id " << task->task_id << " tag=" << task->tag 
+		       << ": #" << idx << ": " << task->regions[idx].region << " (" << task->regions[idx].current_instances.size() << " current)";
       task->regions[idx].virtual_map = false;
       task->regions[idx].early_map = true;
       task->regions[idx].enable_WAR_optimization = false;
@@ -198,28 +198,17 @@ bool CGMapper::pre_map_task(Task *task)
   return true;
 }
 
-bool CGMapper::map_must_epoch(const std::vector<Task*> &tasks,
-			      const std::vector<MappingConstraint> &constraints,
-			      MappingTagID tag)
-{
-  // just map all the tasks, and rely on them satisfying the constraints
-  for(std::vector<Task*>::const_iterator it = tasks.begin(); it != tasks.end(); it++)
-    map_task(*it);
-
-  return false;
-}
-
 void CGMapper::notify_mapping_result(const Mappable *mappable)
 {
   const Task *task = mappable->as_mappable_task();
   const char *name = "(unknown)";
   runtime->retrieve_name(task->task_id, name);
-  log_cgmap.print() << "task " << task->task_id << "(" << name << ") mapped on " << task->target_proc;
+  log_cgmap.info() << "task " << task->task_id << "(" << name << ") mapped on " << task->target_proc;
   for(unsigned idx = 0; idx < task->regions.size(); idx++) {
     const RegionRequirement& rr = task->regions[idx];
-    log_cgmap.print() << " region #" << idx << ": " << rr.region << " (" << rr.privilege << "," << rr.prop
-		      << ") mapped on " << task->regions[idx].selected_memory
-		      << ", fields=" << task->regions[idx].instance_fields;
+    log_cgmap.info() << " region #" << idx << ": " << rr.region << " (" << rr.privilege << "," << rr.prop
+		     << ") mapped on " << task->regions[idx].selected_memory
+		     << ", fields=" << task->regions[idx].instance_fields;
   }
 }
 
@@ -233,7 +222,7 @@ int CGMapper::get_tunable_value(const Task *task,
       return sysmems.size();
     }
   }
-
-  // if we don't recognize the tunable id, pass it on to the default mapper
-  return DefaultMapper::get_tunable_value(task, tid, tag);
+  // Unknown tunable value
+  assert(false);
+  return 0;
 }

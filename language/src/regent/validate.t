@@ -15,7 +15,7 @@
 -- Regent AST Validator
 
 local ast = require("regent/ast")
-local log = require("regent/log")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -39,7 +39,10 @@ function context:pop_local_scope()
 end
 
 function context:intern_variable(node, symbol)
-  assert(ast.is_node(node) and std.is_symbol(symbol))
+  assert(ast.is_node(node))
+  if not std.is_symbol(symbol) then
+    report.error(node, "expected a symbol, got " .. tostring(symbol))
+  end
   self.env[#self.env]:insert(node, symbol, symbol)
 end
 
@@ -52,21 +55,21 @@ function context:check_variable(node, symbol, expected_type)
   assert(ast.is_node(node))
 
   if not std.is_symbol(symbol) then
-    log.error(node, "expected symbol, got " .. tostring(symbol))
+    report.error(node, "expected symbol, got " .. tostring(symbol))
   end
 
   self.env[#self.env]:lookup(node, symbol)
 
   if not terralib.types.istype(symbol:hastype()) then
-    log.error(node, "expected typed symbol, got untyped symbol " .. tostring(symbol))
+    report.error(node, "expected typed symbol, got untyped symbol " .. tostring(symbol))
   end
 
   if not std.type_eq(symbol:gettype(), std.as_read(symbol:gettype())) then
-    log.error(node, "expected non-reference symbol type, got " .. tostring(symbol:gettype()))
+    report.error(node, "expected non-reference symbol type, got " .. tostring(symbol:gettype()))
   end
 
   if not std.type_eq(symbol:gettype(), std.as_read(expected_type)) then
-    log.error(node, "expected " .. tostring(std.as_read(expected_type)) .. ", got " .. tostring(symbol:gettype()))
+    report.error(node, "expected " .. tostring(std.as_read(expected_type)) .. ", got " .. tostring(symbol:gettype()))
   end
 end
 
@@ -75,9 +78,20 @@ local function validate_vars_node(cx)
     if node:is(ast.typed.expr.ID) then
       cx:check_variable(node, node.value, node.expr_type)
 
+    elseif node:is(ast.typed.expr.FieldAccess) then
+      -- Field accesses used to autoref pointers. The type checker now
+      -- desugars into a deref and a separate field access.
+      local value_type = std.as_read(node.value.expr_type)
+      if std.is_bounded_type(value_type) and
+        value_type:is_ptr() and
+        not std.get_field(value_type.index_type.base_type, node.field_name)
+      then
+        report.error(node, "expected desugared autoref field access, got " .. tostring(value_type))
+      end
+      continuation(node, true)
+
     elseif node:is(ast.typed.expr.Constant) or
       node:is(ast.typed.expr.Function) or
-      node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.IndexAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Call) or
@@ -113,6 +127,7 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
@@ -121,6 +136,10 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
+      node:is(ast.typed.expr.Acquire) or
+      node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AttachHDF5) or
+      node:is(ast.typed.expr.DetachHDF5) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
@@ -192,11 +211,22 @@ local function validate_vars_node(cx)
       continuation(node.block)
       cx:pop_local_scope()
 
-    elseif node:is(ast.typed.stat.IndexLaunch) then
-      continuation(node.domain)
+    elseif node:is(ast.typed.stat.IndexLaunchNum) then
+      continuation(node.values)
 
       cx:push_local_scope()
       cx:intern_variable(node, node.symbol)
+      continuation(node.preamble)
+      continuation(node.reduce_lhs)
+      continuation(node.call)
+      cx:pop_local_scope()
+
+    elseif node:is(ast.typed.stat.IndexLaunchList) then
+      continuation(node.value)
+
+      cx:push_local_scope()
+      cx:intern_variable(node, node.symbol)
+      continuation(node.preamble)
       continuation(node.reduce_lhs)
       continuation(node.call)
       cx:pop_local_scope()
@@ -204,6 +234,10 @@ local function validate_vars_node(cx)
     elseif node:is(ast.typed.stat.Var) then
       continuation(node.values)
       cx:intern_variables(node, node.symbols)
+      for i, symbol in ipairs(node.symbols) do
+        local var_type = node.types[i]
+        cx:check_variable(node, symbol, var_type)
+      end
 
     elseif node:is(ast.typed.stat.VarUnpack) then
       continuation(node.value)
@@ -221,7 +255,9 @@ local function validate_vars_node(cx)
       node:is(ast.typed.stat.UnmapRegions) or
       node:is(ast.typed.Block) or
       node:is(ast.location) or
-      node:is(ast.options)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind)
     then
       continuation(node, true)
 
@@ -246,6 +282,15 @@ end
 function validate.top(cx, node)
   if node:is(ast.typed.top.Task) then
     validate.top_task(cx, node)
+
+  elseif node:is(ast.typed.top.Fspace) or
+    node:is(ast.specialized.top.QuoteExpr) or
+    node:is(ast.specialized.top.QuoteStat)
+  then
+    return
+
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 

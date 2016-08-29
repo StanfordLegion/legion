@@ -24,10 +24,11 @@ where
   reads(d), writes(d)
 do
   var x = null(ptr(list(d), d))
-  for i = n, 0, -1 do
-    var y = new(ptr(list(d), d))
+  var i = n
+  for y in d do
     @y = [list(d)]{ data = i, next = x }
     x = y
+    i -= 1
   end
   return x
 end
@@ -46,6 +47,7 @@ end
 
 task top() : int
   var f = region(ispace(ptr, 5), list(f))
+  new(ptr(list(f), f), 5)
   var x = make_list(f, 5)
   return sum_list(f, x)
 end

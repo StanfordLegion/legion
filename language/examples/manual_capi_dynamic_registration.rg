@@ -207,6 +207,8 @@ terra top_level_task(task : c.legion_task_t,
   end
 end
 
+local args = require("manual_capi_args")
+
 terra main()
   c.printf("in main...\n")
 
@@ -223,7 +225,8 @@ terra main()
     nil, 0)
 
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
-  c.legion_runtime_start(0, [&rawstring](0), false)
+  [args.argv_setup]
+  c.legion_runtime_start(args.argc, args.argv, false)
 end
 
 if use_llvm then

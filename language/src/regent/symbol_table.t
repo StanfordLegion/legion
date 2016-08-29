@@ -14,7 +14,7 @@
 
 -- Legion Symbol Table
 
-local log = require("regent/log")
+local report = require("common/report")
 
 local symbol_table = {}
 symbol_table.__index = symbol_table
@@ -28,7 +28,7 @@ symbol_table.new_global_scope = function(lua_env)
         return st.local_env[index] or st.lua_env[index]
       end,
       __newindex = function()
-        log.error("cannot create global variables")
+        report.error("cannot create global variables")
       end,
   })
   return st
@@ -43,7 +43,7 @@ function symbol_table:new_local_scope()
         return st.local_env[index] or st.lua_env[index]
       end,
       __newindex = function()
-        log.error("cannot create global variables")
+        report.error("cannot create global variables")
       end,
   })
   return st
@@ -56,14 +56,14 @@ end
 function symbol_table:lookup(node, index)
   local value = self.combined_env[index]
   if value == nil then
-    log.error(node, "name '" .. tostring(index) .. "' is undefined or nil")
+    report.error(node, "name '" .. tostring(index) .. "' is undefined or nil")
   end
   return value
 end
 
 function symbol_table:insert(node, index, value)
   if rawget(self.local_env, index) then
-    log.error(node, "name '" .. tostring(index) .. "' is already defined")
+    report.error(node, "name '" .. tostring(index) .. "' is already defined")
   end
   rawset(self.local_env, index, value)
   return value

@@ -718,7 +718,14 @@ namespace LegionRuntime {
           CUDAPREFIX
 	  Typed(void *_base, size_t _stride) : Untyped(_base, _stride) {}
 	  CUDAPREFIX
-	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {}
+	  Typed(const Typed& other): Untyped(other.base, other.Stride<STRIDE>::value) {
+#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
+            this->set_region(other.region);
+#endif
+#ifdef PRIVILEGE_CHECKS
+            this->set_privileges(other.priv);
+#endif
+          }
 	  CUDAPREFIX
 	  Typed &operator=(const Typed& rhs) {
 	    *static_cast<Untyped *>(this) = *static_cast<const Untyped *>(&rhs);
