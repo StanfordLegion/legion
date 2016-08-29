@@ -3073,13 +3073,15 @@ class LogicalState(object):
             assert not self.dirty_below
             self.dirty_below = True
         elif req.has_write() and not self.dirty_below and \
-                          (not arrived or req.is_projection()):
+                          (not arrived or (req.is_projection() and
+                            (not req.is_reg or req.projection_function.depth > 0))):
             result,advance_op = self.perform_advance_operation(op, 
                                  req, previous_deps, perform_checks) 
             if not result:
                 return (False,None,None,None)
             # Mark that we are dirty below
-            self.dirty_below = True
+            if not arrived or req.is_projection():
+                self.dirty_below = True
         # Now do our analysis to figure out who we need to wait on locally
         if not self.perform_epoch_analysis(op, req, perform_checks,
                                            arrived, previous_deps):
@@ -3233,6 +3235,7 @@ class LogicalState(object):
     def open_state(self, op, req, next_child):
         # Then figure out how to open our child if necessary  
         if next_child is not None:
+            assert self.projection_mode == OPEN_NONE
             next_open = next_child not in self.open_children
             if req.is_read_only():
                 if next_child in self.open_children:
@@ -3279,7 +3282,8 @@ class LogicalState(object):
                 if self.projection_mode == OPEN_NONE:
                     self.projection_mode = OPEN_READ_ONLY
                 else:
-                    assert self.projection_mode == OPEN_READ_WRITE
+                    assert self.projection_mode == OPEN_READ_WRITE or \
+                           self.projection_mode == OPEN_READ_ONLY
             elif req.is_reduce():
                 self.projection_mode = OPEN_MULTI_REDUCE
                 self.current_redop = req.redop
@@ -3302,11 +3306,13 @@ class LogicalState(object):
                     if not self.perform_close_operation(empty_children_to_close,
                                   True, op, req, previous_deps, perform_checks):
                         return False
+                    self.projection_mode = OPEN_NONE
             elif self.projection_mode == OPEN_READ_WRITE:
                 # We close this no matter what
                 if not self.perform_close_operation(empty_children_to_close,
                                   False, op, req, previous_deps, perform_checks):
                     return False
+                self.projection_mode = OPEN_NONE
             else:
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
@@ -3315,6 +3321,7 @@ class LogicalState(object):
                     if not self.perform_close_operation(empty_children_to_close,
                                   False, op, req, previous_deps, perform_checks):
                         return False
+                    self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = dict()
             permit_leave_open = False # Never allowed to leave anything open here
@@ -3329,6 +3336,7 @@ class LogicalState(object):
             # Figure out which children we need to do closes for
             children_to_close = dict()
             children_to_read_close = dict()
+            upgrade_child = False
             # Not flushing reductions so we can take the normal path
             for child,open_mode in self.open_children.iteritems():
                 if open_mode == OPEN_READ_ONLY:
@@ -3338,6 +3346,7 @@ class LogicalState(object):
                     if next_child is not None:
                         # Same child we can keep going
                         if next_child is child:
+                            upgrade_child = True # not read-only requires upgrade 
                             continue
                         # Disjoint children then we can keep going
                         if self.node.are_children_disjoint(child, next_child):
@@ -3392,13 +3401,26 @@ class LogicalState(object):
                 if not self.perform_close_operation(children_to_close, False, op, req, 
                                                     previous_deps, perform_checks):
                     return False
+                upgrade_child = False
             if children_to_read_close:
                 if not self.perform_close_operation(children_to_read_close, True, op, 
                                                     req, previous_deps, perform_checks):
                     return False
+                upgrade_child = False
+            if upgrade_child:
+                assert next_child
+                assert next_child in self.open_children
+                self.open_children[next_child] = OPEN_READ_WRITE
         else:
             # All children are disjoint so no closes necessary
-            pass
+            # See if we need to upgrade our child
+            if next_child and next_child in self.open_children:
+                if self.open_children[next_child] == OPEN_READ_ONLY:
+                    if not req.is_read_only():
+                        self.open_children[next_child] = OPEN_READ_WRITE
+                elif self.open_children[next_child] == OPEN_SINGLE_REDUCE:
+                    if not req.is_reduce() or req.redop != self.open_redop[next_child]:
+                        self.open_children[next_child] = OPEN_READ_WRITE
         return True
 
     def siphon_logical_projection(self, op, req, previous_deps, perform_checks):
@@ -3663,7 +3685,17 @@ class LogicalState(object):
             return False
         # Record the close operation in the current epoch
         self.register_logical_user(close, close.reqs[0])
-        self.dirty_below = False
+        # See if we still have any dirty children below
+        # Read only close operations don't update the dirty fields
+        if not read_only_close and self.dirty_below:
+            still_dirty = False
+            for privilege in self.open_children.itervalues():
+                if privilege == READ_WRITE or privilege == REDUCE or \
+                    privilege == WRITE_ONLY:
+                      still_dirty = True
+                      break
+            if not still_dirty:
+                self.dirty_below = False
         return True
 
     def close_logical_tree(self, closed_users, permit_leave_open):
@@ -5677,12 +5709,6 @@ class Operation(object):
                                                       req, None, perform_checks):
                     return False
             return True
-        elif self.kind == POST_CLOSE_OP_KIND:
-            # We find our target instances from our parent task
-            assert self.context
-            parent_op = self.context.op
-            assert self.internal_idx in parent_op.mappings
-            mappings = parent_op.mappings[self.internal_idx]
         else:
             # This is the common path
             mappings = self.find_mapping(0, req.parent)
