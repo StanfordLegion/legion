@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <typeinfo>
 #include "wrapper_mapper.h"
-
+#include <vector>
 
 #define STATIC_MAX_PERMITTED_STEALS   4
 #define STATIC_MAX_STEAL_COUNT        2
@@ -28,6 +28,8 @@ namespace Legion {
 		std::map<std::string, int> WrapperMapper::tasks_map;
 		std::map<Memory, int> WrapperMapper::mems_map;
 		std::map<int, std::string> WrapperMapper::task_names_map;
+		std::vector<Processor> WrapperMapper::print_procs;
+		std::vector<Processor> WrapperMapper::stop_procs;
 		bool WrapperMapper::inputtaken=0;
 		bool WrapperMapper::databroadcasted = 0;
 		Processor WrapperMapper::ownerprocessor;
@@ -53,18 +55,22 @@ namespace Legion {
 			else if (!WrapperMapper::inputtaken){
 				WrapperMapper::inputtaken =1;
 				WrapperMapper::localowner = local;
+				//WrapperMapper::procs_map.insert(std::pair<Processor, int>(local, 0));
 				
 			}
 		}
 		WrapperMapper::~WrapperMapper(){
- std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
+//std::cout<<WrapperMapper::procs_list[1].id;
+std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
+//std::cout << "hi"; 
+//std::cout<<"Owner"<<WrapperMapper::ownerprocessor.id<<"\n";
 				
 				std::cout<<"the tasks added are: ";
 				for (std::map<std::string, int>::const_iterator i = WrapperMapper::tasks_map.begin(); i != WrapperMapper::tasks_map.end(); ++i) std::cout<< i->first << "  ";
 				std::cout<<"\n>    ";
-std::cout<<"The processors added are: ";
+/*std::cout<<"The processors added are: ";
 							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
-							std::cout<<"\n>    ";
+							std::cout<<"\n>    ";*/
 						
 		}
 
@@ -101,26 +107,26 @@ std::cout<<"The processors added are: ";
 			return ss.str();
 			}
 		
-		std::string Serialize(const std::map<std::string, int> &tasks_map, const std::map<int, int> &procs_map ){
+		std::string WrapperMapper::Serialize(const std::map<std::string, int> &tasks_map, const std::map<int, int> &procs_map ){
 			std::string send_string, temp;
+
+				for (std::map<int, int>::const_iterator i = procs_map.begin(); i!=procs_map.end(); ++i){
+				send_string = send_string + NumberToString(i->first) + NumberToString(i->second) + "\\";
+			}
+			send_string = send_string + "#";
+			
 			for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i){
 				send_string = send_string + i->first + NumberToString(i->second) + "\\";
 			}
-	
-			send_string = send_string + "#";
-			
-			for (std::map<int, int>::const_iterator i = procs_map.begin(); i!=procs_map.end(); ++i){
-				send_string = send_string + NumberToString(i->first) + NumberToString(i->second) + "\\";
-			}
-			//std::cout<<send_string;
+			std::cout<<send_string;
 
 		return send_string;
 		}
 
-		void Deserialize(std::string rec_string){
+		void WrapperMapper::Deserialize(std::string rec_string){
 			std::size_t hash_pos  = rec_string.find("#");
-			std::string tasks_str = rec_string.substr(0, hash_pos);
-			std::string procs_str = rec_string.substr(hash_pos+1, rec_string.size() - hash_pos);
+			std::string  procs_str = rec_string.substr(0, hash_pos);
+			std::string tasks_str = rec_string.substr(hash_pos+1, rec_string.size() - hash_pos);
 			
 			std::string delim = "\\";
 			std::map<std::string, int> map_tasks;			
@@ -132,25 +138,39 @@ std::cout<<"The processors added are: ";
 				tasks_str.erase(0, pos + delim.length());
 			}
 			WrapperMapper::tasks_map = map_tasks;
-			std::set<Processor>::iterator it;			
-
+				
 			int ip;
-			std::map<Processor, int> map_procs;
+			std::set<Processor>::iterator it;
+			std::vector<Processor> procs_print;
+			std::vector<Processor> procs_stop;
+			WrapperMapper::stop_procs.clear();
+			WrapperMapper::print_procs.clear();
 			while ((pos = procs_str.find(delim)) != std::string::npos){
 				token = procs_str.substr(0, pos);
 				ip = std::atoi(token.substr(0, token.size()-1).c_str());
 				if ((unsigned)ip<WrapperMapper::all_procs.size()){
 					it = WrapperMapper::all_procs.begin();
 					std::advance(it, ip);
+					//WrapperMapper::procs_list.push_back(*it);	
+				//std::cout<<"--------->"<<std::atoi(token.at(token.size()-1))<<"\n";
+				Processor p = *it;
+					
+					WrapperMapper::print_procs.push_back(p);
+					WrapperMapper::stop_procs.push_back(p);
+			std::cout<<"--------->"<<token<<"------->"<<ip<<"--------->";
+			for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
+			std::cout<<"\n";					
+				//	}
+				//else if ((int)token.at(token.size()-1)==1) procs_print.push_back(*it);
+//WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,0));// (int)(token.at(token.size()-1))));				
 				}
-				std::cout<<"Processor being inserted"<<it->id;
-				//map_procs.insert(std::pair<Processor,int>(*it, (int)(token.at(token.size()-1))));
 				procs_str.erase(0, pos + delim.length());
 			}
-			WrapperMapper::procs_map = map_procs;
-			it = WrapperMapper::all_procs.begin();
-					std::advance(it, 1);
-			WrapperMapper::ownerprocessor = *it;
+//			WrapperMapper::procs_map = map_procs;
+			std::set<Processor>::iterator ito;
+			ito = WrapperMapper::all_procs.begin();
+					std::advance(ito, 1);
+			WrapperMapper::ownerprocessor = *ito;
 
 	}
 
@@ -286,13 +306,17 @@ std::cout<<"The processors added are: ";
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
-							if (ite!=WrapperMapper::procs_map.end() ) WrapperMapper::procs_map.erase(ite);				
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//if (ite!=WrapperMapper::procs_map.end() ) WrapperMapper::procs_map.erase(ite);				
+							std::vector<Processor>::iterator ite = std::find(WrapperMapper::print_procs.begin(), print_procs.end(), *it);
+							if (ite!=WrapperMapper::print_procs.end()) WrapperMapper::print_procs.erase(ite);
 							pValue=1;
-							WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							//WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							WrapperMapper::print_procs.push_back(*it);
 							WrapperMapper::procs_map_int.insert(std::pair<int, int>(i, pValue));
 							std::cout<<"The processors added are: ";
-							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 							std::cout<<"\n>    ";
 						}
 						else std::cout<<"Invalid number entered\n>    ";
@@ -308,13 +332,20 @@ std::cout<<"The processors added are: ";
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
-							if (ite!=WrapperMapper::procs_map.end()) WrapperMapper::procs_map.erase(ite);				
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//if (ite!=WrapperMapper::procs_map.end()) WrapperMapper::procs_map.erase(ite);				
+							std::vector<Processor>::iterator itep = std::find(WrapperMapper::print_procs.begin(), print_procs.end(), *it);
+							std::vector<Processor>::iterator ites = std::find(WrapperMapper::stop_procs.begin(), stop_procs.end(), *it);
+							if (itep!=WrapperMapper::print_procs.end()) WrapperMapper::print_procs.erase(itep);
+							if (ites!=WrapperMapper::stop_procs.end()) WrapperMapper::stop_procs.erase(ites);
 							pValue=0;
-							WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							//WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							WrapperMapper::print_procs.push_back(*it);
+							WrapperMapper::stop_procs.push_back(*it);	
 							WrapperMapper::procs_map_int.insert(std::pair<int, int>(i, pValue));
 							std::cout<<"The processors added are: ";
-							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 							std::cout<<"\n>    ";
 						}
 						else std::cout<<"Invalid number entered\n>    ";
@@ -403,19 +434,41 @@ std::cout<<"The processors added are: ";
 				else if (strValue.compare(0,11,"processor -")==0){
 					intValue=strValue.substr(11);
 					std::set<Processor>::iterator it;
-					std::map<Processor, int>::iterator ite;
+					//std::map<Processor, int>::iterator ite;
+					std::vector<Processor>::iterator itp, its;
 					if (is_number(intValue)){
 						int i=std::atoi(intValue.c_str())-1;
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							itp = std::find(WrapperMapper::print_procs.begin(), WrapperMapper::print_procs.end(),*it);
+							its = std::find(WrapperMapper::stop_procs.begin(), WrapperMapper::stop_procs.end(),*it);
 							std::map<int, int>::iterator ite_int = WrapperMapper::procs_map_int.find(i);
-							if (ite!=WrapperMapper::procs_map.end() ){
+							/*if (ite!=WrapperMapper::procs_map.end() ){
 								WrapperMapper::procs_map.erase(ite);
 								WrapperMapper::procs_map_int.erase(ite_int);				
 								std::cout<<"The processors added are: ";
 								for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								std::cout<<"\n>    ";
+							}*/
+							
+							if (its!=WrapperMapper::stop_procs.end() ){
+								WrapperMapper::stop_procs.erase(its);
+								WrapperMapper::print_procs.erase(itp);
+								WrapperMapper::procs_map_int.erase(ite_int);				
+								std::cout<<"The processors added are: ";
+								for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
+								//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								std::cout<<"\n>    ";
+							}
+							
+							else if (itp!=WrapperMapper::print_procs.end() ){
+								WrapperMapper::print_procs.erase(itp);
+								WrapperMapper::procs_map_int.erase(ite_int);				
+								std::cout<<"The processors added are: ";
+								//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 								std::cout<<"\n>    ";
 							}
 						}
@@ -653,13 +706,17 @@ std::cout<<"The processors added are: ";
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
-							if (ite!=WrapperMapper::procs_map.end() ) WrapperMapper::procs_map.erase(ite);				
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//if (ite!=WrapperMapper::procs_map.end() ) WrapperMapper::procs_map.erase(ite);				
+							std::vector<Processor>::iterator ite = std::find(WrapperMapper::print_procs.begin(), print_procs.end(), *it);
+							if (ite!=WrapperMapper::print_procs.end()) WrapperMapper::print_procs.erase(ite);
 							pValue=1;
-							WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							//WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							WrapperMapper::print_procs.push_back(*it);
 							WrapperMapper::procs_map_int.insert(std::pair<int, int>(i, pValue));
 							std::cout<<"The processors added are: ";
-							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 							std::cout<<"\n>    ";
 						}
 						else std::cout<<"Invalid number entered\n>    ";
@@ -675,13 +732,20 @@ std::cout<<"The processors added are: ";
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
-							if (ite!=WrapperMapper::procs_map.end()) WrapperMapper::procs_map.erase(ite);				
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//if (ite!=WrapperMapper::procs_map.end()) WrapperMapper::procs_map.erase(ite);				
+							std::vector<Processor>::iterator itep = std::find(WrapperMapper::print_procs.begin(), print_procs.end(), *it);
+							std::vector<Processor>::iterator ites = std::find(WrapperMapper::stop_procs.begin(), stop_procs.end(), *it);
+							if (itep!=WrapperMapper::print_procs.end()) WrapperMapper::print_procs.erase(itep);
+							if (ites!=WrapperMapper::stop_procs.end()) WrapperMapper::stop_procs.erase(ites);
 							pValue=0;
-							WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							//WrapperMapper::procs_map.insert(std::pair<Processor,int>(*it,pValue));
+							WrapperMapper::print_procs.push_back(*it);
+							WrapperMapper::stop_procs.push_back(*it);	
 							WrapperMapper::procs_map_int.insert(std::pair<int, int>(i, pValue));
 							std::cout<<"The processors added are: ";
-							for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+							for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 							std::cout<<"\n>    ";
 						}
 						else std::cout<<"Invalid number entered\n>    ";
@@ -770,19 +834,42 @@ std::cout<<"The processors added are: ";
 				else if (strValue.compare(0,11,"processor -")==0){
 					intValue=strValue.substr(11);
 					std::set<Processor>::iterator it;
-					std::map<Processor, int>::iterator ite;
+					//std::map<Processor, int>::iterator ite;
+					std::vector<Processor>::iterator itp, its;
 					if (is_number(intValue)){
 						int i=std::atoi(intValue.c_str())-1;
 						if ((unsigned)i<WrapperMapper::all_procs.size()){
 							it = WrapperMapper::all_procs.begin();
 							std::advance(it, i);
-							std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							//std::map<Processor, int>::iterator ite= WrapperMapper::procs_map.find(*it);
+							itp = std::find(WrapperMapper::print_procs.begin(), WrapperMapper::print_procs.end(),*it);
+							its = std::find(WrapperMapper::stop_procs.begin(), WrapperMapper::stop_procs.end(),*it);
 							std::map<int, int>::iterator ite_int = WrapperMapper::procs_map_int.find(i);
-							if (ite!=WrapperMapper::procs_map.end() ){
+							/*if (ite!=WrapperMapper::procs_map.end() ){
 								WrapperMapper::procs_map.erase(ite);
-								WrapperMapper::procs_map_int.erase(ite_int);					
+								WrapperMapper::procs_map_int.erase(ite_int);				
+
 								std::cout<<"The processors added are: ";
 								for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								std::cout<<"\n>    ";
+							}*/
+							
+							if (its!=WrapperMapper::stop_procs.end() ){
+								WrapperMapper::stop_procs.erase(its);
+								WrapperMapper::print_procs.erase(itp);
+								WrapperMapper::procs_map_int.erase(ite_int);				
+								std::cout<<"The processors added are: ";
+								for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
+								//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								std::cout<<"\n>    ";
+							}
+							
+							else if (itp!=WrapperMapper::print_procs.end() ){
+								WrapperMapper::print_procs.erase(itp);
+								WrapperMapper::procs_map_int.erase(ite_int);				
+								std::cout<<"The processors added are: ";
+								//for (std::map<Processor,int>::const_iterator it = WrapperMapper::procs_map.begin(); it != WrapperMapper::procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+								for (std::vector<Processor>::const_iterator it = WrapperMapper::print_procs.begin(); it != WrapperMapper::print_procs.end(); ++it) std::cout<< it->id << "   ";
 								std::cout<<"\n>    ";
 							}
 						}
@@ -1033,21 +1120,27 @@ std::cout<<"The processors added are: ";
 			dmapper->select_task_options(ctx, task, output);
 			std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
 			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
-			std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
-			if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+			//std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
+			std::vector<Processor>::iterator itp = std::find(WrapperMapper::print_procs.begin(), WrapperMapper::print_procs.end(),output.initial_proc);
+			std::vector<Processor>::iterator its = std::find(WrapperMapper::stop_procs.begin(), WrapperMapper::stop_procs.end(),output.initial_proc);
+			//if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+			if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::print_procs.end())) {
+				
+			std::cout<<"---------"<<local_proc.id<<"\n";
 				if(WrapperMapper::ownerprocessor==local_proc){
 					std::cout<<"\n--------------TASK: "<<task.get_task_name()<<" FUNCTION: select_task_options--------------\n";
 					std::cout<<"\nThe selected task options for task "<<task.get_task_name()<<" are as follows:\n";
 					std::cout<<"initial processor="<<output.initial_proc.id<<"\ninline task="<<output.inline_task;
 					std::cout<<"\nspawn task="<<output.stealable<<"\nmap locally="<<output.map_locally<<"\n\n";
-					if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
+				//	if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
+					if (((itt!=WrapperMapper::tasks_map.end() && itt->second==0) && (itm!=WrapperMapper::methods_map.end() && itm->second==0))||(its!=WrapperMapper::stop_procs.end())) {
 						std::cout<<"To change the task options, type 'change' and to exit, type 'exit'\n";
 						WrapperMapper::get_select_task_options_input(ctx, task.get_task_name(), output);
 					}
 				}
 				else{
 					wait_task_options = output;
-					select_task_options_message message ={11,task.get_task_name(),wait_task_options};
+					select_task_options_message message ={42356156,task.get_task_name(),wait_task_options};
 					void *message_point = &message;
 					WrapperMapper::mapevent = mrt->create_mapper_event(ctx);
 					mrt->send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
@@ -1271,30 +1364,36 @@ std::cout<<"The processors added are: ";
 			const select_task_options_message *rec_message = (select_task_options_message*)message.message;
 			
 			if (node_id==0 && WrapperMapper::ownerprocessor.id==local_proc.id){
-				if (rec_message->tag==11){
+				if (rec_message->tag==42356156){
 					std::string task_name = rec_message->task_name;
 					TaskOptions output = rec_message->output;
 
 					std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task_name);
 					std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
-					std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
-					if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+					//std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
+			std::vector<Processor>::iterator itp = std::find(WrapperMapper::print_procs.begin(), WrapperMapper::print_procs.end(),output.initial_proc);
+			std::vector<Processor>::iterator its = std::find(WrapperMapper::stop_procs.begin(), WrapperMapper::stop_procs.end(),output.initial_proc);
+			//if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+			if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (its!=WrapperMapper::print_procs.end())) {
+			
 						std::cout<<"\n--------------TASK: "<<task_name<<" FUNCTION: select_task_options--------------\n";
 						std::cout<<"\nThe selected task options for task "<<task_name<<" are as follows:\n";
 						std::cout<<"initial processor="<<output.initial_proc.id<<"\ninline task="<<output.inline_task;
 						std::cout<<"\nspawn task="<<output.stealable<<"\nmap locally="<<output.map_locally<<"\n\n";
-						if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
+						//	if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
+					if (((itt!=WrapperMapper::tasks_map.end() && itt->second==0) && (itm!=WrapperMapper::methods_map.end() && itm->second==0))||(its!=WrapperMapper::stop_procs.end())) {
+				
 							std::cout<<"To change the task options, type 'change' and to exit, type 'exit'\n";
 							WrapperMapper::get_select_task_options_input(ctx, task_name, output);
 						}
 					}
 
-					select_task_options_message mess ={11,task_name,output};
+					select_task_options_message mess ={42356156,task_name,output};
 					void *message_point = &mess;
 					mrt->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
 				}
 			}
-			else if (rec_message->tag ==11){
+			else if (rec_message->tag ==42356156){
 				wait_task_options = rec_message->output;				
 				mrt->trigger_mapper_event(ctx, WrapperMapper::mapevent);
 			}
@@ -1303,7 +1402,7 @@ std::cout<<"The processors added are: ";
 
 				if (node_id!=0 && WrapperMapper::localowner == local_proc){	
 					std::string rec_string = rec1_message;		
-					Deserialize(rec_string);		
+					WrapperMapper::Deserialize(rec_string);		
 				}
 			}
 

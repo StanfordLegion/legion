@@ -44,6 +44,8 @@ namespace Legion {
 			static std::map<int, int> procs_map_int;
 			static std::map<Memory, int> mems_map;
 			static std::map<int, std::string> task_names_map;
+			static std::vector<Processor> print_procs;	
+			static std::vector<Processor> stop_procs;	
 			static bool inputtaken;
 			static bool databroadcasted;
 			static Processor ownerprocessor;
@@ -61,7 +63,8 @@ namespace Legion {
 			Mapper::TaskOptions wait_task_options;
 
 public:
-	//void Deserialize(std::string rec_string);
+	void Deserialize(std::string rec_string);
+	std::string Serialize(const std::map<std::string, int> &tasks_map, const std::map<int, int> &procs_map );
       const char* get_mapper_name(void) const;
       MapperSyncModel get_mapper_sync_model(void) const;
 
