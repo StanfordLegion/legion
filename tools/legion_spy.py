@@ -2573,8 +2573,8 @@ class LogicalRegion(object):
             self.parent.compute_path(path, target)
         path.append(self)
 
-    def perform_logical_analysis(self, depth, path, op, req, field, 
-                                 open_local, unopened, advance_op, prev, checks):
+    def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
+                                 unopened, advance_op, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -2582,12 +2582,12 @@ class LogicalRegion(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance = \
             self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                                    open_local, unopened, advance_op, prev, checks)
+                            open_local, unopened, advance_op, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
-                      field, next_open, next_unopened, next_advance, prev, checks)
+                field, next_open, next_unopened, next_advance, prev, aliased, checks)
         return True
 
     def register_logical_user(self, op, req, field):
@@ -2864,8 +2864,8 @@ class LogicalPartition(object):
             self.parent.compute_path(path, target)
         path.append(self)
 
-    def perform_logical_analysis(self, depth, path, op, req, field, 
-                                 open_local, unopened, advance_op, prev, checks):
+    def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
+                                  unopened, advance_op, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -2873,12 +2873,12 @@ class LogicalPartition(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance = \
           self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                              open_local, unopened, advance_op, prev, checks)
+                          open_local, unopened, advance_op, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, 
-                      field, next_open, next_unopened, next_advance, prev, checks)
+              field, next_open, next_unopened, next_advance, prev, aliased, checks)
         return True
 
     def register_logical_user(self, op, req, field):
@@ -3039,8 +3039,8 @@ class LogicalState(object):
         self.projection_mode = OPEN_NONE 
         self.projection_epoch = list()
 
-    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, 
-                                 advance_op, previous_deps, perform_checks):
+    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance_op, 
+                                 previous_deps, aliased_children, perform_checks):
         # At most one of these should be true, they can both be false
         assert not open_local or not unopened
         arrived = next_child is None
@@ -3056,8 +3056,8 @@ class LogicalState(object):
                                                       previous_deps, perform_checks):
                     return (False,None,None,None)
             else:
-                if not self.siphon_logical_children(op, req, next_child, 
-                                                    previous_deps, perform_checks):
+                if not self.siphon_logical_children(op, req, next_child, previous_deps, 
+                                                    aliased_children, perform_checks):
                     return (False,None,None,None)
         # Perform any open operations if necessary
         if next_child or req.is_projection():
@@ -3173,6 +3173,7 @@ class LogicalState(object):
                     continue
                 if not op.need_logical_replay:
                     op.need_logical_replay = set()
+                assert False or need_replay
                 op.need_logical_replay.add((prev_req.index,self.field))
                 continue
             if not open_op.has_mapping_dependence(open_req, prev_op, prev_req,
@@ -3210,6 +3211,7 @@ class LogicalState(object):
                     continue
                 if not op.need_logical_replay:
                     op.need_logical_replay = set()
+                assert False or need_replay
                 op.need_logical_replay.add((prev_req.index,self.field))
                 continue
             if not advance.has_mapping_dependence(advance_req, prev_op, prev_req,
@@ -3263,9 +3265,9 @@ class LogicalState(object):
                     # Everyone is in multi-reduce mode
                     self.open_children[next_child] = OPEN_MULTI_REDUCE
                     for child in other_children:
-                        assert self.open_children[next_child] == OPEN_SINGLE_REDUCE or \
-                            self.open_children[next_child] == OPEN_MULTI_REDUCE
-                        self.open_children[next_child] = OPEN_MULTI_REDUCE
+                        assert self.open_children[child] == OPEN_SINGLE_REDUCE or \
+                            self.open_children[child] == OPEN_MULTI_REDUCE
+                        self.open_children[child] = OPEN_MULTI_REDUCE
                 else:
                     # Just single reduce mode
                     self.open_children[next_child] = OPEN_SINGLE_REDUCE
@@ -3294,8 +3296,8 @@ class LogicalState(object):
         return next_open
 
     # Maybe not the most intuitive name for a method but it aligns with the runtime
-    def siphon_logical_children(self, op, req, next_child, 
-                                previous_deps, perform_checks):
+    def siphon_logical_children(self, op, req, next_child, previous_deps, 
+                                aliased_children, perform_checks):
         # First see if we have any reductions to flush
         if self.projection_mode != OPEN_NONE:
             assert not self.open_children # shouldn't have any open children
@@ -3334,9 +3336,10 @@ class LogicalState(object):
                 return False
         elif next_child is None or not self.node.are_all_children_disjoint():
             # Figure out which children we need to do closes for
-            children_to_close = dict()
-            children_to_read_close = dict()
+            need_close = False
+            need_read_only_close = False
             upgrade_child = False
+            depth = self.node.get_index_node().depth
             # Not flushing reductions so we can take the normal path
             for child,open_mode in self.open_children.iteritems():
                 if open_mode == OPEN_READ_ONLY:
@@ -3345,68 +3348,89 @@ class LogicalState(object):
                         continue
                     if next_child is not None:
                         # Same child we can keep going
-                        if next_child is child:
+                        if next_child is child and not depth in aliased_children:
                             upgrade_child = True # not read-only requires upgrade 
                             continue
                         # Disjoint children then we can keep going
                         if self.node.are_children_disjoint(child, next_child):
                             continue
                     # Otherwise, we have to read-only close this child
-                    # Don't permit the child to be left open
-                    children_to_read_close[child] = False
+                    # Keep going to see if we need a real close
+                    need_read_only_close = True
                 elif open_mode == OPEN_READ_WRITE:
                     if next_child is not None:
                         # Same child we can skip this
-                        if next_child is child:
+                        if next_child is child and not depth in aliased_children:
                             continue
                         # If we are disjoint we can keep going
                         if self.node.are_children_disjoint(child, next_child):
                             continue
                     # Otherwise we do an actual close here
-                    # We can leave it open if a reader is causing the close
-                    children_to_close[child] = req.is_read_only()
+                    need_close = True
+                    break
                 elif open_mode == OPEN_SINGLE_REDUCE:
                     # If they are the same reduction operator we can skip
                     if req.redop == self.open_redop[child]:
                         continue
                     if next_child is not None:
                         # Same child we can skip this
-                        if next_child is child:
+                        if next_child is child and not depth in aliased_children:
+                            upgrade_child = True
                             continue
                         # If we are disjoint we can keep going
                         if self.node.are_children_disjoint(child, next_child):
                             continue
                     # Otherwise we need to close this child
-                    # Don't allow it to remain open
-                    children_to_close[child] = False
+                    need_close = True
+                    break
                 elif open_mode == OPEN_MULTI_REDUCE:
                     # If they are the same reduction operator we can skip
                     if req.redop == self.open_redop[child]:
                         continue
-                    if next_child is not None:
-                        # IMPORTANT: can't skip if the child is the same
-                        if self.node.are_children_disjoint(child, next_child):
-                            continue
-                    # Otherwise we need to close this child
-                    children_to_close[child] = False
+                    # Otherwise we definitely need the close operation
+                    need_close = True
+                    break
                 else:
                     assert False # Should never get here
-            # Check our close operations if we have any
-            if children_to_close:
-                # If we have both normal closes and read closes, merge them
-                # so that we have at most one close operation per field
-                if children_to_read_close:
-                    children_to_close.update(children_to_read_close)
-                    children_to_read_close = None
-                if not self.perform_close_operation(children_to_close, False, op, req, 
-                                                    previous_deps, perform_checks):
+            if need_close:
+                # Figure out the children to close
+                # Full closes have to close everybody 
+                children_to_close = dict() 
+                for child,open_mode in self.open_children.iteritems():
+                    if open_mode == OPEN_READ_ONLY:                
+                        children_to_close[child] = False
+                    elif open_mode == OPEN_READ_WRITE:
+                        # Can leave open if closer is a reader
+                        children_to_close[child] = req.is_read_only()
+                    elif open_mode == OPEN_SINGLE_REDUCE:
+                        children_to_close[child] = False
+                    elif open_mode == OPEN_MULTI_REDUCE:
+                        children_to_close[child] = False
+                    else:
+                        assert False
+                if not self.perform_close_operation(children_to_close,
+                        False, op, req, previous_deps, perform_checks):
                     return False
+                # No upgrades if we closed it
                 upgrade_child = False
-            if children_to_read_close:
-                if not self.perform_close_operation(children_to_read_close, True, op, 
-                                                    req, previous_deps, perform_checks):
+            elif need_read_only_close:
+                children_to_read_close = dict()
+                # Read only closes can close specific children
+                for child,open_mode in self.open_children.iteritems():
+                    # Only read-only matters for read-only closes
+                    if open_mode != OPEN_READ_ONLY:
+                        continue
+                    if child is next_child:
+                        # If we can keep it open we will, but not
+                        # if it is going to have aliased children
+                        if depth not in aliased_children:
+                          continue   
+                        # Otherwise we're going to close it so no more upgrades
+                        upgrade_child = False
+                    children_to_read_close[child] = False
+                if not self.perform_close_operation(children_to_read_close,
+                        True, op, req, previous_deps, perform_checks):
                     return False
-                upgrade_child = False
             if upgrade_child:
                 assert next_child
                 assert next_child in self.open_children
@@ -3421,6 +3445,8 @@ class LogicalState(object):
                 elif self.open_children[next_child] == OPEN_SINGLE_REDUCE:
                     if not req.is_reduce() or req.redop != self.open_redop[next_child]:
                         self.open_children[next_child] = OPEN_READ_WRITE
+                else: # Should be in read-write mode
+                    assert self.open_children[next_child] == OPEN_READ_WRITE
         return True
 
     def siphon_logical_projection(self, op, req, previous_deps, perform_checks):
@@ -3461,7 +3487,7 @@ class LogicalState(object):
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
-                    if self.perform_close_operation(empty_children_to_close,
+                    if not self.perform_close_operation(empty_children_to_close,
                               False, op, req, previous_deps, perform_checks):
                         return False
         elif self.current_redop != 0 and self.current_redop != req.redop:
@@ -3593,6 +3619,7 @@ class LogicalState(object):
                     continue
                 if not op.need_logical_replay:
                     op.need_logical_replay = set()
+                assert False or need_replay
                 op.need_logical_replay.add((prev_req.index,self.field))
                 continue
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
@@ -3616,6 +3643,7 @@ class LogicalState(object):
                     continue
                 if not op.need_logical_replay:
                     op.need_logical_replay = set()
+                assert False or need_replay
                 op.need_logical_replay.add((prev_req.index,self.field))
                 continue
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
@@ -3737,6 +3765,7 @@ class LogicalState(object):
                     continue
                 if not replay_op.need_logical_replay:
                     replay_op.need_logical_replay = set()
+                assert False or need_replay
                 replay_op.need_logical_replay.add((prev_req.index,self.field))
                 continue
             # Close operations from the same creator can never depend on eachother
@@ -3768,6 +3797,7 @@ class LogicalState(object):
                         continue
                     if not replay_op.need_logical_replay:
                         replay_op.need_logical_replay = set()
+                    assert False or need_replay
                     replay_op.need_logical_replay.add((prev_req.index,self.field))
                     continue
                 if perform_checks:
@@ -4769,8 +4799,8 @@ class Operation(object):
         if self.inter_close_ops is None:
             return None
         for close in self.inter_close_ops:
-            if close.internal_idx != req.index:
-                continue
+            #if close.internal_idx != req.index:
+                #continue
             assert len(close.reqs) == 1
             close_req = close.reqs[0]
             if close_req.logical_node is not node:
@@ -5079,8 +5109,9 @@ class Operation(object):
                 return copy
         # If we are part of an index space, see if it was premapped
         if self.index_owner:
-            return self.index_owner.find_generated_copy(src_field, dst_field,
-                                region, src_inst, dst_inst, redop, intersect)
+            assert src_field is dst_field
+            return self.index_owner.find_generated_copy(src_field, region, 
+                                      src_inst, dst_inst, redop, intersect)
         return None
 
     def find_generated_fill(self, field, region, dst, intersect=None):
@@ -5133,7 +5164,7 @@ class Operation(object):
         traverser.visit_event(self.start_event)
         return traverser.cycle
 
-    def analyze_logical_requirement(self, index, perform_checks, exact_field=None):
+    def analyze_logical_requirement(self, index, perform_checks):
         assert index in self.reqs
         req = self.reqs[index]
         # Special out for no access
@@ -5157,22 +5188,39 @@ class Operation(object):
         assert self.context
         self.context.check_restricted_coherence(self, req)
         # Now do the traversal for each of the fields
-        if exact_field is None:
-            # This is the common case
-            for field in req.fields:
-                # Keep track of the previous dependences so we can 
-                # use them for adding/checking dependences on close operations
-                previous_deps = list()
-                if not req.parent.perform_logical_analysis(0, path, self, req, field, 
-                                    False, True, None, previous_deps, perform_checks):
-                    return False
-        else:
-            # This happens for replay fields
+        for field in req.fields:
+            # See if we have any aliased fields in future region requirements
+            aliased_children = set()
+            for idx in range(index+1,len(self.reqs)):
+                other_req = self.reqs[idx]
+                if other_req.priv is NO_ACCESS:
+                    continue
+                # See if the trees are the same
+                if req.parent.tree_id != other_req.parent.tree_id:
+                    continue
+                # See if they have the same field
+                if field not in other_req.fields:
+                    continue
+                # Now see if they have a common aliased ancestor
+                aliased,ancestor = self.state.has_aliased_ancestor_tree_only(
+                    req.logical_node.get_index_node(), 
+                    other_req.logical_node.get_index_node())
+                if aliased:
+                    assert ancestor
+                    dep_type = compute_dependence_type(req, other_req)
+                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                        print(("Region requirements %d and %d of operation %s "+
+                               "are interfering in %s") % 
+                               (index,idx,str(self),str(self.context)))
+                        if self.state.assert_on_error:
+                            assert False
+                        return False
+                    aliased_children.add(ancestor.depth) 
             # Keep track of the previous dependences so we can 
             # use them for adding/checking dependences on close operations
             previous_deps = list()
-            if not req.parent.perform_logical_analysis(0, path, self, req, exact_field, 
-                                     False, True, None, previous_deps, perform_checks):
+            if not req.parent.perform_logical_analysis(0, path, self, req, field,
+                  False, True, None, previous_deps, aliased_children, perform_checks):
                 return False
         # Restore the privileges if necessary
         if copy_reduce:
@@ -5233,10 +5281,11 @@ class Operation(object):
                     return False
             return True
         assert not self.need_logical_replay
-        for idx in self.reqs.iterkeys():
+        for idx in range(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
         # If we had any replay regions, analyze them now
+        assert not self.need_logical_replay
         if self.need_logical_replay:
             replays = self.need_logical_replay
             self.need_logical_replay = None
@@ -9827,6 +9876,30 @@ class State(object):
         p1.merge(p2)
         del self.tasks[p2.op]
         return p1
+
+    def has_aliased_ancestor_tree_only(self, one, two):
+        if one is two:
+            return (True,one)
+        # Make them the same depth
+        while one.depth < two.depth:
+            two = two.parent
+        while two.depth < one.depth:
+            one = one.parent
+        # Test again
+        if one is two:
+            return (True,one)
+        parent_one = one.parent
+        parent_two = two.parent
+        while parent_one is not parent_two:
+            one = parent_one
+            parent_one = one.parent
+            two = parent_two
+            parent_two = two.parent
+        assert parent_one is parent_two
+        assert one is not two
+        if parent_one.are_children_disjoint(one, two):
+            return (False,None)
+        return (True,parent_one)
 
     def perform_logical_analysis(self, perform_checks, sanity_checks):
         # Run the full analysis first, this will confirm that
