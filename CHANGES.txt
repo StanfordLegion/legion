@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 16.08.0 (August ??, 2016)
+Version 16.08.0 (August 30, 2016)
   * Realm
     - Critical-enough ("error" and "fatal" by default, controlled with
         -errlevel) logging messages are mirrored to stderr when -logfile is
@@ -15,7 +15,8 @@ Version 16.08.0 (August ??, 2016)
   * Regent
     - Installer now prompts for RDIR installation
   * Tools
-    - Important Legion Spy performance improvements involving transitive reductions
+    - Important Legion Spy performance improvements involving transitive
+        reductions
 
 Version 16.06.0 (June 15, 2016)
   * Legion
