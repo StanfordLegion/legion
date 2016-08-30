@@ -379,6 +379,7 @@ namespace Legion {
         HLRTaskID hlr_id;
         SingleTask *proxy_this;
         Operation *op;
+        RtEvent op_pre;
       };
       struct DeferredPostMappedArgs {
         HLRTaskID hlr_id;
@@ -432,7 +433,8 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+                                           RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -878,12 +880,13 @@ namespace Legion {
               MapperID id, MappingTagID tag,
               bool check_privileges,
               bool track = true); 
-      void initialize_paths(void);
       void set_top_level(void);
     public:
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_internal_requirement(unsigned idx);
@@ -1219,7 +1222,8 @@ namespace Legion {
     public:
       virtual unsigned register_new_child_operation(Operation *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
-      virtual void add_to_dependence_queue(Operation *op, bool has_lock);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+                                           RtEvent op_precondition);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
@@ -1285,12 +1289,12 @@ namespace Legion {
             bool check_privileges);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
-      void initialize_paths(void);
-      void annotate_early_mapped_regions(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_internal_requirement(unsigned idx);

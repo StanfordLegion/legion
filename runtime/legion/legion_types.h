@@ -237,6 +237,7 @@ namespace Legion {
       HLR_DEFERRED_COMMIT_ID,
       HLR_RECLAIM_LOCAL_FIELD_ID,
       HLR_DEFERRED_COLLECT_ID,
+      HLR_PRE_PIPELINE_ID,
       HLR_TRIGGER_DEPENDENCE_ID,
       HLR_TRIGGER_COMPLETE_ID,
       HLR_TRIGGER_OP_ID,
@@ -314,6 +315,7 @@ namespace Legion {
         "Deferred Commit",                                        \
         "Reclaim Local Field",                                    \
         "Garbage Collection",                                     \
+        "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
         "Trigger Complete",                                       \
         "Operation Physical Dependence Analysis",                 \

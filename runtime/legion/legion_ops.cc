@@ -278,13 +278,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::execute_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Always wrap this call with calls to begin/end dependence analysis
+      begin_dependence_analysis();
+      trigger_dependence_analysis();
+      end_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Operation::issue_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      if (has_prepipeline_stage())
+      {
+        PrepipelineArgs args;
+        args.hlr_id = HLR_PRE_PIPELINE_ID;
+        args.proxy_this = this;
+        // Give this deferred throughput priority so that it is always
+        // ahead of the logical analysis
+        return runtime->issue_runtime_meta_task(&args, sizeof(args),
+            HLR_PRE_PIPELINE_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, this);
+      }
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::has_prepipeline_stage(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited types
+      assert(false); 
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
-      end_dependence_analysis();
-      // Since there are no registered dependences here
-      // then trigger mapping will occur immediately
+      // Nothing to do in the base case
     }
 
     //--------------------------------------------------------------------------
@@ -1743,23 +1783,9 @@ namespace Legion {
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
       return region;
     }
 
@@ -1791,23 +1817,9 @@ namespace Legion {
                               map_id, tag, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
       return region;
     }
 
@@ -1829,23 +1841,9 @@ namespace Legion {
       remap_region = region.impl->has_references();
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(), 
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1910,12 +1908,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::trigger_dependence_analysis(void)
+    void MapOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       // First compute our parent region requirement
-      compute_parent_index();  
-      begin_dependence_analysis();
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -1923,7 +1941,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -2881,54 +2898,9 @@ namespace Legion {
           }
         }
       }
-      // Initialize the privilege and mapping paths for all of the
-      // region requirements that we have
-      src_privilege_paths.resize(src_requirements.size());
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        initialize_privilege_path(src_privilege_paths[idx],
-                                  src_requirements[idx]);
-      }
-      dst_privilege_paths.resize(dst_requirements.size());
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        initialize_privilege_path(dst_privilege_paths[idx],
-                                  dst_requirements[idx]);
-      }
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = src_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.instance_fields);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = dst_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, 
-                                             src_requirements.size()+idx, 
-                                             true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, 
-                                            src_requirements.size()+idx, 
-                                            req.instance_fields);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2999,12 +2971,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::trigger_dependence_analysis(void)
+    void CopyOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       // First compute the parent indexes
-      compute_parent_indexes(); 
-      begin_dependence_analysis();
+      compute_parent_indexes();
+      // Initialize the privilege and mapping paths for all of the
+      // region requirements that we have
+      src_privilege_paths.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        initialize_privilege_path(src_privilege_paths[idx],
+                                  src_requirements[idx]);
+      }
+      dst_privilege_paths.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        initialize_privilege_path(dst_privilege_paths[idx],
+                                  dst_requirements[idx]);
+      }
+      if (Runtime::legion_spy_enabled)
+      { 
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = src_requirements[idx];
+          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                             req.region.index_space.id,
+                                             req.region.field_space.id,
+                                             req.region.tree_id,
+                                             req.privilege,
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                            req.instance_fields);
+        }
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = dst_requirements[idx];
+          LegionSpy::log_logical_requirement(unique_op_id, 
+                                             src_requirements.size()+idx, 
+                                             true/*region*/,
+                                             req.region.index_space.id,
+                                             req.region.field_space.id,
+                                             req.region.tree_id,
+                                             req.privilege,
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, 
+                                            src_requirements.size()+idx, 
+                                            req.instance_fields);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
       // Register a dependence on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
@@ -3035,7 +3058,6 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -4012,14 +4034,12 @@ namespace Legion {
     void FenceOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       // Register this fence with all previous users in the parent's context
       parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence
       // before we can complete the dependence analysis
       // and possibly be deactivated
       parent_ctx->update_current_fence(this);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -4471,7 +4491,6 @@ namespace Legion {
                                             req.privilege_fields);
         }
       }
-      begin_dependence_analysis();
       for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {
         RegionRequirement &req = deletion_requirements[idx];
@@ -4485,7 +4504,6 @@ namespace Legion {
                                                    privilege_path);
         version_info.clear();
       }
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -5817,7 +5835,6 @@ namespace Legion {
       // close operations is done inline in the region tree traversal
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
-      begin_dependence_analysis();
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -5825,7 +5842,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -6088,7 +6104,6 @@ namespace Legion {
     void VirtualCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -6096,7 +6111,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -6252,24 +6266,10 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
-        check_acquire_privilege();
-      initialize_privilege_path(privilege_path, requirement);
+        check_acquire_privilege(); 
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6332,12 +6332,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::trigger_dependence_analysis(void)
+    void AcquireOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    { 
+    {
       // First compute the parent index
       compute_parent_index();
-      begin_dependence_analysis();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {  
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
@@ -6350,7 +6370,6 @@ namespace Legion {
                                                    privilege_path);
       // Tell the parent that we've done an acquisition
       parent_ctx->add_acquisition(this, requirement);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -6779,24 +6798,10 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
-        check_release_privilege();
-      initialize_privilege_path(privilege_path, requirement);
+        check_release_privilege(); 
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6859,12 +6864,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::trigger_dependence_analysis(void)
+    void ReleaseOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    { 
+    {
       // First compute the parent index
       compute_parent_index();
-      begin_dependence_analysis();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {  
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
@@ -6878,7 +6903,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -7510,11 +7534,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future.impl != NULL);
 #endif
-      begin_dependence_analysis();
       // Register this operation as dependent on task that
       // generated the future
       future.impl->register_dependence(this);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -7638,10 +7660,8 @@ namespace Legion {
     void NotPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       if (pred_op != NULL)
         register_dependence(pred_op, pred_op->get_generation());
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -7798,12 +7818,10 @@ namespace Legion {
     void AndPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       if (left != NULL)
         register_dependence(left, left->get_generation());
       if (left != NULL)
         register_dependence(right, right->get_generation());
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -8019,12 +8037,10 @@ namespace Legion {
     void OrPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       if (left != NULL)
         register_dependence(left, left->get_generation());
       if (right != NULL)
         register_dependence(right, right->get_generation());
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -8339,19 +8355,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MustEpochOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        if (indiv_tasks[idx]->has_prepipeline_stage())
+          indiv_tasks[idx]->trigger_prepipeline_stage();
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        if (index_tasks[idx]->has_prepipeline_stage())
+          index_tasks[idx]->trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
     void MustEpochOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       // For every one of our sub-operations, add an additional mapping 
       // dependence.  When our sub-operations map, they will trigger these
       // mapping dependences which guarantees that we will not be able to
       // map until all of the sub-operations are ready to map.
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-        indiv_tasks[idx]->trigger_dependence_analysis();
+        indiv_tasks[idx]->execute_dependence_analysis();
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-        index_tasks[idx]->trigger_dependence_analysis();
-      end_dependence_analysis();
+        index_tasks[idx]->execute_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -9522,7 +9548,11 @@ namespace Legion {
       partition_handle = pid;
       color_space = space;
       if (Runtime::legion_spy_enabled)
-        perform_logging();
+        LegionSpy::log_dependent_partition_operation(
+            parent_ctx->get_unique_id(),
+            unique_op_id,
+            partition_handle.id,
+            partition_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -9542,7 +9572,11 @@ namespace Legion {
       partition_handle = pid;
       color_space = space;
       if (Runtime::legion_spy_enabled)
-        perform_logging();
+        LegionSpy::log_dependent_partition_operation(
+            parent_ctx->get_unique_id(),
+            unique_op_id,
+            partition_handle.id,
+            partition_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -9562,40 +9596,11 @@ namespace Legion {
       color_space = space;
       projection = proj;
       if (Runtime::legion_spy_enabled)
-        perform_logging();
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::perform_logging()
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_dependent_partition_operation(
-          parent_ctx->get_unique_id(),
-          unique_op_id,
-          partition_handle.id,
-          partition_kind);
-      if (requirement.handle_type == PART_PROJECTION)
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                  false/*region*/,
-                                  requirement.partition.index_partition.id,
-                                  requirement.partition.field_space.id,
-                                  requirement.partition.tree_id,
-                                  requirement.privilege,
-                                  requirement.prop,
-                                  requirement.redop,
-                                  requirement.parent.index_space.id);
-      else
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                  true/*region*/,
-                                  requirement.region.index_space.id,
-                                  requirement.region.field_space.id,
-                                  requirement.region.tree_id,
-                                  requirement.privilege,
-                                  requirement.prop,
-                                  requirement.redop,
-                                  requirement.parent.index_space.id);
-      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                        requirement.privilege_fields);
+        LegionSpy::log_dependent_partition_operation(
+            parent_ctx->get_unique_id(),
+            unique_op_id,
+            partition_handle.id,
+            partition_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -9606,12 +9611,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::trigger_dependence_analysis(void)
+    void DependentPartitionOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
-      begin_dependence_analysis();
+      if (Runtime::legion_spy_enabled)
+      { 
+        if (requirement.handle_type == PART_PROJECTION)
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    false/*region*/,
+                                    requirement.partition.index_partition.id,
+                                    requirement.partition.field_space.id,
+                                    requirement.partition.tree_id,
+                                    requirement.privilege,
+                                    requirement.prop,
+                                    requirement.redop,
+                                    requirement.parent.index_space.id);
+        else
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                    true/*region*/,
+                                    requirement.region.index_space.id,
+                                    requirement.region.field_space.id,
+                                    requirement.region.tree_id,
+                                    requirement.privilege,
+                                    requirement.prop,
+                                    requirement.redop,
+                                    requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -9619,7 +9654,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -9908,8 +9942,9 @@ namespace Legion {
       memcpy(value, ptr, value_size);
       if (check_privileges)
         check_fill_privilege();
-      initialize_privilege_path(privilege_path, requirement);
-      perform_logging();
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9926,8 +9961,9 @@ namespace Legion {
       future = f;
       if (check_privileges)
         check_fill_privilege();
-      initialize_privilege_path(privilege_path, requirement);
-      perform_logging();
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9947,8 +9983,9 @@ namespace Legion {
       memcpy(value, ptr, size);
       if (check_privileges)
         check_fill_privilege();
-      initialize_privilege_path(privilege_path, requirement);
-      perform_logging();
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9966,9 +10003,9 @@ namespace Legion {
       future = f;
       if (check_privileges)
         check_fill_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-        perform_logging();
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9994,30 +10031,9 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
       if (check_privileges)
         check_fill_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-        perform_logging();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::perform_logging(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!Runtime::legion_spy_enabled)
-	return;
-      LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                    unique_op_id);
-      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
-                                         true/*region*/,
-                                         requirement.region.index_space.id,
-                                         requirement.region.field_space.id,
-                                         requirement.region.tree_id,
-                                         requirement.privilege,
-                                         requirement.prop,
-                                         requirement.redop,
-                                         requirement.parent.index_space.id);
-      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                        requirement.privilege_fields);
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10072,12 +10088,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::trigger_dependence_analysis(void) 
+    void FillOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       // First compute the parent index
       compute_parent_index();
-      begin_dependence_analysis();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_dependence_analysis(void) 
+    //--------------------------------------------------------------------------
+    {
       // Register a dependence on our predicate
       register_predicate_dependence();
       // If we are waiting on a future register a dependence
@@ -10090,7 +10126,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -10554,23 +10589,9 @@ namespace Legion {
                               0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
       return region;
     }
 
@@ -10608,23 +10629,9 @@ namespace Legion {
                               0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
       if (check_privileges)
         check_privilege();
-      initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
       return region;
     }
 
@@ -10681,14 +10688,34 @@ namespace Legion {
     {
       return 1;
     }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent index
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
     
     //--------------------------------------------------------------------------
     void AttachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // First compute the parent index
-      compute_parent_index();
-      begin_dependence_analysis();
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -10715,7 +10742,6 @@ namespace Legion {
       // Tell the parent that we added the restriction
       file_instance = runtime->forest->create_file_instance(this, requirement);
       parent_ctx->add_restriction(this, file_instance, requirement);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -11025,26 +11051,12 @@ namespace Legion {
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
       requirement = region.impl->get_requirement();
-      initialize_privilege_path(privilege_path, requirement);
       // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
-      this->region = region;
+      this->region = region; 
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -11088,12 +11100,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::trigger_dependence_analysis(void)
+    void DetachOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       // First compute the parent index
       compute_parent_index();
-      begin_dependence_analysis();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
       // Before we do our dependence analysis, we can remove the 
       // restricted coherence on the logical region
       ProjectionInfo projection_info;
@@ -11105,7 +11137,6 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -11322,10 +11353,8 @@ namespace Legion {
     void TimingOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      begin_dependence_analysis();
       if (precondition.impl != NULL)
         precondition.impl->register_dependence(this);
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------

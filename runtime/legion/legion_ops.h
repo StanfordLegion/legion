@@ -104,6 +104,11 @@ namespace Legion {
         "Task",                     \
       }
     public:
+      struct PrepipelineArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+      };
       struct DeferredReadyArgs {
       public:
         HLRTaskID hlr_id;
@@ -240,11 +245,19 @@ namespace Legion {
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      // The following three calls may be implemented
+      void execute_dependence_analysis(void);
+      RtEvent issue_prepipeline_stage(void);
+    public:
+      // The following calls may be implemented
       // differently depending on the operation, but we
       // provide base versions of them so that operations
       // only have to overload the stages that they care
       // about modifying.
+      // See if we have a preprocessing stage
+      virtual bool has_prepipeline_stage(void) const;
+      // The function call for made for all operations 
+      // prior to entering the pipeline 
+      virtual void trigger_prepipeline_stage(void);
       // The function to call for depence analysis
       virtual void trigger_dependence_analysis(void);
       // The function to call when the operation has all its
@@ -628,6 +641,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -699,6 +714,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
@@ -1253,6 +1270,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void resolve_true(void);
@@ -1315,6 +1334,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void resolve_true(void);
@@ -1559,6 +1580,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
@@ -1964,10 +1987,11 @@ namespace Legion {
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                const Domain &color_space);
-      void perform_logging();
       const RegionRequirement& get_requirement(void) const;
       inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -2030,7 +2054,6 @@ namespace Legion {
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, const FillLauncher &launcher,
                       bool check_privileges);
-      void perform_logging(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -2040,6 +2063,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
@@ -2106,6 +2131,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -2155,6 +2182,8 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);

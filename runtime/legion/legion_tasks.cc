@@ -3264,7 +3264,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_to_dependence_queue(Operation *op, bool has_lock)
+    void SingleTask::add_to_dependence_queue(Operation *op, bool has_lock,
+                                             RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
       if (!has_lock)
@@ -3277,6 +3278,7 @@ namespace Legion {
           args.hlr_id = HLR_ADD_TO_DEP_QUEUE_TASK_ID;
           args.proxy_this = this;
           args.op = op;
+          args.op_pre = op_precondition;
           last_registration = 
             runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                              HLR_ADD_TO_DEP_QUEUE_TASK_ID,
@@ -3303,13 +3305,28 @@ namespace Legion {
       // since it is on the critical path, but if not we give it the 
       // normal priority so that we can balance doing logical analysis
       // and actually mapping and running tasks
-      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                      HLR_TRIGGER_DEPENDENCE_ID, 
-                                      currently_active_context ? 
-                                        HLR_THROUGHPUT_PRIORITY :
-                                        HLR_DEFERRED_THROUGHPUT_PRIORITY, 
-                                      op, dependence_precondition);
-      dependence_precondition = next;
+      if (op_precondition.exists())
+      {
+        RtEvent pre = Runtime::merge_events(op_precondition, 
+                                            dependence_precondition);
+        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                        HLR_TRIGGER_DEPENDENCE_ID, 
+                                        currently_active_context ? 
+                                          HLR_THROUGHPUT_PRIORITY :
+                                          HLR_DEFERRED_THROUGHPUT_PRIORITY,
+                                        op, pre);
+        dependence_precondition = next;
+      }
+      else
+      {
+        RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                        HLR_TRIGGER_DEPENDENCE_ID, 
+                                        currently_active_context ? 
+                                          HLR_THROUGHPUT_PRIORITY :
+                                          HLR_DEFERRED_THROUGHPUT_PRIORITY,
+                                        op, dependence_precondition);
+        dependence_precondition = next;
+      }
       // Now we can release the lock
       op_lock.release();
     }
@@ -8166,23 +8183,15 @@ namespace Legion {
       }
       if (check_privileges)
         perform_privilege_checks();
-      initialize_paths(); 
       // Get a future from the parent context to use as the result
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
-      check_empty_field_requirements();
-      update_no_access_regions();
+      check_empty_field_requirements(); 
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
                                        task_id, get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          log_requirement(unique_op_id, idx, regions[idx]);
-        }
-      }
       return result;
     }
 
@@ -8214,35 +8223,16 @@ namespace Legion {
       remote_owner_uid = ctx->get_unique_id();
       if (check_privileges)
         perform_privilege_checks();
-      initialize_paths();
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-      update_no_access_regions();
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
                                        task_id, get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          log_requirement(unique_op_id, idx, regions[idx]);
-        }
-      }
       return result;
     }  
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::initialize_paths(void)
-    //--------------------------------------------------------------------------
-    {
-      privilege_paths.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        initialize_privilege_path(privilege_paths[idx], regions[idx]);
-      }
-    }
 
     //--------------------------------------------------------------------------
     void IndividualTask::set_top_level(void)
@@ -8255,18 +8245,34 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void IndividualTask::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent indexes
+      compute_parent_indexes();
+      privilege_paths.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        initialize_privilege_path(privilege_paths[idx], regions[idx]);
+      update_no_access_regions();
+      // If we are tracing we need to record any aliased region requirements
+      if (is_tracing())
+        record_aliased_region_requirements(get_trace());
+      if (Runtime::legion_spy_enabled)
+      { 
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          log_requirement(unique_op_id, idx, regions[idx]);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif
-      // First compute the parent indexes
-      compute_parent_indexes();
-      begin_dependence_analysis();
-      // If we are tracing we need to record any aliased region requirements
-      if (is_tracing())
-        record_aliased_region_requirements(get_trace());
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -8331,7 +8337,6 @@ namespace Legion {
           }
         }
       }
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -10510,10 +10515,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::add_to_dependence_queue(Operation *op, bool has_lock)
+    void InlineTask::add_to_dependence_queue(Operation *op, bool has_lock,
+                                             RtEvent op_precondition)
     //--------------------------------------------------------------------------
     {
-      enclosing->add_to_dependence_queue(op, has_lock);
+      enclosing->add_to_dependence_queue(op, has_lock, op_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -10685,51 +10691,17 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      if (check_privileges)
-        perform_privilege_checks();
-      initialize_paths();
-      annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
-      check_empty_field_requirements();
+      check_empty_field_requirements(); 
+      if (check_privileges)
+        perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        }
-        switch (index_domain.get_dim())
-        {
-          case 1:
-            {
-              Rect<1> rect = index_domain.get_rect<1>();
-              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rect = index_domain.get_rect<2>();
-              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rect = index_domain.get_rect<3>();
-              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
       return future_map;
     }
 
@@ -10784,50 +10756,16 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      if (check_privileges)
-        perform_privilege_checks();
-      initialize_paths();
-      annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime,
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
+      if (check_privileges)
+        perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        }
-        switch (index_domain.get_dim())
-        {
-          case 1:
-            {
-              Rect<1> rect = index_domain.get_rect<1>();
-              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rect = index_domain.get_rect<2>();
-              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rect = index_domain.get_rect<3>();
-              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
       return reduction_future;
     }
 
@@ -10866,51 +10804,17 @@ namespace Legion {
       is_index_space = true;
       index_domain = domain;
       initialize_base_task(ctx, true/*track*/, pred, task_id);
-      if (check_privileges)
-        perform_privilege_checks();
-      initialize_paths();
-      annotate_early_mapped_regions();
       future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
+      if (check_privileges)
+        perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        }
-        switch (index_domain.get_dim())
-        {
-          case 1:
-            {
-              Rect<1> rect = index_domain.get_rect<1>();
-              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rect = index_domain.get_rect<2>();
-              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rect = index_domain.get_rect<3>();
-              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
       return future_map;
     }
     
@@ -10966,50 +10870,16 @@ namespace Legion {
       else
         initialize_reduction_state();
       initialize_base_task(ctx, true/*track*/, pred, task_id);
-      if (check_privileges)
-        perform_privilege_checks();
-      initialize_paths();
-      annotate_early_mapped_regions();
       reduction_future = Future(legion_new<FutureImpl>(runtime, 
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
+      if (check_privileges)
+        perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
-      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        }
-        switch (index_domain.get_dim())
-        {
-          case 1:
-            {
-              Rect<1> rect = index_domain.get_rect<1>();
-              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rect = index_domain.get_rect<2>();
-              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rect = index_domain.get_rect<3>();
-              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
       return reduction_future;
     }
 
@@ -11077,20 +10947,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_paths(void)
+    void IndexTask::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
-      privilege_paths.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        initialize_privilege_path(privilege_paths[idx], regions[idx]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::annotate_early_mapped_regions(void)
-    //--------------------------------------------------------------------------
-    {
+      // First compute the parent indexes
+      compute_parent_indexes();
+      // Annotate any regions which are going to need to be early mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -11105,6 +10967,48 @@ namespace Legion {
             regions[idx].flags |= MUST_PREMAP_FLAG;
         }
       }
+      // Initialize the privilege paths
+      privilege_paths.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        initialize_privilege_path(privilege_paths[idx], regions[idx]);
+      }
+      // If we are tracing we need to record any aliased region requirements
+      if (is_tracing())
+        record_aliased_region_requirements(get_trace());
+      if (Runtime::legion_spy_enabled)
+      { 
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
+        switch (index_domain.get_dim())
+        {
+          case 1:
+            {
+              Rect<1> rect = index_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rect = index_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rect = index_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11113,13 +11017,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
-#endif
-      // First compute the parent indexes
-      compute_parent_indexes();
-      begin_dependence_analysis();
-      // If we are tracing we need to record any aliased region requirements
-      if (is_tracing())
-        record_aliased_region_requirements(get_trace());
+#endif 
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -11187,7 +11085,6 @@ namespace Legion {
           }
         }
       }
-      end_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------

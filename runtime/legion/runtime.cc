@@ -16481,15 +16481,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(p.kind() != Processor::UTIL_PROC);
 #endif
+      // Launch the task to perform the prepipeline stage for the operation
+      RtEvent precondition = op->issue_prepipeline_stage();
       SingleTask *parent = op->get_parent();
       if (program_order_execution)
       {
         ApEvent term_event = op->get_completion_event();
-        parent->add_to_dependence_queue(op, false/*has_lock*/);
+        parent->add_to_dependence_queue(op, false/*has_lock*/, precondition);
         term_event.wait();
       }
       else
-        parent->add_to_dependence_queue(op, false/*has lock*/);
+        parent->add_to_dependence_queue(op, false/*has lock*/, precondition);
     }
     
     //--------------------------------------------------------------------------
@@ -20609,11 +20611,18 @@ namespace Legion {
               delete collect_args->epoch;
             break;
           }
+        case HLR_PRE_PIPELINE_ID:
+          {
+            const Operation::PrepipelineArgs *pargs = 
+              (const Operation::PrepipelineArgs*)args;
+            pargs->proxy_this->trigger_prepipeline_stage();
+            break;
+          }
         case HLR_TRIGGER_DEPENDENCE_ID:
           {
             const SingleTask::DeferredDependenceArgs *deferred_trigger_args =
               (const SingleTask::DeferredDependenceArgs*)args;
-            deferred_trigger_args->op->trigger_dependence_analysis();
+            deferred_trigger_args->op->execute_dependence_analysis();
             break;
           }
         case HLR_TRIGGER_COMPLETE_ID:
@@ -20809,7 +20818,7 @@ namespace Legion {
             SingleTask::AddToDepQueueArgs *dargs = 
               (SingleTask::AddToDepQueueArgs*)args;
             dargs->proxy_this->add_to_dependence_queue(dargs->op,
-                                                       true/*has lock*/);
+                                 true/*has lock*/, dargs->op_pre);
             break;
           }
         case HLR_WINDOW_WAIT_TASK_ID:

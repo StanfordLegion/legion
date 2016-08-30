@@ -549,6 +549,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+      // Now mark our trace as NULL to avoid registering this operation
+      trace = NULL;
+      tracing = false;
     }
 
     //--------------------------------------------------------------------------
@@ -585,16 +592,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(trace != NULL);
+      assert(trace == NULL);
+      assert(local_trace != NULL);
 #endif
-      LegionTrace *local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
-      tracing = false;
-      begin_dependence_analysis();
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();
-      end_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -637,6 +639,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+      // Now mark our trace as NULL to avoid registering this operation
+      trace = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -673,12 +681,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(trace != NULL);
+      assert(trace == NULL);
+      assert(local_trace != NULL);
 #endif
-      LegionTrace *local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
-      begin_dependence_analysis();
       // Indicate that this trace is done being captured
       // This also registers that we have dependences on all operations
       // in the trace.
@@ -686,7 +691,6 @@ namespace Legion {
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
-      end_dependence_analysis();
     }
     
   }; // namespace Internal 
