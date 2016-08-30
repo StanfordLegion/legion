@@ -273,6 +273,11 @@ namespace Legion {
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+      virtual bool default_policy_select_must_epoch_processors(
+                                    MapperContext ctx,
+				    const std::vector<std::set<const Task *> > &tasks,
+				    Processor::Kind proc_kind,
+				    std::map<const Task *, Processor> &target_procs);
       virtual void default_policy_rank_processor_kinds(
                                     MapperContext ctx, const Task &task, 
                                     std::vector<Processor::Kind> &ranking);
@@ -295,6 +300,14 @@ namespace Legion {
                                     LayoutConstraintSet &constraints,
                                     Memory target_memory,
                                     const RegionRequirement &req);
+      virtual Memory default_policy_select_constrained_instance_constraints(
+				    MapperContext ctx,
+				    const std::vector</*const*/ Task *> &tasks,
+				    const std::vector<unsigned> &req_indexes,
+				    const std::vector<Processor> &target_procs,
+				    const std::set<LogicalRegion> &needed_regions,
+				    const std::set<FieldID> &needed_fields,
+                                    LayoutConstraintSet &constraints);
       virtual void default_policy_select_constraint_fields(
                                     MapperContext ctx,
                                     const RegionRequirement &req,
@@ -370,7 +383,8 @@ namespace Legion {
                               std::vector<PhysicalInstance> &instances);
       LogicalRegion default_find_common_ancestor(MapperContext ctx,
                                       const std::set<LogicalRegion> &regions);
-      bool have_procset_variant(const MapperContext ctx, TaskID id);
+      bool have_proc_kind_variant(const MapperContext ctx, TaskID id,
+				  Processor::Kind kind);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
