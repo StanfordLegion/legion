@@ -689,7 +689,7 @@ namespace Legion {
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask, 
                                   const FieldMask &dirty_below,
-                                  bool leave_open, bool projection);
+                                  bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask,
                                    const FieldMask &dirty_below);
@@ -728,7 +728,6 @@ namespace Legion {
                                                       read_only_closed_users;
     protected:
       FieldMask normal_close_mask;
-      FieldMask leave_open_mask;
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;

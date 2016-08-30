@@ -11096,8 +11096,7 @@ namespace Legion {
                 else
                 {
                   closer.record_close_operation(overlap, state.dirty_below,
-                            IS_READ_ONLY(closer.user.usage)/*leave open*/,
-                            true/*projection*/);
+                                                true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                 }
@@ -11129,7 +11128,6 @@ namespace Legion {
                   else
                   {
                     closer.record_close_operation(overlap, state.dirty_below,
-                                                  false/*leave open*/,
                                                   true/*projection*/);
                     state.capture_close_epochs(overlap,
                                                closer.find_closed_node(this));
@@ -11291,8 +11289,7 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                          IS_READ_ONLY(closer.user.usage),
-                                          true/*projection*/);
+                                                true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                   // Advance the projection epochs
@@ -11337,8 +11334,7 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                          IS_READ_ONLY(closer.user.usage),
-                                          true/*projection*/);
+                                                true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                   // Advance the projection epochs
@@ -11366,7 +11362,6 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_close_operation(overlap, state.dirty_below,
-                                                false/*leave open*/,
                                                 true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
@@ -11442,7 +11437,6 @@ namespace Legion {
           if (it->is_projection_state())
           {
             closer.record_close_operation(overlap, state.dirty_below,
-                                          false/*leave open*/, 
                                           true/*projection*/);
             ClosedNode *closed_node = closer.find_closed_node(this); 
             if (!!state.dirty_fields)
@@ -11512,88 +11506,52 @@ namespace Legion {
       // First, if we have a next child and we know all pairs of children
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
-      FieldMask actually_closed;
-      if (next_child.is_valid() && are_all_children_disjoint())
+      const bool all_children_disjoint = are_all_children_disjoint();
+      if (next_child.is_valid() && all_children_disjoint)
       {
-        // Check to see if we have anything to close
+        // If we have a next child and all the children are disjoint
+        // then there are never any close operations, all we have to
+        // do is determine if we need to upgrade the child or not
+#ifdef DEBUG_LEGION
+        assert(allow_next_child);
+        assert(aliased_children == NULL);
+#endif
+        // Check to see if we have any open fields already 
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
                               state.open_children.find(next_child);
         if (finder != state.open_children.end())
         {
-          FieldMask close_mask = finder->second & closing_mask;
-          if (!!close_mask)
+          FieldMask overlap = finder->second & closing_mask;
+          if (!!overlap)
           {
-            if (allow_next_child)
+            output_mask |= overlap; // already open
+            // See if we need to upgrade them
+            if (upgrade_next_child)
             {
-#ifdef DEBUG_LEGION
-              assert(aliased_children == NULL); // shouldn't be any here
-#endif
-              output_mask |= close_mask;
-              if (upgrade_next_child)
-              {
-                finder->second -= close_mask;
-                removed_fields = true;
-                if (!finder->second)
-                  state.open_children.erase(finder);
-              }
-            }
-            else
-            {
-              // Otherwise we actually need to do the close
-              RegionTreeNode *child_node = get_tree_child(finder->first);
-              child_node->close_logical_node(closer, close_mask, 
-                                             permit_leave_open, 
-                                             read_only_close);
-              if (record_close_operations)
-              {
-                if (read_only_close)
-                  closer.record_read_only_close(close_mask,
-                                                false/*projection*/);
-                else
-                  closer.record_close_operation(close_mask, dirty_below,
-                                permit_leave_open, false/*projection*/);
-                actually_closed = close_mask;
-              }
-              // Remove the closed fields
-              finder->second -= close_mask;
+              finder->second -= overlap;
               removed_fields = true;
-              if (permit_leave_open)
-              {
-                new_states.push_back(FieldState(closer.user,
-                                  close_mask, finder->first));
-              }
               if (!finder->second)
                 state.open_children.erase(finder);
-              // Record the closed fields if necessary
-              if (record_closed_fields)
-                output_mask |= close_mask;
             }
           }
-          // Otherwise disjoint fields, nothing to do
         }
-        // Otherwise it's closed so it doesn't matter
       }
-      else
+      else if (read_only_close)
       {
+        // Read only closes can close specific children without 
+        // any issues, so we can selectively filter what we need to close
         std::vector<ColorPoint> to_delete;
-        // Go through and close all the children which we overlap with
-        // and aren't the next child that we're going to use
         for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
               state.open_children.begin(); it != 
               state.open_children.end(); it++)
         {
           FieldMask close_mask = it->second & closing_mask;
-          // check for field disjointness
           if (!close_mask)
             continue;
-          // Check for same child, only allow upgrades in some cases
-          // such as read-only -> exclusive.  This is calling context
-          // sensitive hence the parameter.
+          // Check for same child, only allow
           if (allow_next_child && next_child.is_valid() && 
-              ((next_child) == it->first))
+              (next_child == it->first))
           {
-            // See if we have any aliased children which 
-            // prevent us from doing the upgrade
             if (aliased_children == NULL)
             {
               // No aliased children, so everything is open
@@ -11632,22 +11590,15 @@ namespace Legion {
           }
           // Check for child disjointness
           if (next_child.is_valid() && (it->first != next_child) &&
-              are_children_disjoint(it->first, next_child))
+              (all_children_disjoint || 
+               are_children_disjoint(it->first, next_child)))
             continue;
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
           child_node->close_logical_node(closer, close_mask, 
-                                         permit_leave_open, read_only_close);
+                                         permit_leave_open, true/*read only*/);
           if (record_close_operations)
-          {
-            if (read_only_close)
-              closer.record_read_only_close(close_mask,
-                                            false/*projection*/);
-            else
-              closer.record_close_operation(close_mask, dirty_below,
-                            permit_leave_open, false/*projection*/);
-            actually_closed |= close_mask;
-          }
+            closer.record_read_only_close(close_mask, false/*projection*/);
           // Remove the close fields
           it->second -= close_mask;
           removed_fields = true;
@@ -11665,34 +11616,149 @@ namespace Legion {
               it != to_delete.end(); it++)
           state.open_children.erase(*it);
       }
-      // If we have any fields we actually closed, we have to close any
-      // fields which we skipped the first time around because we 
-      // don't support partial close operations
-      if (!!actually_closed && !state.open_children.empty())
+      else
       {
-        std::vector<ColorPoint> to_delete;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-              state.open_children.begin(); it != 
-              state.open_children.end(); it++)
+        // See if we need a full close operation, if we do then we
+        // must close up all the children for the field(s) being closed
+        // If there is no next_child, then we have to close all
+        // children, otherwise figure out which fields need closes
+        FieldMask full_close;
+        if (next_child.is_valid())
         {
-          if (it->first == next_child)
-            continue;
-          if (it->second * actually_closed)
-            continue;
-          it->second -= actually_closed;
-          removed_fields = true;
-          if (!it->second)
-            to_delete.push_back(it->first);
+          // Figure what if any children need to be closed
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                state.open_children.begin(); it !=
+                state.open_children.end(); it++)
+          {
+            FieldMask close_mask = it->second & closing_mask;
+            if (!close_mask)
+              continue;
+            if (next_child == it->first)
+            {
+              // Same child
+              if (allow_next_child)
+              {
+                // We're allowed to have the same child open, see if 
+                // there are any aliasing fields that prevent this
+                if (aliased_children != NULL)
+                {
+                  close_mask &= (*aliased_children);
+                  // Any fields with aliased children must be closed
+                  if (!!close_mask)
+                  {
+                    full_close |= close_mask;
+                    if (full_close == closing_mask)
+                      break;
+                  }
+                }
+              }
+              else
+              {
+                // Must close these fields, despite the same child
+                // because allow next is not permitted
+                full_close |= close_mask;
+                if (full_close == closing_mask)
+                  break;
+              }
+            }
+            else
+            {
+              // Different child from next_child, check for child disjointness
+              if (all_children_disjoint || 
+                  are_children_disjoint(it->first, next_child))
+                continue;
+              // Now we definitely have to close it
+              full_close |= close_mask;
+              if (full_close == closing_mask)
+                break;
+            }
+          } 
         }
-        if (!to_delete.empty())
+        else
         {
-          for (std::vector<ColorPoint>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
+          // We need to do a full close, but the closing mask
+          // can be an overapproximation, so find all the fields
+          // for the actual children that are here
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                state.open_children.begin(); it !=
+                state.open_children.end(); it++)
+          {
+            FieldMask close_mask = it->second & closing_mask;
+            if (!close_mask)
+              continue;
+            full_close |= close_mask;
+            if (full_close == closing_mask)
+              break;
+          }
+        }
+        // See if we have any fields which must be closed
+        if (!!full_close)
+        {
+          // We can record this close operation now
+          if (record_close_operations)
+            closer.record_close_operation(full_close, dirty_below,
+                                          false/*projection*/);
+          if (record_closed_fields)
+            output_mask |= full_close;
+          std::vector<ColorPoint> to_delete;
+          // Go through and delete all the children which are to be closed
+          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
+                state.open_children.begin(); it !=
+                state.open_children.end(); it++)
+          {
+            FieldMask child_close = it->second & full_close;
+            if (!child_close)
+              continue;
+            // Perform the close operation
+            RegionTreeNode *child_node = get_tree_child(it->first);
+            child_node->close_logical_node(closer, child_close, 
+                                           permit_leave_open, 
+                                           false/*read only close*/);
+            // Remove the close fields
+            it->second -= child_close;
+            removed_fields = true;
+            if (!it->second)
+              to_delete.push_back(it->first);
+            // If we're allowed to leave this open, add a new
+            // state for the current user
+            if (permit_leave_open)
+              new_states.push_back(FieldState(closer.user, 
+                                              child_close, it->first));
+          }
+          // Remove the children that can be deleted
+          for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
+                it != to_delete.end(); it++)
             state.open_children.erase(*it);
         }
+        // If we allow the next child, we need to see if the next
+        // child is already open or not
+        if (allow_next_child && next_child.is_valid())
+        {
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+                                state.open_children.find(next_child);
+          if (finder != state.open_children.end())
+          {
+            FieldMask overlap = finder->second & closing_mask;
+            if (!!overlap)
+            {
+              output_mask |= overlap; // already open
+              // See if we need to upgrade them
+              if (upgrade_next_child)
+              {
+                finder->second -= overlap;
+                removed_fields = true;
+                if (!finder->second)
+                  state.open_children.erase(finder);
+              }
+            }
+          }
+        }
       }
+      // If we have no children, we can clear our fields
+      if (state.open_children.empty())
+        state.valid_fields.clear();
       // See if it is time to rebuild the valid mask 
-      if (removed_fields)
+      else if (removed_fields)
       {
         if (state.rebuild_timeout == 0)
         {
@@ -12276,7 +12342,6 @@ namespace Legion {
             {
               // Do the close here 
               closer.record_close_operation(overlap, state.dirty_below,
-                                            false/*leave open*/,
                                             true/*projection*/);
               state.capture_close_epochs(overlap,
                                          closer.find_closed_node(this));

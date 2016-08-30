@@ -3331,7 +3331,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LogicalCloser::record_close_operation(const FieldMask &mask, 
                                                const FieldMask &dirty_below,
-                                               bool leave_open, bool projection)
+                                               bool projection)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3341,8 +3341,6 @@ namespace Legion {
       // Record fields that are dirty below for this close
       if (!!dirty_below)
         root_split_mask |= (dirty_below & mask);
-      if (leave_open)
-        leave_open_mask |= mask;
       if (projection)
         closed_projections |= mask;
     }
@@ -3422,7 +3420,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // These two sets of fields better be disjoint
       assert(normal_close_mask * flush_only_close_mask);
-      assert(!(leave_open_mask - normal_close_mask));
 #endif
       // Construct a reigon requirement for this operation
       // All privileges are based on the parent logical region
@@ -3451,7 +3448,7 @@ namespace Legion {
         normal_close_op->initialize(creator->get_parent(), req, finder->second,
                                     trace_info, trace_info.req_idx, 
                                     ver_info, normal_close_mask,
-                                    root_split_mask, leave_open_mask, creator);
+                                    root_split_mask, creator);
         // We can clear this now
         closed_nodes.clear();
       }
@@ -3481,10 +3478,9 @@ namespace Legion {
         // Make a closed tree of just the root node
         // There are no dirty fields here since we just flushing reductions
         ClosedNode *closed_tree = new ClosedNode(root_node);
-        FieldMask empty_leave_open;
         flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,
             trace_info, trace_info.req_idx, ver_info, 
-            flush_only_close_mask, flush_split_mask, empty_leave_open, creator);
+            flush_only_close_mask, flush_split_mask, creator);
       }
     }
 

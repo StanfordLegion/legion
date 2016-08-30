@@ -1080,7 +1080,7 @@ namespace Legion {
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, const FieldMask &split,
-                      const FieldMask &leave_open, Operation *create_op);
+                      Operation *create_op);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1105,7 +1105,6 @@ namespace Legion {
                               InstanceSet &chosen_instances);
       void report_profiling_results(void);
     protected:
-      FieldMask leave_open_mask;
       FieldMask close_mask;
       ClosedNode *closed_tree;
     protected:

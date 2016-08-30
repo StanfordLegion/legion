@@ -5208,7 +5208,7 @@ namespace Legion {
                               ClosedNode *closed_t, const TraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
                               const FieldMask &close_m, const FieldMask &split,
-                              const FieldMask &leave_m, Operation *creator)
+                              Operation *creator)
     //--------------------------------------------------------------------------
     {
       if (Runtime::legion_spy_enabled)
@@ -5217,7 +5217,6 @@ namespace Legion {
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
-      leave_open_mask = leave_m;
       closed_tree = closed_t;
       version_info.clone_logical(clone_info, close_m, closed_t->node);
       // Record the root split information
@@ -5249,7 +5248,6 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       close_mask.clear();
-      leave_open_mask.clear();
       if (closed_tree != NULL)
       {
         delete closed_tree;
