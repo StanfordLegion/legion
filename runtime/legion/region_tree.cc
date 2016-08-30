@@ -4088,6 +4088,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::are_disjoint_tree_only(IndexTreeNode *one,
+                            IndexTreeNode *two, IndexTreeNode *&common_ancestor)
+    //--------------------------------------------------------------------------
+    {
+      if (one == two)
+      {
+        common_ancestor = one;
+        return false;
+      }
+      // Bring them to the same depth
+      while (one->depth < two->depth)
+        two = two->get_parent();
+      while (two->depth < one->depth)
+        one = one->get_parent();
+#ifdef DEBUG_LEGION
+      assert(one->depth == two->depth);
+#endif
+      // Test again
+      if (one == two)
+      {
+        common_ancestor = one;
+        return false;
+      }
+      // Same depth, not the same node
+      IndexTreeNode *parent_one = one->get_parent();
+      IndexTreeNode *parent_two = two->get_parent();
+      while (parent_one != parent_two)
+      {
+        one = parent_one;
+        parent_one = one->get_parent();
+        two = parent_two;
+        parent_two = two->get_parent();
+      }
+#ifdef DEBUG_LEGION
+      assert(parent_one == parent_two);
+      assert(one != two); // can't be the same child
+#endif
+      // Now we have the common ancestor, see if the two children are disjoint
+      if (parent_one->is_index_space_node())
+      {
+        if (parent_one->as_index_space_node()->are_disjoint(one->color, 
+                                                            two->color))
+          return true;
+      }
+      else
+      {
+        if (parent_one->as_index_part_node()->are_disjoint(one->color, 
+                                                           two->color))
+          return true;
+      }
+      common_ancestor = parent_one;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
@@ -10172,11 +10227,16 @@ namespace Legion {
                              arrived/*validates*/, captures_closes);
         // Special siphon operation for arrived projecting functions
         if (arrived && proj_info.is_projecting())
+        {
           siphon_logical_projection(closer, state, unopened_field_mask,
                                     proj_info, captures_closes, open_below);
+        }
         else
-          siphon_logical_children(closer, state, unopened_field_mask,
-                                  captures_closes, next_child, open_below);
+        {
+          const FieldMask *aliased_children = path.get_aliased_children(depth);
+          siphon_logical_children(closer, state, unopened_field_mask, 
+              aliased_children, captures_closes, next_child, open_below);
+        }
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
         // If we're not replaying a trace we need to do work here
@@ -10663,7 +10723,9 @@ namespace Legion {
           FieldMask already_open;
           perform_close_operations(closer, overlap, state.dirty_below, *it,
                                    ColorPoint()/*next child*/,
-                                   false/*allow next*/, false/*upgrade*/,
+                                   false/*allow next*/,
+                                   NULL/*aliased children*/,
+                                   false/*upgrade*/,
                                    permit_leave_open,
                                    read_only_close,
                                    false/*record close operations*/,
@@ -10697,11 +10759,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_children(LogicalCloser &closer,
-                                                 CurrentState &state,
-                                                 const FieldMask &current_mask,
-                                                 bool record_close_operations,
-                                                 const ColorPoint &next_child,
-                                                 FieldMask &open_below)
+                                              CurrentState &state,
+                                              const FieldMask &current_mask,
+                                              const FieldMask *aliased_children,
+                                              bool record_close_operations,
+                                              const ColorPoint &next_child,
+                                              FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -10774,6 +10837,7 @@ namespace Legion {
                 perform_close_operations(closer, current_mask, 
                                          state.dirty_below, *it, next_child,
                                          true/*allow next*/,
+                                         aliased_children,
                                          needs_upgrade,
                                          false/*permit leave open*/,
                                          true/*read only close*/,
@@ -10798,6 +10862,7 @@ namespace Legion {
               perform_close_operations(closer, current_mask, 
                                        state.dirty_below, *it, next_child,
                                        true/*allow next*/,
+                                       aliased_children,
                                        false/*needs upgrade*/,
                                        IS_READ_ONLY(closer.user.usage),
                                        overwriting/*read only close*/,
@@ -10904,6 +10969,7 @@ namespace Legion {
                   perform_close_operations(closer, current_mask, 
                                            state.dirty_below, *it, next_child,
                                            true/*allow next*/,
+                                           aliased_children,
                                            true/*needs upgrade*/,
                                            false/*permit leave open*/,
                                            false/*read only close*/,
@@ -10929,6 +10995,7 @@ namespace Legion {
                 perform_close_operations(closer, current_mask, 
                                          state.dirty_below, *it, next_child,
                                          false/*allow next*/,
+                                         NULL/*aliased children*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
                                          overwriting/*read only close*/,
@@ -10970,6 +11037,7 @@ namespace Legion {
                 perform_close_operations(closer, current_mask, 
                                          state.dirty_below, *it, next_child,
                                          false/*allow next child*/,
+                                         NULL/*aliased children*/,
                                          false/*needs upgrade*/,
                                          false/*permit leave open*/,
                                          overwriting/*read only close*/,
@@ -11140,6 +11208,7 @@ namespace Legion {
               perform_close_operations(closer, current_mask, 
                                        state.dirty_below, *it, 
                                        no_next_child, false/*allow next*/,
+                                       NULL/*aliased children*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
                                        true/*read only close*/,
@@ -11161,6 +11230,7 @@ namespace Legion {
               perform_close_operations(closer, current_mask, 
                                        state.dirty_below, *it, 
                                        no_next_child, false/*allow next*/,
+                                       NULL/*aliased children*/,
                                        false/*needs upgrade*/,
                                        false/*permit leave open*/,
                                        false/*read only close*/,
@@ -11388,6 +11458,7 @@ namespace Legion {
             perform_close_operations(closer, overlap, 
                                      state.dirty_below, *it,
                                      next_child, false/*allow_next*/,
+                                     NULL/*aliased children*/,
                                      false/*needs upgrade*/,
                                      false/*permit leave open*/,
                                      false/*read only close*/,
@@ -11421,6 +11492,7 @@ namespace Legion {
                                             FieldState &state,
                                             const ColorPoint &next_child, 
                                             bool allow_next_child,
+                                            const FieldMask *aliased_children,
                                             bool upgrade_next_child,
                                             bool permit_leave_open,
                                             bool read_only_close,
@@ -11453,6 +11525,9 @@ namespace Legion {
           {
             if (allow_next_child)
             {
+#ifdef DEBUG_LEGION
+              assert(aliased_children == NULL); // shouldn't be any here
+#endif
               output_mask |= close_mask;
               if (upgrade_next_child)
               {
@@ -11517,19 +11592,46 @@ namespace Legion {
           if (allow_next_child && next_child.is_valid() && 
               ((next_child) == it->first))
           {
-            output_mask |= close_mask;
-            if (upgrade_next_child)
+            // See if we have any aliased children which 
+            // prevent us from doing the upgrade
+            if (aliased_children == NULL)
             {
-              it->second -= close_mask;
-              removed_fields = true;
-              if (!it->second)
-                to_delete.push_back(it->first);
-              // The upgraded field state gets added by the caller
+              // No aliased children, so everything is open
+              output_mask |= close_mask;
+              if (upgrade_next_child)
+              {
+                it->second -= close_mask;
+                removed_fields = true;
+                if (!it->second)
+                  to_delete.push_back(it->first);
+                // The upgraded field state gets added by the caller
+              }
+              continue;
             }
-            continue;
+            else
+            {
+              // Fields that have aliased children can't remain open
+              FieldMask already_open_mask = close_mask - *aliased_children;
+              if (!!already_open_mask)
+              {
+                output_mask |= already_open_mask;
+                if (upgrade_next_child)
+                {
+                  it->second -= already_open_mask;
+                  removed_fields = true;
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+                // Remove fields that are already open
+                close_mask -= already_open_mask;
+                // See if we still have fields to close
+                if (!close_mask)
+                  continue;
+              }
+            }
           }
           // Check for child disjointness
-          if (next_child.is_valid() && 
+          if (next_child.is_valid() && (it->first != next_child) &&
               are_children_disjoint(it->first, next_child))
             continue;
           // Perform the close operation
@@ -11554,18 +11656,14 @@ namespace Legion {
           // If we're allowed to leave this open, add a new
           // state for the current user
           if (permit_leave_open)
-          {
             new_states.push_back(FieldState(closer.user,close_mask,it->first));
-          }
           if (record_closed_fields)
             output_mask |= close_mask;
         }
         // Remove the children that can be deleted
         for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
               it != to_delete.end(); it++)
-        {
           state.open_children.erase(*it);
-        }
       }
       // If we have any fields we actually closed, we have to close any
       // fields which we skipped the first time around because we 
@@ -12076,6 +12174,7 @@ namespace Legion {
                 perform_close_operations(closer, current_mask, 
                                          state.dirty_below, *it,
                                          next_child, false/*allow next*/,
+                                         NULL/*aliased children*/,
                                          false/*upgrade next child*/,
                                          false/*permit leave open*/,
                                          false/*read only close*/,
@@ -12102,6 +12201,7 @@ namespace Legion {
                 perform_close_operations(closer, current_mask, 
                                          state.dirty_below, *it,
                                          next_child, false/*allow next*/,
+                                         NULL/*aliased children*/,
                                          false/*upgrade next child*/,
                                          false/*permit leave open*/,
                                          false/*read only close*/,
@@ -12144,6 +12244,7 @@ namespace Legion {
               perform_close_operations(closer, current_mask, 
                                        state.dirty_below, *it,
                                        next_child, false/*allow next*/,
+                                       NULL/*aliased children*/,
                                        false/*upgrade next child*/,
                                        false/*permit leave open*/,
                                        false/*read only close*/,
@@ -13997,8 +14098,6 @@ namespace Legion {
         // Skip any users of the same op, we know they won't be dependences
         if ((it->op == closer.user.op) && (it->gen == closer.user.gen))
         {
-          // Report the interfering close operation
-          it->op->report_interfering_internal_requirement(it->idx);
           it->field_mask -= overlap; 
           if (!it->field_mask)
           {

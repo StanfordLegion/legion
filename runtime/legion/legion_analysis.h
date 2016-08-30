@@ -1175,6 +1175,7 @@ namespace Legion {
     public:
       void initialize(unsigned min_depth, unsigned max_depth);
       void register_child(unsigned depth, const ColorPoint &color);
+      void record_aliased_children(unsigned depth, const FieldMask &mask);
       void clear();
     public:
 #ifdef DEBUG_LEGION 
@@ -1190,8 +1191,11 @@ namespace Legion {
         { return ((max_depth-min_depth)+1); }
       inline unsigned get_min_depth(void) const { return min_depth; }
       inline unsigned get_max_depth(void) const { return max_depth; }
+    public:
+      const FieldMask* get_aliased_children(unsigned depth) const;
     protected:
       std::vector<ColorPoint> path;
+      LegionMap<unsigned/*depth*/,FieldMask>::aligned interfering_children;
       unsigned min_depth;
       unsigned max_depth;
     };

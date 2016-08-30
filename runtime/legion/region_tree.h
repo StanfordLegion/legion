@@ -503,6 +503,9 @@ namespace Legion {
       bool are_disjoint(IndexSpace one, IndexSpace two);
       bool are_disjoint(IndexSpace one, IndexPartition two);
       bool are_disjoint(IndexPartition one, IndexPartition two); 
+      // Can only use the region tree for proving disjointness here
+      bool are_disjoint_tree_only(IndexTreeNode *one, IndexTreeNode *two,
+                                  IndexTreeNode *&common_ancestor);
     public:
       bool are_compatible(IndexSpace left, IndexSpace right);
       bool is_dominated(IndexSpace src, IndexSpace dst);
@@ -1314,6 +1317,7 @@ namespace Legion {
       void siphon_logical_children(LogicalCloser &closer,
                                    CurrentState &state,
                                    const FieldMask &closing_mask,
+                                   const FieldMask *aliased_children,
                                    bool record_close_operations,
                                    const ColorPoint &next_child,
                                    FieldMask &open_below);
@@ -1337,6 +1341,7 @@ namespace Legion {
                                     FieldState &closing_state,
                                     const ColorPoint &next_child, 
                                     bool allow_next_child,
+                                    const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
                                     bool read_only_close,

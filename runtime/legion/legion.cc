@@ -1273,7 +1273,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint())
+        map_id(0), tag(0), point(DomainPoint()), independent_requirements(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1282,8 +1282,8 @@ namespace Legion {
     TaskLauncher::TaskLauncher(Processor::TaskFuncID tid, TaskArgument arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : task_id(tid), argument(arg), predicate(pred), 
-        map_id(mid), tag(t), point(DomainPoint())
+      : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
+        point(DomainPoint()), independent_requirements(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1297,7 +1297,7 @@ namespace Legion {
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
-        map_id(0), tag(0)
+        map_id(0), tag(0), independent_requirements(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1311,7 +1311,7 @@ namespace Legion {
                                  MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
-        map_id(mid), tag(t)
+        map_id(mid), tag(t), independent_requirements(false)
     //--------------------------------------------------------------------------
     {
     }

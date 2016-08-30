@@ -744,7 +744,7 @@ namespace Legion {
       CLONE_TASK_CALL,
       COMPUTE_POINT_REQUIREMENTS_CALL,
       EARLY_MAP_REGIONS_CALL,
-      RECORD_ALIASED_REQUIREMENTS_CALL,
+      INTRA_TASK_ALIASING_CALL,
       ACTIVATE_SINGLE_CALL,
       DEACTIVATE_SINGLE_CALL,
       SELECT_INLINE_VARIANT_CALL,
@@ -912,7 +912,7 @@ namespace Legion {
       "Clone Base Task",                                              \
       "Compute Point Requirements",                                   \
       "Early Map Regions",                                            \
-      "Record Early Requirements",                                    \
+      "Intra-Task Aliasing",                                          \
       "Activate Single",                                              \
       "Deactivate Single",                                            \
       "Select Inline Variant",                                        \

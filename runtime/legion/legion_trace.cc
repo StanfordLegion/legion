@@ -301,21 +301,6 @@ namespace Legion {
 #endif
             }
           }
-          // Also see if we have any aliased region requirements that we
-          // need to notify the generating task of
-          std::map<unsigned,std::vector<std::pair<unsigned,unsigned> > >::
-            const_iterator finder = alias_reqs.find(index-1);
-          if (finder != alias_reqs.end())
-          {
-            Operation *create_op = operations.back().first;
-            unsigned internal_idx = internal_op->get_internal_index();
-            for (std::vector<std::pair<unsigned,unsigned> >::const_iterator
-                  it = finder->second.begin(); it != finder->second.end(); it++)
-            {
-              if (it->second == internal_idx)
-                create_op->report_interfering_internal_requirement(it->first);
-            }
-          }
         }
       }
     }
@@ -499,14 +484,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_aliased_requirements(unsigned idx1, unsigned idx2)
+    void LegionTrace::record_aliased_children(unsigned req_index,unsigned depth,
+                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(idx1 < idx2);
-#endif
       unsigned index = operations.size() - 1;
-      alias_reqs[index].push_back(std::pair<unsigned,unsigned>(idx1,idx2));
+      aliased_children[index].push_back(AliasChildren(req_index, depth, mask));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionTrace::replay_aliased_children(
+                             std::vector<RegionTreePath> &privilege_paths) const
+    //--------------------------------------------------------------------------
+    {
+      unsigned index = operations.size() - 1;
+      std::map<unsigned,LegionVector<AliasChildren>::aligned>::const_iterator
+        finder = aliased_children.find(index);
+      if (finder == aliased_children.end())
+        return;
+      for (LegionVector<AliasChildren>::aligned::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->req_index < privilege_paths.size());
+#endif
+        privilege_paths[it->req_index].record_aliased_children(it->depth,
+                                                               it->mask);
+      }
     }
 
     /////////////////////////////////////////////////////////////

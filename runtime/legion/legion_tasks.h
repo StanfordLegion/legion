@@ -225,7 +225,8 @@ namespace Legion {
       bool prepare_steal(void);
     public:
       void compute_parent_indexes(void);
-      void record_aliased_region_requirements(LegionTrace *trace);
+      void perform_intra_task_alias_analysis(bool is_tracing,
+          LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
     protected:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
@@ -889,7 +890,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void report_interfering_internal_requirement(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
@@ -950,7 +950,6 @@ namespace Legion {
       void *future_store;
       size_t future_size;
       Future result; 
-      std::set<unsigned>          rerun_analysis_requirements; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
       std::vector<VersionInfo>    version_infos;
@@ -973,6 +972,8 @@ namespace Legion {
       bool top_level_task;
       // Special field for inline tasks
       bool is_inline;
+      // Whether we have to do intra-task alias analysis
+      bool need_intra_task_alias_analysis;
     protected:
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
@@ -1297,7 +1298,6 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void report_interfering_internal_requirement(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void resolve_false(void);
@@ -1371,12 +1371,14 @@ namespace Legion {
       void *predicate_false_result;
       size_t predicate_false_size;
     protected:
-      std::set<unsigned>          rerun_analysis_requirements;
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> locally_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
+    protected:
+      // Whether we have to do intra-task alias analysis
+      bool need_intra_task_alias_analysis;
     };
 
     /**

@@ -1117,6 +1117,8 @@ namespace Legion {
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
     public:
+      inline void set_independent_requirements(bool independent);
+    public:
       Processor::TaskFuncID              task_id;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
@@ -1137,6 +1139,12 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
     };
 
     /**
@@ -1173,6 +1181,8 @@ namespace Legion {
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
     public:
+      inline void set_independent_requirements(bool independent);
+    public:
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
       std::vector<IndexSpaceRequirement> index_requirements;
@@ -1195,6 +1205,12 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
     };
 
     /**

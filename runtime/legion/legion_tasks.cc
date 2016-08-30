@@ -2313,84 +2313,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::record_aliased_region_requirements(LegionTrace *trace)
+    void TaskOp::perform_intra_task_alias_analysis(bool is_tracing,
+               LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, RECORD_ALIASED_REQUIREMENTS_CALL);
-      for (unsigned i = 1; i < regions.size(); i++)
+      DETAILED_PROFILER(runtime, INTRA_TASK_ALIASING_CALL);
+#ifdef DEBUG_LEGION
+      assert(regions.size() == privilege_paths.size());
+#endif
+      // Quick out if we've already traced this
+      if (!is_tracing && (trace != NULL))
       {
-        for (unsigned j = 0; j < i; j++)
+        trace->replay_aliased_children(privilege_paths);
+        return;
+      }
+      std::map<RegionTreeID,std::vector<unsigned> > tree_indexes;
+      // Find the indexes of requirements with the same tree
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
+        tree_indexes[regions[idx].parent.get_tree_id()].push_back(idx);
+      }
+      // Iterate over the trees with multiple requirements
+      for (std::map<RegionTreeID,std::vector<unsigned> >::const_iterator 
+            tree_it = tree_indexes.begin(); 
+            tree_it != tree_indexes.end(); tree_it++)
+      {
+        const std::vector<unsigned> &indexes = tree_it->second;
+        if (indexes.size() <= 1)
+          continue;
+        // Get the field masks for each of the requirements
+        LegionVector<FieldMask>::aligned field_masks(indexes.size());
+        std::vector<IndexTreeNode*> index_nodes(indexes.size());
         {
-          // Check tree ID first
-          if (regions[i].parent.get_tree_id() != 
-              regions[j].parent.get_tree_id())
-            continue;
-          // Now check if the regions/partitions are aliased
-          if (regions[i].handle_type == PART_PROJECTION)
+          FieldSpaceNode *field_space_node = 
+           runtime->forest->get_node(regions[indexes[0]].parent)->column_source;
+          for (unsigned idx = 0; idx < indexes.size(); idx++)
           {
-            IndexPartition part1 = regions[i].partition.get_index_partition();
-            if (regions[j].handle_type == PART_PROJECTION)
-            {
-              IndexPartition part2 = regions[j].partition.get_index_partition();
-              if (runtime->forest->are_disjoint(part1, part2))
-                continue;
-            }
+            field_masks[idx] = field_space_node->get_field_mask(
+                                        regions[indexes[idx]].privilege_fields);
+            if (regions[indexes[idx]].handle_type == PART_PROJECTION)
+              index_nodes[idx] = runtime->forest->get_node(
+                        regions[indexes[idx]].partition.get_index_partition());
             else
-            {
-              IndexSpace space2 = regions[j].region.get_index_space();
-              if (runtime->forest->are_disjoint(space2, part1))
-                continue;
-            }
+              index_nodes[idx] = runtime->forest->get_node(
+                        regions[indexes[idx]].region.get_index_space());
           }
-          else
+        }
+        // Find the sets of fields which are interfering
+        for (unsigned i = 1; i < indexes.size(); i++)
+        {
+          RegionUsage usage1(regions[indexes[i]]);
+          for (unsigned j = 0; j < i; j++)
           {
-            IndexSpace space1 = regions[i].region.get_index_space();
-            if (regions[j].handle_type == PART_PROJECTION)
-            {
-              IndexPartition part2 = regions[j].partition.get_index_partition();
-              if (runtime->forest->are_disjoint(space1, part2))
-                continue;
-            }
-            else
-            {
-              IndexSpace space2 = regions[j].region.get_index_space();
-              if (runtime->forest->are_disjoint(space1, space2))
-                continue;
-            }
+            FieldMask overlap = field_masks[i] & field_masks[j];
+            // No field overlap, so there is nothing to do
+            if (!overlap)
+              continue;
+            // No check for region overlap
+            IndexTreeNode *common_ancestor = NULL;
+            if (runtime->forest->are_disjoint_tree_only(index_nodes[i],
+                  index_nodes[j], common_ancestor))
+              continue;
+#ifdef DEBUG_LEGION
+            assert(common_ancestor != NULL); // should have a counterexample
+#endif
+            // Get the interference kind and report it if it is bad
+            RegionUsage usage2(regions[indexes[j]]);
+            DependenceType dtype = check_dependence_type(usage1, usage2);
+            if ((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE))
+              report_interfering_requirements(indexes[j], indexes[i]);
+            // Special case, if the parents are not the same,
+            // then we don't have to do anything cause their
+            // path will not overlap
+            if (regions[indexes[i]].parent != regions[indexes[j]].parent)
+              continue;
+            // Record it in the earlier path as the latter path doesn't matter
+            privilege_paths[indexes[j]].record_aliased_children(
+                                    common_ancestor->depth, overlap);
+            // If we have a trace, record the aliased requirements
+            if (trace != NULL)
+              trace->record_aliased_children(indexes[j], 
+                                             common_ancestor->depth, overlap);
           }
-          // Regions are aliased, see if there are overlapping fields
-          bool overlap = false;
-          if (regions[i].privilege_fields.size() < 
-              regions[j].privilege_fields.size())
-          {
-            for (std::set<FieldID>::const_iterator it = 
-                  regions[i].privilege_fields.begin(); it !=
-                  regions[i].privilege_fields.end(); it++)
-            {
-              if (regions[j].privilege_fields.find(*it) !=
-                  regions[j].privilege_fields.end())
-              {
-                overlap = true;
-                break;
-              }
-            }
-          }
-          else
-          {
-            for (std::set<FieldID>::const_iterator it = 
-                  regions[j].privilege_fields.begin(); it !=
-                  regions[j].privilege_fields.end(); it++)
-            {
-              if (regions[i].privilege_fields.find(*it) !=
-                  regions[i].privilege_fields.end())
-              {
-                overlap = true;
-                break;
-              }
-            }
-          }
-          if (overlap)
-            trace->record_aliased_requirements(j,i);
         }
       }
     }
@@ -8032,6 +8038,7 @@ namespace Legion {
       sent_remotely = false;
       top_level_task = false;
       is_inline = false;
+      need_intra_task_alias_analysis = true;
       has_remote_subtasks = false;
     }
 
@@ -8076,7 +8083,6 @@ namespace Legion {
       // Remove our reference on the future
       result = Future();
       predicate_false_future = Future();
-      rerun_analysis_requirements.clear();
       privilege_paths.clear();
       version_infos.clear();
       restrict_infos.clear();
@@ -8121,6 +8127,7 @@ namespace Legion {
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       remote_owner_uid = ctx->get_unique_id();
+      need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED)
       {
         if (launcher.predicate_false_future.impl != NULL)
@@ -8254,9 +8261,15 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
       update_no_access_regions();
-      // If we are tracing we need to record any aliased region requirements
-      if (is_tracing())
-        record_aliased_region_requirements(get_trace());
+      // If we have a trace, it is unsound to do this until the dependence
+      // analysis stage when all the operations are serialized in order
+      if (need_intra_task_alias_analysis)
+      {
+        LegionTrace *local_trace = get_trace();
+        if (local_trace == NULL)
+          perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
+                                            privilege_paths);
+      }
       if (Runtime::legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8273,6 +8286,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif
+      // If we have a trace we do our alias analysis now
+      if (need_intra_task_alias_analysis)
+      {
+        LegionTrace *local_trace = get_trace();
+        if (local_trace != NULL)
+          perform_intra_task_alias_analysis(is_tracing(), local_trace,
+                                            privilege_paths);
+      }
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -8301,41 +8322,6 @@ namespace Legion {
                                                      version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
-      }
-      // See if we have any requirements that interferred with a close
-      // operation that was generated by a later region requirement
-      // and therefore needs to be re-analyzed
-      if (!rerun_analysis_requirements.empty())
-      {
-        // Make a local copy to avoid invalidating the iterator
-        std::vector<unsigned> rerun(rerun_analysis_requirements.begin(),
-                                    rerun_analysis_requirements.end());
-#ifdef DEBUG_LEGION
-        rerun_analysis_requirements.clear();
-#endif
-        for (std::vector<unsigned>::const_iterator it = 
-              rerun.begin(); it != rerun.end(); it++)
-        {
-          // Reset our version info
-          version_infos[*it].clear();
-          runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
-                                                       restrict_infos[*it],
-                                                       version_infos[*it],
-                                                       projection_info,
-                                                       privilege_paths[*it]);
-          // If we still have re-run requirements, then we have
-          // interfering region requirements so warn the user
-          if (!rerun_analysis_requirements.empty())
-          {
-            for (std::set<unsigned>::const_iterator it2 = 
-                  rerun_analysis_requirements.begin(); it2 != 
-                  rerun_analysis_requirements.end(); it2++)
-            {
-              report_interfering_requirements(*it, *it2);
-            }
-            rerun_analysis_requirements.clear();
-          }
-        }
       }
     }
 
@@ -8422,13 +8408,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::report_interfering_internal_requirement(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      rerun_analysis_requirements.insert(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -10616,6 +10595,7 @@ namespace Legion {
       commit_received = false; 
       predicate_false_result = NULL;
       predicate_false_size = 0;
+      need_intra_task_alias_analysis = true;
     }
 
     //--------------------------------------------------------------------------
@@ -10647,7 +10627,6 @@ namespace Legion {
       predicate_false_future = Future();
       // Remove our reference to the reduction future
       reduction_future = Future();
-      rerun_analysis_requirements.clear();
       map_applied_conditions.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
@@ -10687,6 +10666,7 @@ namespace Legion {
       tag = launcher.tag;
       is_index_space = true;
       index_domain = launcher.launch_domain;
+      need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
@@ -10737,6 +10717,7 @@ namespace Legion {
       tag = launcher.tag;
       is_index_space = true;
       index_domain = launcher.launch_domain;
+      need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
@@ -10970,12 +10951,15 @@ namespace Legion {
       // Initialize the privilege paths
       privilege_paths.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
+      if (need_intra_task_alias_analysis)
+      {
+        // If we don't have a trace, we do our alias analysis now
+        LegionTrace *local_trace = get_trace();
+        if (local_trace == NULL)
+          perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
+                                            privilege_paths);
       }
-      // If we are tracing we need to record any aliased region requirements
-      if (is_tracing())
-        record_aliased_region_requirements(get_trace());
       if (Runtime::legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -11018,6 +11002,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif 
+      if (need_intra_task_alias_analysis)
+      {
+        // If we have a trace we do our alias analysis now
+        LegionTrace *local_trace = get_trace();
+        if (local_trace != NULL)
+          perform_intra_task_alias_analysis(is_tracing(), local_trace,
+                                            privilege_paths);
+      }
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -11049,42 +11041,6 @@ namespace Legion {
                                                      projection_infos[idx],
                                                      privilege_paths[idx]);
       }
-      // See if we have any requirements that interferred with a close
-      // operation that was generated by a later region requirement
-      // and therefore needs to be re-analyzed
-      if (!rerun_analysis_requirements.empty())
-      {
-        // Make a local copy to avoid invalidating the iterator
-        std::vector<unsigned> rerun(rerun_analysis_requirements.begin(),
-                                    rerun_analysis_requirements.end());
-#ifdef DEBUG_LEGION
-        rerun_analysis_requirements.clear();
-#endif
-        // Reset our version infos
-        for (std::vector<unsigned>::const_iterator it = 
-              rerun.begin(); it != rerun.end(); it++)
-        {
-          // Reset our version info
-          version_infos[*it].clear();
-          runtime->forest->perform_dependence_analysis(this, *it, regions[*it],
-                                                       restrict_infos[*it],
-                                                       version_infos[*it],
-                                                       projection_infos[*it],
-                                                       privilege_paths[*it]);
-          // If we still have re-run requirements, then we have
-          // interfering region requirements so warn the user
-          if (!rerun_analysis_requirements.empty())
-          {
-            for (std::set<unsigned>::const_iterator it2 = 
-                  rerun_analysis_requirements.begin(); it2 != 
-                  rerun_analysis_requirements.end(); it2++)
-            {
-              report_interfering_requirements(*it, *it2);
-            }
-            rerun_analysis_requirements.clear();
-          }
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -11110,13 +11066,6 @@ namespace Legion {
                       idx1, idx2, get_task_name(), get_unique_id(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::report_interfering_internal_requirement(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      rerun_analysis_requirements.insert(idx);
     }
 
     //--------------------------------------------------------------------------

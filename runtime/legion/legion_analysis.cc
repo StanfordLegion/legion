@@ -7267,6 +7267,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreePath::record_aliased_children(unsigned depth,
+                                                 const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(min_depth <= depth);
+      assert(depth <= max_depth);
+#endif
+      LegionMap<unsigned,FieldMask>::aligned::iterator finder = 
+        interfering_children.find(depth);
+      if (finder == interfering_children.end())
+        interfering_children[depth] = mask;
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreePath::clear(void)
     //--------------------------------------------------------------------------
     {
@@ -7295,6 +7312,19 @@ namespace Legion {
       return path[depth];
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    const FieldMask* RegionTreePath::get_aliased_children(unsigned depth) const
+    //--------------------------------------------------------------------------
+    {
+      if (interfering_children.empty())
+        return NULL;
+      LegionMap<unsigned,FieldMask>::aligned::const_iterator finder = 
+        interfering_children.find(depth);
+      if (finder == interfering_children.end())
+        return NULL;
+      return &(finder->second);
+    }
 
     /////////////////////////////////////////////////////////////
     // InstanceRef 

@@ -61,6 +61,15 @@ namespace Legion {
         DependenceType dtype;
         FieldMask dependent_mask;
       };
+      struct AliasChildren {
+      public:
+        AliasChildren(unsigned req_idx, unsigned dep, const FieldMask &m)
+          : req_index(req_idx), depth(dep), mask(m) { }
+      public:
+        unsigned req_index;
+        unsigned depth;
+        FieldMask mask;
+      };
     public:
       LegionTrace(TraceID tid, SingleTask *ctx);
       LegionTrace(const LegionTrace &rhs);
@@ -85,7 +94,9 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
-      void record_aliased_requirements(unsigned idx1, unsigned idx2);
+      void record_aliased_children(unsigned req_index, unsigned depth,
+                                   const FieldMask &aliased_mask);
+      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences
@@ -107,7 +118,7 @@ namespace Legion {
       // We also need a data structure to record when there are
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
-      std::map<unsigned,std::vector<std::pair<unsigned,unsigned> > > alias_reqs;
+      std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
       // Metadata for checking the validity of a trace when it is replayed
       std::vector<OperationInfo> op_info;
     protected:

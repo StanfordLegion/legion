@@ -852,6 +852,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskLauncher::set_independent_requirements(bool independent)
+    //--------------------------------------------------------------------------
+    {
+      independent_requirements = independent;
+    }
+
+    //--------------------------------------------------------------------------
     inline IndexSpaceRequirement& IndexLauncher::add_index_requirement(
                                               const IndexSpaceRequirement &req)
     //--------------------------------------------------------------------------
@@ -919,6 +926,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::set_independent_requirements(bool independent)
+    //--------------------------------------------------------------------------
+    {
+      independent_requirements = independent;
     }
 
     //--------------------------------------------------------------------------

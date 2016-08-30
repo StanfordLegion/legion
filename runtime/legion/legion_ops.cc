@@ -403,14 +403,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_interfering_internal_requirement(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // should only be called if overridden
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     unsigned Operation::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -3403,13 +3395,6 @@ namespace Legion {
       assert(false);
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::report_interfering_internal_requirement(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do here, we can skip these since it won't impact anything
     }
 
     //--------------------------------------------------------------------------
