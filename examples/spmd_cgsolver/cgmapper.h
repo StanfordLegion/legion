@@ -37,6 +37,17 @@ public:
 				TunableID tid,
 				MappingTagID tag);
 
+  // override DefaultMapper's policy for choosing locations for
+  // instances constrained by a must epoch launch
+  virtual Memory default_policy_select_constrained_instance_constraints(
+				    MapperContext ctx,
+				    const std::vector</*const*/ Legion::Task *> &tasks,
+				    const std::vector<unsigned> &req_indexes,
+				    const std::vector<Processor> &target_procs,
+				    const std::set<LogicalRegion> &needed_regions,
+				    const std::set<FieldID> &needed_fields,
+                                    LayoutConstraintSet &constraints);
+
 protected:
   bool shard_per_proc;
   std::vector<Memory> sysmems;
