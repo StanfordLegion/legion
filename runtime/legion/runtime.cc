@@ -1564,6 +1564,8 @@ namespace Legion {
       // we can set the inditial participants to 1
       if (participating)
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
+      if (runtime->total_address_spaces > 1)
+        done_event = Runtime::create_rt_user_event();
     }
     
     //--------------------------------------------------------------------------
@@ -1608,7 +1610,6 @@ namespace Legion {
       // We can skip this part if there are not multiple nodes
       if (runtime->total_address_spaces > 1)
       {
-        done_event = Runtime::create_rt_user_event();
         // See if we are participating node or not
         if (participating)
         {
