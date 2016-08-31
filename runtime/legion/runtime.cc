@@ -1436,9 +1436,7 @@ namespace Legion {
     MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool in_mpi, int mpi_parts, 
                                                    int legion_parts)
       : mpi_participants(mpi_parts), legion_participants(legion_parts),
-        state(in_mpi ? IN_MPI : IN_LEGION), mpi_count(0), legion_count(0),
-        mpi_ready(Runtime::create_ap_user_event()),
-        legion_ready(Runtime::create_ap_user_event())
+        state(in_mpi ? IN_MPI : IN_LEGION), mpi_count(0), legion_count(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1473,6 +1471,14 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshakeImpl::initialize(void)
+    //--------------------------------------------------------------------------
+    {
+      mpi_ready = Runtime::create_ap_user_event();
+      legion_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -19064,6 +19070,8 @@ namespace Legion {
     /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
     /*static*/ RtUserEvent Runtime::mpi_rank_event = 
       RtUserEvent::NO_RT_USER_EVENT;
+    /*static*/ std::vector<MPILegionHandshake>* 
+                      Runtime::pending_handshakes = NULL;
     /*static*/ bool Runtime::program_order_execution = false;
 #ifdef DEBUG_LEGION
     /*static*/ bool Runtime::logging_region_tree_state = false;
@@ -19101,6 +19109,17 @@ namespace Legion {
 #endif
         realm.init(&argc, &argv);
       assert(ok);
+
+      // If we have any pending MPI handshakes, we can initialize them now
+      if (pending_handshakes != NULL)
+      {
+        for (std::vector<MPILegionHandshake>::const_iterator it = 
+              pending_handshakes->begin(); it != 
+              pending_handshakes->end(); it++)
+          it->impl->initialize();
+        delete pending_handshakes;
+        pending_handshakes = NULL;
+      }
       
       {
 	const ReductionOpTable& red_table = get_reduction_table();
@@ -19496,10 +19515,37 @@ namespace Legion {
     /*static*/ void Runtime::configure_MPI_interoperability(int rank)
     //--------------------------------------------------------------------------
     {
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'configure_MPI_interoperability' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
 #ifdef DEBUG_LEGION
       assert(rank >= 0);
 #endif
       mpi_rank = rank;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_handshake(MPILegionHandshake &handshake)
+    //--------------------------------------------------------------------------
+    {
+      // See if the runtime is started or not
+      if (runtime_started)
+      {
+        // If it's started, we can just do the initialization now
+        handshake.impl->initialize();
+      }
+      else
+      {
+        if (pending_handshakes == NULL)
+          pending_handshakes = new std::vector<MPILegionHandshake>();
+        pending_handshakes->push_back(handshake);
+      }
     }
 
     //--------------------------------------------------------------------------

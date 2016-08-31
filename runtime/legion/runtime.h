@@ -408,6 +408,8 @@ namespace Legion {
     public:
       MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
     public:
+      void initialize(void);
+    public:
       void mpi_handoff_to_legion(void);
       void mpi_wait_on_legion(void);
     public:
@@ -2671,6 +2673,7 @@ namespace Legion {
       static void wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
+      static void register_handshake(MPILegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
@@ -2736,6 +2739,7 @@ namespace Legion {
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;
       static RtUserEvent mpi_rank_event;
+      static std::vector<MPILegionHandshake> *pending_handshakes;
 #ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
       static bool verbose_logging;

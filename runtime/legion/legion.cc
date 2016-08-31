@@ -4097,9 +4097,11 @@ namespace Legion {
       assert(mpi_participants > 0);
       assert(legion_participants > 0);
 #endif
-      return MPILegionHandshake(
+      MPILegionHandshake result(
           Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
                                        mpi_participants, legion_participants));
+      Internal::Runtime::register_handshake(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
