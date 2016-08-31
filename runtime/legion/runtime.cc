@@ -1491,15 +1491,14 @@ namespace Legion {
       const int count = __sync_add_and_fetch(&mpi_count, 1);
       if (count == mpi_participants)
       {
-        // Create a new waiter for the mpi_ready
-        ApUserEvent mpi_trigger = legion_ready;
-        legion_ready = Runtime::create_ap_user_event();
+        if (mpi_ready.has_triggered())
+          mpi_ready = Runtime::create_ap_user_event();
         // Reset the count for the next iteration
         mpi_count = 0;
         // Switch the state to being in Legion
         state = IN_LEGION;
         // Now tell all the Legion threads that we are ready
-        Runtime::trigger_event(mpi_trigger);
+        Runtime::trigger_event(legion_ready);
       }
     }
 
@@ -1526,14 +1525,14 @@ namespace Legion {
       const int count = __sync_add_and_fetch(&legion_count, 1);
       if (count == legion_participants)
       {
-        ApUserEvent legion_trigger = mpi_ready;
-        mpi_ready = Runtime::create_ap_user_event();
+        if (legion_ready.has_triggered())
+          legion_ready = Runtime::create_ap_user_event();
         // Reset the count for the next iteration
         legion_count = 0;
         // Switch the state to being in MPI
         state = IN_MPI;
         // Now tell all the MPI threads that we are ready
-        Runtime::trigger_event(legion_trigger);
+        Runtime::trigger_event(mpi_ready);
       }
     }
 
