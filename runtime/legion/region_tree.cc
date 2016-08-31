@@ -1646,6 +1646,7 @@ namespace Legion {
                                                 RegionTreeNode *parent, 
                                                 const RegionTreePath &path,
                                                 const FieldMask &advance_mask, 
+                  const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -1658,9 +1659,9 @@ namespace Legion {
       const AddressSpaceID local = runtime->address_space;
       parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
                                       parent_ctx, update_parent_state,
-                                      parent_is_upper_bound,
-                                      dedup_opens, dedup_advances,
-                                      open_epoch, advance_epoch, ready_events);
+                                      parent_is_upper_bound, dedup_opens, 
+                                      dedup_advances, open_epoch, advance_epoch,
+                                      dirty_previous, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -10645,6 +10646,10 @@ namespace Legion {
                                                 const LogicalUser &create_user)
     //--------------------------------------------------------------------------
     {
+      // See if we have any previous dirty data to record at this depth
+      FieldMask previous_dirty = state.dirty_fields & advance_user.field_mask;
+      if (!!previous_dirty)
+        advance_op->record_dirty_previous(get_depth(), previous_dirty);
       // We know we are dominating from above, so we don't care about
       // open below fields for advance analysis
       FieldMask empty_below;
@@ -12469,6 +12474,7 @@ namespace Legion {
                                                bool dedup_advances, 
                                                ProjectionEpochID open_epoch,
                                                ProjectionEpochID advance_epoch,
+                  const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -12480,9 +12486,28 @@ namespace Legion {
       const bool arrived = !path.has_child(depth);
       // As long as we are advancing in the middle of the tree
       // then we have no initial state
-      manager.advance_versions(advance_mask, parent_ctx, 
-           local_update_parent, local_space, ready_events, 
-           dedup_opens, open_epoch, dedup_advances, advance_epoch);
+      bool still_need_advance = true;
+      if (!dirty_previous.empty())
+      {
+        LegionMap<unsigned,FieldMask>::aligned::const_iterator finder = 
+          dirty_previous.find(depth);
+        if (finder != dirty_previous.end())
+        {
+          const FieldMask dirty_prev = finder->second & advance_mask;
+          if (!!dirty_prev)
+          {
+            manager.advance_versions(advance_mask, parent_ctx, 
+                 local_update_parent, local_space, ready_events, 
+                 dedup_opens, open_epoch, dedup_advances, 
+                 advance_epoch, &dirty_prev);
+            still_need_advance = false;
+          }
+        }
+      }
+      if (still_need_advance)
+        manager.advance_versions(advance_mask, parent_ctx, 
+             local_update_parent, local_space, ready_events, 
+             dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       // wonder if we get tail call recursion optimization
       if (!arrived)
@@ -12491,7 +12516,8 @@ namespace Legion {
         child->advance_version_numbers(ctx, local_space, path, advance_mask, 
                                        parent_ctx, update_parent_state, false,
                                        dedup_opens, dedup_advances, 
-                                       open_epoch, advance_epoch, ready_events);
+                                       open_epoch, advance_epoch, 
+                                       dirty_previous, ready_events);
       }
     }
 

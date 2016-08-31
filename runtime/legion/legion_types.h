@@ -293,6 +293,7 @@ namespace Legion {
       HLR_DEFER_LAUNCH_TASK_ID,
       HLR_DEFER_MAP_AND_LAUNCH_TASK_ID,
       HLR_ADD_VERSIONING_SET_REF_TASK_ID,
+      HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
       HLR_MESSAGE_ID, // These two must be the last two
       HLR_RETRY_SHUTDOWN_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -371,6 +372,7 @@ namespace Legion {
         "Defer Task Launch",                                      \
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
+        "Version State Capture Dirty",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

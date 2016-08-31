@@ -9243,6 +9243,7 @@ namespace Legion {
       // first have to check to see if the tree is open, and then
       // again to see if it has been advanced if we are going to 
       // be writing/reducing below in the tree
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_NO_ACCESS(regions[idx]))
@@ -9288,7 +9289,8 @@ namespace Legion {
             runtime->forest->advance_version_numbers(this, idx, 
                 false/*update parent state*/, false/*doesn't matter*/,
                 true/*dedup opens*/, false/*dedup advance*/, it->first, 
-                0/*id*/, one_below, open_path, it->second, ready_events);
+                0/*id*/, one_below, open_path, it->second, 
+                empty_dirty_previous, ready_events);
           }
         }
         // If we're doing something other than reading, we need
@@ -9321,7 +9323,8 @@ namespace Legion {
             runtime->forest->advance_version_numbers(this, idx, 
                 true/*update parent state*/, parent_is_upper_bound,
                 false/*dedup opens*/, true/*dedup advances*/, 0/*id*/, 
-                it->first, parent_node, advance_path, it->second, ready_events);
+                it->first, parent_node, advance_path, it->second, 
+                empty_dirty_previous, ready_events);
           }
         }
         // Now we can record our version numbers just like everyone else

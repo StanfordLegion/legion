@@ -996,6 +996,7 @@ namespace Legion {
                       int req_idx, bool parent_is_upper_bound);
       void set_child_node(RegionTreeNode *child);
       void set_split_child_mask(const FieldMask &split_mask);
+      void record_dirty_previous(unsigned depth, const FieldMask &dirty_mask);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1009,6 +1010,7 @@ namespace Legion {
       RegionTreeNode *child_node; // inclusive
       FieldMask       advance_mask;
       FieldMask       split_child_mask; // only for partial reductions
+      LegionMap<unsigned,FieldMask>::aligned dirty_previous;
       bool parent_is_upper_bound;
     };
 

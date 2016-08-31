@@ -836,6 +836,14 @@ namespace Legion {
      */
     class VersionManager {
     public:
+      struct DirtyUpdateArgs {
+      public:
+        HLRTaskID hlr_id;
+        VersionState *previous;
+        VersionState *target;
+        FieldMask *capture_mask;
+      };
+    public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
     public:
@@ -886,7 +894,8 @@ namespace Legion {
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
                             bool dedup_advances = false, 
-                            ProjectionEpochID advance_epoch = 0);
+                            ProjectionEpochID advance_epoch = 0,
+                            const FieldMask *dirty_previous = NULL);
       void update_child_versions(SingleTask *context,
                                  const ColorPoint &child_color,
                                  VersioningSet<> &new_states,
@@ -946,6 +955,8 @@ namespace Legion {
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
           ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
+    public:
+      static void process_capture_dirty(const void *args);
     protected:
       void sanity_check(void);
     public:
@@ -1132,6 +1143,8 @@ namespace Legion {
                                  const FieldMask &capture_mask) const;
       void capture(CompositeNode *target, const FieldMask &capture_mask,
                    SingleTask *translation_context) const;
+      void capture_dirty_instances(const FieldMask &capture_mask, 
+                                   VersionState *target) const;
     public:
       const VersionID version_number;
       RegionTreeNode *const logical_node;

@@ -4770,6 +4770,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> open_events;
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
       runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                false/*update parent state*/,
                                                false/*doesn't matter*/,
@@ -4777,7 +4778,8 @@ namespace Legion {
                                                false/*dedup advances*/, 
                                                0/*open id*/, 0/*advance id*/,
                                                start_node, open_path, 
-                                               open_mask, open_events);
+                                               open_mask, empty_dirty_previous,
+                                               open_events);
       // Deviate from the normal pipeline and don't even put this on the
       // ready queue, we are done executing and can be considered mapped
       // once all the open events have triggered
@@ -4892,6 +4894,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AdvanceOp::record_dirty_previous(unsigned depth, 
+                                          const FieldMask &dirty_mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<unsigned,FieldMask>::aligned::iterator finder = 
+        dirty_previous.find(depth);
+      if (finder == dirty_previous.end())
+        dirty_previous[depth] = dirty_mask;
+      else
+        finder->second |= dirty_mask;
+    }
+
+    //--------------------------------------------------------------------------
     void AdvanceOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -4908,6 +4923,7 @@ namespace Legion {
       deactivate_internal();
       advance_mask.clear();
       split_child_mask.clear();
+      dirty_previous.clear();
       runtime->free_advance_op(this);
     }
 
@@ -4952,7 +4968,8 @@ namespace Legion {
                                                  false/*dedup advance*/,
                                                  0/*open id*/, 0/*advance id*/,
                                                  parent_node, path,
-                                                 advance_mask, advance_events);
+                                                 advance_mask, dirty_previous,
+                                                 advance_events);
       }
       else
       {
@@ -4965,6 +4982,7 @@ namespace Legion {
                                                  0/*open id*/, 0/*advance id*/,
                                                  parent_node, path,
                                                  split_child_mask, 
+                                                 dirty_previous,
                                                  advance_events);
         RegionTreePath one_up_path;
         runtime->forest->initialize_path(
@@ -4978,6 +4996,7 @@ namespace Legion {
                                                  0/*open id*/, 0/*advance id*/,
                                                  parent_node, one_up_path,
                                                  advance_mask-split_child_mask,
+                                                 dirty_previous,
                                                  advance_events);
       }
       // Deviate from the normal pipeline and don't even put this

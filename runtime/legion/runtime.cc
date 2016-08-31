@@ -21034,6 +21034,11 @@ namespace Legion {
             ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
             break;
           }
+        case HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
+          {
+            VersionManager::process_capture_dirty(args);
+            break;
+          }
         case HLR_RETRY_SHUTDOWN_TASK_ID:
           {
             Runtime *runtime = Runtime::get_runtime(p);

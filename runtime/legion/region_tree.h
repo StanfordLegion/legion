@@ -266,6 +266,7 @@ namespace Legion {
                                    RegionTreeNode *parent, 
                                    const RegionTreePath &path,
                                    const FieldMask &advance_mask,
+             const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                    std::set<RtEvent> &ready_events);
     public:
       void initialize_current_context(RegionTreeContext ctx,
@@ -1400,6 +1401,7 @@ namespace Legion {
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
+            const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                    std::set<RtEvent> &ready_events);
     public:
       void initialize_current_state(ContextID ctx);

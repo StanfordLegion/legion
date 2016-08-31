@@ -3546,6 +3546,8 @@ namespace Legion {
       if (!closed_mask)
         return;
       state.dirty_below -= closed_mask;
+      // the dirty data now resides at this level
+      state.dirty_fields |= closed_mask;
       root_node->filter_prev_epoch_users(state, closed_mask);
       root_node->filter_curr_epoch_users(state, closed_mask);
       if (!!closed_projections)
@@ -4527,7 +4529,8 @@ namespace Legion {
                                           bool dedup_opens,
                                           ProjectionEpochID open_epoch,
                                           bool dedup_advances, 
-                                          ProjectionEpochID advance_epoch)
+                                          ProjectionEpochID advance_epoch,
+                                          const FieldMask *dirty_previous)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 
@@ -4903,6 +4906,74 @@ namespace Legion {
         sanity_check();
 #endif
       } // release the lock
+      // See if we have to capture any dirty data from the previous versions
+      // If we don't have to update the parent state then we are at the
+      // top of the tree, so there is no need to worry about closes from above
+      if (update_parent_state && (dirty_previous != NULL))
+      {
+#ifdef DEBUG_LEGION
+        assert(!new_states.empty()); // should only be here with new states
+#endif
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
+              previous_version_infos.begin(); vit != 
+              previous_version_infos.end(); vit++)
+        {
+          // Disjoint so it doesn't matter
+          if (vit->second.get_valid_mask() * (*dirty_previous))
+            continue;
+          for (ManagerVersions::iterator mit = vit->second.begin();
+                mit != vit->second.end(); mit++)
+          {
+            FieldMask state_overlap = mit->second & *dirty_previous;
+            if (!state_overlap)
+              continue;
+            // Get the final version of this version state
+            std::set<RtEvent> preconditions;
+            mit->first->request_final_version_state(state_overlap, 
+                                                    preconditions);
+            if (!preconditions.empty())
+            {
+              RtEvent precondition = Runtime::merge_events(preconditions);
+              for (VersioningSet<>::iterator it = new_states.begin();
+                    it != new_states.end(); it++)
+              {
+                FieldMask overlap = it->second & state_overlap;
+                if (!overlap)
+                  continue;
+                DirtyUpdateArgs args;
+                args.hlr_id = HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
+                args.previous = mit->first;
+                args.target = it->first;
+                args.capture_mask = legion_new<FieldMask>(overlap);
+                RtEvent done = 
+                  runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
+                                HLR_LATENCY_PRIORITY, NULL, precondition);
+                applied_events.insert(done);
+                state_overlap -= overlap;
+                if (!state_overlap)
+                  break;
+              }
+            }
+            else
+            {
+              // We can do the captures now 
+              for (VersioningSet<>::iterator it = new_states.begin();
+                    it != new_states.end(); it++)
+              {
+                FieldMask overlap = it->second & state_overlap;
+                if (!overlap)
+                  continue;
+                mit->first->capture_dirty_instances(overlap, it->first); 
+                state_overlap -= overlap;
+                if (!state_overlap)
+                  break;
+              }
+            }
+          }
+        }
+      }
       // If we recorded any new states then we have to tell our parent manager
       if (!new_states.empty())
       {
@@ -4920,6 +4991,16 @@ namespace Legion {
         parent_manager.update_child_versions(context, color, 
                                              new_states, applied_events);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::process_capture_dirty(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DirtyUpdateArgs *dargs = (const DirtyUpdateArgs*)args;
+      dargs->previous->capture_dirty_instances(*(dargs->capture_mask),
+                                               dargs->target);
+      legion_delete(dargs->capture_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -7223,6 +7304,39 @@ namespace Legion {
           target->record_child_version_state(cit->first, it->first, overlap);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionState::capture_dirty_instances(const FieldMask &capture_mask,
+                                               VersionState *target) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(!(capture_mask - dirty_mask));
+      assert((this->version_number + 1) == target->version_number);
+#endif
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        FieldMask overlap = it->second & capture_mask;
+        if (!overlap)
+          continue;
+        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+          track_aligned::iterator finder = target->valid_views.find(it->first);
+        if (finder == target->valid_views.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(target->currently_valid);
+#endif
+          // No need for a mutator here, it is already valid
+          it->first->add_nested_valid_ref(target->did);
+          target->valid_views[it->first] = overlap;
+        }
+        else
+          finder->second |= overlap;
+      }
+      target->dirty_mask |= capture_mask;
     }
 
     /////////////////////////////////////////////////////////////
