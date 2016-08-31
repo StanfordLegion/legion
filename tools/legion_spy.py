@@ -5111,7 +5111,7 @@ class Operation(object):
         if self.index_owner:
             assert src_field is dst_field
             return self.index_owner.find_generated_copy(src_field, region, 
-                                      src_inst, dst_inst, redop, intersect)
+                                                dst_inst, redop, intersect)
         return None
 
     def find_generated_fill(self, field, region, dst, intersect=None):
