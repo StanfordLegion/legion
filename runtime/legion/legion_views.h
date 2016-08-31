@@ -946,7 +946,8 @@ namespace Legion {
                              RegionTreeNode *logical_node,
                              VersionTracker *src_version_tracker,
                              CopyAcrossHelper *across_helper,
-                     LegionMap<ApEvent,FieldMask>::aligned &postconditions);
+                const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
+                      LegionMap<ApEvent,FieldMask>::aligned &postconditions);
       void compute_update_masks(const FieldMask &copy_mask,
                                 const FieldMask &dominate_mask,
                                 const FieldMask &local_dominate,

@@ -3442,8 +3442,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != closed_nodes.end()); // better have a closed tree
 #endif
-        // We can update the closed fields at the root
-        finder->second->record_closed_fields(normal_close_mask);
         // Now initialize the operation
         normal_close_op->initialize(creator->get_parent(), req, finder->second,
                                     trace_info, trace_info.req_idx, 

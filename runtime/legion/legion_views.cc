@@ -3795,11 +3795,8 @@ namespace Legion {
       // see if we are going to need to make a temporary instance
       // We might also discover that they are already valid
       LegionMap<CompositeNode*,FieldMask>::aligned reduction_only_children;
-      if (!!local_dominate)
+      if (check_overwrite && !!local_dominate)
       {
-#ifdef DEBUG_LEGION
-        assert(check_overwrite);
-#endif
         std::vector<CompositeNode*> to_delete;
         // We need to know which fields need a temporary instance
         FieldMask need_temporary;
@@ -3841,7 +3838,8 @@ namespace Legion {
         {
           // Issue copies to the temporary instance
           copy_to_temporary(info, dst, need_temporary, logical_node, 
-                            src_version_tracker, helper, postconditions);
+                            src_version_tracker, helper, 
+                            preconditions, postconditions);
           // If we issued copies to a temporary instance then we no
           // longer need to do anything at this node
           copy_mask -= need_temporary;
@@ -3924,7 +3922,8 @@ namespace Legion {
                                            *below_preconditions,
                                            below_postconditions,
                                            postreductions, helper,
-                                           dominate_mask, check_overwrite);
+                                           it->second & dominate_mask,
+                                           check_overwrite);
           // Insert the postconditions below, no need to merge since
           // we know that everything added below are new events
           if (!below_postconditions.empty())
@@ -4053,15 +4052,13 @@ namespace Legion {
         // If we initially had dominating fields, we need to update them
         if (!!dominate_mask)
         {
+          // See if we had any intersecting children
           // To be dominating below, we need to still be dominating
           // and have observed at least one dominating child below
           still_dominating &= dominating_child;
           // If we need to check for overwrite, we need the fields
           // that were locally dominated but are not dominated below
-          // and which we've seen open children below
-          if (check_overwrite)
-            local_dominate = 
-              (dominate_mask - still_dominating) & intersecting_children;
+          local_dominate = dominate_mask - still_dominating; 
           // Update the dominating mask
           dominate_mask = still_dominating;
         }
@@ -4165,7 +4162,8 @@ namespace Legion {
                                           RegionTreeNode *logical_node,
                                           VersionTracker *src_version_tracker,
                                           CopyAcrossHelper *across_helper,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions)
+                 const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
+                       LegionMap<ApEvent,FieldMask>::aligned &postconditions)
     //--------------------------------------------------------------------------
     {
       // Make a temporary instance and issue copies to it
@@ -4204,13 +4202,14 @@ namespace Legion {
       // then copy back to the original destination, we know there
       // are no local preconditions because this is a temporary instance
       LegionMap<ApEvent,FieldMask>::aligned empty_pre, local_pre, local_reduce;
-      // If we're making a temporary we are already at the dominate node
-      FieldMask empty_dominate;
       issue_deferred_copies(info, temporary_dst, temp_mask, src_version_tracker,
-                            temporary_dst->logical_node, empty_pre, local_pre,
-                            local_reduce, across_helper, empty_dominate,
+                            logical_node, empty_pre, local_pre,
+                            local_reduce, across_helper, temp_mask,
                             false/*check overwrite*/, false/*already ready*/);
-      // Merge any local reduces into the preconditons
+      // Merge the destination preconditions
+      if (!dst_preconditions.empty())
+        local_pre.insert(dst_preconditions.begin(), dst_preconditions.end());
+      // Also merge any local reduces into the preconditons
       if (!local_reduce.empty())
         local_pre.insert(local_reduce.begin(), local_reduce.end());
       // Compute the event sets
