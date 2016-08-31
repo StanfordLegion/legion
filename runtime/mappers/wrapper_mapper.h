@@ -97,6 +97,11 @@ public:
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
                                              SelectTaskSrcOutput& output);
+      void create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output);
        void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
@@ -112,6 +117,11 @@ public:
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
+      void create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output);
        void report_profiling(const MapperContext         ctx,
                                     const InlineMapping&        inline_op,
                                     const InlineProfilingInfo&  input);
@@ -127,6 +137,11 @@ public:
        void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
+      void create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output);
        void report_profiling(const MapperContext      ctx,
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input);
@@ -139,6 +154,11 @@ public:
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
+       void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output);
        void report_profiling(const MapperContext       ctx,
                                     const Close&              close,
                                     const CloseProfilingInfo& input);
@@ -162,6 +182,11 @@ public:
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output);
+      void create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output);
        void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);

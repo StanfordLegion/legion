@@ -1193,6 +1193,14 @@ std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
 			dmapper->select_task_sources(ctx, task, input, output);
 		}
 
+      		void WrapperMapper::create_task_temporary_instance(
+                                    const MapperContext              ctx,
+                                    const Task&                      task,
+                                    const CreateTaskTemporaryInput&  input,
+                                          CreateTaskTemporaryOutput& output){
+			dmapper->create_task_temporary_instance(ctx, task, input, output);
+		}
+		
 		void WrapperMapper::speculate(const MapperContext      ctx,
 		const Task&              task,
 		SpeculativeOutput& output){
@@ -1219,6 +1227,14 @@ std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
 			dmapper->select_inline_sources(ctx, inline_op, input, output);
 		}
 
+      		void WrapperMapper::create_inline_temporary_instance(
+                                  const MapperContext                ctx,
+                                  const InlineMapping&               inline_op,
+                                  const CreateInlineTemporaryInput&  input,
+                                        CreateInlineTemporaryOutput& output){
+			dmapper->create_inline_temporary_instance(ctx, inline_op, input, output);
+		}
+
 		void WrapperMapper::report_profiling(const MapperContext         ctx,
 		const InlineMapping&        inline_op,
 		const InlineProfilingInfo&  input){
@@ -1237,6 +1253,14 @@ std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
 		const SelectCopySrcInput&    input,
 		SelectCopySrcOutput&   output){
 			dmapper->select_copy_sources(ctx, copy, input, output);
+		}
+
+      		 void WrapperMapper::create_copy_temporary_instance(
+                                  const MapperContext              ctx,
+                                  const Copy&                      copy,
+                                  const CreateCopyTemporaryInput&  input,
+                                        CreateCopyTemporaryOutput& output){
+			dmapper->create_copy_temporary_instance(ctx, copy, input, output);
 		}
 
 		void WrapperMapper::speculate(const MapperContext      ctx,
@@ -1265,6 +1289,14 @@ std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
 			dmapper->select_close_sources(ctx, close, input, output);
 		}
 
+      		void WrapperMapper::create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output){
+			dmapper->create_close_temporary_instance(ctx, close, input, output);
+		}
+	
 		void WrapperMapper::report_profiling(const MapperContext       ctx,
 		const Close&              close,
 		const CloseProfilingInfo& input){
@@ -1304,6 +1336,14 @@ std::cout<<local_proc.id<<"->"<<WrapperMapper::stop_procs.size()<<"\n";
 			dmapper->select_release_sources(ctx, release, input, output);
 		}
 
+      		 void WrapperMapper::create_release_temporary_instance(
+                                   const MapperContext                 ctx,
+                                   const Release&                      release,
+                                   const CreateReleaseTemporaryInput&  input,
+                                         CreateReleaseTemporaryOutput& output){
+			dmapper->create_release_temporary_instance(ctx, release, input, output);
+		}
+	
 		void WrapperMapper::speculate(const MapperContext         ctx,
 		const Release&              release,
 		SpeculativeOutput&    output){
