@@ -261,7 +261,6 @@ void top_level_task(const Task *task,
         spmd_launcher.add_region_requirement(
             RegionRequirement(ghost_right[color-1], READ_ONLY,
                               SIMULTANEOUS, ghost_right[color-1]));
-      spmd_launcher.region_requirements[2].flags = NO_ACCESS_FLAG;
       // Right Ghost
       if (color == (num_subregions-1))
         spmd_launcher.add_region_requirement(
@@ -271,7 +270,6 @@ void top_level_task(const Task *task,
         spmd_launcher.add_region_requirement(
             RegionRequirement(ghost_left[color+1], READ_ONLY,
                               SIMULTANEOUS, ghost_left[color+1]));
-      spmd_launcher.region_requirements[3].flags = NO_ACCESS_FLAG;
       for (unsigned idx = 0; idx < 4; idx++)
         spmd_launcher.add_field(idx, FID_GHOST);
 
