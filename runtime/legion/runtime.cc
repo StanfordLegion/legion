@@ -1551,6 +1551,214 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // MPI Legion Handshake Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MPIRankTable::MPIRankTable(Runtime *rt)
+      : runtime(rt), participating(int(runtime->address_space) <
+          Runtime::legion_collective_participating_spaces),
+        reservation(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      // We already have our contributions for each stage so
+      // we can set the inditial participants to 1
+      if (participating)
+        stage_notifications.resize(Runtime::legion_collective_stages, 1);
+    }
+    
+    //--------------------------------------------------------------------------
+    MPIRankTable::MPIRankTable(const MPIRankTable &rhs)
+      : runtime(NULL), participating(false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MPIRankTable::~MPIRankTable(void)
+    //--------------------------------------------------------------------------
+    {
+      reservation.destroy_reservation();
+      reservation = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    MPIRankTable& MPIRankTable::operator=(const MPIRankTable &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::perform_rank_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(Runtime::mpi_rank >= 0);
+#endif
+      // Add ourselves to the set first
+      // Have to hold the lock in case we are already receiving
+      {
+        AutoLock r_lock(reservation);
+        forward_mapping[Runtime::mpi_rank] = runtime->address_space;
+      }
+      // We can skip this part if there are not multiple nodes
+      if (runtime->total_address_spaces > 1)
+      {
+        done_event = Runtime::create_rt_user_event();
+        // See if we are participating node or not
+        if (participating)
+        {
+          // We are a participating node
+          // See if we are waiting for an initial notification
+          // if not we can just send our message now
+          if ((int(runtime->total_address_spaces) ==
+                Runtime::legion_collective_participating_spaces) ||
+              (runtime->address_space >= (runtime->total_address_spaces -
+                Runtime::legion_collective_participating_spaces)))
+            send_stage(0);
+        }
+        else
+        {
+          // We are not a participating node
+          // so we just have to send notification to one node
+          send_stage(-1);
+        }
+        // Wait for our done event to be ready
+        done_event.wait();
+      }
+#ifdef DEBUG_LEGION
+      assert(forward_mapping.size() == runtime->total_address_spaces);
+#endif
+      // Reverse the mapping
+      for (std::map<int,AddressSpace>::const_iterator it = 
+            forward_mapping.begin(); it != forward_mapping.end(); it++)
+        reverse_mapping[it->second] = it->first;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::send_stage(int stage) const
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(stage);
+        AutoLock r_lock(reservation,1,false/*exclusive*/);
+        rez.serialize<size_t>(forward_mapping.size());
+        for (std::map<int,AddressSpace>::const_iterator it = 
+              forward_mapping.begin(); it != forward_mapping.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      if (stage == -1)
+      {
+        if (participating)
+        {
+          AddressSpaceID target = runtime->address_space +
+            Runtime::legion_collective_participating_spaces;
+#ifdef DEBUG_LEGION
+          assert(target < runtime->total_address_spaces);
+#endif
+          runtime->send_mpi_rank_exchange(target, rez);
+        }
+        else
+        {
+          AddressSpaceID target = runtime->address_space % 
+            Runtime::legion_collective_participating_spaces;
+          runtime->send_mpi_rank_exchange(target, rez);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(stage >= 0);
+#endif
+        for (int r = 1; r < Runtime::legion_collective_radix; r++)
+        {
+          AddressSpaceID target = runtime->address_space ^
+            (r << (stage * Runtime::legion_collective_log_radix));
+#ifdef DEBUG_LEGION
+          assert(int(target) < Runtime::legion_collective_participating_spaces);
+#endif
+          runtime->send_mpi_rank_exchange(target, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MPIRankTable::handle_mpi_rank_exchange(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      int stage;
+      derez.deserialize(stage);
+      bool send_next = unpack_exchange(stage, derez);
+      if (stage == -1)
+      {
+        if (participating)
+          send_stage(0);
+        else
+          Runtime::trigger_event(done_event);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(participating);
+#endif
+        if (send_next)
+        {
+          stage += 1;
+          if (stage == Runtime::legion_collective_stages)
+          {
+            // We are done
+            Runtime::trigger_event(done_event);
+            // See if we have to send a message back to a
+            // non-participating node
+            if ((int(runtime->total_address_spaces) > 
+                Runtime::legion_collective_participating_spaces) &&
+              (int(runtime->address_space) < int(runtime->total_address_spaces -
+                Runtime::legion_collective_participating_spaces)))
+              send_stage(-1);
+          }
+          else // Send the next stage
+            send_stage(stage);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MPIRankTable::unpack_exchange(int stage, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_entries;
+      derez.deserialize(num_entries);
+      AutoLock r_lock(reservation);
+      for (unsigned idx = 0; idx < num_entries; idx++)
+      {
+        int rank;
+        derez.deserialize(rank);
+        derez.deserialize(forward_mapping[rank]);
+      }
+      if (stage >= 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage < int(stage_notifications.size()));
+#endif
+        stage_notifications[stage]++;
+        if (stage_notifications[stage] == (Runtime::legion_collective_radix))
+          return true;
+      }
+      return false;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Processor Manager 
     /////////////////////////////////////////////////////////////
 
@@ -5306,6 +5514,11 @@ namespace Legion {
               runtime->handle_top_level_task_complete(derez);
               break;
             }
+          case SEND_MPI_RANK_EXCHANGE:
+            {
+              runtime->handle_mpi_rank_exchange(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               runtime->handle_shutdown_notification(derez,remote_address_space);
@@ -7856,57 +8069,6 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::construct_mpi_rank_tables(Processor proc, int rank)
-    //--------------------------------------------------------------------------
-    {
-      // Initialize our mpi rank event
-      Runtime::mpi_rank_event = Runtime::create_rt_user_event();
-      // Now broadcast our address space and rank to all the other nodes
-      MPIRankArgs args;
-      args.hlr_id = HLR_MPI_RANK_ID;
-      args.mpi_rank = rank;
-      args.source_space = address_space;
-      std::set<AddressSpace> sent_targets;
-      Machine::ProcessorQuery all_procs(machine);
-      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
-            it != all_procs.end(); it++)
-      {
-        AddressSpace target_space = it->address_space();
-        if (target_space == address_space)
-          continue;
-        if (sent_targets.find(target_space) != sent_targets.end())
-          continue;
-        Processor::Kind kind = it->kind();
-        if (kind != Processor::LOC_PROC)
-          continue;
-        issue_runtime_meta_task(&args, sizeof(args), HLR_MPI_RANK_ID, 
-                                HLR_LATENCY_PRIORITY, NULL,
-                                RtEvent::NO_RT_EVENT, *it);
-        sent_targets.insert(target_space);
-      }
-      // Now set our own value, update the count, and see if we're done
-      Runtime::mpi_rank_table[rank] = address_space;
-      unsigned count = 
-        __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
-      const size_t total_ranks = machine.get_address_space_count();
-      if (count == total_ranks)
-        Runtime::trigger_event(mpi_rank_event);
-      // Wait on the event
-      mpi_rank_event.wait();
-      // Once we've triggered, then we can build the maps
-      for (unsigned local_rank = 0; local_rank < count; local_rank++)
-      {
-        AddressSpace local_space = Runtime::mpi_rank_table[local_rank];
-#ifdef DEBUG_LEGION
-        assert(reverse_mpi_mapping.find(local_space) == 
-               reverse_mpi_mapping.end());
-#endif
-        forward_mpi_mapping[local_rank] = local_space;
-        reverse_mpi_mapping[local_space] = local_rank;
       }
     }
 
@@ -13070,34 +13232,40 @@ namespace Legion {
     const std::map<int,AddressSpace>& Runtime::find_forward_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (forward_mpi_mapping.empty())
+      if (mpi_rank_table == NULL)
       {
-        log_run.error("Forward MPI mapping call not supported with "
-                            "calling configure_MPI_interoperability during "
-                            "start up");
+        log_run.error("Forward MPI mapping call not supported without "
+                      "calling configure_MPI_interoperability during "
+                      "start up");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED);
       }
-      return forward_mpi_mapping;
+#ifdef DEBUG_LEGION
+      assert(!mpi_rank_table->forward_mapping.empty());
+#endif
+      return mpi_rank_table->forward_mapping;
     }
 
     //--------------------------------------------------------------------------
     const std::map<AddressSpace,int>& Runtime::find_reverse_MPI_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (reverse_mpi_mapping.empty())
+      if (mpi_rank_table == NULL)
       {
-        log_run.error("Reverse MPI mapping call not supported with "
-                            "calling configure_MPI_interoperability during "
-                            "start up");
+        log_run.error("Reverse MPI mapping call not supported without "
+                      "calling configure_MPI_interoperability during "
+                      "start up");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED);
       }
-      return reverse_mpi_mapping;
+#ifdef DEBUG_LEGION
+      assert(!mpi_rank_table->reverse_mapping.empty());
+#endif
+      return mpi_rank_table->reverse_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -15007,6 +15175,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_MPI_RANK_EXCHANGE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15929,6 +16105,16 @@ namespace Legion {
       assert(address_space == 0); // should only happen on node 0
 #endif
       decrement_outstanding_top_level_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_mpi_rank_exchange(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(Runtime::mpi_rank_table != NULL);
+#endif
+      Runtime::mpi_rank_table->handle_mpi_rank_exchange(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -19065,11 +19251,13 @@ namespace Legion {
     /*static*/ bool Runtime::enable_test_mapper = false;
     /*static*/ bool Runtime::legion_ldb_enabled = false;
     /*static*/ const char* Runtime::replay_file = NULL;
+    /*static*/ int Runtime::legion_collective_radix = 
+                                     LEGION_COLLECTIVE_RADIX; 
+    /*static*/ int Runtime::legion_collective_log_radix = 0;
+    /*static*/ int Runtime::legion_collective_stages = 0;
+    /*static*/ int Runtime::legion_collective_participating_spaces = 0;
     /*static*/ int Runtime::mpi_rank = -1;
-    /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
-    /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
-    /*static*/ RtUserEvent Runtime::mpi_rank_event = 
-      RtUserEvent::NO_RT_USER_EVENT;
+    /*static*/ MPIRankTable* Runtime::mpi_rank_table = NULL;
     /*static*/ std::vector<MPILegionHandshake>* 
                       Runtime::pending_handshakes = NULL;
     /*static*/ bool Runtime::program_order_execution = false;
@@ -19108,18 +19296,7 @@ namespace Legion {
       bool ok = 
 #endif
         realm.init(&argc, &argv);
-      assert(ok);
-
-      // If we have any pending MPI handshakes, we can initialize them now
-      if (pending_handshakes != NULL)
-      {
-        for (std::vector<MPILegionHandshake>::const_iterator it = 
-              pending_handshakes->begin(); it != 
-              pending_handshakes->end(); it++)
-          it->impl->initialize();
-        delete pending_handshakes;
-        pending_handshakes = NULL;
-      }
+      assert(ok); 
       
       {
 	const ReductionOpTable& red_table = get_reduction_table();
@@ -19153,6 +19330,7 @@ namespace Legion {
         // static initialization properly (always risky).
         the_runtime = NULL;
         runtime_map = NULL;
+        mpi_rank_table = NULL;
         separate_runtime_instances = false;
         record_registration = false;
         stealing_disabled = false;
@@ -19182,6 +19360,10 @@ namespace Legion {
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
         program_order_execution = false;
         num_profiling_nodes = 0;
+        legion_collective_radix = LEGION_COLLECTIVE_RADIX;
+        legion_collective_log_radix = 0;
+        legion_collective_stages = 0;
+        legion_collective_participating_spaces = 0;
 #ifdef DEBUG_LEGION
         logging_region_tree_state = false;
         verbose_logging = false;
@@ -19471,6 +19653,27 @@ namespace Legion {
           (separate_runtime_instances ? Processor::NO_KIND : 
            Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
           !separate_runtime_instances, tasks_registered));
+      // See if we need to do any initialization for MPI interoperability
+      if (mpi_rank >= 0)
+      {
+        // Do another collective to construct the rank tables
+        RtEvent mpi_init_event(realm.collective_spawn_by_kind(
+              Processor::LOC_PROC, HLR_MPI_INTEROP_ID, NULL, 0,
+              true/*one per node*/, runtime_startup_event));
+        // The mpi init event then becomes the new runtime startup event
+        runtime_startup_event = mpi_init_event;
+        // If we have any pending MPI handshakes, we need to initialize them now
+        if (pending_handshakes != NULL)
+        {
+          for (std::vector<MPILegionHandshake>::const_iterator it = 
+                pending_handshakes->begin(); it != 
+                pending_handshakes->end(); it++)
+            it->impl->initialize();
+          delete pending_handshakes;
+          pending_handshakes = NULL;
+        }
+      }
+
       // See if we are supposed to start the top-level task
       if (top_level_proc.exists())
       {
@@ -19831,6 +20034,7 @@ namespace Legion {
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
+      CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -19857,6 +20061,9 @@ namespace Legion {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                 HLR_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
+        registered_events.insert(RtEvent(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                          HLR_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
       }
       if (record_registration)
       {
@@ -20140,9 +20347,18 @@ namespace Legion {
       // the static constraints so we get a valid layout constraint ID
       VirtualManager::initialize_virtual_instance(local_rt, 
                                                   0/*same across nodes*/);
+      // Configure our collective settings
+      if (address_spaces.size() > 1)
+        configure_collective_settings(address_spaces.size());
       // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
-        local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
+      {
+#ifdef DEBUG_LEGION
+        assert(!separate_runtime_instances);
+        assert(mpi_rank_table == NULL);
+#endif
+        mpi_rank_table = new MPIRankTable(local_rt); 
+      }
       // Finally do the application initialization of mappers
       local_rt->initialize_mappers();
     }
@@ -20395,18 +20611,6 @@ namespace Legion {
               (FuturePredOp::ResolveFuturePredArgs*)args;
             resolve_args->future_pred_op->resolve_future_predicate();
             resolve_args->future_pred_op->remove_predicate_reference();
-            break;
-          }
-        case HLR_MPI_RANK_ID:
-          {
-            MPIRankArgs *margs = (MPIRankArgs*)args;
-            Runtime::mpi_rank_table[margs->mpi_rank] = margs->source_space;
-            unsigned count = 
-              __sync_fetch_and_add(&Runtime::remaining_mpi_notifications, 1);
-            const size_t total_ranks = 
-              Machine::get_machine().get_address_space_count();
-            if (count == total_ranks)
-              Runtime::trigger_event(Runtime::mpi_rank_event);
             break;
           }
         case HLR_CONTRIBUTE_COLLECTIVE_ID:
@@ -20699,6 +20903,59 @@ namespace Legion {
     {
       Runtime *rt = Runtime::get_runtime(p);
       rt->launch_top_level_task(p);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::init_mpi_interop(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mpi_rank_table != NULL);
+#endif
+      mpi_rank_table->perform_rank_exchange();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::configure_collective_settings(int total_spaces)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(legion_collective_radix > 0);
+#endif
+      const int MultiplyDeBruijnBitPosition[32] = 
+      {
+        0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
+          8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
+      };
+      // First adjust the radix based on the number of nodes if necessary
+      if (legion_collective_radix > total_spaces)
+        legion_collective_radix = total_spaces;
+      // Adjust the radix to the next smallest power of 2
+      uint32_t radix_copy = legion_collective_radix;
+      for (int i = 0; i < 5; i++)
+        radix_copy |= radix_copy >> (1 << i);
+      int legion_collective_log_radix = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(radix_copy * 0x07C4ACDDU) >> 27];
+      if (legion_collective_radix != (1 << legion_collective_log_radix))
+        legion_collective_radix = (1 << legion_collective_log_radix);
+
+      // Compute the number of stages
+      uint32_t node_copy = total_spaces;
+      for (int i = 0; i < 5; i++)
+        node_copy |= node_copy >> (1 << i);
+      // Now we have it log 2
+      int log_nodes = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
+      legion_collective_stages = log_nodes / legion_collective_log_radix;;
+      legion_collective_participating_spaces = 
+        (1 << (legion_collective_stages * legion_collective_log_radix));
+#ifdef DEBUG_LEGION
+      assert(
+       (legion_collective_participating_spaces % legion_collective_radix) == 0);
+#endif
     }
 
     //--------------------------------------------------------------------------

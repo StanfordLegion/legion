@@ -425,6 +425,31 @@ namespace Legion {
       ApUserEvent mpi_ready, legion_ready;
     };
 
+    class MPIRankTable {
+    public:
+      MPIRankTable(Runtime *runtime);
+      MPIRankTable(const MPIRankTable &rhs);
+      ~MPIRankTable(void);
+    public:
+      MPIRankTable& operator=(const MPIRankTable &rhs);
+    public:
+      void perform_rank_exchange(void);
+      void handle_mpi_rank_exchange(Deserializer &derez);
+    protected:
+      void send_stage(int stage) const;
+      bool unpack_exchange(int stage, Deserializer &derez);
+    public:
+      Runtime *const runtime;
+      const bool participating;
+    public:
+      std::map<int,AddressSpace> forward_mapping;
+      std::map<AddressSpace,int> reverse_mapping;
+    protected:
+      Reservation reservation;
+      RtUserEvent done_event;
+      std::vector<int> stage_notifications;
+    };
+
     /**
      * \class ProcessorManager
      * This class manages all the state for a single processor
@@ -1244,11 +1269,6 @@ namespace Legion {
         TaskOp *task;
         bool prev_fail;
       };
-      struct MPIRankArgs {
-        HLRTaskID hlr_id;
-        int mpi_rank;
-        AddressSpace source_space;
-      };
       struct CollectiveFutureArgs {
         HLRTaskID hlr_id;
         ReductionOpID redop;
@@ -1299,7 +1319,6 @@ namespace Legion {
       void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
-      void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
@@ -1975,6 +1994,7 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
+      void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2128,6 +2148,7 @@ namespace Legion {
       void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
+      void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2414,6 +2435,11 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void init_mpi_interop(const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
+    protected:
+      static void configure_collective_settings(int total_spaces);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2507,10 +2533,6 @@ namespace Legion {
       Reservation projection_lock;
       std::map<ProjectionID,
         std::pair<ProjectionFunctor*,Reservation> > projection_functors;
-    protected:
-      // For MPI Inter-operability
-      std::map<int,AddressSpace> forward_mpi_mapping;
-      std::map<AddressSpace,int> reverse_mpi_mapping; 
     protected:
       Reservation group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
@@ -2735,10 +2757,14 @@ namespace Legion {
       static bool enable_test_mapper;
       static bool legion_ldb_enabled;
       static const char* replay_file;
+      // Collective settings
+      static int legion_collective_radix;
+      static int legion_collective_log_radix;
+      static int legion_collective_stages;
+      static int legion_collective_participating_spaces;
+      // MPI Interoperability
       static int mpi_rank;
-      static unsigned mpi_rank_table[MAX_NUM_NODES];
-      static unsigned remaining_mpi_notifications;
-      static RtUserEvent mpi_rank_event;
+      static MPIRankTable *mpi_rank_table;
       static std::vector<MPILegionHandshake> *pending_handshakes;
 #ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
