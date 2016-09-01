@@ -5861,7 +5861,7 @@ class Operation(object):
             FILL_OP_KIND : "darkorange1",
             ACQUIRE_OP_KIND : "darkolivegreen",
             RELEASE_OP_KIND : "darksalmon",
-            DELETION_OP_KIND : "dodgerblue3",
+            DELETION_OP_KIND : "maroon",
             ATTACH_OP_KIND : "firebrick1",
             DETACH_OP_KIND : "cornflowerblue",
             DEP_PART_OP_KIND : "steelblue",
