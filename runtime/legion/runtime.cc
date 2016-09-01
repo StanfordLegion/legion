@@ -1433,9 +1433,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(int mpi_parts, 
+    MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool init_mpi, int mpi_parts,
                                                    int legion_parts)
-      : mpi_participants(mpi_parts), legion_participants(legion_parts)
+      : init_in_MPI(init_mpi), mpi_participants(mpi_parts), 
+        legion_participants(legion_parts)
     //--------------------------------------------------------------------------
     {
     }
@@ -1443,7 +1444,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPILegionHandshakeImpl::MPILegionHandshakeImpl(
                                               const MPILegionHandshakeImpl &rhs)
-      : mpi_participants(-1), legion_participants(-1)
+      : init_in_MPI(false), mpi_participants(-1), legion_participants(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1481,6 +1482,17 @@ namespace Legion {
       // Advance the two wait barriers
       Runtime::advance_barrier(mpi_wait_barrier);
       Runtime::advance_barrier(legion_wait_barrier);
+      // Whoever is waiting first, we have to advance their arrive barriers
+      if (init_in_MPI)
+      {
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::advance_barrier(mpi_wait_barrier);
+      }
+      else
+      {
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::advance_barrier(legion_wait_barrier);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -3822,15 +3822,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(pending_subtasks > 0);
 #endif
+      pending_subtasks--;
       if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == context_configuration.min_tasks_to_schedule))
+          (pending_subtasks < context_configuration.min_tasks_to_schedule))
       {
         wait_on = context_order_event;
         to_trigger = Runtime::create_rt_user_event();
         context_order_event = to_trigger;
         currently_active_context = true;
       }
-      pending_subtasks--;
       // Release the lock before doing the trigger or the wait
       op_lock.release();
       // Do anything that we need to do
@@ -3885,15 +3885,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(pending_frames > 0);
 #endif
+        pending_frames--;
         if ((outstanding_subtasks > 0) &&
-            (pending_frames == context_configuration.min_frames_to_schedule))
+            (pending_frames < context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
           currently_active_context = true;
         }
-        pending_frames--;
       }
       if (to_trigger.exists())
       {

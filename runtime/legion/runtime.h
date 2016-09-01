@@ -396,7 +396,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      MPILegionHandshakeImpl(int mpi_participants, 
+      MPILegionHandshakeImpl(bool init_in_MPI, int mpi_participants, 
                              int legion_participants);
       MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
       ~MPILegionHandshakeImpl(void);
@@ -415,6 +415,7 @@ namespace Legion {
       PhaseBarrier get_legion_arrive_phase_barrier(void);
       void advance_legion_handshake(void);
     private:
+      const bool init_in_MPI;
       const int mpi_participants;
       const int legion_participants;
     private:
