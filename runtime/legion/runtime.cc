@@ -1498,7 +1498,15 @@ namespace Legion {
       // Wait for mpi to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      mpi_wait_barrier.phase_barrier.external_wait();
+      if (!mpi_wait_barrier.phase_barrier.has_triggered())
+      {
+        // We can't call external wait directly on the barrier
+        // right now, so as a work-around we'll make an event
+        // and then wait on that
+        ApUserEvent wait_on = Runtime::create_ap_user_event();
+        Runtime::trigger_event(wait_on, mpi_wait_barrier.phase_barrier);
+        wait_on.external_wait();
+      }
       // Now we can advance our wait barrier
       Runtime::advance_barrier(mpi_wait_barrier);
     }
