@@ -396,12 +396,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      enum ControlState {
-        IN_MPI,
-        IN_LEGION,
-      };
-    public:
-      MPILegionHandshakeImpl(bool in_mpi, int mpi_participants, 
+      MPILegionHandshakeImpl(int mpi_participants, 
                              int legion_participants);
       MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
       ~MPILegionHandshakeImpl(void);
@@ -415,14 +410,18 @@ namespace Legion {
     public:
       void legion_handoff_to_mpi(void);
       void legion_wait_on_mpi(void);
+    public:
+      PhaseBarrier get_legion_wait_phase_barrier(void);
+      PhaseBarrier get_legion_arrive_phase_barrier(void);
+      void advance_legion_handshake(void);
     private:
       const int mpi_participants;
       const int legion_participants;
-      ControlState state;
     private:
-      int mpi_count, legion_count;
-    private:
-      ApUserEvent mpi_ready, legion_ready;
+      PhaseBarrier mpi_wait_barrier;
+      PhaseBarrier mpi_arrive_barrier;
+      PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
+      PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
     };
 
     class MPIRankTable {

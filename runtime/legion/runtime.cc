@@ -1433,10 +1433,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool in_mpi, int mpi_parts, 
+    MPILegionHandshakeImpl::MPILegionHandshakeImpl(int mpi_parts, 
                                                    int legion_parts)
-      : mpi_participants(mpi_parts), legion_participants(legion_parts),
-        state(in_mpi ? IN_MPI : IN_LEGION), mpi_count(0), legion_count(0)
+      : mpi_participants(mpi_parts), legion_participants(legion_parts)
     //--------------------------------------------------------------------------
     {
     }
@@ -1455,12 +1454,8 @@ namespace Legion {
     MPILegionHandshakeImpl::~MPILegionHandshakeImpl(void)
     //--------------------------------------------------------------------------
     {
-      // Trigger any leftover events to give them 
-      // back to the low-level runtime
-      if (!mpi_ready.has_triggered())
-        Runtime::trigger_event(mpi_ready);
-      if (!legion_ready.has_triggered())
-        Runtime::trigger_event(legion_ready);
+      mpi_wait_barrier.get_barrier().destroy_barrier();
+      legion_wait_barrier.get_barrier().destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -1477,76 +1472,78 @@ namespace Legion {
     void MPILegionHandshakeImpl::initialize(void)
     //--------------------------------------------------------------------------
     {
-      mpi_ready = Runtime::create_ap_user_event();
-      legion_ready = Runtime::create_ap_user_event();
+      mpi_wait_barrier = PhaseBarrier(ApBarrier(
+            Realm::Barrier::create_barrier(legion_participants)));
+      legion_wait_barrier = PhaseBarrier(ApBarrier(
+            Realm::Barrier::create_barrier(mpi_participants)));
+      mpi_arrive_barrier = legion_wait_barrier;
+      legion_arrive_barrier = mpi_wait_barrier;
     }
 
     //--------------------------------------------------------------------------
     void MPILegionHandshakeImpl::mpi_handoff_to_legion(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(state == IN_MPI);
-#endif
-      const int count = __sync_add_and_fetch(&mpi_count, 1);
-      if (count == mpi_participants)
-      {
-        if (mpi_ready.has_triggered())
-          mpi_ready = Runtime::create_ap_user_event();
-        // Reset the count for the next iteration
-        mpi_count = 0;
-        // Switch the state to being in Legion
-        state = IN_LEGION;
-        // Now tell all the Legion threads that we are ready
-        Runtime::trigger_event(legion_ready);
-      }
+      // Just have to do our arrival
+      Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
     void MPILegionHandshakeImpl::mpi_wait_on_legion(void)
     //--------------------------------------------------------------------------
     {
+      // When we get this call, we know we have done 
+      // all the arrivals so we can advance it
+      Runtime::advance_barrier(mpi_arrive_barrier);
       // Wait for mpi to be ready to run
       // Note we use the external wait to be sure 
-      // we don't get drafted by the low-level runtime
-      mpi_ready.external_wait();
-#ifdef DEBUG_LEGION
-      assert(state == IN_MPI);
-#endif
+      // we don't get drafted by the Realm runtime
+      mpi_wait_barrier.phase_barrier.external_wait();
+      // Now we can advance our wait barrier
+      Runtime::advance_barrier(mpi_wait_barrier);
     }
 
     //--------------------------------------------------------------------------
     void MPILegionHandshakeImpl::legion_handoff_to_mpi(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(state == IN_LEGION);
-#endif
-      const int count = __sync_add_and_fetch(&legion_count, 1);
-      if (count == legion_participants)
-      {
-        if (legion_ready.has_triggered())
-          legion_ready = Runtime::create_ap_user_event();
-        // Reset the count for the next iteration
-        legion_count = 0;
-        // Switch the state to being in MPI
-        state = IN_MPI;
-        // Now tell all the MPI threads that we are ready
-        Runtime::trigger_event(mpi_ready);
-      }
+      // Just have to do our arrival
+      Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
     }
 
     //--------------------------------------------------------------------------
     void MPILegionHandshakeImpl::legion_wait_on_mpi(void)
     //--------------------------------------------------------------------------
     {
+      Runtime::advance_barrier(legion_arrive_barrier);
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
-      // low-level runtime here
-      legion_ready.wait();
-#ifdef DEBUG_LEGION
-      assert(state == IN_LEGION);
-#endif
+      // Realm runtime here
+      legion_wait_barrier.phase_barrier.wait();
+      // Now we can advance our wait barrier
+      Runtime::advance_barrier(legion_wait_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier MPILegionHandshakeImpl::get_legion_wait_phase_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      return legion_wait_barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier MPILegionHandshakeImpl::get_legion_arrive_phase_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      return legion_arrive_barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void MPILegionHandshakeImpl::advance_legion_handshake(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::advance_barrier(legion_wait_barrier);
+      Runtime::advance_barrier(legion_arrive_barrier);
     }
 
     /////////////////////////////////////////////////////////////

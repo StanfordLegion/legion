@@ -1524,7 +1524,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshake::mpi_handoff_to_legion(void)
+    void MPILegionHandshake::mpi_handoff_to_legion(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1534,7 +1534,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshake::mpi_wait_on_legion(void)
+    void MPILegionHandshake::mpi_wait_on_legion(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1544,7 +1544,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshake::legion_handoff_to_mpi(void)
+    void MPILegionHandshake::legion_handoff_to_mpi(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1554,13 +1554,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPILegionHandshake::legion_wait_on_mpi(void)
+    void MPILegionHandshake::legion_wait_on_mpi(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
       impl->legion_wait_on_mpi();
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier MPILegionHandshake::get_legion_wait_phase_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->get_legion_wait_phase_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    PhaseBarrier MPILegionHandshake::get_legion_arrive_phase_barrier(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->get_legion_arrive_phase_barrier();
+    }
+    
+    //--------------------------------------------------------------------------
+    void MPILegionHandshake::advance_legion_handshake(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->advance_legion_handshake();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4088,7 +4118,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ MPILegionHandshake Runtime::create_handshake(
-                                                        bool init_in_MPI,
                                                         int mpi_participants,
                                                         int legion_participants)
     //--------------------------------------------------------------------------
@@ -4098,7 +4127,7 @@ namespace Legion {
       assert(legion_participants > 0);
 #endif
       MPILegionHandshake result(
-          Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
+          Internal::legion_new<Internal::MPILegionHandshakeImpl>(
                                        mpi_participants, legion_participants));
       Internal::Runtime::register_handshake(result);
       return result;

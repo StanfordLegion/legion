@@ -107,6 +107,7 @@ namespace Legion {
   class Release;
   class Close;
   class Runtime;
+  class MPILegionHandshake;
   // For backwards compatibility
   typedef Runtime HighLevelRuntime;
   // Helper for saving instantiated template functions
@@ -1279,6 +1280,7 @@ namespace Legion {
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
+    friend class Internal::MPILegionHandshakeImpl;          \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
