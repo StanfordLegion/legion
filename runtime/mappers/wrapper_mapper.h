@@ -32,20 +32,15 @@ namespace Legion {
 
 		public:
 			Mapper* dmapper;
-			static std::vector<int> tasks_list;
 			static std::map<std::string, int> tasks_map;
-			static std::vector<int> functions_list;
 			static std::map<int, int> methods_map;
 			static std::set<Memory> all_mems;
 			static std::set<Processor> all_procs;
-			static std::vector<Memory> mems_list;
-			static std::vector<Processor> procs_list;
 			static std::map<Processor, int> procs_map;
 			static std::map<int, int> procs_map_int;
-			static std::map<Memory, int> mems_map;
-			static std::map<int, std::string> task_names_map;
-			static std::vector<Processor> print_procs;	
-			static std::vector<Processor> stop_procs;	
+			//static std::map<Memory, int> mems_map;
+		//	static std::vector<Processor> print_procs;	
+		//	static std::vector<Processor> stop_procs;	
 			static bool inputtaken;
 			static bool databroadcasted;
 			static Processor ownerprocessor;

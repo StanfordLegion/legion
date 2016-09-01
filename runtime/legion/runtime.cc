@@ -7804,6 +7804,20 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
+	else if (enable_wrapper_mapper)
+	{
+	 //Make wrapper mappers for everyone
+	  for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = 
+              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
+	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, mapper_runtime, machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this,wrapper_mapper, 0, it->first);
+
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+          }
+        }
         else
         {
           // Make default mappers for everyone
@@ -7812,9 +7826,7 @@ namespace Legion {
           {
             Mapper *mapper = 
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this,wrapper_mapper, 0, it->first);
-
+            MapperManager *wrapper = wrap_mapper(this,mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
@@ -13171,9 +13183,19 @@ namespace Legion {
     void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+	MapperManager *manager;
+	if (!enable_wrapper_mapper)
+	{
+	  // First, wrap this mapper in a mapper manager
+      	  manager = wrap_mapper(this, mapper, 0, proc); 
+	}
+	else
+	{
 	Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper,mapper_runtime, machine, proc);
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, wrapper_mapper, 0, proc); 
+      	 manager = wrap_mapper(this, wrapper_mapper, 0, proc); 
+        }
+
       if (!proc.exists())
       {
         bool own = true;
@@ -19060,6 +19082,7 @@ namespace Legion {
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
     /*static*/ bool Runtime::enable_test_mapper = false;
+    /*static*/ bool Runtime::enable_wrapper_mapper = false;
     /*static*/ bool Runtime::legion_ldb_enabled = false;
     /*static*/ const char* Runtime::replay_file = NULL;
     /*static*/ int Runtime::mpi_rank = -1;
@@ -19156,6 +19179,7 @@ namespace Legion {
         legion_spy_enabled = false;
 #endif
         enable_test_mapper = false;
+        enable_wrapper_mapper = false;
         legion_ldb_enabled = false;
         replay_file = NULL;
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
@@ -19197,6 +19221,7 @@ namespace Legion {
             dynamic_independence_tests = false;
           BOOL_ARG("-hl:spy",legion_spy_enabled);
           BOOL_ARG("-hl:test",enable_test_mapper);
+          BOOL_ARG("-hl:wrapper",enable_wrapper_mapper);
           INT_ARG("-hl:delay", delay_start);
           if (!strcmp(argv[i],"-hl:replay"))
           {
