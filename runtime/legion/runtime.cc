@@ -1514,7 +1514,7 @@ namespace Legion {
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
       ApBarrier previous = Runtime::get_previous_phase(mpi_wait_barrier);
-      if (!previous.has_triggered());
+      if (!previous.has_triggered())
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
