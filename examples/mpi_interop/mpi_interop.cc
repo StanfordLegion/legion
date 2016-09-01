@@ -107,6 +107,16 @@ void top_level_task(const Task *task,
                     Context ctx, Runtime *runtime)
 {
   printf("Hello from Legion Top-Level Task\n");
+  // Both the application and Legion mappers have access to
+  // the mappings between MPI Ranks and Legion address spaces
+  // The reverse mapping goes the other way
+  const std::map<int,AddressSpace> &forward_mapping = 
+    runtime->find_forward_MPI_mapping();
+  for (std::map<int,AddressSpace>::const_iterator it = 
+        forward_mapping.begin(); it != forward_Mapping.end(); it++)
+    printf("MPI Rank %d maps to Legion Address Space %d\n", 
+            it->first, it->second);
+
   int rank = -1, size = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);

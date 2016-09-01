@@ -20372,6 +20372,7 @@ namespace Legion {
       if (address_spaces.size() > 1)
         configure_collective_settings(address_spaces.size());
       // If we have an MPI rank, then build the maps
+      // We'll initialize the mappers after the tables are built
       if (Runtime::mpi_rank >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -20380,8 +20381,8 @@ namespace Legion {
 #endif
         mpi_rank_table = new MPIRankTable(local_rt); 
       }
-      // Finally do the application initialization of mappers
-      local_rt->initialize_mappers();
+      else // We can initialize the mappers now
+        local_rt->initialize_mappers();
     }
 
     //--------------------------------------------------------------------------
@@ -20937,6 +20938,9 @@ namespace Legion {
       assert(mpi_rank_table != NULL);
 #endif
       mpi_rank_table->perform_rank_exchange();
+      // Now configure the mappers
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->initialize_mappers();
     }
 
     //--------------------------------------------------------------------------
