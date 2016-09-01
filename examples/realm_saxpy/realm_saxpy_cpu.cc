@@ -297,7 +297,7 @@ void check_result_task(const void *args, size_t arglen,
     float expected = saxpy_args->alpha * ra_x[pir.p] + ra_y[pir.p];
     float actual = ra_z[pir.p];
 
-    // FMAs are too acurate
+    // FMAs are too accurate
     float diff = (actual >= expected) ? actual - expected : expected - actual;
     float relative = diff / expected;
     if (relative < 1e-6) {

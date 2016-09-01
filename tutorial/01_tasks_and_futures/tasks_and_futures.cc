@@ -224,7 +224,7 @@ int main(int argc, char **argv)
   Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   // Note that tasks which return values must pass the type of
-  // the return argument as the first template paramenter.
+  // the return argument as the first template parameter.
   Runtime::register_legion_task<int,fibonacci_task>(FIBONACCI_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
   // The sum-task has a very special property which is that it is

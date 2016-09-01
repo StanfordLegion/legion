@@ -180,7 +180,7 @@ void top_level_task(const Task *task,
   runtime->destroy_index_space(ctx, is);
 }
 
-// Note that tasks get a physical region for every region requriement
+// Note that tasks get a physical region for every region requirement
 // that they requested when they were launched in the vector of 'regions'.
 // In some cases the mapper may have chosen not to map the logical region
 // which means that the task has the necessary privileges to access the
