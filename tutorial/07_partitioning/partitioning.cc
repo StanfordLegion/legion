@@ -108,7 +108,7 @@ void top_level_task(const Task *task,
   // regions, fields, and privileges and then determines which tasks 
   // are safe to run in parallel.
   //
-  // Data partitioning is performed on index spaces.  The paritioning 
+  // Data partitioning is performed on index spaces.  The partitioning 
   // operation is used to break an index space of points into subsets 
   // of points each of which will become a sub index space.  Partitions 
   // created on an index space are then transitively applied to all the 
@@ -130,7 +130,7 @@ void top_level_task(const Task *task,
     //
     // In this block of code we handle the case where the index space
     // of points is not evenly divisible by the desired number of
-    // subregions.  This gives us the opporunity to illustrate a
+    // subregions.  This gives us the opportunity to illustrate a
     // general approach to coloring arrays.  The general idea is
     // to create a map from colors to sub-domains.  Colors correspond
     // to the sub index spaces that will be made and each sub-domain
@@ -160,8 +160,8 @@ void top_level_task(const Task *task,
       index += num_elmts;
     }
     // Once we have computed our domain coloring we are now ready
-    // to create the partition.  Creating a partitiong simply
-    // invovles giving the Legion runtime an index space to
+    // to create the partition.  Creating a partition simply
+    // involves giving the Legion runtime an index space to
     // partition 'is', a domain of colors, and then a domain
     // coloring.  In addition the application must specify whether
     // the given partition is disjoint or not.  This example is
@@ -250,7 +250,7 @@ void top_level_task(const Task *task,
   init_launcher.region_requirements[0].add_field(FID_X);
   runtime->execute_index_space(ctx, init_launcher);
 
-  // Modify our region requirement to intiialize the other field
+  // Modify our region requirement to initialize the other field
   // in the same way.  Note that after we do this we have exposed
   // 2*num_subregions task-level parallelism to the runtime because
   // we have launched tasks that are both data-parallel on

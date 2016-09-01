@@ -104,7 +104,7 @@ void top_level_task(const Task *task,
   // For this example we'll create a single index space tree, but we
   // will make different logical regions from this index space.  The
   // index space will have two levels of partitioning.  One level for
-  // describing the partioning into pieces, and then a second level 
+  // describing the partitioning into pieces, and then a second level 
   // for capturing partitioning to describe ghost regions.
   Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
   IndexSpace is = runtime->create_index_space(ctx,
@@ -379,7 +379,7 @@ void spmd_task(const Task *task,
         copy_launcher.add_wait_barrier(args->wait_empty[idx]);
       }
       // When we are done with the copy, signal that the
-      // destination instnace is now ready
+      // destination instance is now ready
       copy_launcher.add_arrival_barrier(args->notify_ready[idx]);
       runtime->issue_copy_operation(ctx, copy_launcher);
       // Once we've issued our copy operation, advance both of

@@ -97,7 +97,7 @@ enum {
 
 // Mappers are classes that implement the
 // mapping interface declared in legion.h.
-// Legion provides a default impelmentation
+// Legion provides a default implementation
 // of this interface defined by the
 // DefaultMapper class.  Programmers can
 // implement custom mappers either by 
@@ -149,7 +149,7 @@ public:
 // function.  (See below for where we register
 // this callback with the runtime.)  The callback
 // function must have this type, which allows the
-// runtime to pass the necessary paramterers in
+// runtime to pass the necessary parameters in
 // for creating new mappers.
 //
 // In Legion, mappers are identified by a MapperID.
@@ -189,7 +189,7 @@ void mapper_registration(Machine machine, Runtime *rt,
   }
 }
 
-// Here is the constructor for our adversial mapper.
+// Here is the constructor for our adversarial mapper.
 // We'll use the constructor to illustrate how mappers can
 // get access to information regarding the current machine.
 AdversarialMapper::AdversarialMapper(Machine m, 
@@ -400,7 +400,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
 // select_task_options call.  This mapper call is
 // performed on every task launch immediately after
 // it is made.  The call asks the mapper to select 
-// set properities of the task:
+// set properties of the task:
 //
 //  inline_task - whether the task should be directly
 //    inlined into its parent task, using the parent
@@ -415,7 +415,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
 //    information about the task while it is executing
 //  target_proc - which processor should the task be
 //    sent to once all of its mapping dependences have
-//    been satisifed.
+//    been satisfied.
 //
 //  Note that these properties are all set on the Task
 //  object declared in legion.h.  The Task object is
@@ -443,7 +443,7 @@ void AdversarialMapper::select_task_options(const MapperContext ctx,
 // method. The slice_domain call is used by the runtime
 // to query the mapper about the best way to distribute
 // the points in an index space task launch throughout
-// the machine. The maper is given the task and the domain
+// the machine. The mapper is given the task and the domain
 // to slice and then asked to generate sub-domains to be
 // sent to different processors in the form of DomainSplit
 // objects. DomainSplit objects describe the sub-domain,
