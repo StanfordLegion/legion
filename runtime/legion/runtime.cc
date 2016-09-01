@@ -1478,6 +1478,8 @@ namespace Legion {
             Realm::Barrier::create_barrier(mpi_participants)));
       mpi_arrive_barrier = legion_wait_barrier;
       legion_arrive_barrier = mpi_wait_barrier;
+      // Advance the first one to arrive
+      Runtime::advance_barrier(legion_arrive_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -1498,13 +1500,14 @@ namespace Legion {
       // Wait for mpi to be ready to run
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
-      if (!mpi_wait_barrier.phase_barrier.has_triggered())
+      ApBarrier previous = Runtime::get_previous_phase(mpi_wait_barrier);
+      if (!previous.has_triggered());
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
         // and then wait on that
         ApUserEvent wait_on = Runtime::create_ap_user_event();
-        Runtime::trigger_event(wait_on, mpi_wait_barrier.phase_barrier);
+        Runtime::trigger_event(wait_on, previous);
         wait_on.external_wait();
       }
       // Now we can advance our wait barrier
@@ -1527,7 +1530,7 @@ namespace Legion {
       // Wait for Legion to be ready to run
       // No need to avoid being drafted by the
       // Realm runtime here
-      legion_wait_barrier.phase_barrier.wait();
+      legion_wait_barrier.wait();
       // Now we can advance our wait barrier
       Runtime::advance_barrier(legion_wait_barrier);
     }
