@@ -1338,7 +1338,6 @@ namespace Legion {
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
                                     const FieldMask &closing_mask,
-                                    const FieldMask &dirty_below,
                                     FieldState &closing_state,
                                     const ColorPoint &next_child, 
                                     bool allow_next_child,

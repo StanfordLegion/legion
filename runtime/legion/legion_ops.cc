@@ -5226,8 +5226,7 @@ namespace Legion {
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
                               ClosedNode *closed_t, const TraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
-                              const FieldMask &close_m, const FieldMask &split,
-                              Operation *creator)
+                              const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
       if (Runtime::legion_spy_enabled)
@@ -5238,8 +5237,6 @@ namespace Legion {
       close_mask = close_m;
       closed_tree = closed_t;
       version_info.clone_logical(clone_info, close_m, closed_t->node);
-      // Record the root split information
-      version_info.record_split_fields(closed_t->node, split);
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(requirement, restrict_info);
       if (Runtime::legion_spy_enabled)

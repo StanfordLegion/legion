@@ -1081,8 +1081,7 @@ namespace Legion {
       void initialize(SingleTask *ctx, const RegionRequirement &req,
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
-                      const FieldMask &close_mask, const FieldMask &split,
-                      Operation *create_op);
+                      const FieldMask &close_mask, Operation *create_op);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

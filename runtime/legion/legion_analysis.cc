@@ -3329,7 +3329,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalCloser::record_close_operation(const FieldMask &mask, 
-                                               const FieldMask &dirty_below,
                                                bool projection)
     //--------------------------------------------------------------------------
     {
@@ -3337,9 +3336,6 @@ namespace Legion {
       assert(!!mask);
 #endif
       normal_close_mask |= mask;
-      // Record fields that are dirty below for this close
-      if (!!dirty_below)
-        root_split_mask |= (dirty_below & mask);
       if (projection)
         closed_projections |= mask;
     }
@@ -3358,16 +3354,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::record_flush_only_close(const FieldMask &mask,
-                                                const FieldMask &dirty_below)
+    void LogicalCloser::record_flush_only_close(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
 #endif
       flush_only_close_mask |= mask;
-      if (!!dirty_below)
-        flush_split_mask |= (dirty_below & mask);
     }
 
     //--------------------------------------------------------------------------
@@ -3444,8 +3437,7 @@ namespace Legion {
         // Now initialize the operation
         normal_close_op->initialize(creator->get_parent(), req, finder->second,
                                     trace_info, trace_info.req_idx, 
-                                    ver_info, normal_close_mask,
-                                    root_split_mask, creator);
+                                    ver_info, normal_close_mask, creator);
         // We can clear this now
         closed_nodes.clear();
       }
@@ -3475,9 +3467,9 @@ namespace Legion {
         // Make a closed tree of just the root node
         // There are no dirty fields here since we just flushing reductions
         ClosedNode *closed_tree = new ClosedNode(root_node);
-        flush_only_close_op->initialize(creator->get_parent(), req, closed_tree,
-            trace_info, trace_info.req_idx, ver_info, 
-            flush_only_close_mask, flush_split_mask, creator);
+        flush_only_close_op->initialize(creator->get_parent(), req, 
+            closed_tree, trace_info, trace_info.req_idx, 
+            ver_info, flush_only_close_mask, creator);
       }
     }
 
@@ -3779,24 +3771,14 @@ namespace Legion {
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_above)
     //--------------------------------------------------------------------------
     {
-      // We need to capture the normal instance data from the version
-      // states and the open children from the advance states. We 
-      // already know that everything is valid
+      // Capture all the information for the root from the version_states
       for (PhysicalVersions::iterator it = version_states.begin();
             it != version_states.end(); it++)
       {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        it->first->capture_root_instances(composite_view, overlap);
-      }
-      for (PhysicalVersions::iterator it = advance_states.begin();
-            it != advance_states.end(); it++)
-      {
-        FieldMask overlap = it->second & close_mask;
-        if (!overlap)
-          continue;
-        it->first->capture_root_children(composite_view, overlap);
+        it->first->capture_root(composite_view, overlap);
       }
       // Finally record any valid above views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -4477,9 +4459,9 @@ namespace Legion {
 #endif
       // We need the both previous and advance version numbers
       // We need the final versions of all the previous version so we
-      // can see all the instances and reductions. We need the child
-      // versions of the advance state so we can see all the open
-      // children for when we make the composite instance
+      // can see all the instances and reductions and the open children
+      // below in the sub-trees. We only need the names of the current
+      // versions since that is where our composite instance will go
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator 
             vit = previous_version_infos.begin(); vit !=
             previous_version_infos.end(); vit++)
@@ -4515,7 +4497,7 @@ namespace Legion {
             continue;
           version_info.add_advance_version(it->first, overlap,
                                            false/*path only*/);
-          it->first->request_children_version_state(overlap, ready_events);
+          // No need to do anything since we're contributing only
         }
       }
     }
@@ -7167,8 +7149,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void VersionState::capture_root_instances(CompositeView *target, 
-                                            const FieldMask &capture_mask) const
+    void VersionState::capture_root(CompositeView *target, 
+                                    const FieldMask &capture_mask) const
     //--------------------------------------------------------------------------
     {
       // We'll only capture nested composite views if we have no choice
@@ -7179,6 +7161,20 @@ namespace Legion {
       {
         // Only need this in read only mode since we're just reading
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
+              open_children.begin(); cit != open_children.end(); cit++)
+        {
+          if (cit->second.get_valid_mask() * capture_mask)
+            continue;
+          for (StateVersions::iterator it = cit->second.begin();
+                it != cit->second.end(); it++)
+          {
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            target->record_child_version_state(cit->first, it->first, overlap);
+          }
+        }
         FieldMask dirty_overlap = dirty_mask & capture_mask;
         if (!!dirty_overlap)
         {
@@ -7229,29 +7225,6 @@ namespace Legion {
           for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
                 composite_views.begin(); it != composite_views.end(); it++)
             target->record_valid_view(it->first, it->second);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::capture_root_children(CompositeView *target,
-                                            const FieldMask &capture_mask) const
-    //--------------------------------------------------------------------------
-    {
-      // Only need this in read only mode since we're just reading
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
-            open_children.begin(); cit != open_children.end(); cit++)
-      {
-        if (cit->second.get_valid_mask() * capture_mask)
-          continue;
-        for (StateVersions::iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-          FieldMask overlap = it->second & capture_mask;
-          if (!overlap)
-            continue;
-          target->record_child_version_state(cit->first, it->first, overlap);
         }
       }
     }

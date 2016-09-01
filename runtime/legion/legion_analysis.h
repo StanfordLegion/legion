@@ -684,12 +684,9 @@ namespace Legion {
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
                   (!!flush_only_close_mask); }
       // Record normal closes like this
-      void record_close_operation(const FieldMask &mask, 
-                                  const FieldMask &dirty_below,
-                                  bool projection);
+      void record_close_operation(const FieldMask &mask, bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
-      void record_flush_only_close(const FieldMask &mask,
-                                   const FieldMask &dirty_below);
+      void record_flush_only_close(const FieldMask &mask);
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
@@ -728,8 +725,6 @@ namespace Legion {
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
-      FieldMask root_split_mask; // for normal closes, track dirty below
-      FieldMask flush_split_mask; // for flush closes, track dirty below
       FieldMask closed_projections;
     protected:
       // At most we will ever generate three close operations at a node
@@ -1134,10 +1129,8 @@ namespace Legion {
       static void process_version_state_update_response(Runtime *rt,
                                                  Deserializer &derez); 
     public:
-      void capture_root_instances(CompositeView *target, 
-                                  const FieldMask &capture_mask) const;
-      void capture_root_children(CompositeView *target,
-                                 const FieldMask &capture_mask) const;
+      void capture_root(CompositeView *target, 
+                        const FieldMask &capture_mask) const;
       void capture(CompositeNode *target, const FieldMask &capture_mask,
                    SingleTask *translation_context) const;
       void capture_dirty_instances(const FieldMask &capture_mask, 
