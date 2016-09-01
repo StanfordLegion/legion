@@ -113,7 +113,7 @@ void top_level_task(const Task *task,
   const std::map<int,AddressSpace> &forward_mapping = 
     runtime->find_forward_MPI_mapping();
   for (std::map<int,AddressSpace>::const_iterator it = 
-        forward_mapping.begin(); it != forward_Mapping.end(); it++)
+        forward_mapping.begin(); it != forward_mapping.end(); it++)
     printf("MPI Rank %d maps to Legion Address Space %d\n", 
             it->first, it->second);
 
