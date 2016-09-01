@@ -1478,8 +1478,9 @@ namespace Legion {
             Realm::Barrier::create_barrier(mpi_participants)));
       mpi_arrive_barrier = legion_wait_barrier;
       legion_arrive_barrier = mpi_wait_barrier;
-      // Advance the first one to arrive
-      Runtime::advance_barrier(legion_arrive_barrier);
+      // Advance the two wait barriers
+      Runtime::advance_barrier(mpi_wait_barrier);
+      Runtime::advance_barrier(legion_wait_barrier);
     }
 
     //--------------------------------------------------------------------------
