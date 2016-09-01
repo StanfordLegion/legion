@@ -151,6 +151,12 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the runtime to use when 
+// performing collective operations internally
+#ifndef LEGION_COLLECTIVE_RADIX
+#define LEGION_COLLECTIVE_RADIX           8
+#endif
+
 // The radix for the broadcast tree
 // when attempting to shutdown the runtime
 #ifndef LEGION_SHUTDOWN_RADIX

@@ -24,7 +24,7 @@ using namespace Legion;
  * In this section we use a sequential
  * implementation of daxpy to show how
  * to create physical instances of logical
- * reigons.  In later sections we will
+ * regions.  In later sections we will
  * show how to extend this daxpy example
  * so that it will run with sub-tasks
  * and also run in parallel.
@@ -144,7 +144,7 @@ void top_level_task(const Task *task,
   // for the region to be ready.  Note that an application does not
   // need to explicitly wait for the physical region to be ready before
   // using it, but any call to get an accessor (described next) on
-  // phsyical region that does not yet have valid data will implicitly
+  // physical region that does not yet have valid data will implicitly
   // call 'wait_until_valid' to guarantee correct execution by ensuring
   // the application only can access the physical instance once the
   // data is valid.
@@ -225,7 +225,7 @@ void top_level_task(const Task *task,
   // We really could have done this directly since WRITE-DISCARD
   // privileges are equivalent to READ-WRITE privileges in terms
   // of allowing reads and writes, but we'll explicitly unmap
-  // and then reamp.  Unmapping is done with the unamp call.
+  // and then remap.  Unmapping is done with the unmap call.
   // After this call the physical region no longer contains valid
   // data and all accessors from the physical region are invalidated.
   runtime->unmap_region(ctx, output_region);
