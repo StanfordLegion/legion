@@ -1113,6 +1113,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1169,6 +1171,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1259,6 +1263,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1290,6 +1296,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
@@ -1610,6 +1618,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -1644,6 +1654,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -1717,23 +1729,41 @@ namespace Legion {
        * Non-blocking call to signal to Legion that this participant
        * is ready to pass control to Legion.
        */
-      void mpi_handoff_to_legion(void);
+      void mpi_handoff_to_legion(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all Legion participants to hand over control to MPI.
        */
-      void mpi_wait_on_legion(void);
+      void mpi_wait_on_legion(void) const;
     public:
       /**
        * A non-blocking call to signal to MPI that this participant
        * is ready to pass control to MPI.
        */
-      void legion_handoff_to_mpi(void);
+      void legion_handoff_to_mpi(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all MPI participants to hand over control to Legion.
        */
-      void legion_wait_on_mpi(void);
+      void legion_wait_on_mpi(void) const;
+    public:
+      /*
+       * For asynchronous Legion execution, you can use these
+       * methods to get a phase barrier associated with the 
+       * handshake object instead of blocking on the legion side
+       */
+      /**
+       * Get the Legion phase barrier associated with waiting on the handshake 
+       */
+      PhaseBarrier get_legion_wait_phase_barrier(void) const;
+      /**
+       * Get the Legion phase barrier associated with arriving on the handshake
+       */
+      PhaseBarrier get_legion_arrive_phase_barrier(void) const;
+      /**
+       * Advance the handshake associated with the Legion side
+       */
+      void advance_legion_handshake(void) const;
     };
 
     //==========================================================================
@@ -4645,15 +4675,12 @@ namespace Legion {
        * Create a handshake object for exchanging control between MPI
        * and Legion. We make this a static method so that it can be
        * created before the Legion runtime is initialized.
-       * @param init_in_MPI who owns initial control of the handshake,
-       *                    by default it is MPI
        * @param mpi_participants number of calls that need to be made to 
        *                    the handshake to pass control from MPI to Legion
        * @param legion_participants number of calls that need to be made to
        *                    the handshake to pass control from Legion to MPI
        */
-      static MPILegionHandshake create_handshake(bool init_in_MPI = true,
-                                                 int mpi_participants = 1,
+      static MPILegionHandshake create_handshake(int mpi_participants = 1,
                                                  int legion_participants = 1);
 
       /**
