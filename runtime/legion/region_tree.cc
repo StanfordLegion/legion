@@ -10647,7 +10647,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have any previous dirty data to record at this depth
-      FieldMask previous_dirty = state.dirty_fields & advance_user.field_mask;
+      FieldMask previous_dirty = advance_user.field_mask & 
+                                (state.dirty_fields | state.reduction_fields);
       if (!!previous_dirty)
         advance_op->record_dirty_previous(get_depth(), previous_dirty);
       // We know we are dominating from above, so we don't care about
@@ -10755,7 +10756,7 @@ namespace Legion {
       // We can also mark that there is no longer any dirty data below
       state.dirty_below -= closing_mask;
       // We can also clear any outstanding reduction fields
-      if (!(state.outstanding_reduction_fields * closing_mask))
+      if (!(state.reduction_fields * closing_mask))
         clear_logical_reduction_fields(state, closing_mask);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
@@ -10782,10 +10783,10 @@ namespace Legion {
       // to do any closes to flush open reductions. This should be a pretty
       // rare operation since we often won't have lots of reductions going
       // on at different levels of the region tree.
-      if (!!state.outstanding_reduction_fields)
+      if (!!state.reduction_fields)
       {
         FieldMask reduction_flush_fields = 
-          current_mask & state.outstanding_reduction_fields;
+          current_mask & state.reduction_fields;
         if (!!reduction_flush_fields)
           flush_logical_reductions(closer, state, reduction_flush_fields,
                          record_close_operations, next_child, new_states);
@@ -11182,10 +11183,10 @@ namespace Legion {
       LegionDeque<FieldState>::aligned new_states;
       // First let's see if we need to flush any reductions
       ColorPoint no_next_child; // never a next child here
-      if (!!state.outstanding_reduction_fields)
+      if (!!state.reduction_fields)
       {
         FieldMask reduction_flush_fields = 
-          current_mask & state.outstanding_reduction_fields;
+          current_mask & state.reduction_fields;
         if (!!reduction_flush_fields)
           flush_logical_reductions(closer, state, reduction_flush_fields,
                        record_close_operations, no_next_child,new_states);
@@ -11904,7 +11905,7 @@ namespace Legion {
                                                   const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
-      state.outstanding_reduction_fields |= user_mask;
+      state.reduction_fields |= user_mask;
       LegionMap<ReductionOpID,FieldMask>::aligned::iterator finder = 
         state.outstanding_reductions.find(redop);
       if (finder == state.outstanding_reductions.end())
@@ -11918,7 +11919,7 @@ namespace Legion {
                                                   const FieldMask &cleared_mask)
     //--------------------------------------------------------------------------
     {
-      state.outstanding_reduction_fields -= cleared_mask; 
+      state.reduction_fields -= cleared_mask; 
       std::vector<ReductionOpID> to_delete;
       for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
             state.outstanding_reductions.begin(); it !=

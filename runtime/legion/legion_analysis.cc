@@ -2414,6 +2414,7 @@ namespace Legion {
       assert(projection_epochs.empty());
       assert(!dirty_fields);
       assert(!dirty_below);
+      assert(!reduction_fields);
 #endif
     }
 
@@ -2449,10 +2450,9 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
+      dirty_below.clear();
       dirty_fields.clear();
       reduction_fields.clear();
-      dirty_below.clear();
-      outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
       for (std::list<ProjectionEpoch*>::const_iterator it = 
             projection_epochs.begin(); it != projection_epochs.end(); it++)
@@ -2493,7 +2493,7 @@ namespace Legion {
         else
           it = field_states.erase(it);
       }
-      outstanding_reduction_fields -= deleted_mask;
+      reduction_fields -= deleted_mask;
       if (!outstanding_reductions.empty())
       {
         std::vector<ReductionOpID> to_delete;
@@ -2512,7 +2512,6 @@ namespace Legion {
         }
       }
       dirty_below -= deleted_mask;
-      reduction_fields -= deleted_mask;
       dirty_fields -= deleted_mask;
     }
 
@@ -6325,8 +6324,8 @@ namespace Legion {
         if (request_kind != INITIAL_VERSION_REQUEST)
         {
           rez.serialize<size_t>(open_children.size());
-          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
-                open_children.begin(); cit != open_children.end(); cit++)
+          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
+                cit = open_children.begin(); cit != open_children.end(); cit++)
           {
             rez.serialize(cit->first);
             rez.serialize<size_t>(cit->second.size());
@@ -7313,30 +7312,60 @@ namespace Legion {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-      assert(!(capture_mask - dirty_mask));
+      assert(!(capture_mask - (dirty_mask | reduction_mask)));
       assert((this->version_number + 1) == target->version_number);
 #endif
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-            valid_views.begin(); it != valid_views.end(); it++)
+      FieldMask dirty_overlap = dirty_mask & capture_mask;
+      if (!!dirty_overlap)
       {
-        FieldMask overlap = it->second & capture_mask;
-        if (!overlap)
-          continue;
-        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-          track_aligned::iterator finder = target->valid_views.find(it->first);
-        if (finder == target->valid_views.end())
+        target->dirty_mask |= dirty_overlap;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              valid_views.begin(); it != valid_views.end(); it++)
         {
+          FieldMask overlap = it->second & dirty_overlap;
+          if (!overlap)
+            continue;
+          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+           track_aligned::iterator finder = target->valid_views.find(it->first);
+          if (finder == target->valid_views.end())
+          {
 #ifdef DEBUG_LEGION
-          assert(target->currently_valid);
+            assert(target->currently_valid);
 #endif
-          // No need for a mutator here, it is already valid
-          it->first->add_nested_valid_ref(target->did);
-          target->valid_views[it->first] = overlap;
+            // No need for a mutator here, it is already valid
+            it->first->add_nested_valid_ref(target->did);
+            target->valid_views[it->first] = overlap;
+          }
+          else
+            finder->second |= overlap;
         }
-        else
-          finder->second |= overlap;
       }
-      target->dirty_mask |= capture_mask;
+      FieldMask reduction_overlap = reduction_mask & capture_mask;
+      if (!!reduction_overlap)
+      {
+        target->reduction_mask |= reduction_overlap;
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              reduction_views.begin(); it != reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & reduction_overlap;
+          if (!overlap)
+            continue;
+          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                track_aligned::iterator finder = 
+                      target->reduction_views.find(it->first);
+          if (finder == target->reduction_views.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(target->currently_valid);
+#endif
+            // No need for a mutator here, it is already valid
+            it->first->add_nested_valid_ref(target->did);
+            target->reduction_views[it->first] = overlap;
+          }
+          else
+            finder->second |= overlap;
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////

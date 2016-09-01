@@ -599,17 +599,14 @@ namespace Legion {
       LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned 
                                                             prev_epoch_users;
     public:
-      // Fields for which we have outstanding local reductions
-      FieldMask outstanding_reduction_fields;
-      LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
-    public:
+      // Fields which we know have been mutated below in the region tree
+      FieldMask dirty_below;
       // Fields that we know have been written at the current level
       // (reductions don't count, we want to know they were actually written)
       FieldMask dirty_fields;
       // Keep track of which fields we've done a reduction to here
       FieldMask reduction_fields;
-      // Fields which we know have been mutated below in the region tree
-      FieldMask dirty_below;
+      LegionMap<ReductionOpID,FieldMask>::aligned outstanding_reductions;
       // Keep track of the current projection epoch for each field
       std::list<ProjectionEpoch*> projection_epochs;
     };
