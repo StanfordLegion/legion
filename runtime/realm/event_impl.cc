@@ -1989,7 +1989,10 @@ static void *bytedup(const void *data, size_t datalen)
 	  // if there were zero local waiters and a single remote waiter, this barrier is an obvious
 	  //  candidate for migration
           // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
+	  // also, do not migrate a barrier if we have any local involvement in future generations
+	  //  (either arrivals or waiters)
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
+	     generations.empty() &&
              (ID(me).barrier.creator_node == gasnet_mynode())) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
@@ -2065,7 +2068,7 @@ static void *bytedup(const void *data, size_t datalen)
 	for(std::vector<RemoteNotification>::const_iterator it = remote_notifications.begin();
 	    it != remote_notifications.end();
 	    it++) {
-	  log_barrier.info() << "sending remote trigger notification: " << me.id << "/"
+	  log_barrier.info() << "sending remote trigger notification: " << me << "/"
 			     << (*it).previous_gen << " -> " << (*it).trigger_gen << ", dest=" << (*it).node;
 	  void *data = 0;
 	  size_t datalen = 0;
@@ -2276,7 +2279,7 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// handle migration of the barrier ownership (possibly to us)
 	if(args.migration_target != (gasnet_node_t) -1) {
-	  //log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
+	  log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
 	  impl->owner = args.migration_target;
 	  impl->base_arrival_count = args.base_arrival_count;
 	}
