@@ -1,3 +1,28 @@
+/*
+   This wrapper mapper takes a Legion mapper as argument and wraps it, so that the user can
+   print information or stop program execution when important properties of a task are set
+   (properties set by select_task_options())
+   The wrapper mapper can be enabled by setting the runtime parameter "-hl:wrapper" to 1.
+   Alternatively, one can also wrap individual mappers using the constructor
+   Legion::Mapping::WrapperMapper(Mapper* mapper, MapperRuntime *rt, Machine machine, Processor local);
+
+   At the start of the program execution, the user can enter the task names or the processor indexes
+   (index for a processor can be seen using the "processors" command) to be monitored in a command-line interface.
+   The commands to do so are as follows:
+
+   stop task +<task_name> --> To stop when properties for task "task_name" are set
+   print task +<task_name> --> To print the properties of task "task_name"
+   task -<task_name> --> To remove task "task_name" from the lists of tasks which are being monitored
+   processors --> To see the list of processors with their corresponding indexes
+   stop processor +<processor_index> --> To stop when any task is mapped to a particular processor
+   print processor +<processor_index> --> To print properties when any task is mapped to a particular processor
+   processor -<processor_index> --> To remove a processor from the lists of processors which are being monitored
+   exit --> To exit from the command-line interface
+   help --> To show the list of commands
+
+   On stopping at a task/processor, one can change properties or enter the above command line interface by typing "change"
+ */
+
 #ifndef __WRAPPER_MAPPER_h__
 #define __WRAPPER_MAPPER_h__
 
@@ -17,6 +42,7 @@ namespace Legion {
 	int tag;
 	std::string task_name;
 	Mapper::TaskOptions output;
+	int action;
 	};
 
 	struct get_input_message{
@@ -38,9 +64,6 @@ namespace Legion {
 			static std::set<Processor> all_procs;
 			static std::map<Processor, int> procs_map;
 			static std::map<int, int> procs_map_int;
-			//static std::map<Memory, int> mems_map;
-		//	static std::vector<Processor> print_procs;	
-		//	static std::vector<Processor> stop_procs;	
 			static bool inputtaken;
 			static bool databroadcasted;
 			static Processor ownerprocessor;
