@@ -38,13 +38,14 @@
 namespace Legion {
   namespace Mapping {
 
+	//Struct to send properties set by select_task_options
 	struct select_task_options_message{
 	int tag;
 	std::string task_name;
 	Mapper::TaskOptions output;
 	int action;
 	};
-
+/*
 	struct get_input_message{
 	int tag;
 	Processor processor;
@@ -52,7 +53,7 @@ namespace Legion {
 	std::map<std::string, int> tasks_map;
 	std::map<Memory, int> mems_map;
 	};
-	
+*/	
 
 	class WrapperMapper: public Mapper{
 

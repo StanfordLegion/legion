@@ -16,6 +16,10 @@
 namespace Legion {
   namespace Mapping{
 
+    //Static Variables. 
+    //procs_map, procs_map_init and task_map store information about the processors and tasks being monitored.
+    //The owner processor broadcasts the information to all the processors and local owner of each node then stores it in their static maps.
+    //Only the owner processor communicates with the user.
     std::set<Memory> WrapperMapper::all_mems;
     std::set<Processor> WrapperMapper::all_procs;
     std::map<Processor, int> WrapperMapper::procs_map;
@@ -39,30 +43,34 @@ namespace Legion {
       machine.get_all_processors(all_procs);
       machine.get_all_memories(all_mems);
       if (!inputtaken && node_id==0){
-	get_input();
+	get_input();		//First processor of node 0 gets the input from the user
 	inputtaken=1;
-	ownerprocessor = local;
-	localowner = local;
+	ownerprocessor = local; //First processor of node 0 is the owner processor
+	localowner = local;	
+	//Since only select_task_options() is wrapped, there is no need to ask the user to add methods. Hence, select_task_options() is added by default.
 	methods_map.insert(std::pair<int, int>(1,0));	
       }
       else if (!inputtaken){
 	inputtaken =1;
-	localowner = local;
+	localowner = local;     //First processor of every node are the local owners
 	methods_map.insert(std::pair<int, int>(1,0));	
       }
     }
     WrapperMapper::~WrapperMapper(){
-      std::cout<<"Owner"<<ownerprocessor.id<<"\n";
 
-      std::cout<<"the tasks added are: ";
+      /*
+      //Debugging
+      std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
+      std::coutt<<local_proc.id<<"-> The tasks added are: ";
       for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
-      std::cout<<"\n>    ";
-      std::cout<<"The processors added are: ";
+      std::cout<<"\n";
+      std::coutt<<local_proc.id<<"-> The processors added are: ";
       for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
-      std::cout<<"\n>    ";
-
+      std::cout<<"\n";
+       */
     }
 
+    //Helper functions	
     bool is_number(const std::string& s)
     {
       std::string::const_iterator it = s.begin();
@@ -87,6 +95,7 @@ namespace Legion {
 	return ss.str();
       }
 
+    //Serialize the data in tasks_map and procs_map and convert it into a string so that it can be sent to all the processors
     std::string WrapperMapper::Serialize(const std::map<std::string, int> &tasks_map, const std::map<int, int> &procs_map ){
       std::string send_string, temp;
 
@@ -103,6 +112,7 @@ namespace Legion {
       return send_string;
     }
 
+    //Deserialize the received string and store the data in the maps
     void WrapperMapper::Deserialize(std::string rec_string){
       std::size_t hash_pos  = rec_string.find("#");
       std::string  procs_str = rec_string.substr(0, hash_pos);
@@ -139,6 +149,7 @@ namespace Legion {
 
     }
 
+    //Get the input from the user
     void WrapperMapper::get_input(const MapperContext(ctx)){
       std::string strValue;
       std::map<int, std::string> function_map;
@@ -161,6 +172,7 @@ namespace Legion {
 	getline(std::cin, strValue); 
 	std::string nameValue;
 	std::string intValue;
+	//Add a task for which the information needs to be printed
 	if (strValue.compare(0,12,"print task +")==0){
 	  nameValue=strValue.substr(12);
 	  std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
@@ -184,6 +196,7 @@ namespace Legion {
 	  //else std::cout<<"No task of that name\n>    ";
       }
 
+	//Add a task for which program execution needs to stop
       else if (strValue.compare(0,11,"stop task +")==0){
 	nameValue=strValue.substr(11);
 
@@ -208,6 +221,7 @@ namespace Legion {
 	//	else std::cout<<"No task of that name\n>    ";
     }
 
+	//Add a method/function for which the information needs to be printed (not needed at the moment)
     else if (strValue.compare(0,14,"print method +")==0){
       intValue=strValue.substr(14);
       if(InputNumberCheck(intValue)){
@@ -235,6 +249,7 @@ namespace Legion {
       else std::cout<<"Method ID not a number\n>    ";
     }
 
+	//Add a method/function for which program execution needs to stop (not needed at the moment)
     else if (strValue.compare(0,13,"stop method +")==0){
       intValue=strValue.substr(13);
       if(InputNumberCheck(intValue)){
@@ -262,6 +277,7 @@ namespace Legion {
       else std::cout<<"Method ID not a number\n>    ";
     }
 
+	//Add a processor for which the information needs to be printed
     else if (strValue.compare(0,17,"print processor +")==0){
       intValue=strValue.substr(17);
       std::set<Processor>::iterator it;
@@ -284,6 +300,7 @@ namespace Legion {
       else std::cout<<"Invalid input\n>    ";			
     }
 
+	//Add a processor for which program execution needs to stop
     else if (strValue.compare(0,16,"stop processor +")==0){
       intValue=strValue.substr(16);
       std::set<Processor>::iterator it;
@@ -349,6 +366,8 @@ namespace Legion {
       }
       else std::cout<<"Invalid input\n>    ";
       }*/
+	
+	//Remove a task from the tasks map
       else if (strValue.compare(0,6,"task -")==0){
 	nameValue=strValue.substr(6);
 
@@ -365,6 +384,7 @@ namespace Legion {
   }
 
 
+	//Remove a method/function from the methods map
   else if (strValue.compare(0,8,"method -")==0){
     intValue=strValue.substr(8);
     if(InputNumberCheck(intValue)){
@@ -384,6 +404,7 @@ namespace Legion {
     else std::cout<<"Method ID not a number\n>    ";
   }
 
+	//Remove a processor from the processors map
   else if (strValue.compare(0,11,"processor -")==0){
     intValue=strValue.substr(11);
     std::set<Processor>::iterator it;
@@ -403,7 +424,7 @@ namespace Legion {
 	  for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
 	  std::cout<<"\n>    ";
 	}
-
+	else std::cout<<"Processor not present.\n>   ";
       }
       else std::cout<<"Invalid number entered\n>    ";
     }
@@ -435,6 +456,7 @@ namespace Legion {
 
     }*/
 
+	//Help
     else if (strValue.compare("help")==0){
       std::cout<<"Following are the commands that can be executed:\n";
       std::cout<<"task +<task_id> --> To add a task to be monitored \n";
@@ -448,7 +470,7 @@ namespace Legion {
       std::cout<<">    ";
     }
 
-
+//List all the methods
     else if (strValue.compare("methods")==0){
       for(std::map<int, std::string >::const_iterator it = function_map.begin(); it != function_map.end(); ++it)
       {
@@ -456,7 +478,7 @@ namespace Legion {
       }
       std::cout<<">    ";
     }
-
+//List all the processors
     else if (strValue.compare("processors")==0){
       int i=0;
       std::set<Processor>::iterator it;
@@ -470,7 +492,7 @@ namespace Legion {
       }
       std::cout<<">    ";
     }
-
+/*
     else if (strValue.compare("memories")==0){
       int i=0;
       std::set<Memory>::iterator it;
@@ -482,14 +504,15 @@ namespace Legion {
       }
       std::cout<<">    ";
     }
-
-    else if (strValue.compare("exit")==0){
+*/
+//Exit 
+   else if (strValue.compare("exit")==0){
       std::string send_message = Serialize(tasks_map, procs_map_int);
       int send_size = send_message.size()+1;
       char send_mess_chars[send_size];
       std::strcpy(send_mess_chars, send_message.c_str());
       void *message_point = &send_mess_chars;
-      mrt->broadcast(ctx, message_point, send_size*sizeof(char));              	
+      mrt->broadcast(ctx, message_point, send_size*sizeof(char));  //Broadcast the information to all processors on exit            	
       break;
     }
 
@@ -501,7 +524,7 @@ namespace Legion {
 
 
 
-
+//Overloaded version of the previous function to get inputs at the start and without broadcast on exit
 void WrapperMapper::get_input(){
   std::string strValue;
   std::map<int, std::string> function_map;
@@ -770,6 +793,7 @@ else if (strValue.compare(0,11,"processor -")==0){
 	std::cout<<"\n>    ";
       }
 
+	else std::cout<<"Processor not present.\n>   ";
     }
     else std::cout<<"Invalid number entered\n>    ";
   }
@@ -836,7 +860,7 @@ else if (strValue.compare("processors")==0){
   }
   std::cout<<">    ";
 }
-
+/*
 else if (strValue.compare("memories")==0){
   int i=0;
   std::set<Memory>::iterator it;
@@ -848,7 +872,7 @@ else if (strValue.compare("memories")==0){
   }
   std::cout<<">    ";
 }
-
+*/
 else if (strValue.compare("exit")==0){
   break;
 }
@@ -858,7 +882,7 @@ else std::cout<<"Invalid Command\n>    ";
 }
 }
 
-
+//Get input to change options set by select_task_options
 void WrapperMapper::get_select_task_options_input(const MapperContext ctx, std::string task_name, TaskOptions& output){
   std::string strValue;
   std::cout<<"\nType change to change the list of tasks and methods being monitored. Type help for the list of commands. Type exit to exit\n";
@@ -999,6 +1023,7 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
     const Task&            task,
     TaskOptions&     output){
 
+	//Data to be broadcasted the very first time by the owner processor
   if (databroadcasted==0 && node_id==0  && ownerprocessor==local_proc){
 
     std::string send_message = Serialize(tasks_map, procs_map_int);
@@ -1010,11 +1035,15 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
     databroadcasted=1;
 
   }
+
   dmapper->select_task_options(ctx, task, output);
+
+ //Get iterators to the task and processor in the tasks_map and procs_map
   std::map<std::string, int>::iterator itt = tasks_map.find(task.get_task_name());
   std::map<int, int>::iterator itm = methods_map.find(1);
   std::map<Processor, int>::iterator itp = procs_map.find(output.initial_proc);
 
+//If owner processor, then communicate with the user, if needed. If not the owner processor, send the information to the owner processor, if needed. 
   if(ownerprocessor==local_proc){
 
     if (itt!=tasks_map.end() || itp!=procs_map.end()) {
@@ -1036,7 +1065,7 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
       void *message_point = &message;
       mapevent = mrt->create_mapper_event(ctx);
       mrt->send_message(ctx,ownerprocessor, message_point, sizeof(select_task_options_message));
-      mrt->wait_on_mapper_event(ctx, mapevent);
+      mrt->wait_on_mapper_event(ctx, mapevent); //Wait for the owner processor
       output = wait_task_options;
     }
   }
@@ -1294,9 +1323,10 @@ void WrapperMapper::permit_steal_request(const MapperContext         ctx,
 void WrapperMapper::handle_message(const MapperContext           ctx,
     const MapperMessage&          message){
   const select_task_options_message *rec_message = (select_task_options_message*)message.message;
-  std::cout<<rec_message->tag<<"--messagetag\n";	
-  if (node_id==0 && ownerprocessor.id==local_proc.id){
+  //std::cout<<rec_message->tag<<"--messagetag\n";	  
+if (node_id==0 && ownerprocessor.id==local_proc.id){
     if (rec_message->tag==42356156){
+	//Owner processor gets a message with the tag, so communicate with the user
       std::string task_name = rec_message->task_name;
       TaskOptions output = rec_message->output;
       int action = rec_message->action;
@@ -1313,16 +1343,29 @@ void WrapperMapper::handle_message(const MapperContext           ctx,
       mrt->send_message(ctx,message.sender, message_point, sizeof(select_task_options_message));
     }
   }
+  //Message from owner processor, so trigger the wait event
   else if (rec_message->tag ==42356156){
     wait_task_options = rec_message->output;				
     mrt->trigger_mapper_event(ctx, mapevent);
   }
+
+//This is the broadcast message and so, deserialize the message.
   else {
     const char *rec1_message =(const char *)message.message;
 
     if (node_id!=0 && localowner == local_proc){	
       std::string rec_string = rec1_message;		
-      Deserialize(rec_string);		
+      Deserialize(rec_string);	
+
+      /*
+	 std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
+	 std::coutt<<local_proc.id<<"-> The tasks added are: ";
+	 for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
+	 std::cout<<"\n";
+	 std::coutt<<local_proc.id<<"-> The processors added are: ";
+	 for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+	 std::cout<<"\n";
+       */
     }
   }
 
