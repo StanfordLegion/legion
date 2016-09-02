@@ -56,6 +56,12 @@ namespace Realm {
   } \
 } while(0)
 
+namespace LegionRuntime {
+  namespace LowLevel {
+    extern void show_event_waiters(std::ostream& os);
+  };
+};
+
 namespace Realm {
 
   Logger log_runtime("realm");
@@ -84,6 +90,11 @@ namespace Realm {
       while (true)
         sleep(1);
     }
+
+  static void realm_show_events(int signal)
+  {
+    LegionRuntime::LowLevel::show_event_waiters(std::cout);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -831,6 +842,22 @@ namespace Realm {
         signal(SIGFPE,  realm_backtrace);
         signal(SIGILL,  realm_backtrace);
         signal(SIGBUS,  realm_backtrace);
+      }
+
+      // debugging tool to dump realm event graphs after a fixed delay
+      //  (easier than actually detecting a hang)
+      {
+	const char *e = getenv("REALM_SHOW_EVENT_WAITERS");
+	if(e) {
+	  const char *pos;
+	  int delay = strtol(e, (char **)&pos, 10);
+	  assert(delay > 0);
+	  if(*pos == '+')
+	    delay += gasnet_mynode() * atoi(pos + 1);
+	  log_runtime.info() << "setting show_event alarm for " << delay << " seconds";
+	  signal(SIGALRM, realm_show_events);
+	  alarm(delay);
+	}
       }
       
       start_polling_threads(active_msg_worker_threads);
