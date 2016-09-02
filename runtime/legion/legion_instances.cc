@@ -1551,6 +1551,7 @@ namespace Legion {
       }
       else
       {
+#if 0
         AutoLock m_lock(manager_lock);
         std::map<PhysicalManager*,std::vector<
           std::pair<RegionTreeNode*,ApUserEvent> > >::iterator finder = 
@@ -1578,10 +1579,11 @@ namespace Legion {
             assert(false);
           }
         }
+#endif
         // If we get here, make a new one
         ApUserEvent result = Runtime::create_ap_user_event();
-        pending_reductions[target].push_back(
-            std::pair<RegionTreeNode*,ApUserEvent>(target_node,result));
+        //pending_reductions[target].push_back(
+        //    std::pair<RegionTreeNode*,ApUserEvent>(target_node,result));
         first = true;
         return result;
       }

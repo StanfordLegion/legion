@@ -3065,11 +3065,21 @@ namespace Legion {
                                                      src_versions[idx],
                                                      preconditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      dst_requirements[idx],
                                                      dst_privilege_paths[idx],
                                                      dst_versions[idx],
                                                      preconditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
