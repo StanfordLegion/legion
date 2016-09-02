@@ -1679,6 +1679,10 @@ namespace Legion {
       RegionUsage usage(req);
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
+      // If we're writing, update the logical state with the dirty fields
+      if (IS_WRITE(req))
+        top_node->initialize_logical_state(ctx.get_id(), user_mask);
+      // Now we update the physical state
       std::vector<LogicalView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
       // Build our set of corresponding views
@@ -10194,6 +10198,15 @@ namespace Legion {
       result = finder->second.buffer;
       size = finder->second.size;
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::initialize_logical_state(ContextID ctx,
+                                                  const FieldMask &init_dirty)
+    //--------------------------------------------------------------------------
+    {
+      CurrentState &state = get_current_state(ctx);
+      state.dirty_fields |= init_dirty;
     }
 
     //--------------------------------------------------------------------------

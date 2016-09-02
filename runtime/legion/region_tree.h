@@ -1281,6 +1281,8 @@ namespace Legion {
                           const void *buffer, size_t size, bool is_mutable) = 0;
     public:
       // Logical traversal operations
+      void initialize_logical_state(ContextID ctx,
+                                    const FieldMask &init_dirty_mask);
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,

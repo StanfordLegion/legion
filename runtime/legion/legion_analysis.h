@@ -1080,6 +1080,12 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
+      // This method is not currently used, but it is probably
+      // not dead code because we're likely going to need it 
+      // (or something like it) for optimizing how composite
+      // instances fetch only the children they need rather
+      // than requesting the full final version state like
+      // they currently do
       void request_children_version_state(const FieldMask &request_mask,
                                           std::set<RtEvent> &preconditions);
       void request_initial_version_state(const FieldMask &request_mask,

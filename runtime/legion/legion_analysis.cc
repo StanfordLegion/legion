@@ -3082,8 +3082,10 @@ namespace Legion {
         if (!non_dominated_mask)
           return;
       }
-      // Otherwise try to see if the children zip well
-      old_tree->filter_dominated_children(non_dominated_mask, children);
+      // Otherwise try to see if the children zip well, this only
+      // works if we actually have children that can dominate other children
+      if (!children.empty())
+        old_tree->filter_dominated_children(non_dominated_mask, children);
     }
 
     //--------------------------------------------------------------------------
@@ -3191,9 +3193,13 @@ namespace Legion {
           continue;
         std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
           new_children.find(it->first);
-        // If we can't find it, then we are immediately done
+        // If we can't find it, then we are not dominated for those fields
         if (finder == new_children.end())
-          return;
+        {
+          dominated_fields -= overlap;
+          if (!dominated_fields)
+            return;
+        }
         FieldMask child_non_dominated = overlap;
         finder->second->filter_dominated_fields(it->second,child_non_dominated);
         dominated_fields &= (overlap - child_non_dominated);
@@ -4836,7 +4842,7 @@ namespace Legion {
           // Remove this version number from the delete set if it exists
           to_delete_current.erase(next_version);
           VersionState *new_state = create_new_version_state(next_version);
-          if (update_parent_state)
+          if (update_parent_state || (dirty_previous != NULL))
             new_states.insert(new_state, version_overlap, &mutator);
           // Kind of dangerous to be getting another iterator to this
           // data structure that we're iterating, but since neither
@@ -4864,7 +4870,7 @@ namespace Legion {
         if (!!current_filter)
         {
           VersionState *new_state = create_new_version_state(init_version);
-          if (update_parent_state)
+          if (update_parent_state || (dirty_previous != NULL))
             new_states.insert(new_state, current_filter, &mutator);
           current_version_infos[init_version].insert(new_state, 
                                                      current_filter, &mutator);
@@ -4887,14 +4893,14 @@ namespace Legion {
         sanity_check();
 #endif
       } // release the lock
+      // If we have no new states then we are done
+      if (new_states.empty())
+        return;
       // See if we have to capture any dirty data from the previous versions
       // If we don't have to update the parent state then we are at the
       // top of the tree, so there is no need to worry about closes from above
-      if (update_parent_state && (dirty_previous != NULL))
+      if (dirty_previous != NULL)
       {
-#ifdef DEBUG_LEGION
-        assert(!new_states.empty()); // should only be here with new states
-#endif
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
         for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
               previous_version_infos.begin(); vit != 
@@ -4956,11 +4962,8 @@ namespace Legion {
         }
       }
       // If we recorded any new states then we have to tell our parent manager
-      if (!new_states.empty())
+      if (update_parent_state)
       {
-#ifdef DEBUG_LEGION
-        assert(update_parent_state);
-#endif
         RegionTreeNode *parent = node->get_parent();      
 #ifdef DEBUG_LEGION
         assert(parent != NULL);

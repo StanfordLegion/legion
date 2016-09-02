@@ -5081,7 +5081,7 @@ namespace Legion {
       const DeferCompositeViewRegistrationArgs *vargs = 
         (const DeferCompositeViewRegistrationArgs*)args;
       // Register only after construction
-      vargs->view->register_with_runtime(NULL/*remote registration not needed*/);
+      vargs->view->register_with_runtime(NULL/*no remote registration*/);
     }
 
     //--------------------------------------------------------------------------
