@@ -1433,9 +1433,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MPILegionHandshakeImpl::MPILegionHandshakeImpl(int mpi_parts, 
+    MPILegionHandshakeImpl::MPILegionHandshakeImpl(bool init_mpi, int mpi_parts,
                                                    int legion_parts)
-      : mpi_participants(mpi_parts), legion_participants(legion_parts)
+      : init_in_MPI(init_mpi), mpi_participants(mpi_parts), 
+        legion_participants(legion_parts)
     //--------------------------------------------------------------------------
     {
     }
@@ -1443,7 +1444,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MPILegionHandshakeImpl::MPILegionHandshakeImpl(
                                               const MPILegionHandshakeImpl &rhs)
-      : mpi_participants(-1), legion_participants(-1)
+      : init_in_MPI(false), mpi_participants(-1), legion_participants(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1481,6 +1482,17 @@ namespace Legion {
       // Advance the two wait barriers
       Runtime::advance_barrier(mpi_wait_barrier);
       Runtime::advance_barrier(legion_wait_barrier);
+      // Whoever is waiting first, we have to advance their arrive barriers
+      if (init_in_MPI)
+      {
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::advance_barrier(mpi_wait_barrier);
+      }
+      else
+      {
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::advance_barrier(legion_wait_barrier);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1502,7 +1514,7 @@ namespace Legion {
       // Note we use the external wait to be sure 
       // we don't get drafted by the Realm runtime
       ApBarrier previous = Runtime::get_previous_phase(mpi_wait_barrier);
-      if (!previous.has_triggered());
+      if (!previous.has_triggered())
       {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
@@ -20388,6 +20400,7 @@ namespace Legion {
       if (address_spaces.size() > 1)
         configure_collective_settings(address_spaces.size());
       // If we have an MPI rank, then build the maps
+      // We'll initialize the mappers after the tables are built
       if (Runtime::mpi_rank >= 0)
       {
 #ifdef DEBUG_LEGION
@@ -20396,8 +20409,8 @@ namespace Legion {
 #endif
         mpi_rank_table = new MPIRankTable(local_rt); 
       }
-      // Finally do the application initialization of mappers
-      local_rt->initialize_mappers();
+      else // We can initialize the mappers now
+        local_rt->initialize_mappers();
     }
 
     //--------------------------------------------------------------------------
@@ -20953,6 +20966,9 @@ namespace Legion {
       assert(mpi_rank_table != NULL);
 #endif
       mpi_rank_table->perform_rank_exchange();
+      // Now configure the mappers
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->initialize_mappers();
     }
 
     //--------------------------------------------------------------------------

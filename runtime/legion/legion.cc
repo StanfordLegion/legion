@@ -4117,7 +4117,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MPILegionHandshake Runtime::create_handshake(
+    /*static*/ MPILegionHandshake Runtime::create_handshake(bool init_in_MPI,
                                                         int mpi_participants,
                                                         int legion_participants)
     //--------------------------------------------------------------------------
@@ -4127,7 +4127,7 @@ namespace Legion {
       assert(legion_participants > 0);
 #endif
       MPILegionHandshake result(
-          Internal::legion_new<Internal::MPILegionHandshakeImpl>(
+          Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
                                        mpi_participants, legion_participants));
       Internal::Runtime::register_handshake(result);
       return result;

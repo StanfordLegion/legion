@@ -3702,7 +3702,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
-        if ((outstanding_subtasks == 0) && 
+        if (!currently_active_context && (outstanding_subtasks == 0) && 
             (((context_configuration.min_tasks_to_schedule > 0) && 
               (pending_subtasks < 
                context_configuration.min_tasks_to_schedule)) ||
@@ -3743,7 +3743,7 @@ namespace Legion {
         assert(outstanding_subtasks > 0);
 #endif
         outstanding_subtasks--;
-        if ((outstanding_subtasks == 0) && 
+        if (currently_active_context && (outstanding_subtasks == 0) && 
             (((context_configuration.min_tasks_to_schedule > 0) &&
               (pending_subtasks < 
                context_configuration.min_tasks_to_schedule)) ||
@@ -3777,7 +3777,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         pending_subtasks++;
-        if ((outstanding_subtasks > 0) &&
+        if (currently_active_context && (outstanding_subtasks > 0) &&
             (pending_subtasks == context_configuration.min_tasks_to_schedule))
         {
           wait_on = context_order_event;
@@ -3822,15 +3822,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(pending_subtasks > 0);
 #endif
-      if ((outstanding_subtasks > 0) &&
-          (pending_subtasks == context_configuration.min_tasks_to_schedule))
+      pending_subtasks--;
+      if (!currently_active_context && (outstanding_subtasks > 0) &&
+          (pending_subtasks < context_configuration.min_tasks_to_schedule))
       {
         wait_on = context_order_event;
         to_trigger = Runtime::create_rt_user_event();
         context_order_event = to_trigger;
         currently_active_context = true;
       }
-      pending_subtasks--;
       // Release the lock before doing the trigger or the wait
       op_lock.release();
       // Do anything that we need to do
@@ -3885,15 +3885,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(pending_frames > 0);
 #endif
+        pending_frames--;
         if ((outstanding_subtasks > 0) &&
-            (pending_frames == context_configuration.min_frames_to_schedule))
+            (pending_frames < context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = Runtime::create_rt_user_event();
           context_order_event = to_trigger;
           currently_active_context = true;
         }
-        pending_frames--;
       }
       if (to_trigger.exists())
       {
@@ -10068,6 +10068,11 @@ namespace Legion {
       depth = -1;
       is_top_level_context = false;
       remote_completion_event = ApEvent::NO_AP_EVENT;
+      // Configure this so that remote tasks are always trying to 
+      // schedule all of their tasks
+      outstanding_children_count = UINT_MAX;
+      context_configuration.min_tasks_to_schedule = UINT_MAX;
+      context_configuration.min_frames_to_schedule = 0;
     }
 
     //--------------------------------------------------------------------------
