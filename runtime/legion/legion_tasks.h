@@ -43,20 +43,23 @@ namespace Legion {
         SLICE_TASK_KIND,
       };
     public:
-      struct DeferDistributeArgs {
+      struct DeferDistributeArgs : public LgTaskArgs<DeferDistributeArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_DISTRIBUTE_TASK_ID;
+      public:
         TaskOp *proxy_this;
       };
-      struct DeferMappingArgs {
+      struct DeferMappingArgs : public LgTaskArgs<DeferMappingArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_PERFORM_MAPPING_TASK_ID;
+      public:
         TaskOp *proxy_this;
         MustEpochOp *must_op;
       };
-      struct DeferLaunchArgs {
+      struct DeferLaunchArgs : public LgTaskArgs<DeferLaunchArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_LAUNCH_TASK_ID;
+      public:
         TaskOp *proxy_this;
       };
     public:
@@ -341,54 +344,76 @@ namespace Legion {
         RtEvent        reclaim_event;
         CustomSerdezID serdez_id;
       };
-      struct DeferredDependenceArgs {
+      struct DeferredDependenceArgs : 
+        public LgTaskArgs<DeferredDependenceArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
+      public:
         Operation *op;
       };
-      struct RemoteCreateViewArgs {
+      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
+      public:
         SingleTask *proxy_this;
         PhysicalManager *manager;
         InstanceView **target;
         RtUserEvent to_trigger;
         AddressSpaceID source;
       };
-      struct PostEndArgs {
+      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_POST_END_ID;
+      public:
         SingleTask *proxy_this;
         void *result;
         size_t result_size;
       };
-      struct DecrementArgs {
-        HLRTaskID hlr_id;
+      struct DecrementArgs : public LgTaskArgs<DecrementArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
+      public:
         SingleTask *parent_ctx;
       };
-      struct WindowWaitArgs {
-        HLRTaskID hlr_id;
+      struct WindowWaitArgs : public LgTaskArgs<WindowWaitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_WINDOW_WAIT_TASK_ID;
+      public:
         SingleTask *parent_ctx;
       };
-      struct IssueFrameArgs {
-        HLRTaskID hlr_id;
+      struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_ISSUE_FRAME_TASK_ID;
+      public:
         SingleTask *parent_ctx;
         FrameOp *frame;
         ApEvent frame_termination;
       };
-      struct AddToDepQueueArgs {
-        HLRTaskID hlr_id;
+      struct AddToDepQueueArgs : public LgTaskArgs<AddToDepQueueArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_ADD_TO_DEP_QUEUE_TASK_ID;
+      public:
         SingleTask *proxy_this;
         Operation *op;
         RtEvent op_pre;
       };
-      struct DeferredPostMappedArgs {
-        HLRTaskID hlr_id;
+      struct DeferredPostMappedArgs : 
+        public LgTaskArgs<DeferredPostMappedArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
+      public:
         SingleTask *task;
       };
       struct MapperProfilingInfo {
         SingleTask *task;
         RtUserEvent profiling_done;
+      };
+      struct ReclaimLocalFieldArgs : public LgTaskArgs<ReclaimLocalFieldArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RECLAIM_LOCAL_FIELD_ID;
+      public:
+        FieldSpace handle;
+        FieldID fid;
       };
     public:
       SingleTask(Runtime *rt);
@@ -1392,9 +1417,10 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
-      struct DeferMapAndLaunchArgs {
+      struct DeferMapAndLaunchArgs : public LgTaskArgs<DeferMapAndLaunchArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_MAP_AND_LAUNCH_TASK_ID;
+      public:
         SliceTask *proxy_this;
       };
     public:
@@ -1497,9 +1523,10 @@ namespace Legion {
      */
     class DeferredSlicer {
     public:
-      struct DeferredSliceArgs {
+      struct DeferredSliceArgs : public LgTaskArgs<DeferredSliceArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_SLICE_ID;
+      public:
         DeferredSlicer *slicer;
         SliceTask *slice;
       };

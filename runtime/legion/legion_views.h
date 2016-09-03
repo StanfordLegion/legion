@@ -1005,15 +1005,20 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
-      struct DeferCompositeViewRefArgs {
+      struct DeferCompositeViewRefArgs : 
+        public LgTaskArgs<DeferCompositeViewRefArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID;
+      public:
         LogicalView *view;
         DistributedID did;
       };
-      struct DeferCompositeViewRegistrationArgs {
+      struct DeferCompositeViewRegistrationArgs : 
+        public LgTaskArgs<DeferCompositeViewRegistrationArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = 
+          LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID;
+      public:
         CompositeView *view;
       };
     public:
@@ -1131,15 +1136,18 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
     public:
-      struct DeferCompositeNodeRefArgs {
+      struct DeferCompositeNodeRefArgs : 
+        public LgTaskArgs<DeferCompositeNodeRefArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_REF_TASK_ID;
+      public:
         VersionState *state;
         DistributedID owner_did;
       };
-      struct DeferCaptureArgs {
+      struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID;
+      public:
         CompositeNode *proxy_this;
         RtUserEvent capture_event;
       };

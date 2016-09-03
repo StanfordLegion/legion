@@ -294,12 +294,11 @@ namespace Legion {
       if (has_prepipeline_stage())
       {
         PrepipelineArgs args;
-        args.hlr_id = HLR_PRE_PIPELINE_ID;
         args.proxy_this = this;
         // Give this deferred throughput priority so that it is always
         // ahead of the logical analysis
-        return runtime->issue_runtime_meta_task(&args, sizeof(args),
-            HLR_PRE_PIPELINE_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, this);
+        return runtime->issue_runtime_meta_task(args, 
+              LG_DEFERRED_THROUGHPUT_PRIORITY, this);
       }
       else
         return RtEvent::NO_RT_EVENT;
@@ -555,11 +554,8 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
-        args.hlr_id = HLR_DEFERRED_ENQUEUE_OP_ID;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_ENQUEUE_OP_ID,
-                                         HLR_LATENCY_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
                                          this, wait_on);
       }
       else
@@ -590,12 +586,9 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         // We have to defer the execution of this operation
-        DeferredExecuteArgs args;
-        args.hlr_id = HLR_DEFERRED_EXECUTE_ID;
+        DeferredExecArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_EXECUTE_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -617,11 +610,8 @@ namespace Legion {
         RtEvent trigger_pre = 
           Runtime::merge_events(mapped_event, resolved_event);
         TriggerCompleteArgs args;
-        args.hlr_id = HLR_TRIGGER_COMPLETE_ID;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_TRIGGER_COMPLETE_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          this, trigger_pre);
       }
       else // Do the trigger now
@@ -649,11 +639,8 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredCompleteArgs args;
-        args.hlr_id = HLR_DEFERRED_COMPLETE_ID;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_COMPLETE_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -724,12 +711,9 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredCommitArgs args;
-        args.hlr_id = HLR_DEFERRED_COMMIT_ID;
         args.proxy_this = this;
         args.deactivate = do_deactivate;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_COMMIT_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          this, wait_on);
         return;
       }
@@ -1213,11 +1197,8 @@ namespace Legion {
       {
         // We always launch the task to avoid expensive recursive calls
         DeferredReadyArgs args;
-        args.hlr_id = HLR_DEFERRED_READY_TRIGGER_ID;
         args.proxy_this = op;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_READY_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          op, map_precondition);
       }
       else if (!map_precondition.has_triggered())
@@ -1230,11 +1211,8 @@ namespace Legion {
         if (!resolve_precondition.has_triggered())
         {
           DeferredResolutionArgs args;
-          args.hlr_id = HLR_DEFERRED_RESOLUTION_TRIGGER_ID;
           args.proxy_this = op;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
-                                           HLR_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                            op, resolve_precondition);
           resolve_now = false;
         }
@@ -1254,12 +1232,9 @@ namespace Legion {
         if (!commit_precondition.has_triggered())
         {
           DeferredCommitTriggerArgs args;
-          args.hlr_id = HLR_DEFERRED_COMMIT_TRIGGER_ID;
           args.proxy_this = op;
           args.gen = op->get_generation();
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_DEFERRED_COMMIT_TRIGGER_ID,
-                                           HLR_LATENCY_PRIORITY,
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                            op, commit_precondition);
           return false;
         }
@@ -2058,12 +2033,9 @@ namespace Legion {
         Runtime::trigger_event(completion_event, map_complete_event);
         need_completion_trigger = false;
         DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         deferred_execute_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_execute_args,
-                                         sizeof(deferred_execute_args),
-                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY, this, 
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                                         LG_LATENCY_PRIORITY, this, 
                                Runtime::protect_event(map_complete_event));
       }
       else
@@ -4075,12 +4047,9 @@ namespace Legion {
             if (!wait_on.has_triggered())
             {
               DeferredExecuteArgs deferred_execute_args;
-              deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
               deferred_execute_args.proxy_this = this;
-              runtime->issue_runtime_meta_task(&deferred_execute_args,
-                                               sizeof(deferred_execute_args),
-                                              HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                               HLR_LATENCY_PRIORITY,
+              runtime->issue_runtime_meta_task(deferred_execute_args,
+                                               LG_LATENCY_PRIORITY,
                                                this, wait_on);
             }
             else
@@ -4222,12 +4191,9 @@ namespace Legion {
       if (!wait_on.has_triggered())
       {
         DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         deferred_execute_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_execute_args,
-                                         sizeof(deferred_execute_args),
-                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY,
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                                         LG_LATENCY_PRIORITY,
                                          this, wait_on);
       }
       else
@@ -7397,12 +7363,9 @@ namespace Legion {
       if (!barrier.has_triggered())
       {
         DeferredExecuteArgs deferred_execute_args;
-        deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         deferred_execute_args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&deferred_execute_args,
-                                         sizeof(deferred_execute_args),
-                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY, this, 
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                                         LG_LATENCY_PRIORITY, this, 
                                          Runtime::protect_event(barrier));
       }
       else
@@ -7557,11 +7520,8 @@ namespace Legion {
         // Launch a task to get the value
         add_predicate_reference();
         ResolveFuturePredArgs args;
-        args.hlr_id = HLR_RESOLVE_FUTURE_PRED_ID;
         args.future_pred_op = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_RESOLVE_FUTURE_PRED_ID,
-                                         HLR_LATENCY_PRIORITY, this, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
                                          Runtime::protect_event(
                                            future.impl->get_ready_event()));
       }
@@ -8949,12 +8909,11 @@ namespace Legion {
         if (!indiv_triggered[idx])
         {
           MustEpochIndivArgs args;
-          args.hlr_id = HLR_MUST_INDIV_ID;
           args.triggerer = this;
           args.task = indiv_tasks[idx];
           RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                HLR_MUST_INDIV_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            owner->runtime->issue_runtime_meta_task(args, 
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -8964,12 +8923,11 @@ namespace Legion {
         if (!index_triggered[idx])
         {
           MustEpochIndexArgs args;
-          args.hlr_id = HLR_MUST_INDEX_ID;
           args.triggerer = this;
           args.task = index_tasks[idx];
           RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_MUST_INDEX_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            owner->runtime->issue_runtime_meta_task(args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9059,7 +9017,6 @@ namespace Legion {
       assert(single_tasks.size() == dependences.size());
 #endif
       MustEpochMapArgs args;
-      args.hlr_id = HLR_MUST_MAP_ID;
       args.mapper = this;
       // For correctness we still have to abide by the mapping dependences
       // computed on the individual tasks while we are mapping them
@@ -9081,14 +9038,13 @@ namespace Legion {
         {
           RtEvent precondition = Runtime::merge_events(preconditions);
           mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_MUST_MAP_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY,
-                owner, precondition); 
+            owner->runtime->issue_runtime_meta_task(args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, owner, precondition); 
         }
         else
           mapped_events[idx] = 
-            owner->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_MUST_MAP_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            owner->runtime->issue_runtime_meta_task(args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
       }
       std::set<RtEvent> wait_events(mapped_events.begin(), mapped_events.end());
       if (!wait_events.empty())
@@ -9165,9 +9121,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MustEpochDistributorArgs dist_args;
-      dist_args.hlr_id = HLR_MUST_DIST_ID;
       MustEpochLauncherArgs launch_args;
-      launch_args.hlr_id = HLR_MUST_LAUNCH_ID;
       std::set<RtEvent> wait_events;
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
@@ -9176,8 +9130,8 @@ namespace Legion {
         {
           dist_args.task = *it;
           RtEvent wait = 
-            runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
-                HLR_MUST_DIST_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(dist_args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9185,8 +9139,8 @@ namespace Legion {
         {
           launch_args.task = *it;
           RtEvent wait = 
-            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args),
-                HLR_MUST_LAUNCH_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(launch_args,
+                  LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9198,8 +9152,8 @@ namespace Legion {
         {
           dist_args.task = *it;
           RtEvent wait = 
-            runtime->issue_runtime_meta_task(&dist_args, sizeof(dist_args), 
-                HLR_MUST_DIST_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(dist_args, 
+                LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -9207,8 +9161,8 @@ namespace Legion {
         {
           launch_args.task = *it;
           RtEvent wait = 
-            runtime->issue_runtime_meta_task(&launch_args, sizeof(launch_args), 
-                HLR_MUST_LAUNCH_ID, HLR_DEFERRED_THROUGHPUT_PRIORITY, owner);
+            runtime->issue_runtime_meta_task(launch_args,
+                 LG_DEFERRED_THROUGHPUT_PRIORITY, owner);
           if (wait.exists())
             wait_events.insert(wait);
         }
@@ -10247,12 +10201,9 @@ namespace Legion {
         {
           // Launch a task to handle the deferred complete
           DeferredExecuteArgs deferred_execute_args;
-          deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
           deferred_execute_args.proxy_this = this;
-          runtime->issue_runtime_meta_task(&deferred_execute_args,
-                                           sizeof(deferred_execute_args),
-                                           HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                           HLR_LATENCY_PRIORITY, this, 
+          runtime->issue_runtime_meta_task(deferred_execute_args,
+                                           LG_LATENCY_PRIORITY, this, 
                                  Runtime::protect_event(future_ready_event));
         }
         else
@@ -11371,11 +11322,8 @@ namespace Legion {
       {
         ApEvent wait_on = precondition.impl->get_ready_event();
         DeferredExecuteArgs args;
-        args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-                                         HLR_LATENCY_PRIORITY, this, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
                                          Runtime::protect_event(wait_on));
       }
       else

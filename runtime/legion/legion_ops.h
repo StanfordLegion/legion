@@ -104,62 +104,69 @@ namespace Legion {
         "Task",                     \
       }
     public:
-      struct PrepipelineArgs {
+      struct PrepipelineArgs : public LgTaskArgs<PrepipelineArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_PRE_PIPELINE_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredReadyArgs {
+      struct DeferredReadyArgs : public LgTaskArgs<DeferredReadyArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_READY_TRIGGER_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredEnqueueArgs {
+      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_OP_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredMappingArgs {
+      struct DeferredResolutionArgs :
+        public LgTaskArgs<DeferredResolutionArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_RESOLUTION_TRIGGER_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredResolutionArgs {
-        HLRTaskID hlr_id;
+      struct DeferredExecuteArgs : public LgTaskArgs<DeferredExecuteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTION_TRIGGER_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredExecuteArgs {
+      struct DeferredExecArgs : public LgTaskArgs<DeferredExecArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_EXECUTE_ID;
+      public:
         Operation *proxy_this;
       };
-      struct TriggerCompleteArgs {
+      struct TriggerCompleteArgs : public LgTaskArgs<TriggerCompleteArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_TRIGGER_COMPLETE_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredCompleteArgs {
+      struct DeferredCompleteArgs : public LgTaskArgs<DeferredCompleteArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_COMPLETE_ID;
+      public:
         Operation *proxy_this;
       };
-      struct DeferredCommitTriggerArgs {
+      struct DeferredCommitTriggerArgs : 
+        public LgTaskArgs<DeferredCommitTriggerArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_TRIGGER_ID; 
+      public:
         Operation *proxy_this;
         GenerationID gen;
       };
-      struct DeferredCommitArgs {
+      struct DeferredCommitArgs : public LgTaskArgs<DeferredCommitArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_COMMIT_ID;
+      public:
         Operation *proxy_this;
         bool deactivate;
-      };
-      struct StateAnalysisArgs {
-      public:
-        HLRTaskID hlr_id;
-        Operation *proxy_op;
-        RtUserEvent ready_event;
       };
     public:
       class MappingDependenceTracker {
@@ -1412,8 +1419,10 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
-      struct ResolveFuturePredArgs {
-        HLRTaskID hlr_id;
+      struct ResolveFuturePredArgs : public LgTaskArgs<ResolveFuturePredArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RESOLVE_FUTURE_PRED_ID;
+      public:
         FuturePredOp *future_pred_op;
       };
     public:
@@ -1657,14 +1666,17 @@ namespace Legion {
      */
     class MustEpochTriggerer {
     public:
-      struct MustEpochIndivArgs {
+      struct MustEpochIndivArgs : public LgTaskArgs<MustEpochIndivArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_MUST_INDIV_ID;
+      public:
         MustEpochTriggerer *triggerer;
         IndividualTask *task;
       };
-      struct MustEpochIndexArgs {
-        HLRTaskID hlr_id;
+      struct MustEpochIndexArgs : public LgTaskArgs<MustEpochIndexArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MUST_INDEX_ID;
+      public:
         MustEpochTriggerer *triggerer;
         IndexTask *task;
       };
@@ -1696,9 +1708,10 @@ namespace Legion {
      */
     class MustEpochMapper {
     public:
-      struct MustEpochMapArgs {
+      struct MustEpochMapArgs : public LgTaskArgs<MustEpochMapArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_MUST_MAP_ID;
+      public:
         MustEpochMapper *mapper;
         SingleTask *task;
       };
@@ -1720,14 +1733,18 @@ namespace Legion {
 
     class MustEpochDistributor {
     public:
-      struct MustEpochDistributorArgs {
+      struct MustEpochDistributorArgs : 
+        public LgTaskArgs<MustEpochDistributorArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_MUST_DIST_ID;
+      public:
         TaskOp *task;
       };
-      struct MustEpochLauncherArgs {
+      struct MustEpochLauncherArgs : 
+        public LgTaskArgs<MustEpochLauncherArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_MUST_LAUNCH_ID;
+      public:
         TaskOp *task;
       };
     public:

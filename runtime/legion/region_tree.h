@@ -51,8 +51,10 @@ namespace Legion {
      */
     class RegionTreeForest {
     public:
-      struct DisjointnessArgs {
-        HLRTaskID hlr_id;
+      struct DisjointnessArgs : public LgTaskArgs<DisjointnessArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DISJOINTNESS_TASK_ID;
+      public:
         IndexPartition handle;
         RtUserEvent ready;
       };  
@@ -708,13 +710,19 @@ namespace Legion {
      */
     class IndexSpaceNode : public IndexTreeNode {
     public:
-      struct DynamicIndependenceArgs {
-        HLRTaskID hlr_id;
+      struct DynamicIndependenceArgs : 
+        public LgTaskArgs<DynamicIndependenceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_PART_INDEPENDENCE_TASK_ID;
+      public:
         IndexSpaceNode *parent;
         IndexPartNode *left, *right;
       };
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         IndexSpaceNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
@@ -879,18 +887,25 @@ namespace Legion {
      */
     class IndexPartNode : public IndexTreeNode { 
     public:
-      struct DynamicIndependenceArgs {
-        HLRTaskID hlr_id;
+      struct DynamicIndependenceArgs : 
+        public LgTaskArgs<DynamicIndependenceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_SPACE_INDEPENDENCE_TASK_ID;
+      public:
         IndexPartNode *parent;
         IndexSpaceNode *left, *right;
       };
-      struct PendingChildArgs {
-        HLRTaskID hlr_id;
+      struct PendingChildArgs : public LgTaskArgs<PendingChildArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_PENDING_CHILD_TASK_ID;
+      public:
         IndexPartNode *parent;
         ColorPoint pending_child;
       };
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         IndexPartNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
@@ -1057,14 +1072,21 @@ namespace Legion {
       private:
         std::deque<AddressSpaceID> &targets;
       };
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         FieldSpaceNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
       };
-      struct SemanticFieldRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticFieldRequestArgs : 
+        public LgTaskArgs<SemanticFieldRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         FieldSpaceNode *proxy_this;
         FieldID fid;
         SemanticTag tag;
@@ -1632,8 +1654,10 @@ namespace Legion {
      */
     class RegionNode : public RegionTreeNode {
     public:
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REGION_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         RegionNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
@@ -1819,8 +1843,10 @@ namespace Legion {
      */
     class PartitionNode : public RegionTreeNode {
     public:
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         PartitionNode *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;

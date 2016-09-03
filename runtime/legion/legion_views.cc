@@ -5212,11 +5212,9 @@ namespace Legion {
       {
         RtEvent wait_on = Runtime::merge_events(ready_events);
         DeferCompositeViewRegistrationArgs args;
-        args.hlr_id = HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID;
         args.view = view;
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-            HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID, 
-            HLR_LATENCY_PRIORITY, NULL/*op*/, wait_on);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         NULL/*op*/, wait_on);
         // Not ready to perform registration yet
         return;
       }
@@ -5540,12 +5538,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DeferCompositeViewRefArgs args;
-      args.hlr_id = HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID;
       args.view = view;
       args.did = did;
-      return context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-          HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-          NULL/*op*/, precondition);
+      return context->runtime->issue_runtime_meta_task(args, 
+          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5707,14 +5703,12 @@ namespace Legion {
           RtEvent capture_precondition = 
             Runtime::merge_events(capture_preconditions);
           DeferCaptureArgs args;
-          args.hlr_id = HLR_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID;
           args.proxy_this = this;
           args.capture_event = capture_event;
           Runtime *runtime = logical_node->context->runtime;
           RtEvent precondition = 
-            runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID, HLR_LATENCY_PRIORITY,
-              NULL/*op*/, capture_precondition);
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                             NULL/*op*/, capture_precondition);
           preconditions.insert(precondition);
         }
         else // We can do the capture now!
@@ -5881,13 +5875,11 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
-          args.hlr_id = HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID;
           args.state = state;
           args.owner_did = owner_did;
           RtEvent precondition = 
-            runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-                NULL/*op*/, ready);
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                             NULL/*op*/, ready);
           preconditions.insert(precondition);
         }
         else

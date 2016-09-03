@@ -22,6 +22,7 @@
 #include "region_tree.h"
 #include "mapper_manager.h"
 #include "legion_utilities.h"
+#include "legion_profiling.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
@@ -140,9 +141,11 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_ALLOC;
     public:
-      struct ContributeCollectiveArgs {
+      struct ContributeCollectiveArgs : 
+        public LgTaskArgs<ContributeCollectiveArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_CONTRIBUTE_COLLECTIVE_ID;
+      public:
         FutureImpl *impl;
         DynamicCollective dc;
         unsigned count;
@@ -460,20 +463,23 @@ namespace Legion {
      */
     class ProcessorManager {
     public:
-      struct TriggerOpArgs {
+      struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
+      public:
         Operation *op;
         ProcessorManager *manager;
       };
-      struct SchedulerArgs {
+      struct SchedulerArgs : public LgTaskArgs<SchedulerArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_SCHEDULER_ID;
+      public:
         Processor proc;
       };
-      struct TriggerTaskArgs {
+      struct TriggerTaskArgs : public LgTaskArgs<TriggerTaskArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_TRIGGER_TASK_ID;
+      public:
         TaskOp *op;
         ProcessorManager *manager;
       };
@@ -888,6 +894,11 @@ namespace Legion {
      */
     class ShutdownManager {
     public:
+      struct RetryShutdownArgs : public LgTaskArgs<RetryShutdownArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RETRY_SHUTDOWN_TASK_ID;
+      };
+    public:
       ShutdownManager(bool phase_one, Runtime *rt, AddressSpaceID source,
                       unsigned radix, ShutdownManager *owner = NULL);
       ShutdownManager(const ShutdownManager &rhs);
@@ -927,9 +938,10 @@ namespace Legion {
      */
     class GarbageCollectionEpoch {
     public:
-      struct GarbageCollectionArgs {
+      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
+      public:
         GarbageCollectionEpoch *epoch;
         LogicalView *view;
       };
@@ -988,8 +1000,10 @@ namespace Legion {
      */
     class LegionContinuation {
     public:
-      struct ContinuationArgs {
-        HLRTaskID hlr_id;
+      struct ContinuationArgs : public LgTaskArgs<ContinuationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTINUATION_TASK_ID;
+      public:
         LegionContinuation *continuation;
       };
     public:
@@ -1039,8 +1053,10 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = TASK_IMPL_ALLOC;
     public:
-      struct SemanticRequestArgs {
-        HLRTaskID hlr_id;
+      struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID;
+      public:
         TaskImpl *proxy_this;
         SemanticTag tag;
         AddressSpaceID source;
@@ -1276,7 +1292,7 @@ namespace Legion {
       ProjectionFunctor *const functor;
     private:
       Reservation projection_reservation;
-    };
+    }; 
 
     /**
      * \class Runtime 
@@ -1289,51 +1305,61 @@ namespace Legion {
      */
     class Runtime {
     public:
-      struct DeferredRecycleArgs {
+      struct DeferredRecycleArgs : public LgTaskArgs<DeferredRecycleArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFERRED_RECYCLE_ID;
+      public:
         DistributedID did;
       };
-      struct DeferredFutureSetArgs {
-        HLRTaskID hlr_id;
+      struct DeferredFutureSetArgs : public LgTaskArgs<DeferredFutureSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_SET_ID;
+      public:
         FutureImpl *target;
         FutureImpl *result;
         TaskOp *task_op;
       };
-      struct DeferredFutureMapSetArgs {
-        HLRTaskID hlr_id;
+      struct DeferredFutureMapSetArgs : 
+        public LgTaskArgs<DeferredFutureMapSetArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_FUTURE_MAP_SET_ID;
+      public:
         FutureMapImpl *future_map;
         FutureImpl *result;
         Domain domain;
         TaskOp *task_op;
       };
-      struct DeferredEnqueueArgs {
-        HLRTaskID hlr_id;
+      struct DeferredEnqueueArgs : public LgTaskArgs<DeferredEnqueueArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_TASK_ID;
+      public:
         ProcessorManager *manager;
         TaskOp *task;
       };
-      struct CollectiveFutureArgs {
-        HLRTaskID hlr_id;
-        ReductionOpID redop;
-        FutureImpl *future;
-        ApBarrier barrier;
-      };
-      struct MapperTaskArgs {
-        HLRTaskID hlr_id;
+      struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
+      public:
         FutureImpl *future;
         MapperID map_id;
         Processor proc;
         ApEvent event;
         RemoteTask *context;
       }; 
-      struct SelectTunableArgs {
-        HLRTaskID hlr_id;
+      struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
+      public:
         MapperID mapper_id;
         MappingTagID tag;
         TunableID tunable_id;
         unsigned tunable_index; // only valid for LegionSpy
         SingleTask *task;
         FutureImpl *result;
+      }; 
+      struct RetryShutdownArgs : public LgTaskArgs<RetryShutdownArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RETRY_SHUTDOWN_TASK_ID;
       };
     public:
       struct ProcessorGroupInfo {
@@ -2271,11 +2297,11 @@ namespace Legion {
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
       ProcessorMask find_processor_mask(const std::vector<Processor> &procs);
-      RtEvent issue_runtime_meta_task(const void *args, size_t arglen,
-                                  HLRTaskID tid, HLRPriority hlr_priority,
-                                  Operation *op = NULL,
-                                  RtEvent precondition = RtEvent::NO_RT_EVENT, 
-                                  Processor proc = Processor::NO_PROC); 
+      template<typename T>
+      inline RtEvent issue_runtime_meta_task(const LgTaskArgs<T> &args,
+                                   LgPriority lg_priority, Operation *op = NULL,
+                                   RtEvent precondition = RtEvent::NO_RT_EVENT,
+                                   Processor proc = Processor::NO_PROC);
     public:
       DistributedID get_available_distributed_id(bool need_cont, 
                                                  bool has_lock = false);
@@ -3023,6 +3049,47 @@ namespace Legion {
 #endif
       result->activate();
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline RtEvent Runtime::issue_runtime_meta_task(const LgTaskArgs<T> &args,
+                                      LgPriority priority, Operation *op, 
+                                      RtEvent precondition, Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // If this is not a task directly related to shutdown or is a message, 
+      // to a remote node then increment the number of outstanding tasks
+#ifdef DEBUG_LEGION
+      if (T::TASK_ID < LG_MESSAGE_ID)
+        increment_total_outstanding_tasks(args.lg_task_id, true/*meta*/);
+#else
+      if (T::TASK_ID < LG_MESSAGE_ID)
+        increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[T::TASK_ID],1);
+#endif
+      if (!target.exists())
+      {
+        // If we don't have a processor to explicitly target, figure
+        // out which of our utility processors to use
+        target = utility_group;
+      }
+#ifdef DEBUG_LEGION
+      assert(target.exists());
+#endif
+      DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
+      if ((T::TASK_ID < LG_MESSAGE_ID) && (profiler != NULL))
+      {
+        Realm::ProfilingRequestSet requests;
+        profiler->add_meta_request(requests, T::TASK_ID, op);
+        return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T),
+                                    requests, precondition, priority));
+      }
+      else
+        return RtEvent(target.spawn(LG_TASK_ID, &args, sizeof(T), 
+                                    precondition, priority));
     }
 
     //--------------------------------------------------------------------------

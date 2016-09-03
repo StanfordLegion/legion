@@ -787,14 +787,11 @@ namespace Legion {
         // collected while we are waiting for the contribution task to run
         add_base_gc_ref(PENDING_COLLECTIVE_REF);
         ContributeCollectiveArgs args;
-        args.hlr_id = HLR_CONTRIBUTE_COLLECTIVE_ID;
         args.impl = this;
         args.dc = dc;
         args.count = count;
         // Spawn the task dependent on the future being ready
-        runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_CONTRIBUTE_COLLECTIVE_ID,
-                                         HLR_LATENCY_PRIORITY, NULL, 
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
                                          Runtime::protect_event(ready_event));
       }
       else // If we've already triggered, then we can do the arrival now
@@ -1972,10 +1969,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SchedulerArgs sched_args;
-      sched_args.hlr_id = HLR_SCHEDULER_ID;
       sched_args.proc = local_proc;
-      runtime->issue_runtime_meta_task(&sched_args, sizeof(sched_args),
-                                       HLR_SCHEDULER_ID, HLR_LATENCY_PRIORITY);
+      runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_PRIORITY);
     } 
 
     //--------------------------------------------------------------------------
@@ -2225,14 +2220,12 @@ namespace Legion {
       assert(op != NULL);
 #endif
       TriggerOpArgs args;
-      args.hlr_id = HLR_TRIGGER_OP_ID;
       args.manager = this;
       args.op = op;
       AutoLock l_lock(local_queue_lock); 
-      RtEvent next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                    HLR_TRIGGER_OP_ID, 
-                                                    HLR_THROUGHPUT_PRIORITY,
-                      op, local_scheduler_preconditions[next_local_index]);
+      RtEvent next = runtime->issue_runtime_meta_task(args, 
+          LG_THROUGHPUT_PRIORITY, op, 
+          local_scheduler_preconditions[next_local_index]);
       local_scheduler_preconditions[next_local_index++] = next;
       if (next_local_index == superscalar_width)
         next_local_index = 0;
@@ -2385,7 +2378,6 @@ namespace Legion {
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
         TriggerTaskArgs trigger_args;
-        trigger_args.hlr_id = HLR_TRIGGER_TASK_ID;
         trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
@@ -2400,9 +2392,8 @@ namespace Legion {
           // Mark that this task is no longer outstanding
           task->deactivate_outstanding_task();
           trigger_args.op = task;
-          runtime->issue_runtime_meta_task(&trigger_args,sizeof(trigger_args),
-                                           HLR_TRIGGER_TASK_ID, 
-                                           HLR_THROUGHPUT_PRIORITY, task);
+          runtime->issue_runtime_meta_task(trigger_args,
+                                           LG_THROUGHPUT_PRIORITY, task);
         }
       }
 
@@ -4713,8 +4704,8 @@ namespace Legion {
 #endif
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((HLRTaskID*)sending_buffer) = HLR_MESSAGE_ID;
-      sending_index = sizeof(HLRTaskID);
+      *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
+      sending_index = sizeof(LgTaskID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -4830,16 +4821,15 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(HLRTaskID) + sizeof(AddressSpaceID) 
+      const size_t base_size = sizeof(LgTaskID) + sizeof(AddressSpaceID) 
                                 + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
                                                             packaged_messages;
-      // Send the message
-      RtEvent next_event = runtime->issue_runtime_meta_task(sending_buffer, 
-                                      sending_index, HLR_MESSAGE_ID, 
-                                      HLR_LATENCY_PRIORITY, NULL,
-                                      last_message_event, target);
+      // Send the message directly there, don't go through the
+      // runtime interface to avoid being counted
+      RtEvent next_event(target.spawn(LG_TASK_ID, sending_buffer, 
+            sending_index, last_message_event, LG_LATENCY_PRIORITY));
       // Update the event
       last_message_event = next_event;
       // Reset the state of the buffer
@@ -5826,9 +5816,9 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       if (!result)
       {
-        HLR_TASK_DESCRIPTIONS(task_descs);
+        LG_TASK_DESCRIPTIONS(task_descs);
         // Only need to see tasks less than this 
-        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        for (unsigned idx = 0; idx < LG_MESSAGE_ID; idx++)
         {
           if (runtime->outstanding_counts[idx] == 0)
             continue;
@@ -5875,10 +5865,9 @@ namespace Legion {
         if (!wait_for.empty())
           precondition = Runtime::merge_events(wait_for);
         // We failed, launch a task to retry phase 1 
-        HLRTaskID hlr_id = HLR_RETRY_SHUTDOWN_TASK_ID;
-        runtime->issue_runtime_meta_task(&hlr_id, sizeof(hlr_id),
-            HLR_RETRY_SHUTDOWN_TASK_ID, HLR_THROUGHPUT_PRIORITY, 
-            NULL, precondition);
+        RetryShutdownArgs args;
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY, 
+                                         NULL, precondition);
       }
     }
 
@@ -6030,7 +6019,6 @@ namespace Legion {
       // Set remaining to the total number of collections
       remaining = collections.size();
       GarbageCollectionArgs args;
-      args.hlr_id = HLR_DEFERRED_COLLECT_ID;
       args.epoch = this;
       std::set<RtEvent> events;
       for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
@@ -6042,9 +6030,8 @@ namespace Legion {
         // before launching the task
         it++;
         bool done = (it == collections.end());
-        RtEvent e = runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                         HLR_DEFERRED_COLLECT_ID, 
-                                         HLR_THROUGHPUT_PRIORITY, NULL,
+        RtEvent e = runtime->issue_runtime_meta_task(args,
+                                         LG_THROUGHPUT_PRIORITY, NULL,
                                          precondition);
         events.insert(e);
         if (done)
@@ -6646,13 +6633,11 @@ namespace Legion {
         {
           // Defer this until the semantic condition is ready
           SemanticRequestArgs args;
-          args.hlr_id = HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID;
           args.proxy_this = this;
           args.tag = tag;
           args.source = target;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-                        HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
-                        HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                           NULL/*op*/, precondition);
         }
       }
       else
@@ -7722,7 +7707,7 @@ namespace Legion {
       }
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
-      outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
+      outstanding_counts.resize(LG_LAST_TASK_ID, 0);
 #endif
     }
 
@@ -8212,14 +8197,14 @@ namespace Legion {
     void Runtime::initialize_legion_prof(void)
     //--------------------------------------------------------------------------
     {
-      HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
+      LG_TASK_DESCRIPTIONS(hlr_task_descriptions);
       profiler = new LegionProfiler((local_utils.empty() ? 
                                     Processor::NO_PROC : utility_group), 
-                                    machine, HLR_LAST_TASK_ID,
+                                    machine, LG_LAST_TASK_ID,
                                     hlr_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
                                     Operation::op_names); 
-      HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
+      LG_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
       profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(hlr_mapper_calls);
       profiler->record_mapper_call_kinds(hlr_mapper_calls, LAST_MAPPER_CALL);
@@ -8359,16 +8344,13 @@ namespace Legion {
       f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper
       MapperTaskArgs args;
-      args.hlr_id = HLR_MAPPER_TASK_ID;
       args.future = f.impl;
       args.map_id = map_id;
       args.proc = proc;
       args.event = result;
       args.context = map_context;
       ApEvent pre = f.impl->get_ready_event();
-      ApEvent post(issue_runtime_meta_task(&args, sizeof(args), 
-                                           HLR_MAPPER_TASK_ID, 
-                                           HLR_LATENCY_PRIORITY, NULL, 
+      ApEvent post(issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
                                            Runtime::protect_event(pre)));
       // Chain the events properly
       Runtime::trigger_event(result, post);
@@ -11464,13 +11446,10 @@ namespace Legion {
             launcher.predicate_false_future.impl->add_base_gc_ref(
                                                 FUTURE_HANDLE_REF);
             DeferredFutureMapSetArgs args;
-            args.hlr_id = HLR_DEFERRED_FUTURE_MAP_SET_ID;
             args.future_map = result;
             args.result = launcher.predicate_false_future.impl;
             args.domain = launcher.launch_domain;
-            issue_runtime_meta_task(&args, sizeof(args), 
-                                    HLR_DEFERRED_FUTURE_MAP_SET_ID, 
-                                    HLR_LATENCY_PRIORITY, NULL, 
+            issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
                                     Runtime::protect_event(ready_event));
           }
           return FutureMap(result);
@@ -13292,7 +13271,6 @@ namespace Legion {
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
       SelectTunableArgs args;
-      args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
       args.mapper_id = mid;
       args.tag = tag;
       args.tunable_id = tid;
@@ -13300,9 +13278,7 @@ namespace Legion {
         args.tunable_index = ctx->get_tunable_index();
       args.task = ctx;
       args.result = result;
-      issue_runtime_meta_task(&args, sizeof(args),
-                              HLR_SELECT_TUNABLE_TASK_ID, 
-                              HLR_LATENCY_PRIORITY, ctx);
+      issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, ctx);
       return result_future;
     }
 
@@ -16718,11 +16694,9 @@ namespace Legion {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
-        args.hlr_id = HLR_DEFERRED_ENQUEUE_TASK_ID;
         args.manager = proc_managers[p];
         args.task = op;
-        issue_runtime_meta_task(&args, sizeof(args), 
-            HLR_DEFERRED_ENQUEUE_TASK_ID, HLR_LATENCY_PRIORITY, op, wait_on);
+        issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, op, wait_on);
       }
       else
         proc_managers[p]->add_to_ready_queue(op);
@@ -16817,47 +16791,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent Runtime::issue_runtime_meta_task(const void *args, size_t arglen,
-                                             HLRTaskID tid,HLRPriority priority,
-                                             Operation *op,RtEvent precondition,
-                                             Processor target)
-    //--------------------------------------------------------------------------
-    {
-      // If this is not a task directly related to shutdown or is a message, 
-      // to a remote node then increment the number of outstanding tasks
-#ifdef DEBUG_LEGION
-      if (tid < HLR_MESSAGE_ID)
-        increment_total_outstanding_tasks(tid, true/*meta*/);
-#else
-      if (tid < HLR_MESSAGE_ID)
-        increment_total_outstanding_tasks();
-#endif
-#ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&outstanding_counts[tid],1);
-#endif
-      if (!target.exists())
-      {
-        // If we don't have a processor to explicitly target, figure
-        // out which of our utility processors to use
-        target = utility_group;
-      }
-#ifdef DEBUG_LEGION
-      assert(target.exists());
-#endif
-      DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
-      if (profiler != NULL && tid < HLR_MESSAGE_ID)
-      {
-        Realm::ProfilingRequestSet requests;
-        profiler->add_meta_request(requests, tid, op);
-        return RtEvent(target.spawn(HLR_TASK_ID, args, arglen,
-                                    requests, precondition, priority));
-      }
-      else
-        return RtEvent(target.spawn(HLR_TASK_ID, args, arglen, 
-                                    precondition, priority));
-    } 
-
-    //--------------------------------------------------------------------------
     DistributedID Runtime::get_available_distributed_id(bool need_cont,
                                                         bool has_lock)
     //--------------------------------------------------------------------------
@@ -16921,12 +16854,9 @@ namespace Legion {
       if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
-        deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
         deferred_recycle_args.did = did;
-        issue_runtime_meta_task(&deferred_recycle_args,
-                                sizeof(deferred_recycle_args),
-                                HLR_DEFERRED_RECYCLE_ID, 
-                                HLR_RESOURCE_PRIORITY, NULL, recycle_event);
+        issue_runtime_meta_task(deferred_recycle_args, LG_RESOURCE_PRIORITY, 
+                                NULL, recycle_event);
       }
       else
         free_distributed_id(did);
@@ -17295,11 +17225,10 @@ namespace Legion {
     void Runtime::issue_runtime_shutdown_attempt(void)
     //--------------------------------------------------------------------------
     {
-      HLRTaskID hlr_id = HLR_RETRY_SHUTDOWN_TASK_ID; 
+      RetryShutdownArgs args;
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
-      issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, 
-                              HLR_THROUGHPUT_PRIORITY, NULL);
+      issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -20060,7 +19989,7 @@ namespace Legion {
       {
         // Do another collective to construct the rank tables
         RtEvent mpi_init_event(realm.collective_spawn_by_kind(
-              Processor::LOC_PROC, HLR_MPI_INTEROP_ID, NULL, 0,
+              Processor::LOC_PROC, LG_MPI_INTEROP_ID, NULL, 0,
               true/*one per node*/, runtime_startup_event));
         // The mpi init event then becomes the new runtime startup event
         runtime_startup_event = mpi_init_event;
@@ -20080,7 +20009,7 @@ namespace Legion {
       if (top_level_proc.exists())
       {
         Realm::ProfilingRequestSet empty_requests;
-        top_level_proc.spawn(HLR_LAUNCH_TOP_LEVEL_ID, NULL, 0,
+        top_level_proc.spawn(LG_LAUNCH_TOP_LEVEL_ID, NULL, 0,
                              empty_requests, runtime_startup_event);
       }
       // If we are supposed to background this thread, then we wait
@@ -20453,19 +20382,19 @@ namespace Legion {
                                SHUTDOWN_TASK_ID, shutdown_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                         HLR_TASK_ID, hlr_task, no_requests)));
+                                         LG_TASK_ID, hlr_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                    HLR_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
+                    LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                   HLR_MAPPER_PROFILING_ID, map_profiling_task, no_requests)));
+                   LG_MAPPER_PROFILING_ID, map_profiling_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                HLR_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
+                LG_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                          HLR_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
+                          LG_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
       }
       if (record_registration)
       {
@@ -20474,13 +20403,13 @@ namespace Legion {
         log_run.print("Legion runtime shutdown task has "
                             "Realm ID %d", SHUTDOWN_TASK_ID);
         log_run.print("Legion runtime meta-task has Realm ID %d", 
-                      HLR_TASK_ID);
+                      LG_TASK_ID);
         log_run.print("Legion runtime profiling task Realm ID %d",
-                      HLR_LEGION_PROFILING_ID);
+                      LG_LEGION_PROFILING_ID);
         log_run.print("Legion mapper profiling task has Realm ID %d",
-                      HLR_MAPPER_PROFILING_ID);
+                      LG_MAPPER_PROFILING_ID);
         log_run.print("Legion launch top-level task has Realm ID %d",
-                      HLR_LAUNCH_TOP_LEVEL_ID);
+                      LG_LAUNCH_TOP_LEVEL_ID);
       }
       return Runtime::merge_events(registered_events);
     }
@@ -20783,12 +20712,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const char *data = (const char*)args;
-      HLRTaskID tid = *((const HLRTaskID*)data);
+      LgTaskID tid = *((const LgTaskID*)data);
       data += sizeof(tid);
       arglen -= sizeof(tid);
       switch (tid)
       {
-        case HLR_SCHEDULER_ID:
+        case LG_SCHEDULER_ID:
           {
             const ProcessorManager::SchedulerArgs *sched_args = 
               (const ProcessorManager::SchedulerArgs*)args;
@@ -20796,12 +20725,12 @@ namespace Legion {
                                                             sched_args->proc);
             break;
           }
-        case HLR_MESSAGE_ID:
+        case LG_MESSAGE_ID:
           {
             Runtime::get_runtime(p)->process_message_task(data, arglen);
             break;
           }
-        case HLR_POST_END_ID:
+        case LG_POST_END_ID:
           {
             const SingleTask::PostEndArgs *post_end_args = 
               (const SingleTask::PostEndArgs*)args;
@@ -20809,28 +20738,21 @@ namespace Legion {
                                 post_end_args->result_size, true/*owned*/);
             break;
           }
-        case HLR_DEFERRED_READY_TRIGGER_ID:
+        case LG_DEFERRED_READY_TRIGGER_ID:
           {
             const Operation::DeferredReadyArgs *deferred_ready_args = 
               (const Operation::DeferredReadyArgs*)args;
             deferred_ready_args->proxy_this->trigger_ready();
             break;
           }
-        case HLR_DEFERRED_MAPPING_TRIGGER_ID:
-          {
-            const Operation::DeferredMappingArgs *deferred_mapping_args = 
-              (const Operation::DeferredMappingArgs*)args;
-            deferred_mapping_args->proxy_this->trigger_mapping();
-            break;
-          }
-        case HLR_DEFERRED_RESOLUTION_TRIGGER_ID:
+        case LG_DEFERRED_RESOLUTION_TRIGGER_ID:
           {
             const Operation::DeferredResolutionArgs *deferred_resolution_args =
               (const Operation::DeferredResolutionArgs*)args;
             deferred_resolution_args->proxy_this->trigger_resolution();
             break;
           }
-        case HLR_DEFERRED_COMMIT_TRIGGER_ID:
+        case LG_DEFERRED_COMMIT_TRIGGER_ID:
           {
             const Operation::DeferredCommitTriggerArgs *deferred_commit_args =
               (const Operation::DeferredCommitTriggerArgs*)args;
@@ -20838,35 +20760,35 @@ namespace Legion {
                 deferred_commit_args->gen);
             break;
           }
-        case HLR_DEFERRED_POST_MAPPED_ID:
+        case LG_DEFERRED_POST_MAPPED_ID:
           {
             const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
               (const SingleTask::DeferredPostMappedArgs*)args;
             post_mapped_args->task->handle_post_mapped();
             break;
           }
-        case HLR_DEFERRED_EXECUTION_TRIGGER_ID:
+        case LG_DEFERRED_EXECUTE_ID:
           {
-            const Operation::DeferredMappingArgs *deferred_mapping_args = 
-              (const Operation::DeferredMappingArgs*)args;
+            const Operation::DeferredExecArgs *deferred_exec_args = 
+              (const Operation::DeferredExecArgs*)args;
+            deferred_exec_args->proxy_this->complete_execution();
+            break;
+          }
+        case LG_DEFERRED_EXECUTION_TRIGGER_ID:
+          {
+            const Operation::DeferredExecuteArgs *deferred_mapping_args = 
+              (const Operation::DeferredExecuteArgs*)args;
             deferred_mapping_args->proxy_this->deferred_execute();
             break;
           }
-        case HLR_DEFERRED_EXECUTE_ID:
-          {
-            const Operation::DeferredExecuteArgs *deferred_execute_args = 
-              (const Operation::DeferredExecuteArgs*)args;
-            deferred_execute_args->proxy_this->complete_execution();
-            break;
-          }
-        case HLR_DEFERRED_COMPLETE_ID:
+        case LG_DEFERRED_COMPLETE_ID:
           {
             const Operation::DeferredCompleteArgs *deferred_complete_args =
               (const Operation::DeferredCompleteArgs*)args;
             deferred_complete_args->proxy_this->complete_operation();
             break;
           } 
-        case HLR_DEFERRED_COMMIT_ID:
+        case LG_DEFERRED_COMMIT_ID:
           {
             const Operation::DeferredCommitArgs *deferred_commit_args = 
               (const Operation::DeferredCommitArgs*)args;
@@ -20874,19 +20796,15 @@ namespace Legion {
                 deferred_commit_args->deactivate);
             break;
           }
-        case HLR_RECLAIM_LOCAL_FIELD_ID:
+        case LG_RECLAIM_LOCAL_FIELD_ID:
           {
-            Deserializer derez(args, arglen+sizeof(HLRTaskID));
-            derez.advance_pointer(sizeof(HLRTaskID));
-            DerezCheck z(derez);
-            FieldSpace handle;
-            derez.deserialize(handle);
-            FieldID fid;
-            derez.deserialize(fid);
-            Runtime::get_runtime(p)->finalize_field_destroy(handle, fid);
+            const SingleTask::ReclaimLocalFieldArgs *rargs = 
+              (const SingleTask::ReclaimLocalFieldArgs*)args;
+            Runtime::get_runtime(p)->finalize_field_destroy(rargs->handle,
+                                                            rargs->fid);
             break; 
           }
-        case HLR_DEFERRED_COLLECT_ID:
+        case LG_DEFERRED_COLLECT_ID:
           {
             const GarbageCollectionEpoch::GarbageCollectionArgs *collect_args =
               (const GarbageCollectionEpoch::GarbageCollectionArgs*)args;
@@ -20895,28 +20813,28 @@ namespace Legion {
               delete collect_args->epoch;
             break;
           }
-        case HLR_PRE_PIPELINE_ID:
+        case LG_PRE_PIPELINE_ID:
           {
             const Operation::PrepipelineArgs *pargs = 
               (const Operation::PrepipelineArgs*)args;
             pargs->proxy_this->trigger_prepipeline_stage();
             break;
           }
-        case HLR_TRIGGER_DEPENDENCE_ID:
+        case LG_TRIGGER_DEPENDENCE_ID:
           {
             const SingleTask::DeferredDependenceArgs *deferred_trigger_args =
               (const SingleTask::DeferredDependenceArgs*)args;
             deferred_trigger_args->op->execute_dependence_analysis();
             break;
           }
-        case HLR_TRIGGER_COMPLETE_ID:
+        case LG_TRIGGER_COMPLETE_ID:
           {
             const Operation::TriggerCompleteArgs *trigger_complete_args =
               (const Operation::TriggerCompleteArgs*)args;
             trigger_complete_args->proxy_this->trigger_complete();
             break;
           }
-        case HLR_TRIGGER_OP_ID:
+        case LG_TRIGGER_OP_ID:
           {
             // Key off of args here instead of data
             const ProcessorManager::TriggerOpArgs *trigger_args = 
@@ -20924,7 +20842,7 @@ namespace Legion {
             trigger_args->op->trigger_mapping();
             break;
           }
-        case HLR_TRIGGER_TASK_ID:
+        case LG_TRIGGER_TASK_ID:
           {
             // Key off of args here instead of data
             const ProcessorManager::TriggerTaskArgs *trigger_args = 
@@ -20932,7 +20850,7 @@ namespace Legion {
             trigger_args->op->trigger_mapping(); 
             break;
           }
-        case HLR_DEFERRED_RECYCLE_ID:
+        case LG_DEFERRED_RECYCLE_ID:
           {
             const DeferredRecycleArgs *deferred_recycle_args = 
               (const DeferredRecycleArgs*)args;
@@ -20940,37 +20858,37 @@ namespace Legion {
                                         deferred_recycle_args->did);
             break;
           }
-        case HLR_DEFERRED_SLICE_ID:
+        case LG_DEFERRED_SLICE_ID:
           {
             DeferredSlicer::handle_slice(args); 
             break;
           }
-        case HLR_MUST_INDIV_ID:
+        case LG_MUST_INDIV_ID:
           {
             MustEpochTriggerer::handle_individual(args);
             break;
           }
-        case HLR_MUST_INDEX_ID:
+        case LG_MUST_INDEX_ID:
           {
             MustEpochTriggerer::handle_index(args);
             break;
           }
-        case HLR_MUST_MAP_ID:
+        case LG_MUST_MAP_ID:
           {
             MustEpochMapper::handle_map_task(args);
             break;
           }
-        case HLR_MUST_DIST_ID:
+        case LG_MUST_DIST_ID:
           {
             MustEpochDistributor::handle_distribute_task(args);
             break;
           }
-        case HLR_MUST_LAUNCH_ID:
+        case LG_MUST_LAUNCH_ID:
           {
             MustEpochDistributor::handle_launch_task(args);
             break;
           }
-        case HLR_DEFERRED_FUTURE_SET_ID:
+        case LG_DEFERRED_FUTURE_SET_ID:
           {
             DeferredFutureSetArgs *future_args =  
               (DeferredFutureSetArgs*)args;
@@ -20988,7 +20906,7 @@ namespace Legion {
             future_args->task_op->complete_execution();
             break;
           }
-        case HLR_DEFERRED_FUTURE_MAP_SET_ID:
+        case LG_DEFERRED_FUTURE_MAP_SET_ID:
           {
             DeferredFutureMapSetArgs *future_args = 
               (DeferredFutureMapSetArgs*)args;
@@ -21010,7 +20928,7 @@ namespace Legion {
             future_args->task_op->complete_execution();
             break;
           }
-        case HLR_RESOLVE_FUTURE_PRED_ID:
+        case LG_RESOLVE_FUTURE_PRED_ID:
           {
             FuturePredOp::ResolveFuturePredArgs *resolve_args = 
               (FuturePredOp::ResolveFuturePredArgs*)args;
@@ -21018,12 +20936,12 @@ namespace Legion {
             resolve_args->future_pred_op->remove_predicate_reference();
             break;
           }
-        case HLR_CONTRIBUTE_COLLECTIVE_ID:
+        case LG_CONTRIBUTE_COLLECTIVE_ID:
           {
             FutureImpl::handle_contribute_to_collective(args);
             break;
           }
-        case HLR_MAPPER_TASK_ID:
+        case LG_MAPPER_TASK_ID:
           {
             MapperTaskArgs *margs = (MapperTaskArgs*)args;
             Runtime *runtime = Runtime::get_runtime(p);
@@ -21037,7 +20955,7 @@ namespace Legion {
             runtime->decrement_outstanding_top_level_tasks();
             break;
           }
-        case HLR_DISJOINTNESS_TASK_ID:
+        case LG_DISJOINTNESS_TASK_ID:
           {
             RegionTreeForest::DisjointnessArgs *dargs = 
               (RegionTreeForest::DisjointnessArgs*)args;
@@ -21046,7 +20964,7 @@ namespace Legion {
                                                             dargs->ready);
             break;
           }
-        case HLR_PART_INDEPENDENCE_TASK_ID:
+        case LG_PART_INDEPENDENCE_TASK_ID:
           {
             IndexSpaceNode::DynamicIndependenceArgs *dargs = 
               (IndexSpaceNode::DynamicIndependenceArgs*)args;
@@ -21054,7 +20972,7 @@ namespace Legion {
                 dargs->parent, dargs->left, dargs->right);
             break;
           }
-        case HLR_SPACE_INDEPENDENCE_TASK_ID:
+        case LG_SPACE_INDEPENDENCE_TASK_ID:
           {
             IndexPartNode::DynamicIndependenceArgs *dargs = 
               (IndexPartNode::DynamicIndependenceArgs*)args;
@@ -21062,19 +20980,19 @@ namespace Legion {
                 dargs->parent, dargs->left, dargs->right);
             break;
           }
-        case HLR_PENDING_CHILD_TASK_ID:
+        case LG_PENDING_CHILD_TASK_ID:
           {
             IndexPartNode::handle_pending_child_task(args);
             break;
           }
-        case HLR_DECREMENT_PENDING_TASK_ID:
+        case LG_DECREMENT_PENDING_TASK_ID:
           {
             SingleTask::DecrementArgs *dargs = 
               (SingleTask::DecrementArgs*)args;
             dargs->parent_ctx->decrement_pending();
             break;
           }
-        case HLR_SEND_VERSION_STATE_UPDATE_TASK_ID:
+        case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
           {
             VersionState::SendVersionStateArgs *vargs = 
               (VersionState::SendVersionStateArgs*)args;
@@ -21085,7 +21003,7 @@ namespace Legion {
             legion_delete(vargs->request_mask);
             break;
           }
-        case HLR_ADD_TO_DEP_QUEUE_TASK_ID:
+        case LG_ADD_TO_DEP_QUEUE_TASK_ID:
           {
             SingleTask::AddToDepQueueArgs *dargs = 
               (SingleTask::AddToDepQueueArgs*)args;
@@ -21093,14 +21011,14 @@ namespace Legion {
                                  true/*has lock*/, dargs->op_pre);
             break;
           }
-        case HLR_WINDOW_WAIT_TASK_ID:
+        case LG_WINDOW_WAIT_TASK_ID:
           {
             SingleTask::WindowWaitArgs *wargs = 
               (SingleTask::WindowWaitArgs*)args;
             wargs->parent_ctx->perform_window_wait();
             break;
           }
-        case HLR_ISSUE_FRAME_TASK_ID:
+        case LG_ISSUE_FRAME_TASK_ID:
           {
             SingleTask::IssueFrameArgs *fargs = 
               (SingleTask::IssueFrameArgs*)args;
@@ -21108,24 +21026,24 @@ namespace Legion {
                                                    fargs->frame_termination);
             break;
           }
-        case HLR_CONTINUATION_TASK_ID:
+        case LG_CONTINUATION_TASK_ID:
           {
             LegionContinuation::handle_continuation(args);
             break;
           }
-        case HLR_MAPPER_CONTINUATION_TASK_ID:
+        case LG_MAPPER_CONTINUATION_TASK_ID:
           {
             MapperContinuation::handle_continuation(args);
             break;
           }
-        case HLR_FINISH_MAPPER_CONTINUATION_TASK_ID:
+        case LG_FINISH_MAPPER_CONTINUATION_TASK_ID:
           {
             const MapperManager::FinishMapperCallContinuationArgs *finish_args =
               (const MapperManager::FinishMapperCallContinuationArgs*)args;
             MapperManager::finish_mapper_call(finish_args);
             break;
           }
-        case HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
           {
             TaskImpl::SemanticRequestArgs *req_args = 
               (TaskImpl::SemanticRequestArgs*)args;
@@ -21134,7 +21052,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
           {
             IndexSpaceNode::SemanticRequestArgs *req_args = 
               (IndexSpaceNode::SemanticRequestArgs*)args;
@@ -21143,7 +21061,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID:
           {
             IndexPartNode::SemanticRequestArgs *req_args = 
               (IndexPartNode::SemanticRequestArgs*)args;
@@ -21152,7 +21070,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
           {
             FieldSpaceNode::SemanticRequestArgs *req_args = 
               (FieldSpaceNode::SemanticRequestArgs*)args;
@@ -21161,7 +21079,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID:
           {
             FieldSpaceNode::SemanticFieldRequestArgs *req_args = 
               (FieldSpaceNode::SemanticFieldRequestArgs*)args;
@@ -21170,7 +21088,7 @@ namespace Legion {
                   false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_REGION_SEMANTIC_INFO_REQ_TASK_ID:
           {
             RegionNode::SemanticRequestArgs *req_args = 
               (RegionNode::SemanticRequestArgs*)args;
@@ -21179,7 +21097,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID:
+        case LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID:
           {
             PartitionNode::SemanticRequestArgs *req_args = 
               (PartitionNode::SemanticRequestArgs*)args;
@@ -21188,7 +21106,7 @@ namespace Legion {
                           false, false, RtUserEvent::NO_RT_USER_EVENT);
             break;
           }
-        case HLR_SELECT_TUNABLE_TASK_ID:
+        case LG_SELECT_TUNABLE_TASK_ID:
           {
             const SelectTunableArgs *tunable_args = 
               (const SelectTunableArgs*)args;
@@ -21198,83 +21116,83 @@ namespace Legion {
               legion_delete(tunable_args->result);
             break;
           }
-        case HLR_DEFERRED_ENQUEUE_OP_ID:
+        case LG_DEFERRED_ENQUEUE_OP_ID:
           {
             const Operation::DeferredEnqueueArgs *deferred_enqueue_args = 
               (const Operation::DeferredEnqueueArgs*)args;
             deferred_enqueue_args->proxy_this->enqueue_ready_operation();
             break;
           }
-        case HLR_DEFERRED_ENQUEUE_TASK_ID:
+        case LG_DEFERRED_ENQUEUE_TASK_ID:
           {
             const DeferredEnqueueArgs *enqueue_args = 
               (const DeferredEnqueueArgs*)args;
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
-        case HLR_DEFER_MAPPER_MESSAGE_TASK_ID:
+        case LG_DEFER_MAPPER_MESSAGE_TASK_ID:
           {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_HANDLE_TASK_ID:
+        case LG_DEFER_COMPOSITE_HANDLE_TASK_ID:
           {
             InstanceRef::handle_deferred_composite_handle(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
+        case LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
           {
             CompositeView::handle_deferred_view_ref(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
+        case LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
           {
             CompositeView::handle_deferred_view_registration(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID:
+        case LG_DEFER_COMPOSITE_NODE_REF_TASK_ID:
           {
             CompositeNode::handle_deferred_node_ref(args);
             break;
           }
-        case HLR_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
+        case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
           {
             CompositeNode::handle_deferred_capture(args);
             break;
           }
-        case HLR_UPDATE_VIEW_REFERENCES_TASK_ID:
+        case LG_UPDATE_VIEW_REFERENCES_TASK_ID:
           {
             VersionState::process_view_references(args);
             break;
           }
-        case HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID:
+        case LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID:
           {
             VersionState::process_version_state_reduction(args);
             break;
           }
-        case HLR_REMOVE_VERSION_STATE_REF_TASK_ID:
+        case LG_REMOVE_VERSION_STATE_REF_TASK_ID:
           {
             VersionState::process_remove_version_state_ref(args);
             break;
           }
-        case HLR_DEFER_RESTRICTED_MANAGER_TASK_ID:
+        case LG_DEFER_RESTRICTED_MANAGER_TASK_ID:
           {
             RestrictInfo::handle_deferred_reference(args);
             break;
           }
-        case HLR_REMOTE_VIEW_CREATION_TASK_ID:
+        case LG_REMOTE_VIEW_CREATION_TASK_ID:
           {
             SingleTask::handle_remote_view_creation(args);
             break;
           }
-        case HLR_DEFER_DISTRIBUTE_TASK_ID:
+        case LG_DEFER_DISTRIBUTE_TASK_ID:
           {
             const TaskOp::DeferDistributeArgs *dargs = 
               (const TaskOp::DeferDistributeArgs*)args;
             dargs->proxy_this->distribute_task();
             break;
           }
-        case HLR_DEFER_PERFORM_MAPPING_TASK_ID:
+        case LG_DEFER_PERFORM_MAPPING_TASK_ID:
           {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
@@ -21284,21 +21202,21 @@ namespace Legion {
               wait_on.wait();
             break;
           }
-        case HLR_DEFER_LAUNCH_TASK_ID:
+        case LG_DEFER_LAUNCH_TASK_ID:
           {
             const TaskOp::DeferLaunchArgs *largs = 
               (const TaskOp::DeferLaunchArgs*)args;
             largs->proxy_this->launch_task();
             break;
           }
-        case HLR_DEFER_MAP_AND_LAUNCH_TASK_ID:
+        case LG_DEFER_MAP_AND_LAUNCH_TASK_ID:
           {
             const SliceTask::DeferMapAndLaunchArgs *margs = 
               (const SliceTask::DeferMapAndLaunchArgs*)args;
             margs->proxy_this->map_and_launch();
             break;
           }
-        case HLR_ADD_VERSIONING_SET_REF_TASK_ID:
+        case LG_ADD_VERSIONING_SET_REF_TASK_ID:
           {
             const VersioningSetRefArgs *ref_args = 
               (const VersioningSetRefArgs*)args;
@@ -21306,12 +21224,12 @@ namespace Legion {
             ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
             break;
           }
-        case HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
+        case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
           {
             VersionManager::process_capture_dirty(args);
             break;
           }
-        case HLR_RETRY_SHUTDOWN_TASK_ID:
+        case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             Runtime *runtime = Runtime::get_runtime(p);
             runtime->initiate_runtime_shutdown(runtime->address_space,
@@ -21322,11 +21240,11 @@ namespace Legion {
           assert(false); // should never get here
       }
 #ifdef DEBUG_LEGION
-      if (tid < HLR_MESSAGE_ID)
+      if (tid < LG_MESSAGE_ID)
         Runtime::get_runtime(p)->decrement_total_outstanding_tasks(tid, 
                                                                   true/*meta*/);
 #else
-      if (tid < HLR_MESSAGE_ID)
+      if (tid < LG_MESSAGE_ID)
         Runtime::get_runtime(p)->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
@@ -21428,11 +21346,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ContinuationArgs args;
-      args.hlr_id = HLR_CONTINUATION_TASK_ID;
       args.continuation = this;
-      RtEvent done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                          HLR_CONTINUATION_TASK_ID, 
-                          HLR_RESOURCE_PRIORITY, NULL, precondition);
+      RtEvent done = runtime->issue_runtime_meta_task(args,LG_RESOURCE_PRIORITY,
+                                                      NULL, precondition);
       return done;
     }
 

@@ -174,9 +174,10 @@ namespace Legion {
     };
 
     // Small helper struct for adding references to versioning set values
-    struct VersioningSetRefArgs {
+    struct VersioningSetRefArgs : public LgTaskArgs<VersioningSetRefArgs> {
     public:
-      HLRTaskID hlr_id;
+      static const LgTaskID TASK_ID = LG_ADD_VERSIONING_SET_REF_TASK_ID;
+    public:
       VersionState *state;
       ReferenceSource kind;
     };
@@ -828,9 +829,10 @@ namespace Legion {
      */
     class VersionManager {
     public:
-      struct DirtyUpdateArgs {
+      struct DirtyUpdateArgs : public LgTaskArgs<DirtyUpdateArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
+      public:
         VersionState *previous;
         VersionState *target;
         FieldMask *capture_mask;
@@ -1001,31 +1003,36 @@ namespace Legion {
         FINAL_VERSION_REQUEST,
       };
     public:
-      struct SendVersionStateArgs {
+      struct SendVersionStateArgs : public LgTaskArgs<SendVersionStateArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_SEND_VERSION_STATE_UPDATE_TASK_ID;
+      public:
         VersionState *proxy_this;
         AddressSpaceID target;
         FieldMask *request_mask;
         VersionRequestKind request_kind;
         RtUserEvent to_trigger;
       };
-      struct UpdateStateReduceArgs {
+      struct UpdateStateReduceArgs : public LgTaskArgs<UpdateStateReduceArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID;
+      public:
         VersionState *proxy_this;
         ColorPoint child_color;
         VersioningSet<> *children;
       };
-      struct UpdateViewReferences {
+      struct UpdateViewReferences : public LgTaskArgs<UpdateViewReferences> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_UPDATE_VIEW_REFERENCES_TASK_ID;
+      public:
         DistributedID did;
         LogicalView *view;
       }; 
-      struct RemoveVersionStateRefArgs {
+      struct RemoveVersionStateRefArgs : 
+        public LgTaskArgs<RemoveVersionStateRefArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_REMOVE_VERSION_STATE_REF_TASK_ID;
+      public:
         VersionState *proxy_this;
         ReferenceSource ref_kind;
       };
@@ -1369,9 +1376,11 @@ namespace Legion {
      */
     class InstanceRef {
     public:
-      struct DeferCompositeHandleArgs {
+      struct DeferCompositeHandleArgs : 
+        public LgTaskArgs<DeferCompositeHandleArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_HANDLE_TASK_ID;
+      public:
         CompositeView *view;
       };
     public:
@@ -1525,9 +1534,11 @@ namespace Legion {
      */
     class RestrictInfo {
     public:
-      struct DeferRestrictedManagerArgs {
+      struct DeferRestrictedManagerArgs : 
+        public LgTaskArgs<DeferRestrictedManagerArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_RESTRICTED_MANAGER_TASK_ID;
+      public:
         PhysicalManager *manager;
       };
     public:

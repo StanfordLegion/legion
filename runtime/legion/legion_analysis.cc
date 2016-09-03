@@ -314,12 +314,10 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
             VersioningSetRefArgs args;
-            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
             args.state = state;
             args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-                NULL, pre);
+            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                    NULL, pre);
           }
         }
         else if (versions.single_version == state)
@@ -339,12 +337,10 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
             VersioningSetRefArgs args;
-            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
             args.state = state;
             args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-                NULL, pre);
+            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                    NULL, pre);
           }
         }
       }
@@ -361,12 +357,10 @@ namespace Legion {
           if (REF_KIND != LAST_SOURCE_REF)
           {
             VersioningSetRefArgs args;
-            args.hlr_id = HLR_ADD_VERSIONING_SET_REF_TASK_ID;
             args.state = state;
             args.kind = REF_KIND;
-            return runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_ADD_VERSIONING_SET_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-                NULL, pre);
+            return runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                    NULL, pre);
           }
         }
         else
@@ -1320,11 +1314,9 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
         {
           DeferRestrictedManagerArgs args;
-          args.hlr_id = HLR_DEFER_RESTRICTED_MANAGER_TASK_ID;
           args.manager = manager;
-          ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_DEFER_RESTRICTED_MANAGER_TASK_ID, HLR_LATENCY_PRIORITY,
-              NULL, ready);
+          ready = runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                   NULL, ready);
           ready_events.insert(ready);
         }
         else
@@ -4929,14 +4921,12 @@ namespace Legion {
                 if (!overlap)
                   continue;
                 DirtyUpdateArgs args;
-                args.hlr_id = HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
                 args.previous = mit->first;
                 args.target = it->first;
                 args.capture_mask = legion_new<FieldMask>(overlap);
                 RtEvent done = 
-                  runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-                                HLR_LATENCY_PRIORITY, NULL, precondition);
+                  runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                   NULL, precondition);
                 applied_events.insert(done);
                 state_overlap -= overlap;
                 if (!state_overlap)
@@ -6463,15 +6453,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SendVersionStateArgs args;
-      args.hlr_id = HLR_SEND_VERSION_STATE_UPDATE_TASK_ID;
       args.proxy_this = this;
       args.target = target;
       args.request_mask = legion_new<FieldMask>(request_mask);
       args.request_kind = request_kind;
       args.to_trigger = to_trigger;
-      runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                       HLR_SEND_VERSION_STATE_UPDATE_TASK_ID,
-                                       HLR_LATENCY_PRIORITY,
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                        NULL/*op*/, precondition);
     }
 
@@ -6824,16 +6811,14 @@ namespace Legion {
               {
                 // Launch a task to do the merge later
                 UpdateStateReduceArgs args;
-                args.hlr_id = HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID;
                 args.proxy_this = this;
                 args.child_color = child;
                 // Takes ownership for deallocation
                 args.children = deferred_children;
                 RtEvent precondition = 
                   Runtime::merge_events(deferred_children_events);
-                RtEvent done = runtime->issue_runtime_meta_task(&args, 
-                    sizeof(args), HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
-                    HLR_LATENCY_PRIORITY, NULL, precondition);
+                RtEvent done = runtime->issue_runtime_meta_task(args, 
+                            LG_LATENCY_PRIORITY, NULL, precondition);
                 preconditions.insert(done);
               }
             }
@@ -6874,16 +6859,14 @@ namespace Legion {
               {
                 // Launch a task to do the merge later
                 UpdateStateReduceArgs args;
-                args.hlr_id = HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID;
                 args.proxy_this = this;
                 args.child_color = child;
                 // Takes ownership for deallocation
                 args.children = reduce_children;
                 RtEvent precondition = 
                   Runtime::merge_events(reduce_preconditions);
-                RtEvent done = runtime->issue_runtime_meta_task(&args,
-                    sizeof(args), HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
-                    HLR_LATENCY_PRIORITY, NULL, precondition);
+                RtEvent done = runtime->issue_runtime_meta_task(args,
+                    LG_LATENCY_PRIORITY, NULL, precondition);
                 preconditions.insert(done);
               }
               else
@@ -7022,7 +7005,6 @@ namespace Legion {
       if (!pending_views.empty())
       {
         UpdateViewReferences args;
-        args.hlr_id = HLR_UPDATE_VIEW_REFERENCES_TASK_ID;
         args.did = this->did;
         for (std::map<LogicalView*,RtEvent>::const_iterator it = 
               pending_views.begin(); it != pending_views.end(); it++)
@@ -7034,9 +7016,8 @@ namespace Legion {
           }
           args.view = it->first;
           preconditions.insert(
-              runtime->issue_runtime_meta_task(&args, sizeof(args),
-                HLR_UPDATE_VIEW_REFERENCES_TASK_ID, HLR_LATENCY_PRIORITY,
-                NULL, it->second));
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                               NULL, it->second));
         }
       }
       if (!preconditions.empty())
@@ -7071,12 +7052,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoveVersionStateRefArgs args;
-      args.hlr_id = HLR_REMOVE_VERSION_STATE_REF_TASK_ID;
       args.proxy_this = this;
       args.ref_kind = ref_kind;
-      runtime->issue_runtime_meta_task(&args, sizeof(args),
-          HLR_REMOVE_VERSION_STATE_REF_TASK_ID, HLR_LATENCY_PRIORITY,
-          NULL, done_event);
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                       NULL, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7724,11 +7703,9 @@ namespace Legion {
           // Have to static cast this to avoid touching it
           ptr.view = static_cast<CompositeView*>(view);
           DeferCompositeHandleArgs args;
-          args.hlr_id = HLR_DEFER_COMPOSITE_HANDLE_TASK_ID;
           args.view = ptr.view;
-          ready = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                        HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,HLR_LATENCY_PRIORITY,
-                        task, ready);
+          ready = runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                   task, ready);
         }
         else
         {

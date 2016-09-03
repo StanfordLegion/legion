@@ -216,98 +216,109 @@ namespace Legion {
     enum {
       INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      HLR_TASK_ID             = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
-      HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      HLR_LAUNCH_TOP_LEVEL_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      HLR_MPI_INTEROP_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      LG_MAPPER_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
       TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
     };
 
-    // Enumeration of high-level runtime tasks
-    enum HLRTaskID {
-      HLR_SCHEDULER_ID,
-      HLR_POST_END_ID,
-      HLR_DEFERRED_READY_TRIGGER_ID,
-      HLR_DEFERRED_MAPPING_TRIGGER_ID,
-      HLR_DEFERRED_EXECUTION_TRIGGER_ID,
-      HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
-      HLR_DEFERRED_COMMIT_TRIGGER_ID,
-      HLR_DEFERRED_POST_MAPPED_ID,
-      HLR_DEFERRED_EXECUTE_ID,
-      HLR_DEFERRED_COMPLETE_ID,
-      HLR_DEFERRED_COMMIT_ID,
-      HLR_RECLAIM_LOCAL_FIELD_ID,
-      HLR_DEFERRED_COLLECT_ID,
-      HLR_PRE_PIPELINE_ID,
-      HLR_TRIGGER_DEPENDENCE_ID,
-      HLR_TRIGGER_COMPLETE_ID,
-      HLR_TRIGGER_OP_ID,
-      HLR_TRIGGER_TASK_ID,
-      HLR_DEFERRED_RECYCLE_ID,
-      HLR_DEFERRED_SLICE_ID,
-      HLR_MUST_INDIV_ID,
-      HLR_MUST_INDEX_ID,
-      HLR_MUST_MAP_ID,
-      HLR_MUST_DIST_ID,
-      HLR_MUST_LAUNCH_ID,
-      HLR_DEFERRED_FUTURE_SET_ID,
-      HLR_DEFERRED_FUTURE_MAP_SET_ID,
-      HLR_RESOLVE_FUTURE_PRED_ID,
-      HLR_CONTRIBUTE_COLLECTIVE_ID,
-      HLR_MAPPER_TASK_ID,
-      HLR_DISJOINTNESS_TASK_ID,
-      HLR_PART_INDEPENDENCE_TASK_ID,
-      HLR_SPACE_INDEPENDENCE_TASK_ID,
-      HLR_PENDING_CHILD_TASK_ID,
-      HLR_DECREMENT_PENDING_TASK_ID,
-      HLR_SEND_VERSION_STATE_UPDATE_TASK_ID,
-      HLR_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
-      HLR_ADD_TO_DEP_QUEUE_TASK_ID,
-      HLR_WINDOW_WAIT_TASK_ID,
-      HLR_ISSUE_FRAME_TASK_ID,
-      HLR_CONTINUATION_TASK_ID,
-      HLR_MAPPER_CONTINUATION_TASK_ID,
-      HLR_FINISH_MAPPER_CONTINUATION_TASK_ID,
-      HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_SELECT_TUNABLE_TASK_ID,
-      HLR_DEFERRED_ENQUEUE_OP_ID,
-      HLR_DEFERRED_ENQUEUE_TASK_ID,
-      HLR_DEFER_MAPPER_MESSAGE_TASK_ID,
-      HLR_DEFER_COMPOSITE_HANDLE_TASK_ID,
-      HLR_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
-      HLR_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
-      HLR_DEFER_COMPOSITE_NODE_REF_TASK_ID,
-      HLR_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
-      HLR_UPDATE_VIEW_REFERENCES_TASK_ID,
-      HLR_REMOVE_VERSION_STATE_REF_TASK_ID,
-      HLR_DEFER_RESTRICTED_MANAGER_TASK_ID,
-      HLR_REMOTE_VIEW_CREATION_TASK_ID,
-      HLR_DEFER_DISTRIBUTE_TASK_ID,
-      HLR_DEFER_PERFORM_MAPPING_TASK_ID,
-      HLR_DEFER_LAUNCH_TASK_ID,
-      HLR_DEFER_MAP_AND_LAUNCH_TASK_ID,
-      HLR_ADD_VERSIONING_SET_REF_TASK_ID,
-      HLR_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-      HLR_MESSAGE_ID, // These two must be the last two
-      HLR_RETRY_SHUTDOWN_TASK_ID,
-      HLR_LAST_TASK_ID, // This one should always be last
+    // Enumeration of Legion runtime tasks
+    enum LgTaskID {
+      LG_SCHEDULER_ID,
+      LG_POST_END_ID,
+      LG_DEFERRED_READY_TRIGGER_ID,
+      LG_DEFERRED_EXECUTION_TRIGGER_ID,
+      LG_DEFERRED_RESOLUTION_TRIGGER_ID,
+      LG_DEFERRED_COMMIT_TRIGGER_ID,
+      LG_DEFERRED_POST_MAPPED_ID,
+      LG_DEFERRED_EXECUTE_ID,
+      LG_DEFERRED_COMPLETE_ID,
+      LG_DEFERRED_COMMIT_ID,
+      LG_RECLAIM_LOCAL_FIELD_ID,
+      LG_DEFERRED_COLLECT_ID,
+      LG_PRE_PIPELINE_ID,
+      LG_TRIGGER_DEPENDENCE_ID,
+      LG_TRIGGER_COMPLETE_ID,
+      LG_TRIGGER_OP_ID,
+      LG_TRIGGER_TASK_ID,
+      LG_DEFERRED_RECYCLE_ID,
+      LG_DEFERRED_SLICE_ID,
+      LG_MUST_INDIV_ID,
+      LG_MUST_INDEX_ID,
+      LG_MUST_MAP_ID,
+      LG_MUST_DIST_ID,
+      LG_MUST_LAUNCH_ID,
+      LG_DEFERRED_FUTURE_SET_ID,
+      LG_DEFERRED_FUTURE_MAP_SET_ID,
+      LG_RESOLVE_FUTURE_PRED_ID,
+      LG_CONTRIBUTE_COLLECTIVE_ID,
+      LG_MAPPER_TASK_ID,
+      LG_DISJOINTNESS_TASK_ID,
+      LG_PART_INDEPENDENCE_TASK_ID,
+      LG_SPACE_INDEPENDENCE_TASK_ID,
+      LG_PENDING_CHILD_TASK_ID,
+      LG_DECREMENT_PENDING_TASK_ID,
+      LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
+      LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
+      LG_ADD_TO_DEP_QUEUE_TASK_ID,
+      LG_WINDOW_WAIT_TASK_ID,
+      LG_ISSUE_FRAME_TASK_ID,
+      LG_CONTINUATION_TASK_ID,
+      LG_MAPPER_CONTINUATION_TASK_ID,
+      LG_FINISH_MAPPER_CONTINUATION_TASK_ID,
+      LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_REGION_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      LG_SELECT_TUNABLE_TASK_ID,
+      LG_DEFERRED_ENQUEUE_OP_ID,
+      LG_DEFERRED_ENQUEUE_TASK_ID,
+      LG_DEFER_MAPPER_MESSAGE_TASK_ID,
+      LG_DEFER_COMPOSITE_HANDLE_TASK_ID,
+      LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
+      LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
+      LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
+      LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
+      LG_UPDATE_VIEW_REFERENCES_TASK_ID,
+      LG_REMOVE_VERSION_STATE_REF_TASK_ID,
+      LG_DEFER_RESTRICTED_MANAGER_TASK_ID,
+      LG_REMOTE_VIEW_CREATION_TASK_ID,
+      LG_DEFER_DISTRIBUTE_TASK_ID,
+      LG_DEFER_PERFORM_MAPPING_TASK_ID,
+      LG_DEFER_LAUNCH_TASK_ID,
+      LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
+      LG_ADD_VERSIONING_SET_REF_TASK_ID,
+      LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
+      LG_MESSAGE_ID, // These two must be the last two
+      LG_RETRY_SHUTDOWN_TASK_ID,
+      LG_LAST_TASK_ID, // This one should always be last
+    };
+
+    /**
+     * \class LgTaskArgs
+     * The base class for all Legion Task arguments
+     */
+    template<typename T>
+    struct LgTaskArgs {
+    public:
+      LgTaskArgs(void)
+        : lg_task_id(T::TASK_ID) { }
+    public:
+      const LgTaskID lg_task_id;
     };
 
     // Make this a macro so we can keep it close to 
     // declaration of the task IDs themselves
-#define HLR_TASK_DESCRIPTIONS(name)                               \
-      const char *name[HLR_LAST_TASK_ID] = {                      \
+#define LG_TASK_DESCRIPTIONS(name)                               \
+      const char *name[LG_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Post-Task Execution",                                    \
         "Deferred Ready Trigger",                                 \
-        "Deferred Mapping Trigger",                               \
         "Deferred Execution Trigger",                             \
         "Deferred Resolution Trigger",                            \
         "Deferred Commit Trigger",                                \
@@ -483,11 +494,11 @@ namespace Legion {
     // Resource priority means that this task holds a 
     // Realm resource (e.g. reservation) and therefore 
     // shouldn't be stuck behind anything.
-    enum HLRPriority {
-      HLR_THROUGHPUT_PRIORITY = 0,
-      HLR_DEFERRED_THROUGHPUT_PRIORITY = 1,
-      HLR_LATENCY_PRIORITY = 2,
-      HLR_RESOURCE_PRIORITY = 3,
+    enum LgPriority {
+      LG_THROUGHPUT_PRIORITY = 0,
+      LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
+      LG_LATENCY_PRIORITY = 2,
+      LG_RESOURCE_PRIORITY = 3,
     };
 
     enum VirtualChannelKind {
@@ -624,7 +635,7 @@ namespace Legion {
       LAST_SEND_KIND, // This one must be last
     };
 
-#define HLR_MESSAGE_DESCRIPTIONS(name)                                \
+#define LG_MESSAGE_DESCRIPTIONS(name)                                 \
       const char *name[LAST_SEND_KIND] = {                            \
         "Task Message",                                               \
         "Steal Message",                                              \
