@@ -41,7 +41,7 @@ namespace Legion {
 	//Struct to send properties set by select_task_options
 	struct select_task_options_message{
 	int tag;
-	std::string task_name;
+	int  task_name;
 	Mapper::TaskOptions output;
 	int action;
 	};
@@ -59,7 +59,9 @@ namespace Legion {
 
 		public:
 			Mapper* dmapper;
-			static std::map<std::string, int> tasks_map;
+			//static std::map<std::string, int> tasks_map;
+			static std::vector<std::string> print_tasks;
+			static std::vector<std::string> stop_tasks;
 			static std::map<int, int> methods_map;
 			static std::set<Memory> all_mems;
 			static std::set<Processor> all_procs;
@@ -84,7 +86,8 @@ namespace Legion {
 public:
 	void Deserialize(std::string rec_string);
 	std::string Serialize(const std::map<std::string, int> &tasks_map, const std::map<int, int> &procs_map );
-      const char* get_mapper_name(void) const;
+	std::string Serialize(const std::vector<std::string> &print_tasks, const std::vector<std::string> &stop_tasks,  const std::map<int, int> &procs_map);
+const char* get_mapper_name(void) const;
       MapperSyncModel get_mapper_sync_model(void) const;
 
 
