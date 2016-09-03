@@ -4838,7 +4838,7 @@ class Operation(object):
         else:
             self.points[index_point] = point
         if self.context is not None:
-            point.op.set_context(self.context, False)
+            self.points[index_point].op.set_context(self.context, False)
 
     def add_requirement(self, requirement):
         if self.reqs is None:
@@ -4980,6 +4980,14 @@ class Operation(object):
             self.temporaries = other.temporaries
         else:
             assert not other.temporaries
+        if not self.start_event.exists():
+            self.start_event = other.start_event
+        else:
+            assert not other.start_event.exists()
+        if not self.finish_event.exists():
+            self.finish_event = other.finish_event
+        else:
+            assert not other.finish_event.exists() 
         if not self.inter_close_ops:
             self.inter_close_ops = other.inter_close_ops
         else:
@@ -6117,7 +6125,7 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'restrictions', 'dumb_acquisitions', 
                  'used_instances', 'virtual_indexes', 'processor', 'priority', 
-                 'premappings', 'postmappings', 'tunables', 
+                 'premappings', 'postmappings', 'tunables',
                  'operation_indexes', 'close_indexes', 'variant']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
@@ -6230,6 +6238,9 @@ class Task(object):
             assert self.point == other.point
         if not self.operations:
             self.operations = other.operations
+            # Update the contexts
+            for op in self.operations:
+                op.set_context(self, False)
         else:
             assert not other.operations
         if not self.processor:
@@ -9869,13 +9880,50 @@ class State(object):
 
     def alias_points(self, p1, p2):
         # These two tasks are aliased so merge them together 
-        # Merge the operations first 
-        p1.op.merge(p2.op)
-        self.ops[p2.op.uid] = p1.op
-        # Now merge the tasks and delete the other task
-        p1.merge(p2)
-        del self.tasks[p2.op]
-        return p1
+        # Merge differently depending on whether these are
+        # from an index space launch or a single point task
+        if p1.point.dim > 0:
+            # Point task in an index space launch
+            # Always merge into the one that actually ran as that
+            # is the one that appears in the Realm event graph
+            # We know it is the one that ran because it will 
+            # have a processor
+            if p1.processor:
+                assert not p2.processor
+                # Merge the operations first 
+                p1.op.merge(p2.op)
+                self.ops[p2.op.uid] = p1.op
+                # Now merge the tasks and delete the other task
+                p1.merge(p2)
+                del self.tasks[p2.op]
+                return p1
+            else:
+                # TODO: what happens when points bounce around
+                # multiple times under stealing
+                assert p2.processor
+                # Merge the operations first
+                p2.op.merge(p1.op)
+                self.ops[p1.op.uid] = p2.op
+                # Now merge the tasks and delete the other task
+                p2.merge(p1)
+                del self.tasks[p1.op]
+                return p2
+        else:
+            # Always merge these into the one with the context
+            if p1.op.context:
+                assert not p2.op.context
+                p1.op.merge(p2.op)
+                self.ops[p2.op.uid] = p1.op
+                p1.merge(p2)
+                del self.tasks[p2.op]
+                return p1
+            else:
+                assert p2.op.context
+                p2.op.merge(p1.op)
+                self.ops[p1.op.uid] = p2.op
+                p2.merge(p1)
+                del self.tasks[p1.op]
+                return p2
 
     def has_aliased_ancestor_tree_only(self, one, two):
         if one is two:
