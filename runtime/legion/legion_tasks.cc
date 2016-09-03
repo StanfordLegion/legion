@@ -9403,10 +9403,11 @@ namespace Legion {
     VersionInfo& PointTask::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
+      // See if we've copied over the versions from our slice
+      // if not we can just use our slice owner
+      if (idx < version_infos.size())
+        return version_infos[idx];
+      return slice_owner->get_version_info(idx);
     }
 
     //--------------------------------------------------------------------------
@@ -12068,7 +12069,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
-      if (is_locally_mapped() && (num_unmapped_points == 0))
+      if (is_locally_mapped())
       {
         // If we've mapped everything and there are no virtual mappings
         // then we can just send the version numbers
