@@ -2282,7 +2282,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
+    void RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
                       const RegionRequirement &req, VersionInfo &version_info,
                       Operation *op, unsigned index, 
                       SingleTask *translation_context, int composite_idx,
@@ -2309,11 +2309,11 @@ namespace Legion {
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
                                 closing_mask, version_info, op->get_parent(), 
                                 closed_tree, translation_context);
+      if (targets.empty())
+        return;
       PhysicalState *physical_state = NULL;
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
       bool need_valid = true;
-      std::set<ApEvent> closed_events;
-      RegionUsage usage(req);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         if (int(idx) == composite_idx)
@@ -2343,14 +2343,7 @@ namespace Legion {
 #endif
         close_node->update_valid_views(physical_state, target_mask,
                                        false/*dirty*/, target_view);
-        // Find the user precondition
-        closed_events.insert(target_view->find_user_precondition(usage,
-            term_event, target_mask, op, index, &version_info, map_applied));
       }
-      ApEvent closed;
-      if (!closed_events.empty())
-        closed = Runtime::merge_events(closed_events);
-      return closed;
     }
 
     //--------------------------------------------------------------------------
@@ -2410,7 +2403,7 @@ namespace Legion {
                                         const RegionRequirement &dst_req,
                                         const InstanceSet &src_targets, 
                                         const InstanceSet &dst_targets,
-                                        VersionInfo &src_version_info, 
+                                        VersionInfo &dst_version_info, 
                                         int src_composite_index,
                                         Operation *op, unsigned index,
                                         ApEvent precondition, 
@@ -2511,7 +2504,7 @@ namespace Legion {
 #endif
           CompositeView *src_view = composite_ref.get_composite_view();
           TraversalInfo info(ctx.get_id(), op, index, src_req,
-             src_version_info, composite_ref.get_valid_fields(), map_applied);
+             dst_version_info, composite_ref.get_valid_fields(), map_applied);
           InstanceView *view = 
               dst_node->convert_reference(dst_ref, op->get_parent());
 #ifdef DEBUG_LEGION
@@ -2553,7 +2546,6 @@ namespace Legion {
                                             const RegionRequirement &dst_req,
                                             const InstanceSet &src_targets,
                                             const InstanceSet &dst_targets,
-                                            VersionInfo &src_version_info, 
                                             Operation *op, ApEvent precondition)
     //--------------------------------------------------------------------------
     {
@@ -13542,83 +13534,6 @@ namespace Legion {
       }
       state->reduction_mask |= valid_mask;
     }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
-                                          ReductionOpID redop,
-                                          const TraversalInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_FLUSH_REDUCTIONS_CALL);
-      // Go through the list of reduction views and see if there are
-      // any that don't mesh with the current user and therefore need
-      // to be flushed.
-      FieldMask flush_mask;
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
-      PhysicalState *state = get_physical_state(info.version_info); 
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-            state->reduction_views.begin(); it != 
-            state->reduction_views.end(); it++)
-      {
-        // Skip reductions that have the same reduction op ID
-        if (it->first->get_redop() == redop)
-          continue;
-        FieldMask overlap = valid_mask & it->second;
-        if (!overlap)
-          continue;
-        flush_mask |= overlap; 
-        reduction_views.insert(*it);
-      }
-      // Now get any physical instances to flush to
-      if (!!flush_mask)
-      {
-        find_valid_instance_views(info.ctx, state, flush_mask, flush_mask, 
-                    info.version_info, false/*needs space*/, valid_views);
-      }
-      if (!!flush_mask)
-      {
-        FieldMask update_mask;
-        // Iterate over all the valid instances and issue any reductions
-        // to the target that need to be done
-        for (LegionMap<LogicalView*,FieldMask>::aligned::iterator it = 
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          if (it->first->is_deferred_view())
-            continue;
-          FieldMask overlap = flush_mask & it->second; 
-          issue_update_reductions(it->first, overlap, info.version_info,
-              reduction_views, info.op, info.index, info.map_applied_events);
-          // Save the overlap fields
-          it->second = overlap;
-          update_mask |= overlap;
-        }
-        // We should have issued reduction operations to at least
-        // one place for every single reduction field, if we didn't
-        // then issue a warning
-        if (!!(flush_mask - update_mask))
-          log_run.warning("WARNING: No valid instances found for reduction "
-                          "fields. This is a result of performing reductions "
-                          "to an uninitialized field. Undefined behavior "
-                          "may occur.");
-        // Now update our physical state
-        // Update the valid views.  Don't mark them dirty since we
-        // don't want to accidentally invalidate some of our other
-        // instances which get updated later in the loop.  Note this
-        // is safe since we're updating all the instances for each
-        // reduction field.
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          update_valid_views(state, it->second, false/*dirty*/, it->first);
-        }
-        // Update the dirty mask since we didn't do it when updating
-        // the valid instance views do it now
-        state->dirty_mask |= flush_mask;
-        // Then invalidate all the reduction views that we flushed
-        invalidate_reduction_views(state, flush_mask);
-      }
-    } 
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::find_complete_fields(const FieldMask &scope_fields,

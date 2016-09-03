@@ -130,7 +130,8 @@ namespace Legion {
                                            const unsigned index,
                                            const AddressSpaceID source,
                      LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<RtEvent> &applied_events) = 0;
+                                           std::set<RtEvent> &applied_events,
+                                           bool can_filter = true) = 0;
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
@@ -301,7 +302,8 @@ namespace Legion {
                                            const unsigned index,
                                            const AddressSpaceID source,
                          LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                           std::set<RtEvent> &applied_events);
+                                           std::set<RtEvent> &applied_events,
+                                           bool can_filter = true);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
@@ -313,6 +315,9 @@ namespace Legion {
                                          const AddressSpaceID source,
                        LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events);
+      friend class CompositeView;
+      // Give composite views special access here so they can filter
+      // back just the users at the particular level
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
@@ -727,7 +732,8 @@ namespace Legion {
                                            const unsigned index,
                                            const AddressSpaceID source,
                          LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                           std::set<RtEvent> &applied_events);
+                                           std::set<RtEvent> &applied_events,
+                                           bool can_filter = true);
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
@@ -882,6 +888,7 @@ namespace Legion {
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
+                                         FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL) = 0; 
@@ -920,6 +927,7 @@ namespace Legion {
                                  MaterializedView *dst, FieldMask copy_mask,
                                  VersionTracker *src_version_tracker,
                                  RegionTreeNode *logical_node,
+                                 FieldMask &written_mask,
               const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
@@ -941,6 +949,12 @@ namespace Legion {
                    FieldMask &top_need_copy, FieldMask &update_mask,
                    FieldMask &reduction_update,
                    LegionMap<LogicalView*,FieldMask>::aligned &valid_views);
+      void perform_overwrite_check(MaterializedView *dst,
+                                   const FieldMask &check_mask,
+                                   const FieldMask &need_copy_above,
+                                   FieldMask &need_temporary,
+                                   FieldMask &already_valid,
+                                   FieldMask &reductions_below);
       void copy_to_temporary(const TraversalInfo &info, MaterializedView *dst,
                              const FieldMask &temp_mask, 
                              RegionTreeNode *logical_node,
@@ -956,6 +970,7 @@ namespace Legion {
       void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
                                FieldMask copy_mask,RegionTreeNode *logical_node,
                                VersionTracker *src_version_tracker,
+                               FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1044,6 +1059,7 @@ namespace Legion {
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
+                                         FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
@@ -1174,12 +1190,6 @@ namespace Legion {
       void compute_local_complete(MaterializedView *dst,
                                   const FieldMask &test_mask,
                                   FieldMask &local_complete);
-      void perform_overwrite_check(MaterializedView *dst, 
-                                   const FieldMask &check_mask,
-                                   const FieldMask &need_copy_above,
-                                   FieldMask &need_temporary,
-                                   FieldMask &already_valid,
-                                   FieldMask &reductions_below);
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
       void issue_deferred_reductions_only(const TraversalInfo &info, 
@@ -1260,6 +1270,7 @@ namespace Legion {
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
+                                         FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);

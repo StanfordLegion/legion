@@ -868,7 +868,6 @@ namespace Legion {
       REGION_NODE_SORT_COPY_INSTANCES_CALL,
       REGION_NODE_ISSUE_GROUPED_COPIES_CALL,
       REGION_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
-      REGION_NODE_FLUSH_REDUCTIONS_CALL,
       REGION_NODE_MAP_VIRTUAL_CALL,
       REGION_NODE_PREMAP_REGION_CALL,
       REGION_NODE_REGISTER_REGION_CALL,
@@ -1035,7 +1034,6 @@ namespace Legion {
       "Region Node Sort Copy Instances",                              \
       "Region Node Issue Grouped Copies",                             \
       "Region Node Issue Update Reductions",                          \
-      "Region Node Flush Reductions",                                 \
       "Region Node Map Virtual",                                      \
       "Region Node Premap Region",                                    \
       "Region Node Register Region",                                  \

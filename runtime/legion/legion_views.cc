@@ -565,7 +565,7 @@ namespace Legion {
                                                    const unsigned index,
                                                    const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                             std::set<RtEvent> &applied_events, bool can_filter)
     //--------------------------------------------------------------------------
     {
       ApEvent start_use_event = manager->get_use_event();
@@ -581,10 +581,18 @@ namespace Legion {
       RegionNode *origin_node = logical_node->is_region() ? 
         logical_node->as_region_node() : 
         logical_node->as_partition_node()->parent;
-      find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
-                                    origin_node, versions, creator_op_id, 
-                                    index, source, preconditions, 
-                                    applied_events);
+      // If we can filter we can do the normal case, otherwise
+      // we do the above case where we don't filter
+      if (can_filter)
+        find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
+                                      origin_node, versions, creator_op_id, 
+                                      index, source, preconditions, 
+                                      applied_events);
+      else
+        find_local_copy_preconditions_above(redop, reading, copy_mask,
+                                      ColorPoint(), origin_node, versions, 
+                                      creator_op_id, index, source, 
+                                      preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
@@ -3675,13 +3683,14 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       preconditions[precondition] = src_mask;
       LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
+      FieldMask written_mask;
       // A seemingly common case but not the general one, if the fields
       // are in the same locations for the source and destination then
       // we can just do the normal deferred copy routine
       if (perfect)
       {
-        issue_deferred_copies(info, dst, src_mask, preconditions, 
-                              local_postconditions);
+        issue_deferred_copies(info, dst, src_mask, written_mask, 
+                              preconditions, local_postconditions);
       }
       else
       {
@@ -3689,8 +3698,8 @@ namespace Legion {
         CopyAcrossHelper across_helper(src_mask);
         dst->manager->initialize_across_helper(&across_helper, dst_mask, 
                                                src_indexes, dst_indexes);
-        issue_deferred_copies(info, dst, src_mask, preconditions, 
-                              local_postconditions, &across_helper);
+        issue_deferred_copies(info, dst, src_mask, written_mask,
+            preconditions, local_postconditions, &across_helper);
       }
       // Put the local postconditions in the result
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
@@ -3770,6 +3779,7 @@ namespace Legion {
                                  MaterializedView *dst, FieldMask copy_mask,
                                  VersionTracker *src_version_tracker,
                                  RegionTreeNode *logical_node,
+                                 FieldMask &written_mask,
               const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
@@ -3807,7 +3817,8 @@ namespace Legion {
               children_to_traverse.begin(); it != 
               children_to_traverse.end(); it++)
         {
-          FieldMask check_mask = (it->second & local_dominate) - need_temporary;
+          const FieldMask check_mask = 
+            (it->second & local_dominate) - need_temporary;
           if (!check_mask)
             continue;
           // If any fields are already valid below then we can remove
@@ -3815,7 +3826,7 @@ namespace Legion {
           FieldMask reductions_below;
           FieldMask already_valid = check_mask;
           it->first->perform_overwrite_check(dst, check_mask, 
-                               top_need_copy, need_temporary, 
+                               top_need_copy & check_mask, need_temporary, 
                                already_valid, reductions_below);
 #ifdef DEBUG_LEGION
           assert(already_valid * need_temporary);
@@ -3843,6 +3854,8 @@ namespace Legion {
           // If we issued copies to a temporary instance then we no
           // longer need to do anything at this node
           copy_mask -= need_temporary;
+          // We definitely wrote to these fields
+          written_mask |= need_temporary;
           // If we no longer have any fields then we are done
           if (!copy_mask)
             return;
@@ -3871,10 +3884,11 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned local_preconditions;
       if (!!update_mask && !current_valid_views.empty())
       {
+        written_mask |= update_mask;
         // Issue udpate copies for any of these fields
         // We can always put our writes directly into the postconditions
-        issue_update_copies(info, dst, update_mask, logical_node, 
-                            src_version_tracker, preconditions, 
+        issue_update_copies(info, dst, update_mask, logical_node,
+                            src_version_tracker, written_mask, preconditions, 
                             postconditions, current_valid_views, helper);
         // If going down see if we need to build a new set of preconditions
         if (!children_to_traverse.empty() && !postconditions.empty())
@@ -3901,6 +3915,7 @@ namespace Legion {
               reduction_only_children.begin(); it !=
               reduction_only_children.end(); it++)
         {
+          written_mask |= it->second;
           it->first->issue_deferred_reductions_only(info, dst, it->second,
                                                     src_version_tracker,
                                                     *below_preconditions,
@@ -3919,6 +3934,7 @@ namespace Legion {
           it->first->issue_deferred_copies(info, dst, it->second, 
                                            src_version_tracker, 
                                            it->first->logical_node,
+                                           written_mask,
                                            *below_preconditions,
                                            below_postconditions,
                                            postreductions, helper,
@@ -3936,9 +3952,12 @@ namespace Legion {
       // end up being preconditions for the reductions at this level
       // as you come back up the tree
       if (!!reduction_update)
+      {
+        written_mask |= reduction_update;
         issue_update_reductions(info, dst, reduction_update, 
             src_version_tracker, preconditions, postconditions, 
             postreductions, helper);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4156,6 +4175,107 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CompositeBase::perform_overwrite_check(MaterializedView *dst,
+                                               const FieldMask &check_mask,
+                                               const FieldMask &need_copy_above,
+                                               FieldMask &need_temporary,
+                                               FieldMask &already_valid,
+                                               FieldMask &reductions_below)
+    //--------------------------------------------------------------------------
+    {
+      // Have to do our check first
+      perform_ready_check(check_mask); 
+      FieldMask local_dirty;
+      LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
+      {
+        AutoLock b_lock(base_lock,1,false/*exclusive*/);
+        if (!!reduction_mask)
+          reductions_below |= (check_mask & reduction_mask);
+        local_dirty = dirty_mask & check_mask;
+        if (!!local_dirty)
+        {
+          LegionMap<LogicalView*,FieldMask>::aligned local_valid_views;
+          FieldMask empty_up;
+          find_valid_views(local_dirty, empty_up, 
+                           local_valid_views, false/*need lock*/);
+          // See if it is already valid, have to compare managers
+          for (LegionMap<LogicalView*,FieldMask>::aligned::iterator it =
+                local_valid_views.begin(); it != local_valid_views.end(); it++)
+          {
+            if (it->first->is_deferred_view())
+            {
+              // Anything that is not a composite view must be skipped
+              if (!it->first->is_composite_view())
+                continue;
+              // Have to recurse into the composite view here
+              CompositeView *composite = it->first->as_composite_view();
+              FieldMask local_valid = it->second;
+              FieldMask local_reductions_below; // don't care
+              composite->perform_overwrite_check(dst, it->second,
+                  need_copy_above & it->second, need_temporary, 
+                  local_valid, local_reductions_below);
+              // Any fields that are local valid no longer need be dirty
+              if (!!local_valid)
+                local_dirty -= local_valid;
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(it->first->is_materialized_view());
+#endif
+              MaterializedView *mat_view = it->first->as_materialized_view();
+              // Different managers means that we don't care
+              if (mat_view->manager != dst->manager)
+                continue;
+              // See if there are any fields for which we need a copy above 
+              // that overlap with the fields for which we have dirty data here
+              if (!!need_copy_above)
+              {
+                FieldMask overwrite = need_copy_above & it->second;
+                if (!!overwrite)
+                {
+                  // These are the fields for which we will need a temporary
+                  need_temporary |= overwrite;
+                  // Definitely no longer valid below
+                  if (!!already_valid)
+                    already_valid -= overwrite;
+                }
+              }
+              // No matter what we can remove these fields from dirty overlap
+              // because either they are already valid or we'll be making
+              // a temporary instance to deal with them
+              local_dirty -= it->second;
+            }
+          }
+          // If we still have local dirty fields then we are no longer
+          // already valid for those fields and we will need a copy here
+          if (!!local_dirty && !!already_valid)
+            already_valid -= local_dirty;
+        }
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          FieldMask overlap = it->second & check_mask;
+          if (!overlap)
+            continue;
+          children_to_traverse[it->first] = overlap;
+        }
+      }
+      // If we still have local dirty fields we need to merge those with
+      // the copy above fields to make our local above mask
+      local_dirty |= need_copy_above; 
+      // Traverse down the tree for all of our children that overlap
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+            children_to_traverse.begin(); it != 
+            children_to_traverse.end(); it++)
+      {
+        it->first->perform_overwrite_check(dst, it->second, local_dirty,
+                                           need_temporary, already_valid, 
+                                           reductions_below);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CompositeBase::copy_to_temporary(const TraversalInfo &info, 
                                           MaterializedView *dst,
                                           const FieldMask &temp_mask, 
@@ -4202,9 +4322,10 @@ namespace Legion {
       // then copy back to the original destination, we know there
       // are no local preconditions because this is a temporary instance
       LegionMap<ApEvent,FieldMask>::aligned empty_pre, local_pre, local_reduce;
+      FieldMask dummy_written_mask;
       issue_deferred_copies(info, temporary_dst, temp_mask, src_version_tracker,
-                            logical_node, empty_pre, local_pre,
-                            local_reduce, across_helper, temp_mask,
+                            logical_node, dummy_written_mask, empty_pre, 
+                            local_pre, local_reduce, across_helper, temp_mask, 
                             false/*check overwrite*/, false/*already ready*/);
       // Merge the destination preconditions
       if (!dst_preconditions.empty())
@@ -4267,6 +4388,7 @@ namespace Legion {
                                             FieldMask copy_mask,
                                             RegionTreeNode *logical_node,
                                             VersionTracker *src_version_tracker,
+                                            FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
           const LegionMap<LogicalView*,FieldMask>::aligned &current_valid_views,
@@ -4348,8 +4470,8 @@ namespace Legion {
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
-          it->first->issue_deferred_copies(info, dst, it->second,
-                        preconditions, postconditions, across_helper);
+          it->first->issue_deferred_copies(info, dst, it->second, written_mask,
+              preconditions, postconditions, across_helper);
         }
       }
     }
@@ -4777,19 +4899,48 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      // Find the destination preconditions first 
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+      // We're not sure we're going to issue all these copies so 
+      // we have to make sure that we don't filter when computing
+      // the preconditions
+      dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
                                    copy_mask, &info.version_info, 
-                                   info.op->get_unique_op_id(),
-                                   info.index, local_space, 
-                                   preconditions, info.map_applied_events);
+                                   info.op->get_unique_op_id(), info.index,
+                                   local_space, preconditions, 
+                                   info.map_applied_events,
+                                   false/*can filter*/);
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, 
+      FieldMask written_mask;
+      issue_deferred_copies(info, dst, copy_mask, written_mask,
                             preconditions, postconditions);
+      // If we didn't write anything, then we are done
+      if (!written_mask)
+        return;
+      // If we had written fields, recompute the destination preconditions
+      // so that we filter back any previous users for the copies that
+      // we are about to register
+      {
+        preconditions.clear();
+        RegionNode *origin_node = dst->logical_node->is_region() ? 
+                dst->logical_node->as_region_node() : 
+                dst->logical_node->as_partition_node()->parent;
+        // Only need to do local to get the filtering correct
+        dst->find_local_copy_preconditions(0/*redop*/, false/*reading*/,
+                                           copy_mask, ColorPoint(), 
+                                           origin_node, &info.version_info,
+                                           info.op->get_unique_op_id(),
+                                           info.index, local_space, 
+                                           preconditions, 
+                                           info.map_applied_events);
+      }
+      // If we have no postconditions, then we are done
+      if (postconditions.empty())
+        return;
       // Sort these into event sets and add a destination user for each merge
       LegionList<EventSet>::aligned postcondition_sets;
       RegionTreeNode::compute_event_sets(copy_mask, postconditions,
                                          postcondition_sets);
+      
+      // Now we can register our dependences on the target
       for (LegionList<EventSet>::aligned::const_iterator it = 
             postcondition_sets.begin(); it != postcondition_sets.end(); it++)
       {
@@ -4811,6 +4962,7 @@ namespace Legion {
     void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               const FieldMask &copy_mask,
+                                              FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                               CopyAcrossHelper *across_helper)
@@ -4821,10 +4973,10 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned postreductions;
       // Note no need to check ready at the top
       CompositeBase::issue_deferred_copies(info, dst, copy_mask, this, 
-                                           logical_node, preconditions, 
-                                           postconditions, postreductions, 
-                                           across_helper, copy_mask, 
-                                           true/*check overwrite*/,
+                                           logical_node, written_mask, 
+                                           preconditions, postconditions, 
+                                           postreductions, across_helper, 
+                                           copy_mask, true/*check overwrite*/,
                                            false/*check ready*/);
       if (!postreductions.empty())
       {
@@ -4964,8 +5116,7 @@ namespace Legion {
     void CompositeView::perform_ready_check(FieldMask mask)
     //--------------------------------------------------------------------------
     {
-      // This should never be called
-      assert(false);
+      // Nothing to do here
     }
 
     //--------------------------------------------------------------------------
@@ -5997,97 +6148,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::perform_overwrite_check(MaterializedView *dst,
-                                               const FieldMask &check_mask,
-                                               const FieldMask &need_copy_above,
-                                               FieldMask &need_temporary,
-                                               FieldMask &already_valid,
-                                               FieldMask &reductions_below)
-    //--------------------------------------------------------------------------
-    {
-      // Have to do our check first
-      perform_ready_check(check_mask); 
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (!!reduction_mask)
-        reductions_below |= (check_mask & reduction_mask);
-      FieldMask local_dirty = dirty_mask & check_mask;
-      if (!!local_dirty)
-      {
-        // See if it is already valid, have to compare managers
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              valid_views.begin(); it != valid_views.end(); it++)
-        {
-          if (it->first->is_deferred_view())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first->is_materialized_view());
-#endif
-          MaterializedView *mat_view = it->first->as_materialized_view();
-          // Different managers means that we don't care
-          if (mat_view->manager != dst->manager)
-            continue;
-          FieldMask dirty_overlap = it->second & local_dirty;
-          if (!!dirty_overlap)
-          {
-            // See if there are any fields for which we need a copy above 
-            // that overlap with the fields for which we have dirty data here
-            if (!!need_copy_above)
-            {
-              FieldMask overwrite = need_copy_above & dirty_overlap;
-              if (!!overwrite)
-              {
-                // These are the fields for which we will need a temporary
-                need_temporary |= overwrite;
-                // Definitely no longer valid below
-                if (!!already_valid)
-                  already_valid -= overwrite;
-              }
-            }
-            // No matter what we can remove these fields from dirty overlap
-            // because either they are already valid or we'll be making
-            // a temporary instance to deal with them
-            local_dirty -= dirty_overlap;
-          }
-        }
-        // If we still have local dirty fields then we are no longer
-        // already valid for those fields and we will need a copy here
-        if (!!local_dirty && !!already_valid)
-          already_valid -= local_dirty;
-      }
-      // If we still have local dirty fields we need to merge those with
-      // the copy above fields to make our local above mask
-      if (!!local_dirty)
-      {
-        local_dirty |= need_copy_above; 
-        // Traverse down the tree for all of our children that overlap
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          FieldMask overlap = it->second & check_mask;
-          if (!overlap)
-            continue;
-          it->first->perform_overwrite_check(dst, overlap, local_dirty,
-                                             need_temporary, already_valid, 
-                                             reductions_below);
-        }
-      }
-      else
-      {
-        // We can reuse the need copy above mask here
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-              children.begin(); it != children.end(); it++)
-        {
-          FieldMask overlap = it->second & check_mask;
-          if (!overlap)
-            continue;
-          it->first->perform_overwrite_check(dst, overlap, need_copy_above,
-                                             need_temporary, already_valid, 
-                                             reductions_below);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void CompositeNode::capture_field_versions(FieldVersions &versions,
                                             const FieldMask &capture_mask) const
     //--------------------------------------------------------------------------
@@ -6270,14 +6330,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
-      // Find the destination preconditions first 
+      // We know we're going to write all these fields so we can filter
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
                                    preconditions, info.map_applied_events);
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, 
+      FieldMask written_mask;
+      issue_deferred_copies(info, dst, copy_mask, written_mask,
                             preconditions, postconditions);
       // We know there is at most one event per field so no need
       // to sort into event sets here
@@ -6296,11 +6357,14 @@ namespace Legion {
     void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
+                                         FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
+      // We write all the fields
+      written_mask |= copy_mask;
       // Compute the precondition sets
       LegionList<EventSet>::aligned precondition_sets;
       RegionTreeNode::compute_event_sets(copy_mask, preconditions,
@@ -6615,11 +6679,14 @@ namespace Legion {
                                                 const unsigned index,
                                                 const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                             std::set<RtEvent> &applied_events, bool can_filter)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         REDUCTION_VIEW_FIND_COPY_PRECONDITIONS_CALL);
+#ifdef DEBUG_LEGION
+      assert(can_filter); // should always be able to filter reductions
+#endif
       ApEvent use_event = manager->get_use_event();
       if (use_event.exists())
       {

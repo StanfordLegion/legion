@@ -341,16 +341,16 @@ namespace Legion {
                    RegionTreeContext enclosing_context,
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events);
-      ApEvent physical_perform_close(RegionTreeContext ctx,
-                                     const RegionRequirement &req,
-                                     VersionInfo &version_info,
-                                     Operation *op, unsigned index,
-                                     SingleTask *translation_context,
-                                     int composite_index,
-                                     ClosedNode *closed_tree,
-                                     ApEvent term_event, 
-                                     std::set<RtEvent> &map_applied,
-                                     const InstanceSet &targets
+      void physical_perform_close(RegionTreeContext ctx,
+                                  const RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  Operation *op, unsigned index,
+                                  SingleTask *translation_context,
+                                  int composite_index,
+                                  ClosedNode *closed_tree,
+                                  ApEvent term_event, 
+                                  std::set<RtEvent> &map_applied,
+                                  const InstanceSet &targets
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
@@ -372,7 +372,7 @@ namespace Legion {
                           const RegionRequirement &dst_req,
                           const InstanceSet &src_targets, 
                           const InstanceSet &dst_targets,
-                          VersionInfo &src_version_info, 
+                          VersionInfo &dst_version_info, 
                           int src_composite, Operation *op, 
                           unsigned index, ApEvent precondition,
                           std::set<RtEvent> &map_applied);
@@ -381,7 +381,6 @@ namespace Legion {
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
                             const InstanceSet &dst_targets,
-                            VersionInfo &src_version_info,
                             Operation *op, ApEvent precondition);
       void convert_views_into_context(const RegionRequirement &req,
                                       SingleTask *context,
@@ -1504,8 +1503,6 @@ namespace Legion {
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
-      void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
-                            const TraversalInfo &info);
     public: // Help for physical analysis
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,

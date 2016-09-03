@@ -3311,7 +3311,7 @@ namespace Legion {
           ApEvent across_done = 
             runtime->forest->copy_across(context, 
                                   src_requirements[idx], dst_requirements[idx],
-                                  src_targets, dst_targets, src_versions[idx], 
+                                  src_targets, dst_targets, dst_versions[idx], 
                                   src_composite, this, idx, 
                                   local_sync_precondition, 
                                   map_applied_conditions);
@@ -3326,8 +3326,8 @@ namespace Legion {
           ApEvent across_done = 
             runtime->forest->reduce_across(context,
                                   src_requirements[idx], dst_requirements[idx],
-                                  src_targets, dst_targets, src_versions[idx], 
-                                  this, local_sync_precondition);
+                                  src_targets, dst_targets, this, 
+                                  local_sync_precondition);
           Runtime::trigger_event(local_completion, across_done);
         }
         // Apply our changes to the version states
@@ -5347,19 +5347,18 @@ namespace Legion {
       assert(closed_tree != NULL);
 #endif
       // Now we can perform our close operation
-      ApEvent close_event = 
-        runtime->forest->physical_perform_close(physical_ctx, requirement,
-                                                version_info, this, 0/*idx*/, 
-                                                NULL/*no translation*/,
-                                                composite_idx, closed_tree,
-                                                completion_event,
-                                                map_applied_conditions,
-                                                chosen_instances
+      runtime->forest->physical_perform_close(physical_ctx, requirement,
+                                              version_info, this, 0/*idx*/, 
+                                              NULL/*no translation*/,
+                                              composite_idx, closed_tree,
+                                              completion_event,
+                                              map_applied_conditions,
+                                              chosen_instances
 #ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                                );
+                                              );
       // The physical perform close call took ownership
       closed_tree = NULL;
       if (Runtime::legion_spy_enabled)
@@ -5367,10 +5366,6 @@ namespace Legion {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
                                               chosen_instances);
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, close_event, 
-                                        completion_event);
-#endif
       }
       version_info.apply_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
@@ -5379,7 +5374,7 @@ namespace Legion {
         complete_mapping();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      complete_execution(Runtime::protect_event(close_event));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
