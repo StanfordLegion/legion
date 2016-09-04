@@ -59,17 +59,15 @@ namespace Legion {
       }
     }
     WrapperMapper::~WrapperMapper(){
-
-
       //Debugging
-      std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
-      std::cout<<local_proc.id<<"-> The tasks added are: ";
+      /*std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
+        std::cout<<local_proc.id<<"-> The tasks added are: ";
       //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
       for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
       std::cout<<"\n";
       std::cout<<local_proc.id<<"-> The processors added are: ";
       for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
-      std::cout<<"\n";
+      std::cout<<"\n";*/
 
     }
 
@@ -138,26 +136,31 @@ namespace Legion {
     void WrapperMapper::Deserialize(std::string rec_string){
       std::size_t hash_pos  = rec_string.find("#");
       std::string  procs_str = rec_string.substr(0, hash_pos);
+
       std::string tasks_str = rec_string.substr(hash_pos+1, rec_string.size() - hash_pos);
       hash_pos = tasks_str.find("#");
+
       std::string  print_tasks_str = tasks_str.substr(0, hash_pos);
       std::string stop_tasks_str = tasks_str.substr(hash_pos+1, rec_string.size() - hash_pos);
+
       print_tasks.clear();
       stop_tasks.clear();
-      std::cout<<procs_str<<"		"<<print_tasks_str<<"		"<<stop_tasks_str;
+
+      //std::cout<<procs_str<<"		"<<print_tasks_str<<"		"<<stop_tasks_str;
+
       std::string delim = "\\";
       std::map<std::string, int> map_tasks;			
       std::string token;
       std::size_t pos = 0;
+
       while ((pos = print_tasks_str.find(delim)) != std::string::npos){
         token = print_tasks_str.substr(0, pos);
-        //tasks_map.insert(std::pair<std::string, int>(token.substr(0, token.size()-1),(int)(token.at(token.size()-1))));
         print_tasks.push_back(token);
         print_tasks_str.erase(0, pos + delim.length());
       }
+
       while ((pos = stop_tasks_str.find(delim)) != std::string::npos){
         token = stop_tasks_str.substr(0, pos);
-        //tasks_map.insert(std::pair<std::string, int>(token.substr(0, token.size()-1),(int)(token.at(token.size()-1))));
         stop_tasks.push_back(token);
         stop_tasks_str.erase(0, pos + delim.length());
       }
@@ -176,6 +179,7 @@ namespace Legion {
         }
         procs_str.erase(0, pos + delim.length());
       }
+
       std::set<Processor>::iterator ito;
       ito = all_procs.begin();
       std::advance(ito, 1);
@@ -206,69 +210,57 @@ namespace Legion {
         getline(std::cin, strValue); 
         std::string nameValue;
         std::string intValue;
+
         //Add a task for which the information needs to be printed
         if (strValue.compare(0,12,"print task +")==0){
           nameValue=strValue.substr(12);
-          //std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
+          
           std::vector<std::string>::iterator it = std::find(print_tasks.begin(), print_tasks.end(), nameValue);  
-          //if (it==tasks_map.end())
+          std::vector<std::string>::iterator its = std::find(stop_tasks.begin(), stop_tasks.end(), nameValue);  
           if (it==print_tasks.end())
           {
             pValue=2;
-            //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
             print_tasks.push_back(nameValue);
             std::cout<<"The tasks added are: ";
-            //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
             for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
             std::cout<<"\n>    ";
           }
           else{
-            //tasks_map.erase(it);
-            pValue=2;
-            //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
+            print_tasks.erase(it);
+            if (its != stop_tasks.end()) stop_tasks.erase(its);
+            print_tasks.push_back(nameValue);
+              pValue=2;
             std::cout<<"The tasks added are: ";
-            //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
             for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
             std::cout<<"\n>    ";
           }
-          //}
-          //else std::cout<<"No task of that name\n>    ";
       }
 
       //Add a task for which program execution needs to stop
       else if (strValue.compare(0,11,"stop task +")==0){
         nameValue=strValue.substr(11);
 
-        //std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
         std::vector<std::string>::iterator itp = std::find(print_tasks.begin(), print_tasks.end(), nameValue);  
         std::vector<std::string>::iterator its = std::find(stop_tasks.begin(), stop_tasks.end(), nameValue);  
-        //if (it==tasks_map.end())
         if (itp==print_tasks.end())
         {
           pValue=1;
-          //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
           stop_tasks.push_back(nameValue);
           print_tasks.push_back(nameValue);
           std::cout<<"The tasks added are: ";
-          //	  for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
           for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
           std::cout<<"\n>    ";
         }
         else{
-          //tasks_map.erase(it);
           print_tasks.erase(itp);
           stop_tasks.erase(its);
           pValue=1;
-          //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
           stop_tasks.push_back(nameValue);
           print_tasks.push_back(nameValue);
           std::cout<<"The tasks added are: ";
-          //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
           for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
           std::cout<<"\n>    ";
         }
-        //	}
-        //	else std::cout<<"No task of that name\n>    ";
     }
 
     //Add a method/function for which the information needs to be printed (not needed at the moment)
@@ -421,29 +413,22 @@ namespace Legion {
       else if (strValue.compare(0,6,"task -")==0){
         nameValue=strValue.substr(6);
 
-        // std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
         std::vector<std::string>::iterator itp = std::find(print_tasks.begin(), print_tasks.end(),nameValue);  
         std::vector<std::string>::iterator its = std::find(stop_tasks.begin(), stop_tasks.end(),nameValue);  
-        //if (it!=tasks_map.end())
         if (itp!=print_tasks.end())
         {
-          //tasks_map.erase(it);
           print_tasks.erase(itp);
           stop_tasks.erase(its);
           std::cout<<"The tasks added are: ";
-          //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
           for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
           std::cout<<"\n>    ";
         }
         else{
           std::cout<<"Task "<<Value<<" not present\n>    ";
           std::cout<<"The tasks added are: ";
-          //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
           for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
           std::cout<<"\n>    ";
         }
-        //}
-        //else std::cout<<"Task ID not a number\n>    ";
   }
 
 
@@ -472,7 +457,6 @@ namespace Legion {
     intValue=strValue.substr(11);
     std::set<Processor>::iterator it;
     std::map<Processor, int>::iterator ite;
-    //std::vector<Processor>::iterator itp, its;
     if (is_number(intValue)){
       int i=std::atoi(intValue.c_str())-1;
       if ((unsigned)i<all_procs.size()){
@@ -575,7 +559,6 @@ namespace Legion {
      */
     //Exit 
     else if (strValue.compare("exit")==0){
-      //std::string send_message = Serialize(tasks_map, procs_map_int);
       std::string send_message = Serialize(print_tasks,stop_tasks, procs_map_int);
 
       int send_size = send_message.size()+1;
@@ -590,9 +573,6 @@ namespace Legion {
 
 }
 }
-
-
-
 
 //Overloaded version of the previous function to get inputs at the start and without broadcast on exit
 void WrapperMapper::get_input(){
@@ -619,66 +599,52 @@ void WrapperMapper::get_input(){
     std::string intValue;
     if (strValue.compare(0,12,"print task +")==0){
       nameValue=strValue.substr(12);
-      //std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
       std::vector<std::string>::iterator it = std::find(print_tasks.begin(), print_tasks.end(), nameValue);  
-      //if (it==tasks_map.end())
+      std::vector<std::string>::iterator its = std::find(stop_tasks.begin(), stop_tasks.end(), nameValue);  
       if (it==print_tasks.end())
       {
         pValue=2;
-        //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
         print_tasks.push_back(nameValue);
         std::cout<<"The tasks added are: ";
-        //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
         for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
         std::cout<<"\n>    ";
       }
       else{
-        //tasks_map.erase(it);
-        pValue=2;
-        //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
+        print_tasks.erase(it);
+        if (its != stop_tasks.end()) stop_tasks.erase(its);
+        print_tasks.push_back(nameValue);
+          pValue=2;
         std::cout<<"The tasks added are: ";
-        //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
         for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
         std::cout<<"\n>    ";
       }
-      //}
-      //else std::cout<<"No task of that name\n>    ";
   }
 
   //Add a task for which program execution needs to stop
   else if (strValue.compare(0,11,"stop task +")==0){
     nameValue=strValue.substr(11);
 
-    //std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
     std::vector<std::string>::iterator itp = std::find(print_tasks.begin(), print_tasks.end(), nameValue);  
     std::vector<std::string>::iterator its = std::find(stop_tasks.begin(), stop_tasks.end(), nameValue);  
-    //if (it==tasks_map.end())
     if (itp==print_tasks.end())
     {
       pValue=1;
-      //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
       stop_tasks.push_back(nameValue);
       print_tasks.push_back(nameValue);
       std::cout<<"The tasks added are: ";
-      //	  for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
       for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
       std::cout<<"\n>    ";
     }
     else{
-      //tasks_map.erase(it);
       print_tasks.erase(itp);
       stop_tasks.erase(its);
       pValue=1;
-      //tasks_map.insert(std::pair<std::string, int>(nameValue,pValue));
       stop_tasks.push_back(nameValue);
       print_tasks.push_back(nameValue);
       std::cout<<"The tasks added are: ";
-      //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
       for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
       std::cout<<"\n>    ";
     }
-    //	}
-    //	else std::cout<<"No task of that name\n>    ";
 }
 
 else if (strValue.compare(0,14,"print method +")==0){
@@ -826,29 +792,23 @@ else if (strValue.compare(0,16,"stop processor +")==0){
 else if (strValue.compare(0,6,"task -")==0){
   nameValue=strValue.substr(6);
 
-  // std::map<std::string, int>::iterator it = tasks_map.find(nameValue);
   std::vector<std::string>::iterator itp = std::find(print_tasks.begin(), print_tasks.end(),nameValue);  
   std::vector<std::string>::iterator its = std::find(stop_tasks.begin(),stop_tasks.end(), nameValue);  
-  //if (it!=tasks_map.end())
   if (itp!=print_tasks.end())
   {
     //tasks_map.erase(it);
     print_tasks.erase(itp);
     stop_tasks.erase(its);
     std::cout<<"The tasks added are: ";
-    //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
     for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
     std::cout<<"\n>    ";
   }
   else{
     std::cout<<"Task "<<Value<<" not present\n>    ";
     std::cout<<"The tasks added are: ";
-    //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
     for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
     std::cout<<"\n>    ";
   }
-  //}
-  //else std::cout<<"Task ID not a number\n>    ";
 }
 
 
@@ -874,8 +834,6 @@ else if (strValue.compare(0,8,"method -")==0){
 else if (strValue.compare(0,11,"processor -")==0){
   intValue=strValue.substr(11);
   std::set<Processor>::iterator it;
-  //std::map<Processor, int>::iterator ite;
-  std::vector<Processor>::iterator itp, its;
   if (is_number(intValue)){
     int i=std::atoi(intValue.c_str())-1;
     if ((unsigned)i<all_procs.size()){
@@ -1153,30 +1111,25 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
   //If owner processor, then communicate with the user, if needed. If not the owner processor, send the information to the owner processor, if needed. 
   if(ownerprocessor==local_proc){
 
-    //if (itt!=tasks_map.end() || itp!=procs_map.end()) {
     if (ittp!=print_tasks.end() || itp!=procs_map.end()) {
       std::cout<<"\n--------------TASK: "<<task.get_task_name()<<" FUNCTION: select_task_options--------------\n";
       std::cout<<"\nThe selected task options for task "<<task.get_task_name()<<" are as follows:\n";
       std::cout<<"initial processor="<<output.initial_proc.id<<"\ninline task="<<output.inline_task;
       std::cout<<"\nspawn task="<<output.stealable<<"\nmap locally="<<output.map_locally<<"\n\n";
-      //if (itt->second==1 || itp->second==1) {
       if (itts!=stop_tasks.end() || itp->second==1) {
         std::cout<<"To change the task options, type 'change' and to exit, type 'exit'\n";
         get_select_task_options_input(ctx, task.get_task_name(), output);
       }
     }
     }
-    //else if (itt!=tasks_map.end() || itp!=procs_map.end()) {
     else if (ittp!=print_tasks.end() || itp!=procs_map.end()) {
       wait_task_options = output;
       int action = 1;
       int task_int = ittp - print_tasks.begin();
-      //if (itt->second==1 || itp->second==1) action=0;
       if (itts!=stop_tasks.end() || itp->second==1){
         action=0;
         task_int = itts - stop_tasks.begin();
       }
-      //select_task_options_message message ={42356156,task.get_task_name(),wait_task_options, action};
       select_task_options_message message ={42356156,task_int,wait_task_options, action};
       void *message_point = &message;
       mapevent = mrt->create_mapper_event(ctx);
@@ -1442,7 +1395,6 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
     if (node_id==0 && ownerprocessor.id==local_proc.id){
       if (rec_message->tag==42356156){
         //Owner processor gets a message with the tag, so communicate with the user
-        //std::string task_name = rec_message->task_name;
         int task_int = rec_message->task_name;
         TaskOptions output = rec_message->output;
         int action = rec_message->action;
@@ -1480,15 +1432,15 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
         std::string rec_string = rec1_message;		
         Deserialize(rec_string);	
 
-        /*
-           std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
-           std::coutt<<local_proc.id<<"-> The tasks added are: ";
-           for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
-           std::cout<<"\n";
-           std::coutt<<local_proc.id<<"-> The processors added are: ";
-           for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
-           std::cout<<"\n";
-         */
+      //Debugging
+      /*std::cout<<local_proc.id<<"-> Owner:"<<ownerprocessor.id<<"\n";
+        std::cout<<local_proc.id<<"-> The tasks added are: ";
+      //for (std::map<std::string, int>::const_iterator i = tasks_map.begin(); i != tasks_map.end(); ++i) std::cout<< i->first << "  ";
+      for (std::vector<std::string>::const_iterator i = print_tasks.begin(); i != print_tasks.end(); ++i) std::cout<< *i << "  ";
+      std::cout<<"\n";
+      std::cout<<local_proc.id<<"-> The processors added are: ";
+      for (std::map<Processor,int>::const_iterator it = procs_map.begin(); it != procs_map.end(); ++it) std::cout<< it->first.id << "   ";
+      std::cout<<"\n";*/
       }
     }
 
