@@ -295,7 +295,8 @@ namespace Legion {
       output.initial_proc = default_policy_select_initial_processor(ctx, task);
       output.inline_task = false;
       output.stealable = stealing_enabled; 
-      output.map_locally = true;
+      // Unlike in the past, this is now the best choice
+      output.map_locally = false;
     }
 
     //--------------------------------------------------------------------------
