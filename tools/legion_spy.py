@@ -4833,8 +4833,8 @@ class Operation(object):
         point.op.set_index_owner(self)
         index_point = point.point
         if index_point in self.points:
-            self.points[index_point] = self.state.alias_points(point,
-                                              self.points[index_point])
+            self.points[index_point] = self.state.alias_index_points(point,
+                                                  self.points[index_point])
         else:
             self.points[index_point] = point
         if self.context is not None:
@@ -9442,7 +9442,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
-        state.alias_points(p1, p2)
+        state.alias_individual_points(p1, p2)
         return True
     m = op_index_pat.match(line)
     if m is not None:
@@ -9878,52 +9878,53 @@ class State(object):
                 src.physical_outgoing = actual_out
         print("Done")
 
-    def alias_points(self, p1, p2):
-        # These two tasks are aliased so merge them together 
-        # Merge differently depending on whether these are
-        # from an index space launch or a single point task
-        if p1.point.dim > 0:
-            # Point task in an index space launch
-            # Always merge into the one that actually ran as that
-            # is the one that appears in the Realm event graph
-            # We know it is the one that ran because it will 
-            # have a processor
-            if p1.processor:
-                assert not p2.processor
-                # Merge the operations first 
-                p1.op.merge(p2.op)
-                self.ops[p2.op.uid] = p1.op
-                # Now merge the tasks and delete the other task
-                p1.merge(p2)
-                del self.tasks[p2.op]
-                return p1
-            else:
-                # TODO: what happens when points bounce around
-                # multiple times under stealing
-                assert p2.processor
-                # Merge the operations first
-                p2.op.merge(p1.op)
-                self.ops[p1.op.uid] = p2.op
-                # Now merge the tasks and delete the other task
-                p2.merge(p1)
-                del self.tasks[p1.op]
-                return p2
+    def alias_individual_points(self, p1, p2):
+        # These are two copies of the same individual
+        # task from different nodes, merge them into
+        # the one from the original node (e.g. the
+        # one with the context)
+        if p1.op.context:
+            assert not p2.op.context
+            p1.op.merge(p2.op)
+            self.ops[p2.op.uid] = p1.op
+            p1.merge(p2)
+            del self.tasks[p2.op]
+            return p1
         else:
-            # Always merge these into the one with the context
-            if p1.op.context:
-                assert not p2.op.context
-                p1.op.merge(p2.op)
-                self.ops[p2.op.uid] = p1.op
-                p1.merge(p2)
-                del self.tasks[p2.op]
-                return p1
-            else:
-                assert p2.op.context
-                p2.op.merge(p1.op)
-                self.ops[p1.op.uid] = p2.op
-                p2.merge(p1)
-                del self.tasks[p1.op]
-                return p2
+            assert p2.op.context
+            p2.op.merge(p1.op)
+            self.ops[p1.op.uid] = p2.op
+            p2.merge(p1)
+            del self.tasks[p1.op]
+            return p2
+
+    def alias_index_points(self, p1, p2):
+        # These two copies of the same point task from an
+        # index space launch so merge them together 
+        # Always merge into the one that actually ran as that
+        # is the one that appears in the Realm event graph
+        # We know it is the one that ran because it will 
+        # have a processor
+        if p1.processor:
+            assert not p2.processor
+            # Merge the operations first 
+            p1.op.merge(p2.op)
+            self.ops[p2.op.uid] = p1.op
+            # Now merge the tasks and delete the other task
+            p1.merge(p2)
+            del self.tasks[p2.op]
+            return p1
+        else:
+            # TODO: what happens when points bounce around
+            # multiple times under stealing
+            assert p2.processor
+            # Merge the operations first
+            p2.op.merge(p1.op)
+            self.ops[p1.op.uid] = p2.op
+            # Now merge the tasks and delete the other task
+            p2.merge(p1)
+            del self.tasks[p1.op]
+            return p2
 
     def has_aliased_ancestor_tree_only(self, one, two):
         if one is two:
