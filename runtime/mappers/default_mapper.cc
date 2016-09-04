@@ -1252,7 +1252,6 @@ namespace Legion {
                                        MapTaskOutput&     output)
     //--------------------------------------------------------------------------
     {
-
       log_mapper.spew("Default map_task in %s", get_mapper_name());
       Processor::Kind target_kind = task.target_proc.kind();
       // Get the variant that we are going to use to map this task

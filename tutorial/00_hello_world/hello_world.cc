@@ -13,69 +13,19 @@
  * limitations under the License.
  */
 
-#include <cstdlib>
+
 #include <cstdio>
 
 #include "legion.h"
 
-#include "default_mapper.h"
-
 // All of the important user-level objects live 
 // in the Legion namespace.
 using namespace Legion;
-using namespace Legion::Mapping;
+
 // We use an enum to declare the IDs for user-level tasks
 enum TaskID {
   HELLO_WORLD_ID,
 };
-
-class BroadcastTest: public DefaultMapper{
-public:
-	BroadcastTest(Machine machine, 
-      Runtime *rt, Processor local);
-public:
-  virtual void select_task_options(const MapperContext    ctx,
-                                       const Task&            task,
-                                             TaskOptions&     output);
-   virtual void handle_message(const MapperContext           ctx,
-                                  const MapperMessage&          message);
- std::set<Processor> all_procs;
-};
-
-void mapper_registration(Machine machine, Runtime *rt,
-                          const std::set<Processor> &local_procs)
-{
-  for (std::set<Processor>::const_iterator it = local_procs.begin();
-        it != local_procs.end(); it++)
-  {
-    rt->replace_default_mapper(
-        new BroadcastTest(machine, rt, *it), *it);
-  }
-}
-
-BroadcastTest::BroadcastTest(Machine m, Runtime *rt, Processor p):DefaultMapper(rt->get_mapper_runtime(), m, p)
-{
-  machine.get_all_processors(all_procs);
-}
-
-void BroadcastTest::select_task_options(const MapperContext ctx,
-                                            const Task& task,
-                                                  TaskOptions& output)
-{
-int m=123;
-void *message = &m;
-if (all_procs.begin()->id + 1 == local_proc.id) mapper_runtime->broadcast(ctx, message, sizeof(int));
-
-//std::set<Processor>::iterator it = all_procs.begin(); std::advance(it, 7);
-//if (all_procs.begin()->id+1 == local_proc.id) mapper_runtime->send_message(ctx,*it, message, sizeof(int));
-DefaultMapper::select_task_options(ctx, task, output);
-}
-
-void BroadcastTest::handle_message(const MapperContext           ctx,
-                const MapperMessage&          message){
-					std::cout<<"handle message\t Node: "<<node_id<<"\tProcessor: "<<local_proc.id<<"\tSender: "<<message.sender.id<<"\tMessage "<<*(int *)message.message<<"\n";
-}
-
 
 // All single-launch tasks in Legion must have this signature with
 // the extension that they can have different return values.
@@ -109,7 +59,5 @@ int main(int argc, char **argv)
   // Now we're ready to start the runtime, so tell it to begin the
   // execution.  We'll never return from this call, but its return 
   // signature will return an int to satisfy the type checker.
-	  Runtime::set_registration_callback(mapper_registration);
-
   return Runtime::start(argc, argv);
 }

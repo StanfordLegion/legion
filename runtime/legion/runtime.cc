@@ -1,4 +1,4 @@
-/* assopyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -8066,7 +8066,7 @@ namespace Legion {
           {
             Mapper *mapper = 
               new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
-            MapperManager *wrapper = wrap_mapper(this,mapper, 0, it->first);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
         }
@@ -14110,7 +14110,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First forward the message onto any remote nodes
-      int base = index*radix;
+      int base = index * radix;
       int init = source.address_space();
       // The runtime stride is the same as the number of nodes
       const int total_nodes = runtime_stride;
@@ -14139,7 +14139,7 @@ namespace Legion {
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
       {
-     	managers.insert(it->second->find_mapper(map_id));
+	 managers.insert(it->second->find_mapper(map_id));
       }
       Mapper::MapperMessage message_args;
       message_args.sender = source;
@@ -14150,7 +14150,7 @@ namespace Legion {
       for (std::set<MapperManager*>::const_iterator it = 
             managers.begin(); it != managers.end(); it++)
         (*it)->invoke_handle_message(&message_args);
-	 }
+       }
 
     //--------------------------------------------------------------------------
     void Runtime::send_task(TaskOp *task)

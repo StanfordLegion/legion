@@ -18,8 +18,6 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
-#include "default_mapper.h"
-
 using namespace Legion;
 
 /*
