@@ -269,6 +269,10 @@ namespace Legion {
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
                                     const std::vector<unsigned> &dst_indexes);
+      void deduplicate_deferred_copy(DistributedID def_did,
+                         RegionTreeNode *target_node, FieldMask &copy_mask,
+                         LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                         LegionMap<ApEvent,FieldMask>::aligned &postconditions);
     public:
       // Interface to the mapper PhysicalInstance
       virtual void get_fields(std::set<FieldID> &fields) const
