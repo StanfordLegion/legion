@@ -20,7 +20,7 @@
    exit --> To exit from the command-line interface
    help --> To show the list of commands
 
-   On stopping at a task/processor, one can change properties or enter the above command line interface by typing "change"
+   On stopping at a task/processor, one can change properties. One can also enter the above command line interface to add or remove tasks or processors by typing "change".
  */
 
 #ifndef __WRAPPER_MAPPER_h__

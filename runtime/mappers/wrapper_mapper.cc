@@ -17,7 +17,7 @@ namespace Legion {
   namespace Mapping{
 
     //Static Variables. 
-    //procs_map, procs_map_init and task_map store information about the processors and tasks being monitored.
+    //procs_map, procs_map_init, print_tasks and stop_tasks store information about the processors and tasks being monitored.
     //The owner processor broadcasts the information to all the processors and local owner of each node then stores it in their static variables.
     //Only the owner processor communicates with the user.
     std::set<Memory> WrapperMapper::all_mems;
