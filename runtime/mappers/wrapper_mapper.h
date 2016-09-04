@@ -1,5 +1,5 @@
 /*
-   This wrapper mapper takes a Legion mapper as argument and wraps it, so that the user can
+   This wrapper mapper takes a Legion mapper as a parameter and wraps it, so that the user can
    print information or stop program execution when important properties of a task are set
    (properties set by select_task_options())
    The wrapper mapper can be enabled by setting the runtime parameter "-hl:wrapper" to 1.
@@ -80,7 +80,6 @@ namespace Legion {
 			void get_select_task_options_input(const MapperContext ctx, std::string task_name, TaskOptions& output);
 			void get_map_task_input(Task *task);
 			bool InputNumberCheck(std::string strUserInput);
-			//std::string wait_task_name;
 			Mapper::TaskOptions wait_task_options;
 
 public:
