@@ -571,8 +571,6 @@ namespace Legion {
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
-      SEND_REDUCTION_DEDUPLICATION_REQUEST,
-      SEND_REDUCTION_DEDUPLICATION_RESPONSE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_SUBVIEW_DID_REQUEST,
@@ -689,8 +687,6 @@ namespace Legion {
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
-        "Send Reduction Deduplication Request",                       \
-        "Send REduction Deduplication Response",                      \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send Subview DID Request",                                   \

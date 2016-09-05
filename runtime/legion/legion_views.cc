@@ -535,16 +535,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApUserEvent MaterializedView::reduce_from(PhysicalManager *target,
-                                              RegionTreeNode *target_node,
-                                              ReductionOpID redop, bool &first,
-                                              const FieldMask &reduce_mask, 
+    void MaterializedView::reduce_from(ReductionOpID redop,
+                                       const FieldMask &reduce_mask, 
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
       manager->compute_copy_offsets(reduce_mask, src_fields);
-      first = true;
-      return Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -559,6 +555,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
                                                    bool reading, 
+                                                   bool single_copy,
                                                    const FieldMask &copy_mask,
                                                    VersionTracker *versions,
                                                    const UniqueID creator_op_id,
@@ -584,27 +581,28 @@ namespace Legion {
       // If we can filter we can do the normal case, otherwise
       // we do the above case where we don't filter
       if (can_filter)
-        find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
-                                      origin_node, versions, creator_op_id, 
-                                      index, source, preconditions, 
-                                      applied_events);
-      else
-        find_local_copy_preconditions_above(redop, reading, copy_mask,
+        find_local_copy_preconditions(redop, reading, single_copy, copy_mask, 
                                       ColorPoint(), origin_node, versions, 
                                       creator_op_id, index, source, 
+                                      preconditions, applied_events);
+      else
+        find_local_copy_preconditions_above(redop, reading, single_copy, 
+                                      copy_mask, ColorPoint(), origin_node, 
+                                      versions, creator_op_id, index, source, 
                                       preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above(redop, reading, copy_mask,
-                        local_point, origin_node, versions, creator_op_id, 
-                        index, source, preconditions, applied_events);
+        parent->find_copy_preconditions_above(redop, reading, single_copy,
+                   copy_mask, local_point, origin_node, versions, 
+                   creator_op_id, index, source, preconditions, applied_events);
       }
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_copy_preconditions_above(ReductionOpID redop,
                                                          bool reading,
+                                                         bool single_copy,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -616,21 +614,22 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      find_local_copy_preconditions_above(redop, reading, copy_mask,child_color,
-                                    origin_node, versions, creator_op_id, index,
-                                    source, preconditions, applied_events);
+      find_local_copy_preconditions_above(redop, reading, single_copy,copy_mask,
+                            child_color, origin_node, versions, creator_op_id, 
+                            index, source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above(redop, reading, copy_mask,
-                        local_point, origin_node, versions, creator_op_id, 
-                        index, source, preconditions, applied_events);
+        parent->find_copy_preconditions_above(redop, reading, single_copy, 
+                  copy_mask, local_point, origin_node, versions, creator_op_id,
+                  index, source, preconditions, applied_events);
       }
     }
     
     //--------------------------------------------------------------------------
     void MaterializedView::find_local_copy_preconditions(ReductionOpID redop,
                                                          bool reading,
+                                                         bool single_copy,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -678,7 +677,8 @@ namespace Legion {
         // Find any version updates as well our write skip mask
         find_version_updates(copy_mask, versions, write_skip_mask, 
             filter_mask, advance_versions, add_versions, redop > 0);
-        if (!!write_skip_mask)
+        // Can only do the write-skip optimization if this is a single copy
+        if (single_copy && !!write_skip_mask)
         {
           // If we have a write skip mask we know we won't interfere with
           // any users in the list of current users so we can skip them
@@ -735,6 +735,7 @@ namespace Legion {
     void MaterializedView::find_local_copy_preconditions_above(
                                                   ReductionOpID redop, 
                                                   bool reading,
+                                                  bool single_copy,
                                                   const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -777,7 +778,8 @@ namespace Legion {
         // Find any version updates as well our write skip mask
         find_version_updates(copy_mask, versions, write_skip_mask, 
             filter_mask, advance_versions, add_versions, redop > 0);
-        if (!!write_skip_mask)
+        // Can only do the write skip optimization if this is a single copy
+        if (single_copy && !!write_skip_mask)
         {
           // If we have a write skip mask we know we won't interfere with
           // any users in the list of current users so we can skip them
@@ -3594,7 +3596,11 @@ namespace Legion {
       {
         // Do analysis and register the user
         LegionMap<ApEvent,FieldMask>::aligned dummy_preconditions;
+        // Always safe to assume single copy here since we don't
+        // actually use the results and assuming single copy means
+        // that fewer users will potentially be filtered
         find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
+                                    true/*single copy*/,
                                     user_mask, child_color, origin_node,
                                     &dummy_version_info, op_id, index, source,
                                     dummy_preconditions, applied_conditions);
@@ -4436,6 +4442,7 @@ namespace Legion {
               it = src_instances.begin(); it != src_instances.end(); it++)
         {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                             true/*single copy*/,
                                              it->second, src_version_tracker,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
@@ -4903,6 +4910,7 @@ namespace Legion {
       // we have to make sure that we don't filter when computing
       // the preconditions
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
+                                   false/*single copy*/,
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(), info.index,
                                    local_space, preconditions, 
@@ -4925,6 +4933,7 @@ namespace Legion {
                 dst->logical_node->as_partition_node()->parent;
         // Only need to do local to get the filtering correct
         dst->find_local_copy_preconditions(0/*redop*/, false/*reading*/,
+                                           false/*single copy*/,
                                            copy_mask, ColorPoint(), 
                                            origin_node, &info.version_info,
                                            info.op->get_unique_op_id(),
@@ -6324,6 +6333,7 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       // We know we're going to write all these fields so we can filter
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                   true/*single copy*/,
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
@@ -6504,44 +6514,38 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
+
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
-      bool first = true;
-      ApUserEvent reduction_done = 
-        this->reduce_from(target->get_manager(), target->logical_node,
-                          manager->redop, first, reduce_mask, src_fields);
-      // Only need to do the reduction if it hasn't been done before
-      if (first)
+      this->reduce_from(manager->redop, reduce_mask, src_fields);
+
+      LegionMap<ApEvent,FieldMask>::aligned preconditions;
+      target->find_copy_preconditions(manager->redop, false/*reading*/, 
+            false/*single copy*/, reduce_mask, versions, op->get_unique_op_id(),
+            index, local_space, preconditions, map_applied_events);
+      this->find_copy_preconditions(manager->redop, true/*reading*/, 
+           true/*single copy*/, reduce_mask, versions, op->get_unique_op_id(), 
+           index, local_space, preconditions, map_applied_events);
+
+      std::set<ApEvent> event_preconds;
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+            preconditions.begin(); it != preconditions.end(); it++)
       {
-        LegionMap<ApEvent,FieldMask>::aligned preconditions;
-        target->find_copy_preconditions(manager->redop, false/*reading*/, 
-                reduce_mask, versions, op->get_unique_op_id(), index, 
-                local_space, preconditions, map_applied_events);
-        this->find_copy_preconditions(manager->redop, true/*reading*/, 
-             reduce_mask, versions, op->get_unique_op_id(), index, 
-             local_space, preconditions, map_applied_events);
-        std::set<ApEvent> event_preconds;
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              preconditions.begin(); it != preconditions.end(); it++)
-        {
-          event_preconds.insert(it->first);
-        }
-        ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
-        ApEvent reduce_post = manager->issue_reduction(op, src_fields, 
-                                                       dst_fields,
-                                                       target->logical_node,
-                                                       reduce_pre,
-                                                       fold, true/*precise*/,
-                                                       NULL/*intersect*/);
-        target->add_copy_user(manager->redop, reduce_post, versions,
-                             op->get_unique_op_id(), index, reduce_mask, 
-                             false/*reading*/, local_space, map_applied_events);
-        this->add_copy_user(manager->redop, reduce_post, versions,
-                           op->get_unique_op_id(), index, reduce_mask, 
-                           true/*reading*/, local_space, map_applied_events);
-        // Chain the events
-        Runtime::trigger_event(reduction_done, reduce_post);
+        event_preconds.insert(it->first);
       }
-    } 
+      ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
+      ApEvent reduce_post = manager->issue_reduction(op, src_fields, 
+                                                     dst_fields,
+                                                     target->logical_node,
+                                                     reduce_pre,
+                                                     fold, true/*precise*/,
+                                                     NULL/*intersect*/);
+      target->add_copy_user(manager->redop, reduce_post, versions,
+                           op->get_unique_op_id(), index, reduce_mask, 
+                           false/*reading*/, local_space, map_applied_events);
+      this->add_copy_user(manager->redop, reduce_post, versions,
+                         op->get_unique_op_id(), index, reduce_mask, 
+                         true/*reading*/, local_space, map_applied_events);
+    }
 
     //--------------------------------------------------------------------------
     ApEvent ReductionView::perform_deferred_reduction(MaterializedView *target,
@@ -6560,38 +6564,31 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, red_mask, 
                                     dst_fields, helper);
-      bool first = true;
-      ApUserEvent reduction_done = 
-        this->reduce_from(target->manager, target->logical_node,
-                          manager->redop, first, red_mask, src_fields);
-      if (first)
+      this->reduce_from(manager->redop, red_mask, src_fields);
+      LegionMap<ApEvent,FieldMask>::aligned src_pre;
+      // Don't need to ask the target for preconditions as they 
+      // are included as part of the pre set
+      find_copy_preconditions(manager->redop, true/*reading*/, 
+                              true/*single copy*/, red_mask, 
+                              versions, op->get_unique_op_id(), index, 
+                              local_space, src_pre, map_applied_events);
+      std::set<ApEvent> preconditions = pre;
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
+            src_pre.begin(); it != src_pre.end(); it++)
       {
-        LegionMap<ApEvent,FieldMask>::aligned src_pre;
-        // Don't need to ask the target for preconditions as they 
-        // are included as part of the pre set
-        find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                                versions, op->get_unique_op_id(), index, 
-                                local_space, src_pre, map_applied_events);
-        std::set<ApEvent> preconditions = pre;
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
-              src_pre.begin(); it != src_pre.end(); it++)
-        {
-          preconditions.insert(it->first);
-        }
-        ApEvent reduce_pre = Runtime::merge_events(preconditions); 
-        ApEvent reduce_post = target->logical_node->issue_copy(op, 
-                                                       src_fields, dst_fields,
-                                                       reduce_pre, intersect,
-                                                       manager->redop, fold);
-        // No need to add the user to the destination as that will
-        // be handled by the caller using the reduce post event we return
-        add_copy_user(manager->redop, reduce_post, versions,
-                      op->get_unique_op_id(), index, red_mask, 
-                      true/*reading*/, local_space, map_applied_events);
-        // Chain the events
-        Runtime::trigger_event(reduction_done, reduce_post);
+        preconditions.insert(it->first);
       }
-      return reduction_done;
+      ApEvent reduce_pre = Runtime::merge_events(preconditions); 
+      ApEvent reduce_post = target->logical_node->issue_copy(op, 
+                                                     src_fields, dst_fields,
+                                                     reduce_pre, intersect,
+                                                     manager->redop, fold);
+      // No need to add the user to the destination as that will
+      // be handled by the caller using the reduce post event we return
+      add_copy_user(manager->redop, reduce_post, versions,
+                    op->get_unique_op_id(), index, red_mask, 
+                    true/*reading*/, local_space, map_applied_events);
+      return reduce_post;
     }
 
     //--------------------------------------------------------------------------
@@ -6612,39 +6609,32 @@ namespace Legion {
       const bool fold = false;
       target->copy_field(dst_field, dst_fields);
       FieldMask red_mask; red_mask.set_bit(src_index);
-      bool first = true;
-      ApUserEvent reduction_done = 
-        this->reduce_from(target->manager, target->logical_node,
-                          manager->redop, first, red_mask, src_fields);
-      if (first)
+      this->reduce_from(manager->redop, red_mask, src_fields);
+      LegionMap<ApEvent,FieldMask>::aligned src_pre;
+      // Don't need to ask the target for preconditions as they 
+      // are included as part of the pre set
+      find_copy_preconditions(manager->redop, true/*reading*/, 
+                              true/*singe copy*/, red_mask, 
+                              versions, op->get_unique_op_id(), index, 
+                              local_space, src_pre, map_applied_events);
+      std::set<ApEvent> preconditions = preconds;
+      for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+            src_pre.begin(); it != src_pre.end(); it++)
       {
-        LegionMap<ApEvent,FieldMask>::aligned src_pre;
-        // Don't need to ask the target for preconditions as they 
-        // are included as part of the pre set
-        find_copy_preconditions(manager->redop, true/*reading*/, red_mask, 
-                                versions, op->get_unique_op_id(), index, 
-                                local_space, src_pre, map_applied_events);
-        std::set<ApEvent> preconditions = preconds;
-        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-              src_pre.begin(); it != src_pre.end(); it++)
-        {
-          preconditions.insert(it->first);
-        }
-        ApEvent reduce_pre = Runtime::merge_events(preconditions); 
-        ApEvent reduce_post = manager->issue_reduction(op, 
-                                               src_fields, dst_fields,
-                                               intersect, reduce_pre,
-                                               fold, false/*precise*/,
-                                               target->logical_node);
-        // No need to add the user to the destination as that will
-        // be handled by the caller using the reduce post event we return
-        add_copy_user(manager->redop, reduce_post, versions,
-                      op->get_unique_op_id(), index, red_mask, 
-                      true/*reading*/, local_space, map_applied_events);
-        // Chain the events
-        Runtime::trigger_event(reduction_done, reduce_post);
+        preconditions.insert(it->first);
       }
-      return reduction_done;
+      ApEvent reduce_pre = Runtime::merge_events(preconditions); 
+      ApEvent reduce_post = manager->issue_reduction(op, 
+                                             src_fields, dst_fields,
+                                             intersect, reduce_pre,
+                                             fold, false/*precise*/,
+                                             target->logical_node);
+      // No need to add the user to the destination as that will
+      // be handled by the caller using the reduce post event we return
+      add_copy_user(manager->redop, reduce_post, versions,
+                    op->get_unique_op_id(), index, red_mask, 
+                    true/*reading*/, local_space, map_applied_events);
+      return reduce_post;
     }
 
     //--------------------------------------------------------------------------
@@ -6665,6 +6655,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReductionView::find_copy_preconditions(ReductionOpID redop,
                                                 bool reading,
+                                                bool single_copy,
                                                 const FieldMask &copy_mask,
                                                 VersionTracker *versions,
                                                 const UniqueID creator_op_id,
@@ -7241,10 +7232,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApUserEvent ReductionView::reduce_from(PhysicalManager *target,
-                                           RegionTreeNode *target_node,
-                                           ReductionOpID redop, bool &first,
-                                           const FieldMask &reduce_mask,
+    void ReductionView::reduce_from(ReductionOpID redop,
+                                    const FieldMask &reduce_mask,
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
@@ -7252,11 +7241,7 @@ namespace Legion {
       assert(redop == manager->redop);
       assert(FieldMask::pop_count(reduce_mask) == 1); // only one field
 #endif
-      ApUserEvent result = manager->deduplicate_reductions(target, 
-                                              target_node, first);
-      if (first)
-        manager->find_field_offsets(reduce_mask, src_fields);
-      return result;
+      manager->find_field_offsets(reduce_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------

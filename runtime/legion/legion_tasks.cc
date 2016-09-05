@@ -505,17 +505,6 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
-      if (!map_locally)
-      {
-        log_run.error("Invalid mapper output. Remote mapping of tasks is not "
-                      "currently supported. Mapper %s attempted to remote map "
-                      "task %s (ID %lld).", mapper->get_mapper_name(),
-                      get_task_name(), unique_op_id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
       return options.inline_task;
     }
 
@@ -2285,6 +2274,7 @@ namespace Legion {
                               regions[*it], version_info, 
                               restrict_info, this, *it,
                               completion_event, (regions.size() > 1), 
+                              true/*need read only reservatins*/,
                               applied_conditions, chosen_instances
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
@@ -6146,6 +6136,40 @@ namespace Legion {
       // Now do the mapping call
       invoke_mapper(must_epoch_op);
       RegionTreeContext enclosing_context = parent_ctx->get_context();
+      const bool multiple_requirements = (regions.size() > 1);
+      std::set<Reservation> read_only_reservations;
+      // This is the price of allowing read-only requirements to
+      // map in parallel: we have to get the reservations for doing
+      // read-only mappings to each physical instance prior to performing
+      // the mapping. The call to physical_register_only can do this for
+      // us if we only have on requirement, but with multiple requirements
+      // we need to deduplicate physical instances across requirements
+      // so we have to do it here in the caller's context
+      if (multiple_requirements)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          // Don't skip early mapped regions
+          if (IS_READ_ONLY(regions[idx]))
+            physical_instances[idx].find_read_only_reservations(
+                                                  read_only_reservations);
+        }
+        if (!read_only_reservations.empty())
+        {
+          RtEvent precondition;
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_reservations.begin(); it != 
+                read_only_reservations.end(); it++)
+          {
+            RtEvent next = Runtime::acquire_rt_reservation(*it,
+                              true/*exclusive*/, precondition);
+            precondition = next;
+          }
+          // Wait until we have our read-only locks
+          if (precondition.exists())
+            precondition.wait();
+        }
+      }
       // After we've got our results, apply the state to the region tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -6198,7 +6222,8 @@ namespace Legion {
                                     regions[idx], get_version_info(idx), 
                                     get_restrict_info(idx),
                                     this, idx, local_termination_event, 
-                                    (regions.size() > 1)/*defer add users*/,
+                                    multiple_requirements/*defer add users*/,
+                                    !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
                                     physical_instances[idx]
 #ifdef DEBUG_LEGION
@@ -6209,7 +6234,7 @@ namespace Legion {
       }
       // If we had more than one region requirement when now have to
       // record our users because we skipped that during traversal
-      if (regions.size() > 1)
+      if (multiple_requirements)
       {
         // C++ type system suckiness
         std::deque<InstanceSet> &phy_inst_ref = 
@@ -6220,6 +6245,30 @@ namespace Legion {
             *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
             *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
             enclosing_context, phy_inst_ref, map_applied_conditions);
+        // Release any read-only reservations that we're holding
+        if (!read_only_reservations.empty())
+        {
+          if (!map_applied_conditions.empty())
+          {
+            // This is actually imprecise to do this, let's see if it
+            // comes back to haunt us at some point
+            RtEvent done_event = Runtime::merge_events(map_applied_conditions);
+            for (std::set<Reservation>::const_iterator it = 
+                  read_only_reservations.begin(); it != 
+                  read_only_reservations.end(); it++)
+              it->release(done_event);
+            // Can replace the applied conditions with the summary
+            map_applied_conditions.clear();
+            map_applied_conditions.insert(done_event);
+          }
+          else
+          {
+            for (std::set<Reservation>::const_iterator it = 
+                  read_only_reservations.begin(); it != 
+                  read_only_reservations.end(); it++)
+              it->release();
+          }
+        }
       }
       if (perform_postmap)
         perform_post_mapping();
@@ -6392,6 +6441,7 @@ namespace Legion {
                           empty_restrict_info, this, idx,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
+                          true/*need read only locks*/,
                           map_applied_conditions, result
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
@@ -6430,6 +6480,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(index < regions.size());
         assert(virtual_mapped[index]);
+        assert(!IS_READ_ONLY(regions[index]));
 #endif
         // Apply our version state information, put map applied information
         // in a temporary data structure and then hold the lock when merging
@@ -6441,6 +6492,7 @@ namespace Legion {
                                                 info, empty_restrict_info, this,
                                                 index, ApEvent::NO_AP_EVENT,
                                                 false/*defer add users*/, 
+                                                false/*not read only*/,
                                                 temp_map_applied_conditions,refs
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()

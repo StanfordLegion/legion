@@ -1943,6 +1943,7 @@ namespace Legion {
                                                 this, 0/*idx*/, 
                                                 termination_event,
                                                 false/*defer add users*/,
+                                                true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances
 #ifdef DEBUG_LEGION
@@ -1966,6 +1967,7 @@ namespace Legion {
                                                 this, 0/*idx*/,
                                                 termination_event, 
                                                 false/*defer add users*/,
+                                                true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances
 #ifdef DEBUG_LEGION
@@ -3219,6 +3221,7 @@ namespace Legion {
                                                   src_restrict_infos[idx],
                                                   this, idx, local_completion,
                                                   false/*defer add users*/,
+                                                  true/*read only locks*/,
                                                   map_applied_conditions,
                                                   src_targets
 #ifdef DEBUG_LEGION
@@ -3244,6 +3247,7 @@ namespace Legion {
                                                 dst_restrict_infos[idx],
                                                 this, idx, local_completion,
                                                 false/*defer add users*/,
+                                                false/*not read only*/,
                                                 map_applied_conditions,
                                                 dst_targets
 #ifdef DEBUG_LEGION
@@ -6407,6 +6411,7 @@ namespace Legion {
                                               version_info, restrict_info,
                                               this, 0/*idx*/, completion_event,
                                               false/*defer add users*/,
+                                              false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances
 #ifdef DEBUG_LEGION
@@ -6939,6 +6944,7 @@ namespace Legion {
                                               version_info, restrict_info,
                                               this, 0/*idx*/, completion_event,
                                               false/*defer add users*/,
+                                              false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances
 #ifdef DEBUG_LEGION
@@ -10147,6 +10153,7 @@ namespace Legion {
                                                   this, 0/*idx*/,
                                                   ApEvent::NO_AP_EVENT,
                                                   false/*defer add users*/,
+                                                  false/*not read only*/,
                                                   map_applied_conditions,
                                                   mapped_instances
 #ifdef DEBUG_LEGION
@@ -10230,6 +10237,7 @@ namespace Legion {
                                                 this, 0/*idx*/,
                                                 ApEvent::NO_AP_EVENT,
                                                 false/*defer add users*/,
+                                                false/*not read only*/,
                                                 map_applied_conditions,
                                                 mapped_instances
 #ifdef DEBUG_LEGION

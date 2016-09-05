@@ -240,7 +240,8 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      bool register_now, ApEvent use_event); 
+                      bool register_now, ApEvent use_event,
+                      Reservation read_only_mapping_reservation); 
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -256,6 +257,8 @@ namespace Legion {
       virtual size_t get_instance_size(void) const;
     public:
       inline ApEvent get_use_event(void) const { return use_event; }
+      inline Reservation get_read_only_mapping_reservation(void) const
+        { return read_only_mapping_reservation; }
     public:
       virtual InstanceView* create_instance_top_view(SingleTask *context,
                                             AddressSpaceID logical_owner);
@@ -269,10 +272,6 @@ namespace Legion {
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
                                     const std::vector<unsigned> &dst_indexes);
-      void deduplicate_deferred_copy(DistributedID def_did,
-                         RegionTreeNode *target_node, FieldMask &copy_mask,
-                         LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                         LegionMap<ApEvent,FieldMask>::aligned &postconditions);
     public:
       // Interface to the mapper PhysicalInstance
       virtual void get_fields(std::set<FieldID> &fields) const
@@ -296,6 +295,8 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event;
+    protected:
+      Reservation read_only_mapping_reservation;
     };
 
     /**
@@ -350,21 +351,11 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(SingleTask *context,
                                             AddressSpaceID logical_owner);
     public:
-      ApUserEvent deduplicate_reductions(PhysicalManager *target,
-                                         RegionTreeNode *target_node,
-                                         bool &first);
-      static void handle_deduplication_request(Runtime *runtime,
-                                               AddressSpaceID source,
-                                               Deserializer &derez);
-      static void handle_deduplication_response(Deserializer &derez);
-    public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const FieldID logical_field;
     protected:
       Reservation manager_lock;
-      std::map<PhysicalManager*,std::vector<
-               std::pair<RegionTreeNode*,ApUserEvent> > > pending_reductions;
     };
 
     /**

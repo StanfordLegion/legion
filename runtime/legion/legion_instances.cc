@@ -980,10 +980,12 @@ namespace Legion {
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
-                                     bool register_now, ApEvent u_event) 
+                                     bool register_now, ApEvent u_event,
+                                     Reservation read_only_reservation) 
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
-                        own, register_now),use_event(u_event)
+                        own, register_now),use_event(u_event),
+                        read_only_mapping_reservation(read_only_reservation)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1027,6 +1029,10 @@ namespace Legion {
 #endif
       if (layout->remove_reference())
         delete layout;
+      // If we are the owner, we get to destroy the read only reservation
+      if (is_owner())
+        read_only_mapping_reservation.destroy_reservation();
+      read_only_mapping_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1211,6 +1217,7 @@ namespace Legion {
         rez.serialize(use_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
+        rez.serialize(read_only_mapping_reservation);
       }
       context->runtime->send_instance_manager(target, rez);
       update_remote_instances(target);
@@ -1242,6 +1249,8 @@ namespace Legion {
                                                             target_node);
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
+      Reservation read_only_reservation;
+      derez.deserialize(read_only_reservation);
       MemoryManager *memory = runtime->find_memory_manager(mem);
       void *location;
       InstanceManager *man = NULL;
@@ -1251,13 +1260,15 @@ namespace Legion {
                                              memory, inst, inst_domain, 
                                              false/*owns*/, target_node, layout,
                                              pointer_constraint,
-                                             false/*reg now*/, use_event);
+                                             false/*reg now*/, use_event,
+                                             read_only_reservation);
       else
         man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
                                     runtime->address_space, memory, inst,
                                     inst_domain, false/*owns*/,
                                     target_node, layout, pointer_constraint, 
-                                    false/*reg now*/, use_event);
+                                    false/*reg now*/, use_event,
+                                    read_only_reservation);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1474,197 +1485,6 @@ namespace Legion {
                                        context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApUserEvent ReductionManager::deduplicate_reductions(
-              PhysicalManager *target, RegionTreeNode *target_node, bool &first)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-      {
-        // See if we've cached the result
-        {
-          AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-          std::map<PhysicalManager*,std::vector<
-            std::pair<RegionTreeNode*,ApUserEvent> > >::const_iterator finder =
-              pending_reductions.find(target);
-          if (finder != pending_reductions.end())
-          {
-            for (std::vector<std::pair<RegionTreeNode*,
-                                       ApUserEvent> >::const_iterator it = 
-                  finder->second.begin(); it != finder->second.end(); it++)
-            {
-              if (it->first == target_node)
-              {
-                first = false;
-                return it->second;
-              }
-              if (!it->first->intersects_with(target_node))
-                continue;
-              if (it->first->dominates(target_node))
-              {
-                first = false;
-                return it->second;
-              }
-              // TODO: Implement partial reduction applications
-              assert(false);
-            }
-          }
-        }
-        // If we get here we have to message the owner node
-        ApUserEvent result;
-        RtUserEvent done_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(target->did);
-          if (target_node->is_region())
-          {
-            rez.serialize<bool>(true);
-            rez.serialize(target_node->as_region_node()->handle);
-          }
-          else
-          {
-            rez.serialize<bool>(false);
-            rez.serialize(target_node->as_partition_node()->handle);
-          }
-          rez.serialize(&result);
-          rez.serialize(&first);
-          rez.serialize(done_event);
-        }
-        runtime->send_reduction_deduplication_request(owner_space, rez);
-        done_event.wait();
-#ifdef DEBUG_LEGION
-        assert(result.exists()); // should have an event when we wake up 
-#endif
-        // Cache the result
-        if (first)
-        {
-          AutoLock m_lock(manager_lock);
-          // Can result in multiple copies but whatever
-          pending_reductions[target].push_back(
-              std::pair<RegionTreeNode*,ApUserEvent>(target_node, result));
-        }
-        return result;
-      }
-      else
-      {
-#if 0
-        AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,std::vector<
-          std::pair<RegionTreeNode*,ApUserEvent> > >::iterator finder = 
-            pending_reductions.find(target);
-        if (finder != pending_reductions.end())
-        {
-          // See if we can find it already
-          for (std::vector<std::pair<RegionTreeNode*,
-                                     ApUserEvent> >::const_iterator it = 
-                finder->second.begin(); it != finder->second.end(); it++)
-          {
-            if (it->first == target_node)
-            {
-              first = false;
-              return it->second;
-            }
-            if (!it->first->intersects_with(target_node))
-              continue;
-            if (it->first->dominates(target_node))
-            {
-              first = false;
-              return it->second;
-            }
-            // TODO: Implement partial reduction applications
-            assert(false);
-          }
-        }
-#endif
-        // If we get here, make a new one
-        ApUserEvent result = Runtime::create_ap_user_event();
-        //pending_reductions[target].push_back(
-        //    std::pair<RegionTreeNode*,ApUserEvent>(target_node,result));
-        first = true;
-        return result;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReductionManager::handle_deduplication_request(
-                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent did_ready;
-      PhysicalManager *manager = runtime->find_or_request_physical_manager(did, 
-                                                                    did_ready);
-      DistributedID target_did;
-      derez.deserialize(target_did);
-      RtEvent target_ready;
-      PhysicalManager *target = runtime->find_or_request_physical_manager(
-                                                    target_did, target_ready);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node = NULL;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      ApUserEvent *result_ptr;
-      derez.deserialize(result_ptr);
-      bool *first_ptr;
-      derez.deserialize(first_ptr);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      RtEvent wait_for = Runtime::merge_events(did_ready, target_ready);
-      if (wait_for.exists())
-        wait_for.wait();
-#ifdef DEBUG_LEGION
-      assert(manager->is_reduction_manager());
-      assert(manager->is_owner());
-#endif
-      ReductionManager *owner_manager = manager->as_reduction_manager();
-      bool first_result = true;
-      ApUserEvent result = owner_manager->deduplicate_reductions(target,
-                                              target_node, first_result);
-      // Send the result back
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(result_ptr);
-        rez.serialize(result);
-        rez.serialize(first_ptr);
-        rez.serialize(first_result);
-        rez.serialize(done_event);
-      }
-      runtime->send_reduction_deduplication_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReductionManager::handle_deduplication_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      ApUserEvent *result_ptr;
-      derez.deserialize(result_ptr);
-      derez.deserialize(*result_ptr);
-      bool *first_ptr;
-      derez.deserialize(first_ptr);
-      derez.deserialize(*first_ptr);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2206,14 +2026,16 @@ namespace Legion {
         case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
-            
             // Now we can make the manager
+            Reservation read_only_reservation = 
+              Reservation::create_reservation();
             result = legion_new<InstanceManager>(forest, did, local_space,
                                                  local_space, memory_manager,
                                                  instance, instance_domain, 
                                                  own_domain, ancestor, layout, 
                                                  pointer_constraint, 
-                                                 true/*register now*/, ready);
+                                                 true/*register now*/, ready,
+                                                 read_only_reservation);
             break;
           }
         case REDUCTION_FOLD_SPECIALIZE:

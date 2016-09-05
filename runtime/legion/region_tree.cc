@@ -2104,19 +2104,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_register_only(RegionTreeContext ctx,
-                                                 const RegionRequirement &req,
-                                                 VersionInfo &version_info,
-                                                 RestrictInfo &restrict_info,
-                                                 Operation *op, unsigned index,
-                                                 ApEvent term_event,
-                                                 bool defer_add_users,
-                                                 std::set<RtEvent> &map_applied,
-                                                 InstanceSet &targets
+                                               const RegionRequirement &req,
+                                               VersionInfo &version_info,
+                                               RestrictInfo &restrict_info,
+                                               Operation *op, unsigned index,
+                                               ApEvent term_event,
+                                               bool defer_add_users,
+                                               bool need_read_only_reservations,
+                                               std::set<RtEvent> &map_applied,
+                                               InstanceSet &targets
 #ifdef DEBUG_LEGION
-                                                 , const char *log_name
-                                                 , UniqueID uid
+                                               , const char *log_name
+                                               , UniqueID uid
 #endif
-                                                 )
+                                               )
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
@@ -2128,9 +2129,7 @@ namespace Legion {
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
-      // Construct the traversal info
-      TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
-                         user_mask, map_applied);
+      
       RegionUsage usage(req);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2145,12 +2144,74 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(targets.size() == 1); // better only be one
 #endif
+        // Construct the traversal info
+        TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                           user_mask, map_applied);
         child_node->register_virtual(ctx.get_id(), targets[0], 
                                      version_info, user_mask);
       }
       else // this is the normal path
-        child_node->register_region(info, restrict_info, term_event, 
-                                    usage, defer_add_users, targets);
+      {
+        // See if we need to acquire locks for read-only privileges
+        if (need_read_only_reservations && IS_READ_ONLY(req))
+        {
+          // This is the price of allowing read-only requirements from
+          // different operations to be mapped in parallel, we have to 
+          // serialize access to the requirements mapping to the same
+          // instance otherwise we can get weird effects with partial
+          // applications of reductions in composite instances, etc.
+          //
+          // Note that by using a set we deduplicate and put the
+          // locks in the order to be taken to avoid deadlocks
+          std::set<Reservation> read_only_locks;
+          targets.find_read_only_reservations(read_only_locks);
+          RtEvent precondition;
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_locks.begin(); it != read_only_locks.end(); it++)
+          {
+            RtEvent next = Runtime::acquire_rt_reservation(*it,
+                              true/*exclusive*/, precondition);
+            precondition = next;
+          }
+          // Have to wait for all the locks to be acquired
+          if (precondition.exists())
+            precondition.wait();
+          // Now do the mapping with our own applied event set
+          std::set<RtEvent> local_applied;
+          // Construct the traversal info
+          TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                             user_mask, local_applied);
+          child_node->register_region(info, restrict_info, term_event,
+                                      usage, defer_add_users, targets);
+          
+          if (!local_applied.empty())
+          {
+            // Release the read only locks once our map applied 
+            // conditions have been met
+            RtEvent done_event = Runtime::merge_events(local_applied);
+            for (std::set<Reservation>::const_iterator it = 
+                  read_only_locks.begin(); it != read_only_locks.end(); it++)
+              it->release(done_event);
+            // Propagate the condition back to the map applied
+            map_applied.insert(done_event);
+          }
+          else
+          {
+            // Release the locks with no preconditions
+            for (std::set<Reservation>::const_iterator it = 
+                  read_only_locks.begin(); it != read_only_locks.end(); it++)
+              it->release();
+          }
+        }
+        else // The common case
+        {
+          // Construct the traversal info
+          TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                             user_mask, map_applied);
+          child_node->register_region(info, restrict_info, term_event, 
+                                      usage, defer_add_users, targets);
+        }
+      }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
@@ -9596,7 +9657,8 @@ namespace Legion {
                                          memory, inst, dom, false/*own*/,
                                          node, layout, pointer_constraint,
                                          true/*register now*/, 
-                                         ApEvent::NO_AP_EVENT);
+                                         ApEvent::NO_AP_EVENT,
+                                         Reservation::create_reservation());
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -12763,6 +12825,7 @@ namespace Legion {
           assert(!!it->second);
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                             true/*single copy*/,
                                              it->second, &info.version_info,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
@@ -12772,6 +12835,7 @@ namespace Legion {
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                     true/*single copy*/,
                                      update_mask, &info.version_info,
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
@@ -15344,7 +15408,8 @@ namespace Legion {
       {
         InstanceView *target = target_views[idx];
         LegionMap<ApEvent,FieldMask>::aligned preconditions;
-        target->find_copy_preconditions(0/*redop*/, false/*reading*/, fill_mask,
+        target->find_copy_preconditions(0/*redop*/, false/*reading*/, 
+                                true/*single copy*/, fill_mask,
                                 &version_info, op->get_unique_op_id(), index,
                                 local_space, preconditions, map_applied_events);
         if (sync_precondition.exists())

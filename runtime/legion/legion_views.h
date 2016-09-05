@@ -124,6 +124,7 @@ namespace Legion {
     public:
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           bool single_copy/*only for writing*/,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -186,10 +187,8 @@ namespace Legion {
                              const FieldMask &reduce_mask,
                      std::vector<Domain::CopySrcDstField> &src_fields,
                              CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual ApUserEvent reduce_from(PhysicalManager *target,
-                                      RegionTreeNode *target_node,
-                                      ReductionOpID redop, bool &first,
-                                      const FieldMask &reduce_mask, 
+      virtual void reduce_from(ReductionOpID redop,
+                               const FieldMask &reduce_mask, 
                        std::vector<Domain::CopySrcDstField> &src_fields) = 0;
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
@@ -280,10 +279,8 @@ namespace Legion {
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
-      virtual ApUserEvent reduce_from(PhysicalManager *target,
-                                      RegionTreeNode *target_node,
-                                      ReductionOpID redop, bool &first,
-                                      const FieldMask &reduce_mask,
+      virtual void reduce_from(ReductionOpID redop,
+                               const FieldMask &reduce_mask,
                           std::vector<Domain::CopySrcDstField> &src_fields);
     public:
       void accumulate_events(std::set<ApEvent> &all_events);
@@ -296,6 +293,7 @@ namespace Legion {
       virtual Memory get_location(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           bool single_copy/*only for writing*/,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -306,6 +304,7 @@ namespace Legion {
                                            bool can_filter = true);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
+                                         bool single_copy,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -319,6 +318,7 @@ namespace Legion {
       // Give composite views special access here so they can filter
       // back just the users at the particular level
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
+                                         bool single_copy,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -328,7 +328,8 @@ namespace Legion {
                                          const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events);
-      void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
+      void find_local_copy_preconditions_above(ReductionOpID redop,
+                                         bool reading, bool single_copy,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -726,6 +727,7 @@ namespace Legion {
         { return false; }
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           bool single_copy/*only for writing*/,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -781,10 +783,8 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields);
-      virtual ApUserEvent reduce_from(PhysicalManager *target,
-                                      RegionTreeNode *target_node,
-                                      ReductionOpID redop, bool &first,
-                                      const FieldMask &reduce_mask,
+      virtual void reduce_from(ReductionOpID redop,
+                               const FieldMask &reduce_mask,
                           std::vector<Domain::CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);

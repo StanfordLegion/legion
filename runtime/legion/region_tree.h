@@ -327,6 +327,7 @@ namespace Legion {
                                   Operation *op, unsigned index,
                                   ApEvent term_event,
                                   bool defer_add_users,
+                                  bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
                                   InstanceSet &targets
 #ifdef DEBUG_LEGION

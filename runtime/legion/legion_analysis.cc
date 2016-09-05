@@ -7596,7 +7596,8 @@ namespace Legion {
         {
           if (ptr.manager->is_reduction_manager())
           {
-            ReductionManager *reduc_manager = ptr.manager->as_reduction_manager();
+            ReductionManager *reduc_manager = 
+              ptr.manager->as_reduction_manager();
             if (reduc_manager->is_list_manager())
               legion_delete(reduc_manager->as_list_manager());
             else
@@ -7617,6 +7618,19 @@ namespace Legion {
       assert(ptr.manager != NULL);
 #endif
       return ptr.manager->get_memory();
+    }
+
+    //--------------------------------------------------------------------------
+    Reservation InstanceRef::get_read_only_reservation(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!composite);
+      assert(ptr.manager != NULL);
+      assert(ptr.manager->is_instance_manager());
+#endif
+      return 
+        ptr.manager->as_instance_manager()->get_read_only_mapping_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8340,6 +8354,23 @@ namespace Legion {
           if (ready.exists())
             wait_on.insert(ready);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::find_read_only_reservations(
+                                             std::set<Reservation> &locks) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          locks.insert(refs.single->get_read_only_reservation());
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          locks.insert(refs.multi->vector[idx].get_read_only_reservation());
       }
     }
     
