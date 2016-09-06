@@ -2498,6 +2498,7 @@ namespace Legion {
             instances.push_back(it->first);
           }
         }
+        std::set<RtEvent> wait_for;
         for (std::vector<PhysicalManager*>::const_iterator it = 
               instances.begin(); it != instances.end(); it++)
         {
@@ -2507,11 +2508,17 @@ namespace Legion {
             // Unregister it from the runtime so that it avoids
             // sending messages when it is deleted
             if ((*it)->is_registered())
-              (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
+              wait_for.insert(
+                  (*it)->unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL));
             // Remove our base resource reference
             if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
               PhysicalManager::delete_physical_manager(*it);
           }
+        }
+        if (!wait_for.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(wait_for);
+          wait_on.wait();
         }
       }
     }
@@ -16798,19 +16805,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::recycle_distributed_id(DistributedID did,
-                                         RtEvent recycle_event)
+    RtEvent Runtime::recycle_distributed_id(DistributedID did,
+                                            RtEvent recycle_event)
     //--------------------------------------------------------------------------
     {
       if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.did = did;
-        issue_runtime_meta_task(deferred_recycle_args, LG_RESOURCE_PRIORITY, 
-                                NULL, recycle_event);
+        return issue_runtime_meta_task(deferred_recycle_args, 
+            LG_RESOURCE_PRIORITY, NULL, recycle_event);
       }
       else
+      {
         free_distributed_id(did);
+        return RtEvent::NO_RT_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17227,7 +17237,8 @@ namespace Legion {
           mem_managers.resize(memory_managers.size());
           unsigned idx = 0;
           for (std::map<Memory,MemoryManager*>::const_iterator it = 
-                memory_managers.begin(); it != memory_managers.end(); it++, idx++)
+                memory_managers.begin(); it != 
+                memory_managers.end(); it++, idx++)
             mem_managers[idx] = it->second;
         }
         for (std::vector<MemoryManager*>::const_iterator it = 

@@ -2771,7 +2771,7 @@ namespace Legion {
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
       ApEvent init_event = src_view->add_user_fused(usage,ready_event,user_mask,
-                                                  context, index, &version_info, 
+                                                  context, index, &version_info,
                                                   runtime->address_space,
                                                   applied_events,
                                                   false/*update versions*/);

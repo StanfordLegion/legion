@@ -2299,7 +2299,7 @@ namespace Legion {
       DistributedID get_available_distributed_id(bool need_cont, 
                                                  bool has_lock = false);
       void free_distributed_id(DistributedID did);
-      void recycle_distributed_id(DistributedID did, RtEvent recycle_event);
+      RtEvent recycle_distributed_id(DistributedID did, RtEvent recycle_event);
       AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,

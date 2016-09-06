@@ -1010,7 +1010,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID;
       public:
-        LogicalView *view;
+        DistributedCollectable *dc;
         DistributedID did;
       };
       struct DeferCompositeViewRegistrationArgs : 
@@ -1102,12 +1102,13 @@ namespace Legion {
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
+      void record_top_version_state(VersionState *state);
       void finalize_capture(void);
     public:
       void pack_composite_view(Serializer &rez) const;
       void unpack_composite_view(Deserializer &derez,
                                  std::set<RtEvent> &preconditions);
-      RtEvent defer_add_reference(LogicalView *view, 
+      RtEvent defer_add_reference(DistributedCollectable *dc, 
                                   RtEvent precondition) const;
       static void handle_deferred_view_ref(const void *args);
     public:
@@ -1122,6 +1123,11 @@ namespace Legion {
       // record the views and children we immediately depend on and that
       // is how we break the inifinite meta-data cycle
       LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
+    protected:
+      // Keep track of the top version states for this composite instance
+      // We keep valid views to these version state objects as long
+      // as we are valid
+      std::vector<VersionState*> top_version_states;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     };
@@ -1189,8 +1195,7 @@ namespace Legion {
                                  SingleTask *translation_context);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
-      void record_version_state(VersionState *state, const FieldMask &mask,
-                                bool already_valid);
+      void record_version_state(VersionState *state, const FieldMask &mask);
     public:
       void find_sound_domination_mask(RegionTreeNode *logical_node,
                                       const FieldMask &mask,

@@ -76,7 +76,8 @@ namespace Legion {
      * This is the same as the above class, but specialized
      * for VersionState objects explicitly
      */
-    template<ReferenceSource REF_SRC = LAST_SOURCE_REF>
+    template<ReferenceSource REF_SRC = LAST_SOURCE_REF, 
+             bool LOCAL_ONLY = true>
     class VersioningSet {
     public:
       class iterator : public std::iterator<std::input_iterator_tag,
@@ -151,9 +152,9 @@ namespace Legion {
       iterator begin(void) const;
       inline iterator end(void) const { return iterator(this, NULL, single); }
     public:
-      template<ReferenceSource ARG_KIND>
+      template<ReferenceSource ARG_KIND, bool ARG_LOCAL>
       void reduce(const FieldMask &reduce_mask, 
-                  VersioningSet<ARG_KIND> &new_states,
+                  VersioningSet<ARG_KIND,ARG_LOCAL> &new_states,
                   ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
@@ -895,9 +896,9 @@ namespace Legion {
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
-      template<ReferenceSource REF_SRC>
       static void filter_version_info(const FieldMask &invalidate_mask,
-            typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned 
+            typename LegionMap<VersionID,
+                               VersioningSet<VERSION_MANAGER_REF> >::aligned
                                                                 &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
@@ -928,9 +929,9 @@ namespace Legion {
     public:
       void pack_response(Serializer &rez, AddressSpaceID target,
                          const FieldMask &request_mask);
-      template<ReferenceSource REF_SRC>
       static void find_send_infos(
-          typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned& 
+          typename LegionMap<VersionID,
+                             VersioningSet<VERSION_MANAGER_REF> >::aligned& 
             version_infos, const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
       static void pack_send_infos(Serializer &rez, const
@@ -942,10 +943,9 @@ namespace Legion {
       static void unpack_send_infos(Deserializer &derez,
           LegionMap<VersionState*,FieldMask>::aligned &infos,
           Runtime *runtime, std::set<RtEvent> &preconditions);
-      template<ReferenceSource REF_SRC>
       static void merge_send_infos(
-          typename LegionMap<VersionID,VersioningSet<REF_SRC> >::aligned 
-            &target_infos, 
+          typename LegionMap<VersionID,
+              VersioningSet<VERSION_MANAGER_REF> >::aligned &target_infos,
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
           ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
@@ -1178,7 +1178,10 @@ namespace Legion {
       FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
-      typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
+      // Note that we make the StateVersions type not local which
+      // is how we keep the distributed version state tree live
+      typedef VersioningSet<VERSION_STATE_TREE_REF,
+                            false/*LOCAL*/> StateVersions;
       LegionMap<ColorPoint,StateVersions>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
