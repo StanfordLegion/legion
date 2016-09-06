@@ -1009,6 +1009,7 @@ namespace Legion {
       public:
         VersionState *proxy_this;
         AddressSpaceID target;
+        SingleTask *context;
         FieldMask *request_mask;
         VersionRequestKind request_kind;
         RtUserEvent to_trigger;
@@ -1020,6 +1021,14 @@ namespace Legion {
         VersionState *proxy_this;
         ColorPoint child_color;
         VersioningSet<> *children;
+      };
+      struct ConvertViewArgs : public LgTaskArgs<ConvertViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONVERT_VIEW_TASK_ID;
+      public:
+        VersionState *proxy_this;
+        PhysicalManager *manager;
+        SingleTask *context;
       };
       struct UpdateViewReferences : public LgTaskArgs<UpdateViewReferences> {
       public:
@@ -1039,13 +1048,15 @@ namespace Legion {
       template<VersionRequestKind KIND>
       struct RequestFunctor {
       public:
-        RequestFunctor(VersionState *proxy, AddressSpaceID r,
-                       const FieldMask &m, std::set<RtEvent> &pre)
-          : proxy_this(proxy), requestor(r), mask(m), preconditions(pre) { }
+        RequestFunctor(VersionState *proxy, SingleTask *ctx,
+            AddressSpaceID r, const FieldMask &m, std::set<RtEvent> &pre)
+          : proxy_this(proxy), context(ctx), requestor(r), 
+            mask(m), preconditions(pre) { }
       public:
         void apply(AddressSpaceID target);
       private:
         VersionState *proxy_this;
+        SingleTask *context;
         AddressSpaceID requestor;
         const FieldMask &mask;
         std::set<RtEvent> &preconditions;
@@ -1093,22 +1104,27 @@ namespace Legion {
       // instances fetch only the children they need rather
       // than requesting the full final version state like
       // they currently do
-      void request_children_version_state(const FieldMask &request_mask,
+      void request_children_version_state(SingleTask *context,
+                                          const FieldMask &request_mask,
                                           std::set<RtEvent> &preconditions);
-      void request_initial_version_state(const FieldMask &request_mask,
+      void request_initial_version_state(SingleTask *context,
+                                         const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);
-      void request_final_version_state(const FieldMask &request_mask,
+      void request_final_version_state(SingleTask *context,
+                                       const FieldMask &request_mask,
                                        std::set<RtEvent> &preconditions);
     public:
       void send_version_state_update(AddressSpaceID target,
+                                     SingleTask *context,
                                      const FieldMask &request_mask, 
                                      VersionRequestKind request_kind,
                                      RtUserEvent to_trigger);
       void send_version_state_update_request(AddressSpaceID target, 
-                          AddressSpaceID src, RtUserEvent to_trigger, 
-                          const FieldMask &request_mask,
+                          SingleTask *context, AddressSpaceID src, 
+                          RtUserEvent to_trigger, const FieldMask &request_mask,
                           VersionRequestKind request_kind);
       void launch_send_version_state_update(AddressSpaceID target,
+                                     SingleTask *context,
                                      RtUserEvent to_trigger, 
                                      const FieldMask &request_mask, 
                                      VersionRequestKind request_kind,
@@ -1121,10 +1137,12 @@ namespace Legion {
                                       Runtime *runtime, AddressSpaceID source);
     public:
       void handle_version_state_update_request(AddressSpaceID source, 
+                                        SingleTask *context,
                                         RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,
                                         FieldMask &request_mask);
-      void handle_version_state_update_response(RtUserEvent to_trigger, 
+      void handle_version_state_update_response(SingleTask *context,
+                                               RtUserEvent to_trigger, 
                                                Deserializer &derez, 
                                                const FieldMask &update, 
                                                VersionRequestKind request_kind);
@@ -1135,6 +1153,9 @@ namespace Legion {
                                      RtEvent done_event);
       static void process_remove_version_state_ref(const void *args);
     public:
+      void convert_view(PhysicalManager *manager, SingleTask *context,
+                        ReferenceMutator *mutator);
+      static void process_convert_view(const void *args);
       static void process_view_references(const void *args);
     public:
       static void process_version_state_update_request(Runtime *rt, 
@@ -1177,6 +1198,9 @@ namespace Legion {
       LegionMap<RtEvent,FieldMask>::aligned child_events;
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;
+    protected:
+      LegionMap<PhysicalManager*,
+                std::pair<RtEvent,FieldMask> >::aligned pending_instances;
     };
 
     /**

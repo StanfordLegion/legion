@@ -20949,6 +20949,7 @@ namespace Legion {
             VersionState::SendVersionStateArgs *vargs = 
               (VersionState::SendVersionStateArgs*)args;
             vargs->proxy_this->send_version_state_update(vargs->target, 
+                                                  vargs->context,
                                                   *(vargs->request_mask),
                                                   vargs->request_kind,
                                                   vargs->to_trigger);
@@ -21110,6 +21111,11 @@ namespace Legion {
         case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
           {
             CompositeNode::handle_deferred_capture(args);
+            break;
+          }
+        case LG_CONVERT_VIEW_TASK_ID:
+          {
+            VersionState::process_convert_view(args);
             break;
           }
         case LG_UPDATE_VIEW_REFERENCES_TASK_ID:

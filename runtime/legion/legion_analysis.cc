@@ -4080,7 +4080,8 @@ namespace Legion {
               continue;
             version_info.add_current_version(it->first, overlap,
                                              false/*path only*/);
-            it->first->request_final_version_state(overlap, ready_events);
+            it->first->request_final_version_state(context, overlap, 
+                                                   ready_events);
           }
         }
         // We're about to produce the first version of this instance
@@ -4136,7 +4137,8 @@ namespace Legion {
                                              false/*path only*/);
             version_info.add_advance_version(it->first, overlap,
                                              false/*path only*/);
-            it->first->request_initial_version_state(overlap, ready_events);
+            it->first->request_initial_version_state(context, overlap, 
+                                                     ready_events);
           }
           if (!unversioned)
             break;
@@ -4170,7 +4172,8 @@ namespace Legion {
                                              false/*path only*/);
             version_info.add_advance_version(it->first, overlap,
                                              false/*path only*/);
-            it->first->request_initial_version_state(overlap, ready_events);
+            it->first->request_initial_version_state(context, overlap, 
+                                                     ready_events);
           }
           if (!unversioned)
             break;
@@ -4270,7 +4273,8 @@ namespace Legion {
               unversioned -= overlap;
               version_info.add_current_version(it->first, overlap,
                                                true/*path only*/);
-              it->first->request_final_version_state(overlap, ready_events);
+              it->first->request_final_version_state(context, overlap, 
+                                                     ready_events);
             }
             if (!unversioned)
               break;
@@ -4345,7 +4349,8 @@ namespace Legion {
             unversioned -= overlap;
             version_info.add_current_version(it->first, overlap,
                                              true/*path only*/);
-            it->first->request_final_version_state(overlap, ready_events);
+            it->first->request_final_version_state(context, overlap, 
+                                                   ready_events);
           }
           if (!unversioned)
             break;
@@ -4368,7 +4373,8 @@ namespace Legion {
                 continue;
               version_info.add_current_version(it->first, overlap,
                                                true/*path only*/);
-              it->first->request_initial_version_state(overlap, ready_events);
+              it->first->request_initial_version_state(context, overlap,
+                                                       ready_events);
             }
           } 
         }
@@ -4401,7 +4407,8 @@ namespace Legion {
             unversioned -= overlap;
             version_info.add_current_version(it->first, overlap, 
                                              true/*path only*/);
-            it->first->request_initial_version_state(overlap, ready_events);
+            it->first->request_initial_version_state(context, overlap, 
+                                                     ready_events);
           }
           if (!unversioned)
             break;
@@ -4477,7 +4484,8 @@ namespace Legion {
             continue;
           version_info.add_current_version(it->first, overlap,
                                            false/*path only*/);
-          it->first->request_final_version_state(overlap, ready_events);
+          it->first->request_final_version_state(context, overlap, 
+                                                 ready_events);
         }
       }
       // If we've arrived, then we need to request all the children of
@@ -4911,7 +4919,7 @@ namespace Legion {
               continue;
             // Get the final version of this version state
             std::set<RtEvent> preconditions;
-            mit->first->request_final_version_state(state_overlap, 
+            mit->first->request_final_version_state(context, state_overlap, 
                                                     preconditions);
             if (!preconditions.empty())
             {
@@ -6060,18 +6068,20 @@ namespace Legion {
       if (target == requestor)
         return;
       RtUserEvent ready_event = Runtime::create_rt_user_event();
-      proxy_this->send_version_state_update_request(target, requestor, 
-          ready_event, mask, KIND);
+      proxy_this->send_version_state_update_request(target, context, 
+          requestor, ready_event, mask, KIND);
       preconditions.insert(ready_event);
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_children_version_state(const FieldMask &req_mask,
-                                               std::set<RtEvent> &preconditions)
+    void VersionState::request_children_version_state(SingleTask *context,
+                    const FieldMask &req_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(logical_node->context->runtime,
-                        VERSION_STATE_REQUEST_CHILDREN_CALL);
+      DETAILED_PROFILER(context->runtime, VERSION_STATE_REQUEST_CHILDREN_CALL);
+#ifdef DEBUG_LEGION
+      assert(context != NULL);
+#endif
       if (is_owner())
       {
         // We are the owner node so see if we need to do any reequests
@@ -6097,8 +6107,8 @@ namespace Legion {
           if (!!remaining_mask)
           {
             std::set<RtEvent> local_preconditions;
-            RequestFunctor<CHILD_VERSION_REQUEST> functor(this, local_space, 
-                                        remaining_mask, local_preconditions);
+            RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context, 
+                local_space, remaining_mask, local_preconditions);
             map_over_remote_instances(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
             child_events[ready_event] = remaining_mask;
@@ -6127,7 +6137,7 @@ namespace Legion {
         if (!!remaining_mask)
         {
           RtUserEvent ready_event = Runtime::create_rt_user_event();
-          send_version_state_update_request(owner_space, local_space, 
+          send_version_state_update_request(owner_space, context, local_space,
               ready_event, remaining_mask, CHILD_VERSION_REQUEST);
           // Save the event indicating when the fields will be ready
           final_events[ready_event] = remaining_mask;
@@ -6137,12 +6147,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_initial_version_state(
+    void VersionState::request_initial_version_state(SingleTask *context,
                 const FieldMask &request_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(logical_node->context->runtime,
-                        VERSION_STATE_REQUEST_INITIAL_CALL);
+      DETAILED_PROFILER(context->runtime, VERSION_STATE_REQUEST_INITIAL_CALL);
+#ifdef DEBUG_LEGION
+      assert(context != NULL);
+#endif
       FieldMask needed_fields;
       {
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
@@ -6174,8 +6186,8 @@ namespace Legion {
           if (!!needed_fields)
           {
             std::set<RtEvent> local_preconditions;
-            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, local_space,
-                                          needed_fields, local_preconditions);
+            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, context,
+                local_space, needed_fields, local_preconditions);
             map_over_remote_instances(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
             child_events[ready_event] = needed_fields;
@@ -6204,7 +6216,7 @@ namespace Legion {
         if (!!needed_fields)
         {
           RtUserEvent ready_event = Runtime::create_rt_user_event();
-          send_version_state_update_request(owner_space, local_space, 
+          send_version_state_update_request(owner_space, context, local_space,
               ready_event, needed_fields, INITIAL_VERSION_REQUEST);
           // Save the event indicating when the fields will be ready
           initial_events[ready_event] = needed_fields;
@@ -6214,12 +6226,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_final_version_state(const FieldMask &req_mask,
-                                               std::set<RtEvent> &preconditions)
+    void VersionState::request_final_version_state(SingleTask *context,
+                    const FieldMask &req_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(logical_node->context->runtime,
-                        VERSION_STATE_REQUEST_FINAL_CALL);
+      DETAILED_PROFILER(context->runtime, VERSION_STATE_REQUEST_FINAL_CALL);
+#ifdef DEBUG_LEGION
+      assert(context != NULL);
+#endif
       if (is_owner())
       {
         // We are the owner node so see if we need to do any reequests
@@ -6245,8 +6259,8 @@ namespace Legion {
           if (!!remaining_mask)
           {
             std::set<RtEvent> local_preconditions;
-            RequestFunctor<FINAL_VERSION_REQUEST> functor(this, local_space, 
-                                        remaining_mask, local_preconditions);
+            RequestFunctor<FINAL_VERSION_REQUEST> functor(this, context,
+                local_space, remaining_mask, local_preconditions);
             map_over_remote_instances(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
             final_events[ready_event] = remaining_mask;
@@ -6275,7 +6289,7 @@ namespace Legion {
         if (!!remaining_mask)
         {
           RtUserEvent ready_event = Runtime::create_rt_user_event();
-          send_version_state_update_request(owner_space, local_space, 
+          send_version_state_update_request(owner_space, context, local_space,
               ready_event, remaining_mask, FINAL_VERSION_REQUEST);
           // Save the event indicating when the fields will be ready
           final_events[ready_event] = remaining_mask;
@@ -6286,6 +6300,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_update(AddressSpaceID target,
+                                                SingleTask *context,
                                                 const FieldMask &request_mask,
                                                 VersionRequestKind request_kind,
                                                 RtUserEvent to_trigger)
@@ -6297,6 +6312,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(context);
         rez.serialize(to_trigger);
         rez.serialize(request_mask);
         rez.serialize(request_kind);
@@ -6331,13 +6347,41 @@ namespace Legion {
           // Only send this if we are not doing child
           if (request_kind != CHILD_VERSION_REQUEST)
           {
-            rez.serialize<size_t>(valid_views.size());
+            // Sort the valid views into materialized and deferred
+            std::vector<MaterializedView*> materialized;
+            std::vector<LogicalView*> deferred;
             for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
                   track_aligned::const_iterator it = valid_views.begin(); it !=
                   valid_views.end(); it++)
             {
-              rez.serialize(it->first->did);
-              rez.serialize(it->second);
+              if (it->first->is_materialized_view())
+              {
+                materialized.push_back(it->first->as_materialized_view());
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(it->first->is_deferred_view());
+#endif
+                deferred.push_back(it->first);
+              }
+            }
+            rez.serialize<size_t>(materialized.size());
+            for (std::vector<MaterializedView*>::const_iterator it = 
+                  materialized.begin(); it != materialized.end(); it++)
+            {
+              // Serialize the DID of the manager and not the view
+              // it will be converted on the far side to get the
+              // proper subview
+              rez.serialize((*it)->manager->did);
+              rez.serialize(valid_views[*it]);
+            }
+            rez.serialize<size_t>(deferred.size());
+            for (std::vector<LogicalView*>::const_iterator it = 
+                  deferred.begin(); it != deferred.end(); it++)
+            {
+              rez.serialize((*it)->did);
+              rez.serialize(valid_views[*it]);
             }
             rez.serialize<size_t>(reduction_views.size());
             for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
@@ -6398,6 +6442,8 @@ namespace Legion {
           {
             if (!valid_views.empty())
             {
+              // Sort into materialized and deferred
+              LegionMap<MaterializedView*,FieldMask>::aligned materialized;
               Serializer valid_rez;
               size_t count = 0;
               for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
@@ -6407,9 +6453,27 @@ namespace Legion {
                 FieldMask overlap = it->second & request_mask;
                 if (!overlap)
                   continue;
+                if (it->first->is_materialized_view())
+                {
+                  materialized[it->first->as_materialized_view()] = overlap;
+                  continue;
+                }
+#ifdef DEBUG_LEGION
+                assert(it->first->is_deferred_view());
+#endif
                 valid_rez.serialize(it->first->did);
                 valid_rez.serialize(overlap);
                 count++;
+              }
+              rez.serialize<size_t>(materialized.size());
+              for (LegionMap<MaterializedView*,FieldMask>::aligned::
+                    const_iterator it = materialized.begin(); it !=
+                    materialized.end(); it++)
+              {
+                // Serialize the manager DID, it will get converted
+                // to the proper subview on the far side
+                rez.serialize(it->first->manager->did);
+                rez.serialize(it->second);
               }
               rez.serialize(count);
               rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
@@ -6444,7 +6508,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_update_request(AddressSpaceID target,
-                                    AddressSpaceID source, 
+                                    SingleTask *context, AddressSpaceID source, 
                                     RtUserEvent to_trigger,
                                     const FieldMask &request_mask, 
                                     VersionRequestKind request_kind) 
@@ -6458,6 +6522,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(source);
+        rez.serialize(context);
         rez.serialize(to_trigger);
         rez.serialize(request_kind);
         rez.serialize(request_mask);
@@ -6467,6 +6532,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state_update(AddressSpaceID target,
+                                                SingleTask *context,
                                                 RtUserEvent to_trigger, 
                                                 const FieldMask &request_mask, 
                                                 VersionRequestKind request_kind,
@@ -6479,6 +6545,7 @@ namespace Legion {
       SendVersionStateArgs args;
       args.proxy_this = this;
       args.target = target;
+      args.context = context;
       args.request_mask = legion_new<FieldMask>(request_mask);
       args.request_kind = request_kind;
       args.to_trigger = to_trigger;
@@ -6573,8 +6640,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_update_request(
-                    AddressSpaceID source, RtUserEvent to_trigger, 
-                    VersionRequestKind request_kind, FieldMask &request_mask)
+            AddressSpaceID source, SingleTask *context, RtUserEvent to_trigger, 
+            VersionRequestKind request_kind, FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
@@ -6597,7 +6664,7 @@ namespace Legion {
             break;
           }
           if (has_children)
-            launch_send_version_state_update(source, to_trigger, 
+            launch_send_version_state_update(source, context, to_trigger, 
                                              request_mask, request_kind);
           else // no children so we can trigger now
             Runtime::trigger_event(to_trigger);
@@ -6614,7 +6681,7 @@ namespace Legion {
           if (!overlap)
             Runtime::trigger_event(to_trigger);
           else
-            launch_send_version_state_update(source, to_trigger, 
+            launch_send_version_state_update(source, context, to_trigger, 
                                              overlap, request_kind);
         }
       }
@@ -6640,13 +6707,13 @@ namespace Legion {
                 {
                   // We're going to have send messages so we need a local event
                   RtUserEvent local = Runtime::create_rt_user_event();
-                  launch_send_version_state_update(source, local,
+                  launch_send_version_state_update(source, context, local,
                                                    overlap, request_kind);
                   local_event = local;
                 }
                 else // no messages, so do the normal thing
                 {
-                  launch_send_version_state_update(source, to_trigger,
+                  launch_send_version_state_update(source, context, to_trigger,
                                                    overlap, request_kind);
                   return; // we're done here
                 }
@@ -6658,8 +6725,8 @@ namespace Legion {
             assert(!!needed_fields);
 #endif
             std::set<RtEvent> local_preconditions;
-            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, source,
-                                      needed_fields, local_preconditions);
+            RequestFunctor<INITIAL_VERSION_REQUEST> functor(this, context,
+                source, needed_fields, local_preconditions);
             map_over_remote_instances(functor);
             if (!local_preconditions.empty())
             {
@@ -6685,7 +6752,7 @@ namespace Legion {
             if (!overlap)
               Runtime::trigger_event(to_trigger);
             else
-              launch_send_version_state_update(source, to_trigger,
+              launch_send_version_state_update(source, context, to_trigger,
                                                overlap, request_kind);
           }
         }
@@ -6702,14 +6769,14 @@ namespace Legion {
             std::set<RtEvent> local_preconditions;
             if (request_kind == CHILD_VERSION_REQUEST)
             {
-              RequestFunctor<CHILD_VERSION_REQUEST> functor(this, source, 
-                                      request_mask, local_preconditions);
+              RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context,
+                  source, request_mask, local_preconditions);
               map_over_remote_instances(functor);
             }
             else
             {
-              RequestFunctor<FINAL_VERSION_REQUEST> functor(this, source, 
-                                      request_mask, local_preconditions);
+              RequestFunctor<FINAL_VERSION_REQUEST> functor(this, context,
+                  source, request_mask, local_preconditions);
               map_over_remote_instances(functor);
             }
             if (!local_preconditions.empty())
@@ -6719,7 +6786,7 @@ namespace Legion {
               if (!!overlap)
               {
                 RtUserEvent local_event = Runtime::create_rt_user_event();
-                launch_send_version_state_update(source, local_event, 
+                launch_send_version_state_update(source, context, local_event, 
                                                  overlap, request_kind);
                 local_preconditions.insert(local_event);
               }
@@ -6734,7 +6801,7 @@ namespace Legion {
               if (!overlap)
                 Runtime::trigger_event(to_trigger);
               else
-                launch_send_version_state_update(source, to_trigger, 
+                launch_send_version_state_update(source, context, to_trigger,
                                                  overlap, request_kind);
             }
           }
@@ -6745,7 +6812,7 @@ namespace Legion {
             if (!overlap)
               Runtime::trigger_event(to_trigger);
             else
-              launch_send_version_state_update(source, to_trigger, 
+              launch_send_version_state_update(source, context, to_trigger,
                                                overlap, request_kind);
           }
         }
@@ -6753,15 +6820,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_update_response(
+    void VersionState::handle_version_state_update_response(SingleTask *context,
                                                 RtUserEvent to_trigger, 
                                                 Deserializer &derez,
                                                 const FieldMask &update,
                                                 VersionRequestKind request_kind)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(logical_node->context->runtime,
-                        VERSION_STATE_HANDLE_RESPONSE_CALL);
+      DETAILED_PROFILER(context->runtime, VERSION_STATE_HANDLE_RESPONSE_CALL);
 #ifdef DEBUG_LEGION
       assert(currently_valid);
 #endif
@@ -6909,7 +6975,44 @@ namespace Legion {
         if (request_kind != CHILD_VERSION_REQUEST)
         {
           // Finally do the views
-          if (!valid_fields)
+          // Materialized Views have to convert to the proper
+          // subview, so there is no point in doing anything
+          // special with them since we'll need to convert
+          // them anyway
+          size_t num_instance_views;
+          derez.deserialize(num_instance_views);
+          for (unsigned idx = 0; idx < num_instance_views; idx++)
+          {
+            DistributedID manager_did;
+            derez.deserialize(manager_did);
+            RtEvent ready;
+            PhysicalManager *manager = 
+              runtime->find_or_request_physical_manager(manager_did, ready);
+            LegionMap<PhysicalManager*,
+              std::pair<RtEvent,FieldMask> >::aligned::iterator finder = 
+                pending_instances.find(manager);
+            if (finder == pending_instances.end())
+            {
+              ConvertViewArgs args;
+              args.proxy_this = this;
+              args.manager = manager;
+              args.context = context;
+              std::pair<RtEvent,FieldMask> &entry = pending_instances[manager];
+              entry.first = runtime->issue_runtime_meta_task(args,
+                                             LG_LATENCY_PRIORITY, NULL, ready);
+              derez.deserialize(entry.second);
+              preconditions.insert(entry.first);
+            }
+            else
+            {
+              // Already pending, so we can just add our fields 
+              FieldMask update_mask;
+              derez.deserialize(update_mask);
+              finder->second.second |= update_mask;
+              preconditions.insert(finder->second.first);
+            }
+          }
+          if (in_place)
           {
             size_t num_valid_views;
             derez.deserialize(num_valid_views);
@@ -7097,6 +7200,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionState::convert_view(PhysicalManager *manager,
+                                 SingleTask *context, ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView *view = logical_node->convert_manager(manager, context);
+      AutoLock s_lock(state_lock);
+      LegionMap<PhysicalManager*,
+                std::pair<RtEvent,FieldMask> >::aligned::iterator finder = 
+                  pending_instances.find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_instances.end());
+#endif
+      // See if it is already in our list of valid views
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator view_finder = 
+        valid_views.find(view);
+      if (view_finder == valid_views.end())
+      {
+        view->add_nested_valid_ref(did, mutator);
+        valid_views[view] = finder->second.second;
+      }
+      else
+        view_finder->second |= finder->second.second;
+      // Remove the entry 
+      pending_instances.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_convert_view(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ConvertViewArgs *view_args = (const ConvertViewArgs*)args;
+      LocalReferenceMutator mutator;
+      view_args->proxy_this->convert_view(view_args->manager,
+                                          view_args->context, &mutator);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_view_references(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -7115,6 +7255,8 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID source;
       derez.deserialize(source);
+      SingleTask *context;
+      derez.deserialize(context);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       VersionRequestKind request_kind;
@@ -7128,7 +7270,7 @@ namespace Legion {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_update_request(source, to_trigger, 
+      vs->handle_version_state_update_request(source, context, to_trigger, 
                                               request_kind, request_mask);
     }
 
@@ -7140,6 +7282,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      SingleTask *context;
+      derez.deserialize(context);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       FieldMask update_mask;
@@ -7153,7 +7297,7 @@ namespace Legion {
 #else
       VersionState *vs = static_cast<VersionState*>(target);
 #endif
-      vs->handle_version_state_update_response(to_trigger, derez, 
+      vs->handle_version_state_update_response(context, to_trigger, derez, 
                                                update_mask, request_kind);
     } 
 

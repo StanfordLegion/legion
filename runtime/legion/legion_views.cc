@@ -5705,9 +5705,10 @@ namespace Legion {
         // Request final states for all the version states and then either
         // launch a task to do the capture, or do it now
         std::set<RtEvent> capture_preconditions;
+        SingleTask *translation_context = parent->get_translation_context();
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               needed_states.begin(); it != needed_states.end(); it++)
-          it->first->request_final_version_state(it->second, 
+          it->first->request_final_version_state(translation_context,it->second,
                                                  capture_preconditions);
         if (!capture_preconditions.empty())
         {

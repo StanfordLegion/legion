@@ -5319,7 +5319,7 @@ namespace Legion {
       // Now we can perform our close operation
       runtime->forest->physical_perform_close(physical_ctx, requirement,
                                               version_info, this, 0/*idx*/, 
-                                              NULL/*no translation*/,
+                                              get_parent()/*context*/,
                                               composite_idx, closed_tree,
                                               completion_event,
                                               map_applied_conditions,
