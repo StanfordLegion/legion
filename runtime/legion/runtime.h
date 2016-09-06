@@ -2755,7 +2755,6 @@ namespace Legion {
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
       static bool enable_test_mapper;
-      static bool enable_wrapper_mapper;
       static bool legion_ldb_enabled;
       static const char* replay_file;
       // Collective settings
