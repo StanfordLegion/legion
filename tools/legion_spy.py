@@ -5073,8 +5073,8 @@ class Operation(object):
                 return copy
         # If we are part of an index space, see if it was premapped
         if self.index_owner:
-            return self.index_owner.find_generated_copy(src_field, dst_field,
-                                region, src_inst, dst_inst, redop, intersect)
+            return self.index_owner.find_generated_copy(field, region, dst, 
+                                                        redop, intersect)
         return None
 
     def find_generated_copy_across(self, src_field, dst_field, region, 

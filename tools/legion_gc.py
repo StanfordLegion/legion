@@ -377,53 +377,53 @@ class Base(object):
     def report_references(self, printer, kind, verbose):
         printer.down()
         if kind == GC_REF_KIND and self.base_gc_refs:
-            for kind,refs in self.base_gc_refs.iteritems():
+            for src,refs in self.base_gc_refs.iteritems():
                 if refs == 0:
                     if verbose:
-                        printer.println('Empty (Refs=0): Base GC '+kind+
-                            ' (Adds='+str(self.base_gc_adds[kind])+',Rems='+str(self.base_gc_rems[kind])+')')
+                        printer.println('Empty (Refs=0): Base GC '+repr(src)+
+                            ' (Adds='+str(self.base_gc_adds[src])+',Rems='+str(self.base_gc_rems[src])+')')
                 else:
                     if verbose:
-                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base GC '+kind+
-                            ' (Adds='+str(self.base_gc_adds[kind])+',Rems='+str(self.base_gc_rems[kind])+')')
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base GC '+repr(src)+
+                            ' (Adds='+str(self.base_gc_adds[src])+',Rems='+str(self.base_gc_rems[src])+')')
                     else:
-                        printer.println('Base GC '+kind+' (Refs='+str(refs)+')')
+                        printer.println('Base GC '+repr(src)+' (Refs='+str(refs)+')')
         if kind == VALID_REF_KIND and self.base_valid_refs:
-            for kind,refs in self.base_valid_refs.iteritems():
+            for src,refs in self.base_valid_refs.iteritems():
                 if refs == 0:
                     if verbose:
-                        printer.println('Empty (Refs=0): Base Valid '+kind+
-                            ' (Adds='+str(self.base_valid_adds[kind])+',Rems='+str(self.base_valid_rems[kind])+')')
+                        printer.println('Empty (Refs=0): Base Valid '+repr(src)+
+                            ' (Adds='+str(self.base_valid_adds[src])+',Rems='+str(self.base_valid_rems[src])+')')
                 else:
                     if verbose:
-                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Valid '+kind+
-                            ' (Adds='+str(self.base_valid_adds[kind])+',Rems='+str(self.base_valid_rems[kind])+')')
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Valid '+repr(src)+
+                            ' (Adds='+str(self.base_valid_adds[src])+',Rems='+str(self.base_valid_rems[src])+')')
                     else:
-                        printer.println('Base Valid '+kind+' (Refs='+str(refs)+')')
+                        printer.println('Base Valid '+repr(src)+' (Refs='+str(refs)+')')
         if kind == REMOTE_REF_KIND and self.base_remote_refs:
-            for kind,refs in self.base_remote_refs.iteritems():
+            for src,refs in self.base_remote_refs.iteritems():
                 if refs == 0:
                     if verbose:
-                        printer.println('Empty (Refs=0): Base Remote '+kind+
-                            ' (Adds='+str(self.base_remote_adds[kind])+',Rems='+str(self.base_remote_rems[kind])+')')
+                        printer.println('Empty (Refs=0): Base Remote '+repr(src)+
+                            ' (Adds='+str(self.base_remote_adds[src])+',Rems='+str(self.base_remote_rems[src])+')')
                 else:
                     if verbose:
-                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Remote '+kind+
-                            ' (Adds='+str(self.base_remote_adds[kind])+',Rems='+str(self.base_remote_rems[kind])+')')
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Remote '+repr(src)+
+                            ' (Adds='+str(self.base_remote_adds[src])+',Rems='+str(self.base_remote_rems[src])+')')
                     else:
-                        printer.println('Base Remote '+kind+' (Refs='+str(refs)+')')
+                        printer.println('Base Remote '+repr(src)+' (Refs='+str(refs)+')')
         if kind == RESOURCE_REF_KIND and self.base_resource_refs:
-            for kind,refs in self.base_resource_refs.iteritems():
+            for src,refs in self.base_resource_refs.iteritems():
                 if refs == 0:
                     if verbose:
-                        printer.println('Empty (Refs=0): Base Resource '+kind+
-                            ' (Adds='+str(self.base_resource_adds[kind])+',Rems='+str(self.base_resource_rems[kind])+')')
+                        printer.println('Empty (Refs=0): Base Resource '+repr(src)+
+                            ' (Adds='+str(self.base_resource_adds[src])+',Rems='+str(self.base_resource_rems[src])+')')
                 else:
                     if verbose:
-                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Resource '+kind+
-                            ' (Adds='+str(self.base_resource_adds[kind])+',Rems='+str(self.base_resource_rems[kind])+')')
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Resource '+repr(src)+
+                            ' (Adds='+str(self.base_resource_adds[src])+',Rems='+str(self.base_resource_rems[src])+')')
                     else:
-                        printer.println('Base Resource '+kind+' (Refs='+str(refs)+')')
+                        printer.println('Base Resource '+repr(src)+' (Refs='+str(refs)+')')
         if kind == GC_REF_KIND and self.nested_gc_refs:
             for src,refs in self.nested_gc_refs.iteritems():
                 if refs == 0:
