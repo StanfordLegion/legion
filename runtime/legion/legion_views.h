@@ -1174,8 +1174,8 @@ namespace Legion {
       void clone(CompositeView *target, const FieldMask &clone_mask) const;
       void pack_composite_node(Serializer &rez) const;
       static CompositeNode* unpack_composite_node(Deserializer &derez,
-                      Runtime *runtime, DistributedID owner_did,
-                      std::set<RtEvent> &preconditions);
+                     CompositeView *parent, Runtime *runtime, 
+                     DistributedID owner_did, std::set<RtEvent> &preconditions);
       static void handle_deferred_node_ref(const void *args);
     public:
       void notify_valid(ReferenceMutator *mutator);

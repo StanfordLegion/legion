@@ -929,6 +929,9 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
+          FieldMask local_split;
+          versions->get_split_mask(logical_node, copy_mask, local_split);
+          rez.serialize(local_split);
         }
         runtime->send_view_remote_update(logical_owner, rez);
         // Tell the operation it has to wait for this event
@@ -1261,6 +1264,9 @@ namespace Legion {
         return false;
       if (!is_logical_owner())
       {
+        RegionNode *origin_node = logical_node->is_region() ? 
+          logical_node->as_region_node() : 
+          logical_node->as_partition_node()->parent;
         // If we are no the owner, we have to send the user back
         RtUserEvent remote_update_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -1272,6 +1278,7 @@ namespace Legion {
           rez.serialize(usage);
           rez.serialize(user_mask);
           rez.serialize(child_color);
+          rez.serialize(origin_node->handle);
           rez.serialize(op_id);
           rez.serialize(index);
           rez.serialize(term_event);
@@ -1296,6 +1303,9 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
+          FieldMask local_split;
+          versions->get_split_mask(logical_node, user_mask, local_split);
+          rez.serialize(local_split);
         }
         runtime->send_view_remote_update(logical_owner, rez);
         // Tell the operation it has to wait for this event to
@@ -3579,8 +3589,6 @@ namespace Legion {
       derez.deserialize(term_event);
       size_t num_versions;
       derez.deserialize(num_versions);
-      VersionInfo temp_version_info;
-      temp_version_info.unpack_version_numbers(derez, forest); 
       FieldVersions field_versions;
       for (unsigned idx = 0; idx < num_versions; idx++)
       {
@@ -3588,9 +3596,15 @@ namespace Legion {
         derez.deserialize(vid);
         derez.deserialize(field_versions[vid]);
       }
+      FieldMask split_mask;
+      derez.deserialize(split_mask);
       
       // Make a dummy version info for doing the analysis calls
+      // and put our split mask in it
       VersionInfo dummy_version_info;
+      dummy_version_info.resize(logical_node->get_depth());
+      dummy_version_info.record_split_fields(logical_node, split_mask);
+
       std::set<RtEvent> applied_conditions;
       if (is_copy)
       {
@@ -5536,7 +5550,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_children; idx++)
       {
         CompositeNode *child = CompositeNode::unpack_composite_node(derez, 
-                                    context->runtime, did, preconditions);
+                              this, context->runtime, did, preconditions);
         derez.deserialize(children[child]);
       }
     }
@@ -5850,8 +5864,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
-        Deserializer &derez, Runtime *runtime, DistributedID owner_did,
-        std::set<RtEvent> &preconditions)
+        Deserializer &derez, CompositeView *parent, Runtime *runtime, 
+        DistributedID owner_did, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
       bool is_region;
@@ -5870,7 +5884,7 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       }
       CompositeNode *result = 
-        legion_new<CompositeNode>(node, (CompositeNode*)NULL, owner_did);
+        legion_new<CompositeNode>(node, parent, owner_did);
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx = 0; idx < num_versions; idx++)

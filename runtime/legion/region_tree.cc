@@ -3911,6 +3911,9 @@ namespace Legion {
     RegionNode* RegionTreeForest::get_tree(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(tid != 0);
+#endif
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,RegionNode*>::const_iterator finder = 

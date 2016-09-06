@@ -1005,25 +1005,18 @@ namespace Legion {
     {
       pack_version_numbers(rez);
       rez.serialize<size_t>(physical_states.size());
-#ifdef DEBUG_LEGION
-      bool first = true;
-#endif
       bool is_region = upper_bound_node->is_region();
       for (std::vector<PhysicalState*>::const_iterator it = 
             physical_states.begin(); it != physical_states.end(); it++)
       {
         if ((*it) == NULL)
         {
-#ifdef DEBUG_LEGION
-          assert(first); // should only see NULL above
-#endif
+          rez.serialize<bool>(true); // empty
+          // Reverse the polarity
+          is_region = !is_region;
           continue;
         }
-#ifdef DEBUG_LEGION
-        if (first)
-          assert((*it)->node == upper_bound_node);
-        first = false;
-#endif
+        rez.serialize<bool>(false); // not empty
         rez.serialize<bool>((*it)->path_only);
         if (is_region)
           rez.serialize((*it)->node->as_region_node()->handle);
@@ -1048,6 +1041,14 @@ namespace Legion {
       bool is_region = upper_bound_node->is_region();
       for (unsigned idx = start_depth; idx < num_states; idx++)
       {
+        bool empty;
+        derez.deserialize(empty);
+        if (empty)
+        {
+          // Reverse the polarity
+          is_region = !is_region;
+          continue;
+        }
         bool is_path_only;
         derez.deserialize(is_path_only);
         RegionTreeNode *node = NULL;
@@ -1893,6 +1894,7 @@ namespace Legion {
                       const RegionRequirement &req, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
+      projection_type = req.handle_type;
       if (req.handle_type != SINGULAR)
       {
         projection = runtime->find_projection_function(req.projection);
@@ -6279,146 +6281,149 @@ namespace Legion {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_SEND_STATE_CALL);
       Serializer rez;
-      RezCheck z(rez);
-      rez.serialize(did);
-      rez.serialize(to_trigger);
-      rez.serialize(request_mask);
-      rez.serialize(request_kind);
-      // Hold the lock in read-only mode while iterating these structures
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      // See if we should send all the fields or just do a partial send
-      if (!(valid_fields - request_mask))
       {
-        // Send everything
-        if (request_kind != CHILD_VERSION_REQUEST)
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(to_trigger);
+        rez.serialize(request_mask);
+        rez.serialize(request_kind);
+        // Hold the lock in read-only mode while iterating these structures
+        AutoLock s_lock(state_lock,1,false/*exclusive*/);
+        // See if we should send all the fields or just do a partial send
+        if (!(valid_fields - request_mask))
         {
-          rez.serialize(dirty_mask);
-          rez.serialize(reduction_mask);
-        }
-        // Only send this if request is for child or final
-        if (request_kind != INITIAL_VERSION_REQUEST)
-        {
-          rez.serialize<size_t>(open_children.size());
-          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
-                cit = open_children.begin(); cit != open_children.end(); cit++)
+          // Send everything
+          if (request_kind != CHILD_VERSION_REQUEST)
           {
-            rez.serialize(cit->first);
-            rez.serialize<size_t>(cit->second.size());
-            for (StateVersions::iterator it = cit->second.begin();
-                  it != cit->second.end(); it++)
+            rez.serialize(dirty_mask);
+            rez.serialize(reduction_mask);
+          }
+          // Only send this if request is for child or final
+          if (request_kind != INITIAL_VERSION_REQUEST)
+          {
+            rez.serialize<size_t>(open_children.size());
+            for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
+                 cit = open_children.begin(); cit != open_children.end(); cit++)
+            {
+              rez.serialize(cit->first);
+              rez.serialize<size_t>(cit->second.size());
+              for (StateVersions::iterator it = cit->second.begin();
+                    it != cit->second.end(); it++)
+              {
+                rez.serialize(it->first->did);
+                rez.serialize(it->second);
+              }
+            }
+          }
+          // Only send this if we are not doing child
+          if (request_kind != CHILD_VERSION_REQUEST)
+          {
+            rez.serialize<size_t>(valid_views.size());
+            for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+                  track_aligned::const_iterator it = valid_views.begin(); it !=
+                  valid_views.end(); it++)
+            {
+              rez.serialize(it->first->did);
+              rez.serialize(it->second);
+            }
+            rez.serialize<size_t>(reduction_views.size());
+            for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                  track_aligned::const_iterator it = reduction_views.begin();
+                  it != reduction_views.end(); it++)
             {
               rez.serialize(it->first->did);
               rez.serialize(it->second);
             }
           }
         }
-        // Only send this if we are not doing child
-        if (request_kind != CHILD_VERSION_REQUEST)
+        else
         {
-          rez.serialize<size_t>(valid_views.size());
-          for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-                track_aligned::const_iterator it = valid_views.begin(); it !=
-                valid_views.end(); it++)
+          // Partial send
+          if (request_kind != CHILD_VERSION_REQUEST)
           {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
+            rez.serialize(dirty_mask & request_mask);
+            rez.serialize(reduction_mask & request_mask);
           }
-          rez.serialize<size_t>(reduction_views.size());
-          for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-                track_aligned::const_iterator it = reduction_views.begin(); 
-                it != reduction_views.end(); it++)
+          if (request_kind != INITIAL_VERSION_REQUEST)
           {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
-          }
-        }
-      }
-      else
-      {
-        // Partial send
-        if (request_kind != CHILD_VERSION_REQUEST)
-        {
-          rez.serialize(dirty_mask & request_mask);
-          rez.serialize(reduction_mask & request_mask);
-        }
-        if (request_kind != INITIAL_VERSION_REQUEST)
-        {
-          if (!open_children.empty())
-          {
-            Serializer child_rez;
-            size_t count = 0;
-            for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
-                 cit = open_children.begin(); cit != open_children.end(); cit++)
+            if (!open_children.empty())
             {
-              FieldMask overlap = cit->second.get_valid_mask() & request_mask;
-              if (!overlap)
-                continue;
-              child_rez.serialize(cit->first);
-              Serializer state_rez;
-              size_t state_count = 0;
-              for (StateVersions::iterator it = cit->second.begin();
-                    it != cit->second.end(); it++)
+              Serializer child_rez;
+              size_t count = 0;
+              for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
+                    cit = open_children.begin(); 
+                    cit != open_children.end(); cit++)
               {
-                FieldMask state_overlap = it->second & overlap;
-                if (!state_overlap)
+                FieldMask overlap = cit->second.get_valid_mask() & request_mask;
+                if (!overlap)
                   continue;
-                state_rez.serialize(it->first->did);
-                state_rez.serialize(state_overlap);
-                state_count++;
+                child_rez.serialize(cit->first);
+                Serializer state_rez;
+                size_t state_count = 0;
+                for (StateVersions::iterator it = cit->second.begin();
+                      it != cit->second.end(); it++)
+                {
+                  FieldMask state_overlap = it->second & overlap;
+                  if (!state_overlap)
+                    continue;
+                  state_rez.serialize(it->first->did);
+                  state_rez.serialize(state_overlap);
+                  state_count++;
+                }
+                child_rez.serialize(state_count);
+                child_rez.serialize(state_rez.get_buffer(), 
+                                    state_rez.get_used_bytes());
+                count++;
               }
-              child_rez.serialize(state_count);
-              child_rez.serialize(state_rez.get_buffer(), 
-                                  state_rez.get_used_bytes());
-              count++;
+              rez.serialize(count);
+              rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
             }
-            rez.serialize(count);
-            rez.serialize(child_rez.get_buffer(), child_rez.get_used_bytes());
+            else
+              rez.serialize<size_t>(0);
           }
-          else
-            rez.serialize<size_t>(0);
-        }
-        if (request_kind != CHILD_VERSION_REQUEST)
-        {
-          if (!valid_views.empty())
+          if (request_kind != CHILD_VERSION_REQUEST)
           {
-            Serializer valid_rez;
-            size_t count = 0;
-            for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-                  track_aligned::const_iterator it = valid_views.begin(); it !=
-                  valid_views.end(); it++)
+            if (!valid_views.empty())
             {
-              FieldMask overlap = it->second & request_mask;
-              if (!overlap)
-                continue;
-              valid_rez.serialize(it->first->did);
-              valid_rez.serialize(overlap);
-              count++;
+              Serializer valid_rez;
+              size_t count = 0;
+              for (LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+                    track_aligned::const_iterator it = valid_views.begin(); 
+                    it != valid_views.end(); it++)
+              {
+                FieldMask overlap = it->second & request_mask;
+                if (!overlap)
+                  continue;
+                valid_rez.serialize(it->first->did);
+                valid_rez.serialize(overlap);
+                count++;
+              }
+              rez.serialize(count);
+              rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
             }
-            rez.serialize(count);
-            rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
-          }
-          else
-            rez.serialize<size_t>(0);
-          if (!reduction_views.empty())
-          {
-            Serializer reduc_rez;
-            size_t count = 0;
-            for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-                  track_aligned::const_iterator it = reduction_views.begin();
-                  it != reduction_views.end(); it++)
+            else
+              rez.serialize<size_t>(0);
+            if (!reduction_views.empty())
             {
-              FieldMask overlap = it->second & request_mask;
-              if (!overlap)
-                continue;
-              reduc_rez.serialize(it->first->did);
-              reduc_rez.serialize(overlap);
-              count++;
+              Serializer reduc_rez;
+              size_t count = 0;
+              for (LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+                    track_aligned::const_iterator it = reduction_views.begin();
+                    it != reduction_views.end(); it++)
+              {
+                FieldMask overlap = it->second & request_mask;
+                if (!overlap)
+                  continue;
+                reduc_rez.serialize(it->first->did);
+                reduc_rez.serialize(overlap);
+                count++;
+              }
+              rez.serialize(count);
+              rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
             }
-            rez.serialize(count);
-            rez.serialize(reduc_rez.get_buffer(), reduc_rez.get_used_bytes());
+            else
+              rez.serialize<size_t>(0);
           }
-          else
-            rez.serialize<size_t>(0);
         }
       }
       runtime->send_version_state_update_response(target, rez);
@@ -6432,6 +6437,9 @@ namespace Legion {
                                     VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!request_mask);
+#endif
       Serializer rez;
       {
         RezCheck z(rez);
@@ -6452,6 +6460,9 @@ namespace Legion {
                                                 RtEvent precondition)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!request_mask);
+#endif
       SendVersionStateArgs args;
       args.proxy_this = this;
       args.target = target;
@@ -6692,7 +6703,7 @@ namespace Legion {
             {
               AutoLock s_lock(state_lock,1,false/*exclusive*/);
               FieldMask overlap = valid_fields & request_mask;
-              if (!overlap)
+              if (!!overlap)
               {
                 RtUserEvent local_event = Runtime::create_rt_user_event();
                 launch_send_version_state_update(source, local_event, 
