@@ -5268,6 +5268,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // For now we'll just record it, we'll add references later
+      // during the call to finalize_capture
       if (view->is_instance_view())
       {
 #ifdef DEBUG_LEGION
@@ -5284,10 +5285,7 @@ namespace Legion {
         LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(mat_view);
         if (finder == valid_views.end())
-        {
-          mat_view->add_nested_resource_ref(did);
           valid_views[mat_view] = m;
-        }
         else
           finder->second |= m;
       }
@@ -5304,10 +5302,7 @@ namespace Legion {
             LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
               nested_composite_views.find(composite_view);
             if (finder == nested_composite_views.end())
-            {
-              composite_view->add_nested_resource_ref(did);
               nested_composite_views[composite_view] = m;
-            }
             else
               finder->second |= m;
           }
@@ -5321,10 +5316,7 @@ namespace Legion {
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
               valid_views.find(composite_view);
             if (finder == valid_views.end())
-            {
-              composite_view->add_nested_resource_ref(did);
               valid_views[composite_view] = m;
-            }
             else
               finder->second |= m;
           }
@@ -5335,10 +5327,7 @@ namespace Legion {
           LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
             valid_views.find(def_view);
           if (finder == valid_views.end())
-          {
-            def_view->add_nested_resource_ref(did);
             valid_views[def_view] = m;
-          }
           else
             finder->second |= m;
         }
@@ -5361,13 +5350,12 @@ namespace Legion {
       if (translation_context != NULL)
         view = logical_node->convert_manager(view->manager, 
                                   translation_context)->as_reduction_view();
+      // For now just add it, we'll record references 
+      // during finalize_capture
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
       if (finder == reduction_views.end())
-      {
-        view->add_nested_resource_ref(did);
         reduction_views[view] = mask;
-      }
       else
         finder->second |= mask;
     }

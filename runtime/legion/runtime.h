@@ -2335,8 +2335,8 @@ namespace Legion {
     public:
       void issue_runtime_shutdown_attempt(void);
       void attempt_runtime_shutdown(void);
-      void initiate_runtime_shutdown(AddressSpaceID source,
-                                     bool phase_one);
+      void initiate_runtime_shutdown(AddressSpaceID source, bool phase_one,
+                                     ShutdownManager *owner = NULL);
       void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
                                     bool phase_one);
       void finalize_runtime_shutdown(void);

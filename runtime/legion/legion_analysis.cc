@@ -5743,7 +5743,6 @@ namespace Legion {
       {
         LogicalView *new_view = corresponding[idx];
         const FieldMask &view_mask = targets[idx].get_valid_fields();
-        new_view->add_nested_valid_ref(did, context);
         if (new_view->is_instance_view())
         {
           InstanceView *inst_view = new_view->as_instance_view();
@@ -5753,7 +5752,10 @@ namespace Legion {
             LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
               track_aligned::iterator finder = reduction_views.find(view); 
             if (finder == reduction_views.end())
+            {
+              new_view->add_nested_valid_ref(did, context);
               reduction_views[view] = view_mask;
+            }
             else
               finder->second |= view_mask;
             reduction_mask |= view_mask;
@@ -5765,7 +5767,10 @@ namespace Legion {
             LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
               track_aligned::iterator finder = valid_views.find(new_view);
             if (finder == valid_views.end())
+            {
+              new_view->add_nested_valid_ref(did, context);
               valid_views[new_view] = view_mask;
+            }
             else
               finder->second |= view_mask;
             if (HAS_WRITE(usage))
@@ -5782,7 +5787,10 @@ namespace Legion {
           LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
               track_aligned::iterator finder = valid_views.find(new_view);
           if (finder == valid_views.end())
+          {
+            new_view->add_nested_valid_ref(did, context);
             valid_views[new_view] = view_mask;
+          }
           else
             finder->second |= view_mask;
           if (HAS_WRITE(usage))
@@ -5880,6 +5888,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_MERGE_PHYSICAL_STATE_CALL);
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       WrapperReferenceMutator mutator(applied_conditions);
       if (need_lock)
       {
@@ -5979,6 +5990,8 @@ namespace Legion {
       }
       else
         finder->second.reduce(update_mask, new_states, mutator);
+      // Update the valid fields
+      valid_fields |= update_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -6749,6 +6762,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_RESPONSE_CALL);
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       std::set<RtEvent> preconditions;
       std::map<LogicalView*,RtEvent> pending_views;
       WrapperReferenceMutator mutator(preconditions);
@@ -6904,6 +6920,9 @@ namespace Legion {
               RtEvent ready;
               LogicalView *view = 
                 runtime->find_or_request_logical_view(view_did, ready);
+#ifdef DEBUG_LEGION
+              assert(valid_views.find(view) == valid_views.end());
+#endif
               FieldMask &mask = valid_views[view];
               derez.deserialize(mask);
               if (ready.exists())
@@ -6923,6 +6942,9 @@ namespace Legion {
               LogicalView *view =
                 runtime->find_or_request_logical_view(view_did, ready);
               ReductionView *red_view = static_cast<ReductionView*>(view); 
+#ifdef DEBUG_LEGION
+              assert(reduction_views.find(red_view) == reduction_views.end());
+#endif
               FieldMask &mask = reduction_views[red_view];
               derez.deserialize(mask);
               if (ready.exists())
@@ -6956,10 +6978,7 @@ namespace Legion {
                 derez.deserialize(update_mask);
                 finder->second |= update_mask;
                 if (ready.exists())
-                {
-                  pending_views[view] = ready;
-                  continue;
-                }
+                  preconditions.insert(ready);
               }
               else
               {
@@ -6991,10 +7010,7 @@ namespace Legion {
                 derez.deserialize(update_mask);
                 finder->second |= update_mask;
                 if (ready.exists())
-                {
-                  pending_views[view] = ready;
-                  continue;
-                }
+                  preconditions.insert(ready);
               }
               else
               {

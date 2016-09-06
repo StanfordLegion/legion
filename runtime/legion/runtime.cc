@@ -2501,16 +2501,17 @@ namespace Legion {
         for (std::vector<PhysicalManager*>::const_iterator it = 
               instances.begin(); it != instances.end(); it++)
         {
-          // Tell these instances that they are no longer registered
-          // with the runtime to avoid them sending messages when they
-          // are deleted
-          if ((*it)->is_registered())
-            (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
           if ((*it)->try_active_deletion())
+          {
             record_deleted_instance(*it);
-          // Remove our base resource reference
-          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            PhysicalManager::delete_physical_manager(*it);
+            // Unregister it from the runtime so that it avoids
+            // sending messages when it is deleted
+            if ((*it)->is_registered())
+              (*it)->unregister_with_runtime(MAX_NUM_VIRTUAL_CHANNELS);
+            // Remove our base resource reference
+            if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+              PhysicalManager::delete_physical_manager(*it);
+          }
         }
       }
     }
@@ -5742,7 +5743,7 @@ namespace Legion {
       // shift up by 1 for 1-based indexing
       // do the math
       // shift back down by 1
-      AddressSpaceID start = ((local_space+1) * radix) - 1;
+      AddressSpaceID start = local_space * radix + 1;
       for (unsigned idx = 0; idx < radix; idx++)
       {
         AddressSpaceID next = start+idx;
@@ -5869,11 +5870,7 @@ namespace Legion {
       derez.deserialize(owner);
       bool phase_one;
       derez.deserialize(phase_one);
-      ShutdownManager *shutdown_manager = 
-        new ShutdownManager(phase_one, runtime, source, 
-                            LEGION_SHUTDOWN_RADIX, owner);
-      if (shutdown_manager->attempt_shutdown())
-        delete shutdown_manager;
+      runtime->initiate_runtime_shutdown(source, phase_one, owner);
     }
 
     //--------------------------------------------------------------------------
@@ -17200,7 +17197,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::initiate_runtime_shutdown(AddressSpaceID source,
-                                            bool phase_one)
+                                         bool phase_one, ShutdownManager *owner)
     //--------------------------------------------------------------------------
     {
       if (phase_one)
@@ -17242,7 +17239,8 @@ namespace Legion {
           gc_done.wait();
       }
       ShutdownManager *shutdown_manager = 
-        new ShutdownManager(phase_one, this, source, LEGION_SHUTDOWN_RADIX);
+        new ShutdownManager(phase_one, this, source, 
+                            LEGION_SHUTDOWN_RADIX, owner);
       if (shutdown_manager->attempt_shutdown())
         delete shutdown_manager;
     }
