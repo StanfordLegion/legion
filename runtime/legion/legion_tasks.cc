@@ -259,6 +259,11 @@ namespace Legion {
       rez.serialize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         pack_region_requirement(regions[idx], rez);
+#ifdef DEBUG_LEGION
+      assert(regions.size() == parent_req_indexes.size());
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        rez.serialize(parent_req_indexes[idx]);
       rez.serialize(futures.size());
       // If we are remote we can just do the normal pack
       for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -308,6 +313,9 @@ namespace Legion {
       regions.resize(num_regions);
       for (unsigned idx = 0; idx < regions.size(); idx++)
         unpack_region_requirement(regions[idx], derez);
+      parent_req_indexes.resize(num_regions);
+      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
+        derez.deserialize(parent_req_indexes[idx]);
       size_t num_futures;
       derez.deserialize(num_futures);
       futures.resize(num_futures);
@@ -3135,6 +3143,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, PACK_REMOTE_CONTEXT_CALL);
+      rez.serialize<bool>(false); // not the top-level context
       int depth = get_depth();
       rez.serialize(depth);
       // See if we need to pack up base task information
@@ -4060,6 +4069,62 @@ namespace Legion {
           missing_fields, NULL, unacquired, false/*do acquire_checks*/);
       runtime->forest->log_mapping_decision(unique_op_id,
           regions.size() + index, created_requirements[index], instance_set);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* SingleTask::find_parent_logical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif
+      if (index < virtual_mapped.size())
+      {
+        // See if it is virtual mapped
+        if (virtual_mapped[index])
+          return parent_ctx->find_parent_logical_context(
+                                parent_req_indexes[index]);
+        else // We mapped a physical instances so we're it
+          return this;
+      }
+      else // We created it, get the outermost enclosing context
+        return parent_ctx->find_outermost_local_context(this);
+    }
+    
+    //--------------------------------------------------------------------------
+    SingleTask* SingleTask::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif     
+      if (index < virtual_mapped.size())
+      {
+        // See if it is virtual mapped
+        if (virtual_mapped[index])
+          return parent_ctx->find_parent_physical_context(
+                                  parent_req_indexes[index]);
+        else // We mapped a physical instance so we're it
+          return this;
+      }
+      else // We created it, put it in the top context
+        return parent_ctx->find_top_context();
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* SingleTask::find_outermost_local_context(SingleTask *previous)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->find_outermost_local_context(this);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* SingleTask::find_top_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->find_top_context();
     }
 
     //--------------------------------------------------------------------------
@@ -8062,7 +8127,6 @@ namespace Legion {
       top_level_task = false;
       is_inline = false;
       need_intra_task_alias_analysis = true;
-      has_remote_subtasks = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8070,10 +8134,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_INDIVIDUAL_CALL);
-      // If we are the top_level task then deactivate our parent context
-      const bool is_local_task = !is_remote();
-      if (top_level_task && is_local_task)
-        parent_ctx->deactivate();
       deactivate_single();
       if (!remote_instances.empty())
       {
@@ -8112,14 +8172,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
-      // Read this before freeing the task
-      // Should be safe, but we'll be careful
-      const bool is_top_level_task = top_level_task;
       runtime->free_individual_task(this);
-      // If we are the top-level-task and we are deactivated then
-      // it is now safe to shutdown the machine
-      if (is_top_level_task && is_local_task)
-        runtime->decrement_outstanding_top_level_tasks();
     }
 
     //--------------------------------------------------------------------------
@@ -8669,21 +8722,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::has_remote_state(void) const
-    //--------------------------------------------------------------------------
-    {
-      return has_remote_subtasks;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::record_remote_state(void)
-    //--------------------------------------------------------------------------
-    {
-      // Monotonic so no need to hold the lock 
-      has_remote_subtasks = true;
-    }
-
-    //--------------------------------------------------------------------------
     void IndividualTask::send_remote_context(AddressSpaceID remote_instance,
                                              RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
@@ -8880,11 +8918,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_TASK_CALL);
-      // Notify our enclosing parent task that we are being sent 
-      // remotely if we are not locally mapped because now there
-      // will be remote state
-      if (!is_remote() && !is_locally_mapped())
-        parent_ctx->record_remote_state();
       // Check to see if we are stealable, if not and we have not
       // yet been sent remotely, then send the state now
       AddressSpaceID addr_target = runtime->find_address_space(target);
@@ -9211,7 +9244,6 @@ namespace Legion {
       // Point tasks never have to resolve speculation
       resolve_speculation();
       slice_owner = NULL;
-      has_remote_subtasks = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9519,21 +9551,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_acquired_instances_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    bool PointTask::has_remote_state(void) const
-    //--------------------------------------------------------------------------
-    {
-      return has_remote_subtasks;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::record_remote_state(void)
-    //--------------------------------------------------------------------------
-    {
-      // Monotonic so no need to hold the lock
-      has_remote_subtasks = true;
     }
 
     //--------------------------------------------------------------------------
@@ -9909,6 +9926,203 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Top Level Task 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TopLevelTask::TopLevelTask(Runtime *rt)
+      : WrapperTask(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TopLevelTask::TopLevelTask(const TopLevelTask &rhs)
+      : WrapperTask(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TopLevelTask::~TopLevelTask(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    TopLevelTask& TopLevelTask::operator=(const TopLevelTask &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelTask::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_wrapper();
+      parent_ctx = NULL;
+      parent_task = NULL;
+      runtime->allocate_local_context(this);
+#ifdef DEBUG_LEGION
+      assert(context.exists());
+      runtime->forest->check_context_state(context);
+#endif
+      // Configure this so that remote tasks are always trying to 
+      // schedule all of their tasks
+      outstanding_children_count = UINT_MAX;
+      context_configuration.min_tasks_to_schedule = UINT_MAX;
+      context_configuration.min_frames_to_schedule = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelTask::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do this before deactivating the wrapper which releases our context
+      runtime->forest->invalidate_all_versions(context);
+      deactivate_wrapper();
+      if (!remote_instances.empty())
+      {
+        UniqueID local_uid = get_unique_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          runtime->send_remote_context_free(it->first, rez);
+        }
+        remote_instances.clear();
+      }
+      runtime->free_top_level_task(this);
+      // Tell the runtime that another top level task is done
+      runtime->decrement_outstanding_top_level_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    int TopLevelTask::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return -1;
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelTask::send_remote_context(AddressSpaceID remote_instance,
+                                           RemoteTask *remote_ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_instance != runtime->address_space);
+#endif
+      // should only see this call if it is the top-level context
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void TopLevelTask::pack_remote_context(Serializer &rez, 
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<bool>(true); // top level context, all we need to pack
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID TopLevelTask::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& TopLevelTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return *(new VersionInfo());
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* TopLevelTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* TopLevelTask::find_parent_context(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID TopLevelTask::get_version_owner(RegionTreeNode *node,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // Use a static partitioning of the nodes
+      // Whichever node made the region tree node is the
+      // one that owns the context, no communication necessary
+      return node->get_row_source()->get_owner_space();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent TopLevelTask::get_task_completion(void) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskOp::TaskKind TopLevelTask::get_task_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TOP_LEVEL_KIND;
+    }
+    
+    //--------------------------------------------------------------------------
+    void TopLevelTask::find_enclosing_local_fields(
+             LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* TopLevelTask::find_outermost_local_context(SingleTask *previous)
+    //--------------------------------------------------------------------------
+    {
+      return previous;
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* TopLevelTask::find_top_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Remote Task 
     /////////////////////////////////////////////////////////////
 
@@ -9962,7 +10176,7 @@ namespace Legion {
       remote_owner_uid = 0;
       parent_context_uid = 0;
       depth = -1;
-      is_top_level_context = false;
+      top_level_context = false; 
       remote_completion_event = ApEvent::NO_AP_EVENT;
       // Configure this so that remote tasks are always trying to 
       // schedule all of their tasks
@@ -9976,41 +10190,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REMOTE_TASK_DEACTIVATE_CALL);
-      deactivate_wrapper();
-      if (!remote_instances.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(is_top_level_context);
-#endif
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
+      // Invalidate our context if necessary before deactivating
+      // the wrapper as it will release the context
+      if (top_level_context)
+        runtime->forest->invalidate_all_versions(context);
+      deactivate_wrapper(); 
       version_infos.clear();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID context_uid, bool is_top_level)
+    void RemoteTask::initialize_remote(UniqueID context_uid)
     //--------------------------------------------------------------------------
     {
       remote_owner_uid = context_uid;
-      is_top_level_context = is_top_level;
       runtime->allocate_local_context(this);
 #ifdef DEBUG_LEGION
       assert(context.exists());
       runtime->forest->check_context_state(context);
 #endif
+    }
+    
+    //--------------------------------------------------------------------------
+    SingleTask* RemoteTask::find_outermost_local_context(SingleTask *previous)
+    //--------------------------------------------------------------------------
+    {
+      return previous;
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* RemoteTask::find_top_context(void)
+    //--------------------------------------------------------------------------
+    {
+      if (top_level_context)
+        return this;
+      if (parent_ctx == NULL)
+        return find_parent_context()->find_top_context();
+      else
+        return parent_ctx->find_top_context();
     }
     
     //--------------------------------------------------------------------------
@@ -10025,6 +10243,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!top_level_context);
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
@@ -10034,56 +10253,19 @@ namespace Legion {
     const std::vector<VersionInfo>* RemoteTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!top_level_context);
+#endif
       return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteTask::has_remote_state(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true; // Definitely does!
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_state(void)
-    //--------------------------------------------------------------------------
-    {
-      // Should only see this call if it is the top-level context
-#ifdef DEBUG_LEGION
-      assert(is_top_level_context);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::send_remote_context(AddressSpaceID remote_instance,
-                                         RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_instance != runtime->address_space);
-#endif
-      // should only see this call if it is the top-level context
-#ifdef DEBUG_LEGION
-      assert(is_top_level_context);
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ctx);
-        pack_remote_context(rez, remote_instance);
-      }
-      runtime->send_remote_context_response(remote_instance, rez);
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_instances.find(remote_instance) == remote_instances.end());
-#endif
-      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
     SingleTask* RemoteTask::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!top_level_context);
+#endif
       // See if we already have it
       if (parent_ctx != NULL)
         return parent_ctx;
@@ -10102,6 +10284,14 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      // If we are the top-level context then there is an easy answer
+      if (top_level_context)
+      {
+        // Use a static partitioning of the nodes
+        // Whichever node made the region tree node is the
+        // one that owns the context, no communication necessary
+        return node->get_row_source()->get_owner_space();
+      }
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
@@ -10204,6 +10394,9 @@ namespace Legion {
                                                     AddressSpaceID result)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!top_level_context);
+#endif
       RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
@@ -10255,6 +10448,9 @@ namespace Legion {
     ApEvent RemoteTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!top_level_context);
+#endif
       return remote_completion_event;
     }
 
@@ -10270,6 +10466,9 @@ namespace Legion {
            LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!top_level_context);
+#endif
       // No need to go up since we are the uppermost task on this runtime
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < local_fields.size(); idx++)
@@ -10282,6 +10481,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
+      derez.deserialize(top_level_context);
+      // If we're the top-level context then we're already done
+      if (top_level_context)
+        return;
       derez.deserialize(depth);
       WrapperReferenceMutator mutator(preconditions);
       unpack_base_external_task(derez, &mutator);
@@ -10449,23 +10652,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->get_context_id();
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineTask::has_remote_state(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::record_remote_state(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -12102,11 +12288,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_PACK_TASK_CALL);
-      // Notify our enclosing parent task that we are being sent 
-      // remotely if we are not locally mapped because now there
-      // will be remote state
-      if (!is_remote() && !is_locally_mapped())
-        parent_ctx->record_remote_state();
       // Check to see if we are stealable or not yet fully sliced,
       // if both are false and we're not remote, then we can send the state
       // now or check to see if we are remotely mapped

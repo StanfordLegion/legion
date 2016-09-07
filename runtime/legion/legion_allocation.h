@@ -66,6 +66,7 @@ namespace Legion {
       POINT_TASK_ALLOC,
       INDEX_TASK_ALLOC,
       SLICE_TASK_ALLOC,
+      TOP_TASK_ALLOC,
       REMOTE_TASK_ALLOC,
       INLINE_TASK_ALLOC,
       MAP_OP_ALLOC,

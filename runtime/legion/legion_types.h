@@ -254,6 +254,7 @@ namespace Legion {
       LG_DEFERRED_FUTURE_MAP_SET_ID,
       LG_RESOLVE_FUTURE_PRED_ID,
       LG_CONTRIBUTE_COLLECTIVE_ID,
+      LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
@@ -345,6 +346,7 @@ namespace Legion {
         "Deferred Future Map Set",                                \
         "Resolve Future Predicate",                               \
         "Contribute Collective",                                  \
+        "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
@@ -1153,6 +1155,7 @@ namespace Legion {
     class IndividualTask;
     class PointTask;
     class WrapperTask;
+    class TopLevelTask;
     class RemoteTask;
     class InlineTask;
     class IndexTask;

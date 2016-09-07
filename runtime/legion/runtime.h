@@ -1336,6 +1336,12 @@ namespace Legion {
         ProcessorManager *manager;
         TaskOp *task;
       };
+      struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
+      public:
+        TopLevelTask *task;
+      };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_MAPPER_TASK_ID;
@@ -1344,7 +1350,7 @@ namespace Legion {
         MapperID map_id;
         Processor proc;
         ApEvent event;
-        RemoteTask *context;
+        TopLevelTask *context;
       }; 
       struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
       public:
@@ -2364,6 +2370,8 @@ namespace Legion {
                                                   bool has_lock = false);
       SliceTask*            get_available_slice_task(bool need_cont,
                                                   bool has_lock = false);
+      TopLevelTask*         get_available_top_level_task(bool need_cont,
+                                                  bool has_lock = false);
       RemoteTask*           get_available_remote_task(bool need_cont,
                                                   bool has_lock = false);
       InlineTask*           get_available_inline_task(bool need_cont,
@@ -2427,6 +2435,7 @@ namespace Legion {
       void free_point_task(PointTask *task);
       void free_index_task(IndexTask *task);
       void free_slice_task(SliceTask *task);
+      void free_top_level_task(TopLevelTask *task);
       void free_remote_task(RemoteTask *task);
       void free_inline_task(InlineTask *task);
       void free_map_op(MapOp *op);
@@ -2683,6 +2692,7 @@ namespace Legion {
       Reservation point_task_lock;
       Reservation index_task_lock;
       Reservation slice_task_lock;
+      Reservation top_level_task_lock;
       Reservation remote_task_lock;
       Reservation inline_task_lock;
       Reservation map_op_lock;
@@ -2717,6 +2727,7 @@ namespace Legion {
       std::deque<PointTask*>            available_point_tasks;
       std::deque<IndexTask*>            available_index_tasks;
       std::deque<SliceTask*>            available_slice_tasks;
+      std::deque<TopLevelTask*>         available_top_tasks;
       std::deque<RemoteTask*>           available_remote_tasks;
       std::deque<InlineTask*>           available_inline_tasks;
       std::deque<MapOp*>                available_map_ops;

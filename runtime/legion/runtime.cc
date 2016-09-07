@@ -7574,6 +7574,7 @@ namespace Legion {
         point_task_lock(Reservation::create_reservation()),
         index_task_lock(Reservation::create_reservation()), 
         slice_task_lock(Reservation::create_reservation()),
+        top_level_task_lock(Reservation::create_reservation()),
         remote_task_lock(Reservation::create_reservation()),
         inline_task_lock(Reservation::create_reservation()),
         map_op_lock(Reservation::create_reservation()), 
@@ -7783,6 +7784,15 @@ namespace Legion {
       available_slice_tasks.clear();
       slice_task_lock.destroy_reservation();
       slice_task_lock = Reservation::NO_RESERVATION;
+      for (std::deque<TopLevelTask*>::const_iterator it = 
+            available_top_tasks.begin(); it !=
+            available_top_tasks.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_top_tasks.clear();
+      top_level_task_lock.destroy_reservation();
+      top_level_task_lock = Reservation::NO_RESERVATION;
       for (std::deque<RemoteTask*>::const_iterator it = 
             available_remote_tasks.begin(); it != 
             available_remote_tasks.end(); it++)
@@ -8282,9 +8292,7 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
-      RemoteTask *top_context = get_available_remote_task(false);
-      top_context->initialize_remote(
-          top_context->get_unique_op_id(), true/*top*/);
+      TopLevelTask *top_context = get_available_top_level_task(false);
       // Set the executing processor
       top_context->set_executing_processor(target);
       TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -8307,6 +8315,13 @@ namespace Legion {
                                       top_task->get_task_name());
       }
       increment_outstanding_top_level_tasks();
+      // Launch a task to deactivate the top-level context
+      // when the top-level task is done
+      TopFinishArgs args;
+      args.task = top_context;
+      ApEvent pre = top_task->get_task_completion();
+      issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+                              Runtime::protect_event(pre));
       // Put the task in the ready queue
       add_to_ready_queue(target, top_task);
     }
@@ -8320,9 +8335,7 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
-      RemoteTask *map_context = get_available_remote_task(false);
-      map_context->initialize_remote(
-          map_context->get_unique_op_id(), true/*top*/);
+      TopLevelTask *map_context = get_available_top_level_task(false);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -17488,6 +17501,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TopLevelTask* Runtime::get_available_top_level_task(bool need_cont,
+                                                        bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<TopLevelTask*,
+                     &Runtime::get_available_top_level_task> 
+                       continuation(this, top_level_task_lock);
+        return continuation.get_result();
+      }
+      return get_available(top_level_task_lock, available_top_tasks, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     RemoteTask* Runtime::get_available_remote_task(bool need_cont, 
                                                    bool has_lock)
     //--------------------------------------------------------------------------
@@ -18070,6 +18101,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_top_level_task(TopLevelTask *task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(top_level_task_lock);
+      // Note that we can safely delete remote tasks because they are
+      // never registered in the logical state of the region tree
+      // as part of the dependence analysis. This does not apply
+      // to all operation objects.
+      if (available_top_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(task);
+      else
+        available_top_tasks.push_front(task);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_remote_task(RemoteTask *task)
     //--------------------------------------------------------------------------
     {
@@ -18510,7 +18556,7 @@ namespace Legion {
 #endif
         // Make the result
         RemoteTask *result = get_available_remote_task(false);
-        result->initialize_remote(context_uid, false/*top*/);
+        result->initialize_remote(context_uid);
         // Send the message
         Serializer rez;
         {
@@ -18908,6 +18954,8 @@ namespace Legion {
           return "Index Task";
         case SLICE_TASK_ALLOC:
           return "Slice Task";
+        case TOP_TASK_ALLOC:
+          return "Top Level Task";
         case REMOTE_TASK_ALLOC:
           return "Remote Task";
         case INLINE_TASK_ALLOC:
@@ -20902,6 +20950,12 @@ namespace Legion {
         case LG_CONTRIBUTE_COLLECTIVE_ID:
           {
             FutureImpl::handle_contribute_to_collective(args);
+            break;
+          }
+        case LG_TOP_FINISH_TASK_ID:
+          {
+            TopFinishArgs *fargs = (TopFinishArgs*)args; 
+            fargs->task->deactivate();
             break;
           }
         case LG_MAPPER_TASK_ID:

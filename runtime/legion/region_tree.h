@@ -270,6 +270,7 @@ namespace Legion {
                                    const FieldMask &advance_mask,
              const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                    std::set<RtEvent> &ready_events);
+      void invalidate_all_versions(RegionTreeContext ctx);
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,

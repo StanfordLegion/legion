@@ -1656,6 +1656,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_all_versions(RegionTreeContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeID,RegionNode*> trees;
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        trees = tree_nodes;
+      }
+      VersioningInvalidator invalidator; 
+      for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
+            trees.begin(); it != trees.end(); it++)
+        it->second->visit_node(&invalidator);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &sources,
                     ApEvent term_event, SingleTask *context,unsigned init_index,
