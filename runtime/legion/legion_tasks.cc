@@ -6565,8 +6565,26 @@ namespace Legion {
         else
         {
           for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-            runtime->forest->invalidate_current_context(context, true,
-                                            created_requirements[idx].region);
+          {
+            // Check to see if the region or the fields is still in the 
+            // set of created regions or fields, if not then do the full
+            // invaliation
+            bool still_created = 
+              created_regions.find(created_requirements[idx].region) !=
+               created_regions.end();
+            if (!still_created && 
+                (created_requirements[idx].privilege_fields.size() == 1))
+            {
+              std::pair<FieldSpace,FieldID> key(
+                  created_requirements[idx].region.get_field_space(),
+                  *(created_requirements[idx].privilege_fields.begin()));
+              still_created = 
+                (created_fields.find(key) != created_fields.end());
+            }
+            runtime->forest->invalidate_current_context(
+                outermost->get_context(), still_created,
+                created_requirements[idx].region);
+          }
         }
       }
     }

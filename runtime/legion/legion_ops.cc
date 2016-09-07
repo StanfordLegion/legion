@@ -3276,8 +3276,9 @@ namespace Legion {
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, 
                                   src_versions[idx], dst_versions[idx], 
-                                  src_composite,
-                                  this, idx, local_sync_precondition, 
+                                  local_completion, this, idx,
+                                  idx + src_requirements.size(),
+                                  local_sync_precondition, 
                                   map_applied_conditions);
           Runtime::trigger_event(local_completion, across_done);
         }
@@ -11079,7 +11080,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       ApEvent detach_event = 
         runtime->forest->detach_file(physical_ctx, requirement, 
-                                     this, version_info, reference);
+                                     this, 0/*idx*/, version_info, reference);
       std::set<RtEvent> applied_conditions;
       version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())

@@ -357,8 +357,8 @@ namespace Legion {
                           const InstanceSet &dst_targets,
                           VersionInfo &src_version_info,
                           VersionInfo &dst_version_info, 
-                          unsigned src_composite_index,
-                          Operation *op, unsigned index, 
+                          ApEvent term_event, Operation *op,
+                          unsigned src_index, unsigned dst_index,
                           ApEvent precondition,
                           std::set<RtEvent> &map_applied);
       ApEvent reduce_across(const RegionRequirement &src_req,
@@ -414,7 +414,8 @@ namespace Legion {
                               VersionInfo &version_info);
       ApEvent detach_file(RegionTreeContext ctx, 
                           const RegionRequirement &req, DetachOp *detach_op, 
-                          VersionInfo &version_info, const InstanceRef &ref);
+                          unsigned index, VersionInfo &version_info, 
+                          const InstanceRef &ref);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -1737,7 +1738,7 @@ namespace Legion {
                          const FieldMask &valid_mask,
                          VersionInfo &version_info,
                          InstanceSet &targets);
-      void register_region(const TraversalInfo &info, 
+      void register_region(const TraversalInfo &info, SingleTask *context, 
                            RestrictInfo &restrict_info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
                            InstanceSet &targets);
@@ -1750,8 +1751,8 @@ namespace Legion {
                              const InstanceSet &targets,
                              SingleTask *context, unsigned init_index,
                              const std::vector<LogicalView*> &corresponding);
-      void close_state(const TraversalInfo &info,
-                       RegionUsage &usage, InstanceSet &targets);
+      void close_state(const TraversalInfo &info, RegionUsage &usage, 
+                       SingleTask *context, InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
@@ -1774,7 +1775,7 @@ namespace Legion {
                            const FieldMask &attach_mask,
                            const RegionRequirement &req, 
                            InstanceManager *manager, VersionInfo &version_info);
-      ApEvent detach_file(ContextID ctx, DetachOp *detach_op, 
+      ApEvent detach_file(ContextID ctx, DetachOp *detach_op, unsigned index, 
                           VersionInfo &version_info, const InstanceRef &ref);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,

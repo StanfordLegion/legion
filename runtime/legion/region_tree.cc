@@ -2172,7 +2172,7 @@ namespace Legion {
           // Construct the traversal info
           TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                              user_mask, local_applied);
-          child_node->register_region(info, restrict_info, term_event,
+          child_node->register_region(info, context, restrict_info, term_event,
                                       usage, defer_add_users, targets);
           
           if (!local_applied.empty())
@@ -2199,7 +2199,7 @@ namespace Legion {
           // Construct the traversal info
           TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                              user_mask, map_applied);
-          child_node->register_region(info, restrict_info, term_event, 
+          child_node->register_region(info, context, restrict_info, term_event,
                                       usage, defer_add_users, targets);
         }
       }
@@ -2427,6 +2427,9 @@ namespace Legion {
       RegionUsage usage(req);
       TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                          user_mask, map_applied);
+      SingleTask *parent_ctx = op->get_parent();
+      SingleTask *context = parent_ctx->find_parent_physical_context(
+                                        op->find_parent_index(index));
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2434,7 +2437,7 @@ namespace Legion {
                                      true/*closing*/, false/*logical*/,
                  FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-      top_node->close_state(info, usage, targets);
+      top_node->close_state(info, usage, context, targets);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2461,8 +2464,8 @@ namespace Legion {
                                         const InstanceSet &dst_targets,
                                         VersionInfo &src_version_info,
                                         VersionInfo &dst_version_info, 
-                                        unsigned src_composite_index,
-                                        Operation *op, unsigned index,
+                                        ApEvent term_event, Operation *op, 
+                                        unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, 
                                         std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
@@ -2485,141 +2488,213 @@ namespace Legion {
                                                  src_indexes);   
       dst_node->column_source->get_field_indexes(dst_req.instance_fields,
                                                  dst_indexes);
+      // Convert the destination references to views
+      std::vector<MaterializedView*> dst_views(dst_targets.size());
+      SingleTask *parent_ctx = op->get_parent();
+      SingleTask *dst_context = parent_ctx->find_parent_physical_context(
+                                        op->find_parent_index(dst_index));
+      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      {
+        const InstanceRef &dst_ref = dst_targets[idx];
+#ifdef DEBUG_LEGION
+        assert(!dst_ref.is_composite_ref());
+#endif
+        InstanceView *view = 
+              dst_node->convert_reference(dst_ref, dst_context);
+#ifdef DEBUG_LEGION
+        assert(view->is_materialized_view());
+#endif
+        dst_views[idx] = view->as_materialized_view();
+      }
+
       // If we need to, grab the valid views for the source
-      std::set<unsigned> composite_indexes;
+      // and issue copies to any of the deferred views
       if (src_targets.empty())
       {
-#if 0
-        SingleTask *parent_ctx = op->get_parent();
-        SingleTask *context = parent_ctx->find_parent_physical_context(
-                                            op->find_parent_index(index));
-        RegionTreeContext ctx = context->get_context();
+        SingleTask *src_context = parent_ctx->find_parent_physical_context(
+                                          op->find_parent_index(src_index));
+        RegionTreeContext ctx = src_context->get_context();
 #ifdef DEBUG_LEGION
         assert(ctx.exists());
 #endif
         FieldMask src_mask = src_node->column_source->get_field_mask(
                                             src_req.privilege_fields);
         LegionMap<LogicalView*,FieldMask>::aligned src_views;
-        PhysicalState *state = src_node->get_physical_state(ctx.id());
+        PhysicalState *state = src_node->get_physical_state(src_version_info);
         src_node->find_valid_instance_views(ctx.get_id(), state, src_mask,
             src_mask, src_version_info, false/*needs space*/, src_views);
-        // Convert them to references
-        src_targets.resize(src_views.size());
-#endif
-        // TODO
-        // unsigned idx = 0;
-        assert(false);
-      }
-      // Next figure out which src_targets satisfy each field
-      std::vector<unsigned> src_target_indexes(src_indexes.size());
-      for (unsigned idx1 = 0; idx1 < src_targets.size(); idx1++)
-      {
-        const FieldMask valid_mask = src_targets[idx1].get_valid_fields();
-        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
+        // Sort them into deferred and materialized views
+        std::vector<DeferredView*> deferred_views;
+        std::vector<MaterializedView*> materialized_views;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              src_views.begin(); it != src_views.end(); it++)
         {
-          if (valid_mask.is_set(src_indexes[idx2]))
-            src_target_indexes[idx2] = idx1;
+          if (!it->first->is_materialized_view())
+          {
+#ifdef DEBUG_LEGION
+            assert(it->first->is_deferred_view());
+#endif
+            deferred_views.push_back(it->first->as_deferred_view()); 
+          }
+          else
+            materialized_views.push_back(it->first->as_materialized_view());
+        }
+        if (!deferred_views.empty())
+        {
+          // For each destination, find which composite views satisfy its fields
+          for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
+          {
+            const InstanceRef &dst_ref = dst_targets[idx1];
+#ifdef DEBUG_LEGION
+            assert(!dst_ref.is_composite_ref());
+#endif
+            const FieldMask &dst_mask = dst_ref.get_valid_fields(); 
+            std::map<DeferredView*,std::vector<unsigned> > src_deferred_indexes;
+            std::map<DeferredView*,std::vector<unsigned> > dst_deferred_indexes;
+            for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
+            {
+              const unsigned dst_field_index = dst_indexes[idx2];
+              // If it's not set for the destination, then keep going 
+              if (!dst_mask.is_set(dst_field_index))
+                continue;
+              const unsigned src_field_index = src_indexes[idx2];
+              for (std::vector<DeferredView*>::const_iterator it = 
+                    deferred_views.begin(); it != deferred_views.end(); it++)
+              {
+                FieldMask &src_mask = src_views[*it];
+                if (!src_mask)
+                  continue; 
+                if (src_mask.is_set(src_field_index))
+                {
+                  src_deferred_indexes[*it].push_back(src_field_index);
+                  dst_deferred_indexes[*it].push_back(dst_field_index);
+                  src_mask.unset_bit(src_field_index);
+                  if (!src_mask)
+                    break;
+                }
+              }
+            }
+            if (src_deferred_indexes.empty())
+              continue;
+            // Now we've got the information necessary to do our copies
+            MaterializedView *dst_view = dst_views[idx1];
+            ApEvent precondition = dst_ref.get_ready_event();
+            for (std::map<DeferredView*,std::vector<unsigned> >::const_iterator
+                  src_it = src_deferred_indexes.begin(); 
+                  src_it != src_deferred_indexes.end(); src_it++)
+            {
+              std::map<DeferredView*,std::vector<unsigned> >::const_iterator
+                dst_it = dst_deferred_indexes.find(src_it->first);
+#ifdef DEBUG_LEGION
+              assert(dst_it != dst_deferred_indexes.end());
+              assert(src_it->second.size() == dst_it->second.size());
+#endif
+              FieldMask copy_mask;
+              for (std::vector<unsigned>::const_iterator it = 
+                    src_it->second.begin(); it != src_it->second.end(); it++)
+                copy_mask.set_bit(*it);
+              TraversalInfo info(ctx.get_id(), op, src_index, src_req,
+                                 dst_version_info, copy_mask, map_applied);
+              src_it->first->issue_deferred_copies_across(info, dst_view,
+                  src_it->second, dst_it->second, precondition, result_events);
+              src_mask -= copy_mask;
+            }
+            // If we've handled all the sources, we are done
+            if (!src_mask)
+              break;
+          }
+        }
+        // Save any materialized views for the remaining fields
+        // in the src_targets and then issue copies like normal
+        if (!!src_mask && !materialized_views.empty())
+        {
+          RegionUsage src_usage(src_req);
+          for (std::vector<MaterializedView*>::const_iterator it = 
+                materialized_views.begin(); it != 
+                materialized_views.end(); it++)
+          {
+            FieldMask valid_mask = src_mask & src_views[*it]; 
+            if (!valid_mask)
+              continue;
+            // Need to add ourselves as a user of the instance
+            // and get the event precondition for our use
+            ApEvent ready = (*it)->add_user_fused(src_usage, term_event,
+                                                  valid_mask, op, src_index,
+                                                  &src_version_info,
+                                                  runtime->address_space,
+                                                  map_applied);
+            src_targets.add_instance(
+                InstanceRef((*it)->get_manager(), valid_mask, ready));
+            src_mask -= valid_mask;
+            if (!src_mask)
+              break;
+          }
         }
       }
-      // Let's handle all the actual instances first
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
-      for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
+      // If we have actual concrete instances to copy from now we can
+      // issue those copies to the destination
+      if (!src_targets.empty())
       {
-        const InstanceRef &dst_ref = dst_targets[idx1];
-#ifdef DEBUG_LEGION
-        assert(!dst_ref.is_composite_ref());
-        assert(dst_ref.get_manager()->is_instance_manager());
-#endif
-        InstanceManager *dst_manager = 
-          dst_ref.get_manager()->as_instance_manager();
-        FieldMask dst_valid = dst_ref.get_valid_fields();
-        std::vector<unsigned> src_composite_field_indexes;
-        std::vector<unsigned> dst_composite_field_indexes;
-        // Iterate over all the fields and find the ones for this target
-        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
+        for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
         {
-          if (dst_valid.is_set(dst_indexes[idx2]))
+          const InstanceRef &dst_ref = dst_targets[idx1];
+#ifdef DEBUG_LEGION
+          assert(!dst_ref.is_composite_ref());
+          assert(dst_ref.get_manager()->is_instance_manager());
+#endif
+          InstanceManager *dst_manager = 
+            dst_ref.get_manager()->as_instance_manager();
+          const FieldMask &dst_mask = dst_ref.get_valid_fields();
+          std::map<unsigned,
+                   std::vector<Domain::CopySrcDstField> > src_fields,dst_fields;
+          for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
           {
-            // Find the index of the source
-            unsigned src_index = src_target_indexes[idx2];
-            // See if this is the composite reference
-            if (int(src_index) == src_composite_index)
+            const unsigned dst_field_index = dst_indexes[idx2];
+            // If it's not set for the destination, then keep going 
+            if (!dst_mask.is_set(dst_field_index))
+              continue;
+            const unsigned src_field_index = src_indexes[idx2];
+            for (unsigned idx3 = 0; idx3 < src_targets.size(); idx3++)
             {
-              src_composite_field_indexes.push_back(src_indexes[idx2]);
-              dst_composite_field_indexes.push_back(dst_indexes[idx2]);
-            }
-            else
-            {
-              // Otherwise, this is a normal copy, fill in offsets
-              const InstanceRef &src_ref = src_targets[src_index];
+              const InstanceRef &src_ref = src_targets[idx3];
 #ifdef DEBUG_LEGION
               assert(!src_ref.is_composite_ref());
               assert(src_ref.get_manager()->is_instance_manager());
 #endif
+              const FieldMask &src_mask = src_ref.get_valid_fields();   
+              if (!src_mask.is_set(src_field_index))
+                continue;
               InstanceManager *src_manager = 
                 src_ref.get_manager()->as_instance_manager();
               src_manager->compute_copy_offsets(
-                  src_req.instance_fields[idx2], src_fields);
+                  src_req.instance_fields[idx2], src_fields[idx3]);
               dst_manager->compute_copy_offsets(
-                  dst_req.instance_fields[idx2], dst_fields);
+                  dst_req.instance_fields[idx2], dst_fields[idx3]);
             }
-            // Unset the bit and see if we are done with this instance
-            dst_valid.unset_bit(dst_indexes[idx2]);
-            if (!dst_valid)
-              break;
+          }
+          if (src_fields.empty())
+            continue;
+          ApEvent dst_precondition = dst_ref.get_ready_event(); 
+          for (std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+                const_iterator src_it = src_fields.begin(); 
+                src_it != src_fields.end(); src_it++)
+          {
+            std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+              const_iterator dst_it = dst_fields.find(src_it->first);
+#ifdef DEBUG_LEGION
+            assert(dst_it != dst_fields.end());
+            assert(src_it->second.size() == dst_it->second.size());
+#endif
+            ApEvent src_precondition = 
+              src_targets[src_it->first].get_ready_event();
+            ApEvent copy_pre = Runtime::merge_events(src_precondition,
+                                                     dst_precondition);
+            ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
+                                                     dst_it->second, copy_pre);
+            if (copy_post.exists())
+              result_events.insert(copy_post);
           }
         }
-        // Save the copy precondition for the dst
-        copy_preconditions.insert(dst_ref.get_ready_event());
-        // See if we have any composite fields to handle
-        if (!src_composite_field_indexes.empty())
-        {
-          assert(false);
-#if 0
- #ifdef DEBUG_LEGION
-          assert(src_composite_index >= 0);
-          assert(src_composite_field_indexes.size() == 
-                 dst_composite_field_indexes.size());
-#endif         
-          const InstanceRef &composite_ref = src_targets[src_composite_index];
-#ifdef DEBUG_LEGION
-          assert(composite_ref.is_composite_ref());
-#endif
-          CompositeView *src_view = composite_ref.get_composite_view();
-          TraversalInfo info(ctx.get_id(), op, index, src_req,
-             dst_version_info, composite_ref.get_valid_fields(), map_applied);
-          InstanceView *view = 
-              dst_node->convert_reference(dst_ref, op->get_parent());
-#ifdef DEBUG_LEGION
-          assert(view->is_materialized_view());
-#endif
-          MaterializedView *dst_view = view->as_materialized_view();
-          ApEvent precondition = dst_ref.get_ready_event();
-          // Perform the copy across
-          src_view->issue_deferred_copies_across(info, dst_view, 
-              src_composite_field_indexes, dst_composite_field_indexes,
-              precondition, result_events);
-#endif
-        }
-      }
-      // Also record the src preconditions
-#ifdef DEBUG_LEGION
-      assert(src_fields.size() == dst_fields.size());
-#endif
-      if (!src_fields.empty())
-      {
-        for (unsigned idx = 0; idx < src_targets.size(); idx++)
-        {
-          if (int(idx) == src_composite_index)
-            continue;
-          copy_preconditions.insert(src_targets[idx].get_ready_event());
-        }
-        ApEvent copy_pre = Runtime::merge_events(copy_preconditions);
-        ApEvent copy_post = dst_node->issue_copy(op, src_fields, 
-                                                 dst_fields, copy_pre);
-        if (copy_post.exists())
-          result_events.insert(copy_post);
       }
       // Return the merge of all the result events
       return Runtime::merge_events(result_events);
@@ -3165,6 +3240,7 @@ namespace Legion {
     ApEvent RegionTreeForest::detach_file(RegionTreeContext ctx,
                                           const RegionRequirement &req,
                                           DetachOp *detach_op,
+                                          unsigned index,
                                           VersionInfo &version_info,
                                           const InstanceRef &ref)
     //--------------------------------------------------------------------------
@@ -3175,7 +3251,7 @@ namespace Legion {
 #endif
       RegionNode *detach_node = get_node(req.region);
       // Perform the detachment
-      return detach_node->detach_file(ctx.get_id(), detach_op,
+      return detach_node->detach_file(ctx.get_id(), detach_op, index,
                                       version_info, ref);
     }
 
@@ -12391,7 +12467,9 @@ namespace Legion {
                                   op, idx, usage, version_info, ready_events);
           // If we had any unversioned fields all the way down then we
           // have to report that uninitialized data is being used
-          if (!!unversioned_mask)
+          // Skip this if we have simultaneous coherence as it might
+          // be unclear who is reading or writing first
+          if (!!unversioned_mask && !IS_SIMULT(usage))
             report_uninitialized_usage(op, idx, unversioned_mask);
         }
       }
@@ -14877,7 +14955,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::register_region(const TraversalInfo &info,
+    void RegionNode::register_region(const TraversalInfo &info, 
+                                     SingleTask *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
                                    bool defer_add_users, InstanceSet &targets)
@@ -14898,8 +14977,8 @@ namespace Legion {
         {
           restricted_instances = restrict_info.get_instances();
           restricted_views.resize(restricted_instances.size());
-          convert_target_views(restricted_instances, 
-                               info.op->get_parent(), restricted_views);
+          convert_target_views(restricted_instances, context,
+                               restricted_views);
         }
       }
 #ifdef DEBUG_LEGION
@@ -14924,7 +15003,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!ref.is_composite_ref());
 #endif
-          LogicalView *view = convert_reference(ref, info.op->get_parent());
+          LogicalView *view = convert_reference(ref, context);
 #ifdef DEBUG_LEGION
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
@@ -14987,7 +15066,7 @@ namespace Legion {
       {
         // Normal instances
         std::vector<InstanceView*> new_views(targets.size());
-        convert_target_views(targets, info.op->get_parent(), new_views);
+        convert_target_views(targets, context, new_views);
         if (!IS_WRITE_ONLY(info.req))
         {
           // Any case but write-only
@@ -15184,7 +15263,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 InstanceSet &targets)
+                                 SingleTask *context, InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -15196,7 +15275,7 @@ namespace Legion {
       // need to be done would have been issued as part of the 
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
-      register_region(info, empty_restrict_info, ApEvent::NO_AP_EVENT, 
+      register_region(info, context, empty_restrict_info, ApEvent::NO_AP_EVENT,
                       usage, false/*defer add users*/, targets);
     }
 
@@ -15307,8 +15386,11 @@ namespace Legion {
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       std::set<ApEvent> post_events;
+      SingleTask *parent_ctx = op->get_parent();
+      SingleTask *context = parent_ctx->find_parent_physical_context(
+                                        op->find_parent_index(index));
       std::vector<InstanceView*> target_views(instances.size(), NULL);
-      convert_target_views(instances, op->get_parent(), target_views);
+      convert_target_views(instances, context, target_views);
       const AddressSpaceID local_space = context->runtime->address_space;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
@@ -15378,11 +15460,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::detach_file(ContextID ctx, DetachOp *detach_op, 
-                                    VersionInfo &version_info, 
+                                    unsigned index, VersionInfo &version_info, 
                                     const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-      InstanceView *view = convert_reference(ref, detach_op->get_parent());
+      SingleTask *parent_ctx = detach_op->get_parent();
+      SingleTask *context = parent_ctx->find_parent_physical_context(
+                                  detach_op->find_parent_index(index));
+      InstanceView *view = convert_reference(ref, context);
 #ifdef DEBUG_LEGION
       assert(view->is_materialized_view());
 #endif
