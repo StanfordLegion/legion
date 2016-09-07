@@ -2467,7 +2467,7 @@ namespace Legion {
       {
         log_run.error("Invalid mapper output from invocation of 'map_inline' "
                       "on mapper %s. Mapper failed to specify a physical "
-                      "instance for %ld fields of the region requirement to "
+                      "instance for %zd fields of the region requirement to "
                       "an inline mapping in task %s (ID %lld). The missing "
                       "fields are listed below.", mapper->get_mapper_name(),
                       missing_fields.size(), parent_ctx->get_task_name(),
@@ -2792,8 +2792,8 @@ namespace Legion {
       {
         if (src_requirements.size() != dst_requirements.size())
         {
-          log_run.error("Number of source requirements (%ld) does not "
-                        "match number of destination requirements (%ld) "
+          log_run.error("Number of source requirements (%zd) does not "
+                        "match number of destination requirements (%zd) "
                         "for copy operation (ID %lld) with parent "
                         "task %s (ID %lld)",
                         src_requirements.size(), dst_requirements.size(),
@@ -2810,8 +2810,8 @@ namespace Legion {
               src_requirements[idx].instance_fields.size())
           {
             log_run.error("Copy source requirement %d for copy operation "
-                          "(ID %lld) in parent task %s (ID %lld) has %ld "
-                          "privilege fields and %ld instance fields.  "
+                          "(ID %lld) in parent task %s (ID %lld) has %zd "
+                          "privilege fields and %zd instance fields.  "
                           "Copy requirements must have exactly the same "
                           "number of privilege and instance fields.",
                           idx, get_unique_id(), 
@@ -2846,7 +2846,7 @@ namespace Legion {
           {
             log_run.error("Copy destination requirement %d for copy "
                           "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %ld privilege fields and %ld "
+                          "(ID %lld) has %zd privilege fields and %zd "
                           "instance fields.  Copy requirements must "
                           "have exactly the same number of privilege "
                           "and instance fields.", idx, 
@@ -3824,7 +3824,7 @@ namespace Legion {
       {
         log_run.error("Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper failed to specify a physical "
-                      "instance for %ld fields of the region requirement %d "
+                      "instance for %zd fields of the region requirement %d "
                       "of explicit region-to-region copy in task %s (ID %lld). "
                       "Ths missing fields are listed below.",
                       mapper->get_mapper_name(), missing_fields.size(), idx,
@@ -5184,7 +5184,7 @@ namespace Legion {
       {
         log_run.error("Invalid mapper output from invocation of 'map_close' "
                       "on mapper %s. Mapper failed to specify a physical "
-                      "instance for %ld fields fo the region requirement to "
+                      "instance for %zd fields for the region requirement to "
                       "a close operation in task %s (ID %lld). The missing "
                       "fields are listed below.", mapper->get_mapper_name(),
                       missing_fields.size(), parent_ctx->get_task_name(),
@@ -7850,7 +7850,7 @@ namespace Legion {
       if (total_points > all_cpus.count())
       {
         log_run.error("Illegal must epoch launch in task %s (UID %lld). "
-            "Must epoch launch requested %ld tasks, but only %ld CPUs "
+            "Must epoch launch requested %zd tasks, but only %zd CPUs "
             "exist in this machine.", parent_ctx->get_task_name(),
             parent_ctx->get_unique_id(), total_points, all_cpus.count());
         assert(false);

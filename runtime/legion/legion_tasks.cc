@@ -2157,7 +2157,7 @@ namespace Legion {
         {
           log_run.error("Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper failed to specify instances "
-                        "for %ld fields of region requirement %d of task %s "
+                        "for %zd fields of region requirement %d of task %s "
                         "(ID %lld) launched in parent task %s (ID %lld). "
                         "The missing fields are listed below.",
                         mapper->get_mapper_name(), missing_fields.size(),
@@ -5696,7 +5696,7 @@ namespace Legion {
         {
           log_run.error("Invalid mapper output from invocation of '%s' on "
                         "mapper %s. Mapper failed to specify an instance for "
-                        "%ld fields of region requirement %d on task %s "
+                        "%zd fields of region requirement %d on task %s "
                         "(ID %lld). The missing fields are listed below.",
                         "map_task", mapper->get_mapper_name(), 
                         missing_fields.size(), idx, get_task_name(), 
@@ -7656,7 +7656,7 @@ namespace Legion {
         log_run.error("Invalid mapper output from invocation of 'slice_task' "
                       "on mapper %s. Mapper returned slices with a total "
                       "volume %d that does not match the expected volume of "
-                      "%ld when slicing task %s (ID %lld).", 
+                      "%zd when slicing task %s (ID %lld).", 
                       mapper->get_mapper_name(), minimal_points_assigned,
                       index_domain.get_volume(), 
                       get_task_name(), get_unique_id());

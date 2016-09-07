@@ -185,8 +185,8 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
-#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFUL
-#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFUL)
+#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFULL
+#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
 #define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
 
@@ -563,7 +563,7 @@ typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_generator_id_t;
-typedef unsigned long legion_distributed_id_t;
+typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_semantic_tag_t;

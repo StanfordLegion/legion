@@ -431,7 +431,7 @@ namespace Legion {
       for (std::deque<InstUsageInfo>::const_iterator it = inst_usage_infos.begin();
             it != inst_usage_infos.end(); it++)
       {
-        log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %lu",
+        log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %zu",
 		       it->op_id, it->inst.id, it->mem.id, it->total_bytes);
       }
       for (std::deque<InstTimelineInfo>::const_iterator it = inst_timeline_infos.begin();
@@ -513,7 +513,7 @@ namespace Legion {
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
-        log_prof.print("Prof Mem Desc " IDFMT " %d %ld", 
+        log_prof.print("Prof Mem Desc " IDFMT " %d %zd", 
 		       it->id, it->kind(), it->capacity());
       }
     }
