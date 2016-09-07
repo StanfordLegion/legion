@@ -1228,7 +1228,7 @@ namespace Legion {
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
       void initialize(SingleTask *ctx, unsigned index,
-                      const RegionRequirement &req, bool created);
+                      const RegionRequirement &req);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1236,14 +1236,9 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
-      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       unsigned parent_idx;
-      bool created_requirement;
-      std::set<RtEvent> map_applied_conditions;
     };
 
     /**

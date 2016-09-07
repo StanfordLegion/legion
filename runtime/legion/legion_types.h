@@ -606,7 +606,6 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
       SEND_REMOTE_CONTEXT_FREE,
-      SEND_REMOTE_CONVERT_VIRTUAL,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
@@ -722,7 +721,6 @@ namespace Legion {
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
         "Send Remote Context Free",                                   \
-        "Send Remote Convert Virtual Instances",                      \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
         "Send Version State Request",                                 \
@@ -782,9 +780,7 @@ namespace Legion {
       INITIALIZE_REGION_TREE_CONTEXTS_CALL,
       INVALIDATE_REGION_TREE_CONTEXTS_CALL,
       CREATE_INSTANCE_TOP_VIEW_CALL,
-      CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL,
       LAUNCH_TASK_CALL,
-      SINGLE_RETURN_VIRTUAL_CALL,
       ACTIVATE_MULTI_CALL,
       DEACTIVATE_MULTI_CALL,
       SLICE_INDEX_SPACE_CALL,
@@ -855,15 +851,12 @@ namespace Legion {
       REGION_TREE_INITIALIZE_CONTEXT_CALL,
       REGION_TREE_INVALIDATE_CONTEXT_CALL,
       REGION_TREE_PREMAP_ONLY_CALL,
-      REGION_TREE_MAP_VIRTUAL_CALL,
       REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL,
       REGION_TREE_PHYSICAL_REGISTER_USERS_CALL,
       REGION_TREE_PHYSICAL_PERFORM_CLOSE_CALL,
       REGION_TREE_PHYSICAL_CLOSE_CONTEXT_CALL,
       REGION_TREE_PHYSICAL_COPY_ACROSS_CALL,
       REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL,
-      REGION_TREE_PHYSICAL_CONVERT_VIEWS_INTO_CALL,
-      REGION_TREE_PHYSICAL_CONVERT_VIEWS_FROM_CALL,
       REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL,
       REGION_TREE_PHYSICAL_FILL_FIELDS_CALL,
       REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
@@ -879,7 +872,6 @@ namespace Legion {
       REGION_NODE_SORT_COPY_INSTANCES_CALL,
       REGION_NODE_ISSUE_GROUPED_COPIES_CALL,
       REGION_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
-      REGION_NODE_MAP_VIRTUAL_CALL,
       REGION_NODE_PREMAP_REGION_CALL,
       REGION_NODE_REGISTER_REGION_CALL,
       REGION_NODE_CLOSE_STATE_CALL,
@@ -949,9 +941,7 @@ namespace Legion {
       "Initialize Region Tree Contexts",                              \
       "Invalidate Region Tree Contexts",                              \
       "Create Instance Top View",                                     \
-      "Convert Virtual Instance Top View",                            \
       "Launch Task",                                                  \
-      "Single Return Virtual",                                        \
       "Activate Multi",                                               \
       "Deactivate Multi",                                             \
       "Slice Index Space",                                            \
@@ -1021,15 +1011,12 @@ namespace Legion {
       "Region Tree Initialize Context",                               \
       "Region Tree Invalidate Context",                               \
       "Region Tree Premap Only",                                      \
-      "Region Tree Map Virtual",                                      \
       "Region Tree Physical Register Only",                           \
       "Region Tree Physical Register Users",                          \
       "Region Tree Physical Perform Close",                           \
       "Region Tree Physical Close Context",                           \
       "Region Tree Physical Copy Across",                             \
       "Region Tree Physical Reduce Across",                           \
-      "Region Tree Physical Convert View Into Context",               \
-      "Region Tree Physical Convert View From Context",               \
       "Region Tree Physical Convert Mapping",                         \
       "Region Tree Physical Fill Fields",                             \
       "Region Tree Physical Attach File",                             \
@@ -1045,7 +1032,6 @@ namespace Legion {
       "Region Node Sort Copy Instances",                              \
       "Region Node Issue Grouped Copies",                             \
       "Region Node Issue Update Reductions",                          \
-      "Region Node Map Virtual",                                      \
       "Region Node Premap Region",                                    \
       "Region Node Register Region",                                  \
       "Region Node Close State",                                      \

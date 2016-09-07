@@ -270,18 +270,16 @@ namespace Legion {
                                    const FieldMask &advance_mask,
              const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                    std::set<RtEvent> &ready_events);
+      void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
                     ApEvent term_event, SingleTask *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
-      void initialize_current_context(RegionTreeContext ctx,
-                                      const RegionRequirement &req,
-                                      const InstanceSet &sources,
-                                      SingleTask *context, unsigned index,
-                                      CompositeView *composite_view);
-      void invalidate_current_context(RegionTreeContext ctx,
+      void initialize_virtual_context(RegionTreeContext ctx,
+                                      const RegionRequirement &req);
+      void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
@@ -303,26 +301,11 @@ namespace Legion {
                               const RegionRequirement &req, 
                               RestrictInfo &restrict_info);
     public: // Physical analysis methods
-      void physical_premap_only(RegionTreeContext ctx,
+      void physical_premap_only(Operation *op, unsigned index,
                                 const RegionRequirement &req,
                                 VersionInfo &version_info,
                                 InstanceSet &valid_instances);
-      void map_virtual_region(RegionTreeContext ctx,
-                              const RegionRequirement &req,
-                              InstanceRef &composite_ref,
-                              VersionInfo &version_info,
-                              SingleTask *target_ctx,
-                              Operation *op,
-                              SingleTask *translation_ctx,
-                              const bool needs_fields
-#ifdef DEBUG_LEGION
-                              , unsigned index
-                              , const char *log_name
-                              , UniqueID uid
-#endif
-                              );
-      void physical_register_only(RegionTreeContext ctx,
-                                  const RegionRequirement &req,
+      void physical_register_only(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   RestrictInfo &restrict_info,
                                   Operation *op, unsigned index,
@@ -342,14 +325,11 @@ namespace Legion {
                    const std::vector<bool> &to_skip,
                    std::vector<VersionInfo> &version_infos,
                    std::vector<RestrictInfo> &restrict_infos,
-                   RegionTreeContext enclosing_context,
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events);
-      void physical_perform_close(RegionTreeContext ctx,
-                                  const RegionRequirement &req,
+      void physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
-                                  SingleTask *translation_context,
                                   int composite_index,
                                   ClosedNode *closed_tree,
                                   ApEvent term_event, 
@@ -371,38 +351,21 @@ namespace Legion {
                                      , UniqueID uid
 #endif
                                      );
-      ApEvent copy_across(RegionTreeContext ctx,
-                          const RegionRequirement &src_req,
+      ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                          const InstanceSet &src_targets, 
+                                InstanceSet &src_targets, 
                           const InstanceSet &dst_targets,
+                          VersionInfo &src_version_info,
                           VersionInfo &dst_version_info, 
-                          int src_composite, Operation *op, 
-                          unsigned index, ApEvent precondition,
+                          unsigned src_composite_index,
+                          Operation *op, unsigned index, 
+                          ApEvent precondition,
                           std::set<RtEvent> &map_applied);
-      ApEvent reduce_across(RegionTreeContext ctx,
-                            const RegionRequirement &src_req,
+      ApEvent reduce_across(const RegionRequirement &src_req,
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
                             const InstanceSet &dst_targets,
                             Operation *op, ApEvent precondition);
-      void convert_views_into_context(const RegionRequirement &req,
-                                      SingleTask *context,
-                                      unsigned index,
-                                      VersionInfo &version_info,
-                                      InstanceView *src_view,
-                                      InstanceView *dst_view,
-                                      ApEvent ready_event,
-                                      const std::vector<ColorPoint> &path,
-                                      std::set<RtEvent> &applied_events);
-      void convert_views_from_context(const RegionRequirement &req,
-                                      SingleTask *context,
-                                      unsigned index,
-                                      VersionInfo &version_info,
-                                      InstanceView *dst_view,
-                                      ApEvent ready_event,
-                                      bool initial_user,
-                                      std::set<RtEvent> &applied_events);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -1429,7 +1392,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events);
     public:
       void initialize_current_state(ContextID ctx);
-      void invalidate_current_state(ContextID ctx);
+      void invalidate_current_state(ContextID ctx, bool users_only);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
       void invalidate_version_state(ContextID ctx);
@@ -1439,9 +1402,8 @@ namespace Legion {
       CompositeView* create_composite_instance(ContextID ctx_id,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
-                                     SingleTask *target_ctx,
-                                     ClosedNode *closed_tree,
-                                     SingleTask *translation_context);
+                                     SingleTask *owner_context,
+                                     ClosedNode *closed_tree);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -1770,12 +1732,6 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
-      CompositeView *map_virtual_region(ContextID ctx, 
-                                       const FieldMask &virtual_mask,
-                                       VersionInfo &version_info,
-                                       SingleTask *target_ctx,
-                                       ClosedNode *closed_tree,
-                                       SingleTask *translation_ctx);
       void premap_region(ContextID ctx, 
                          const RegionRequirement &req,
                          const FieldMask &valid_mask,

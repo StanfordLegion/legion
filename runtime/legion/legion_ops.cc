@@ -1931,14 +1931,13 @@ namespace Legion {
     void MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       InstanceSet mapped_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
       if (remap_region)
       {
         region.impl->get_references(mapped_instances);
-        runtime->forest->physical_register_only(physical_ctx, requirement,
+        runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/, 
                                                 termination_event,
@@ -1957,12 +1956,12 @@ namespace Legion {
         // We're going to need to invoke the mapper, find the set of valid
         // instances as part of our traversal
         InstanceSet valid_instances;
-        runtime->forest->physical_premap_only(physical_ctx, requirement,
+        runtime->forest->physical_premap_only(this, 0/*idx*/, requirement,
                                               version_info, valid_instances);
         // Now we've got the valid instances so invoke the mapper
         invoke_mapper(valid_instances, mapped_instances);
         // Then we can register our mapped instances
-        runtime->forest->physical_register_only(physical_ctx, requirement,
+        runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/,
                                                 termination_event, 
@@ -3112,12 +3111,11 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
-      RegionTreeContext context = parent_ctx->get_context();
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         InstanceSet &valid_instances = valid_src_instances[idx];
-        runtime->forest->physical_premap_only(context,
+        runtime->forest->physical_premap_only(this, idx, 
                                               src_requirements[idx],
                                               src_versions[idx],
                                               valid_instances);
@@ -3132,7 +3130,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         InstanceSet &valid_instances = valid_dst_instances[idx];
-        runtime->forest->physical_premap_only(context,
+        runtime->forest->physical_premap_only(this, idx+src_requirements.size(),
                                               dst_requirements[idx],
                                               dst_versions[idx],
                                               valid_instances);
@@ -3198,25 +3196,15 @@ namespace Legion {
         // as a virtual region
         if (src_composite >= 0)
         {
-          // No need to do the registration here
-          runtime->forest->map_virtual_region(context,
-                                              src_requirements[idx],
-                                              src_targets[src_composite],
-                                              src_versions[idx],
-                                              parent_ctx, this, NULL,
-                                              false/*needs fields*/
-#ifdef DEBUG_LEGION
-                                              , idx, get_logging_name()
-                                              , unique_op_id
-#endif
-                                              );
+          // Clear out the target views, the copy_across call will
+          // find the proper valid views
+          src_targets.clear();
         }
         else
         {
           // Now do the registration
           set_mapping_state(idx, true/*src*/);
-          runtime->forest->physical_register_only(context,
-                                                  src_requirements[idx],
+          runtime->forest->physical_register_only(src_requirements[idx],
                                                   src_versions[idx],
                                                   src_restrict_infos[idx],
                                                   this, idx, local_completion,
@@ -3241,8 +3229,7 @@ namespace Legion {
                                          dst_targets);
         // Now do the registration
         set_mapping_state(idx, false/*src*/);
-        runtime->forest->physical_register_only(context,
-                                                dst_requirements[idx],
+        runtime->forest->physical_register_only(dst_requirements[idx],
                                                 dst_versions[idx],
                                                 dst_restrict_infos[idx],
                                                 this, idx, local_completion,
@@ -3285,11 +3272,12 @@ namespace Legion {
         if (!IS_REDUCE(dst_requirements[idx]))
         {
           ApEvent across_done = 
-            runtime->forest->copy_across(context, 
+            runtime->forest->copy_across( 
                                   src_requirements[idx], dst_requirements[idx],
-                                  src_targets, dst_targets, dst_versions[idx], 
-                                  src_composite, this, idx, 
-                                  local_sync_precondition, 
+                                  src_targets, dst_targets, 
+                                  src_versions[idx], dst_versions[idx], 
+                                  src_composite,
+                                  this, idx, local_sync_precondition, 
                                   map_applied_conditions);
           Runtime::trigger_event(local_completion, across_done);
         }
@@ -3300,7 +3288,7 @@ namespace Legion {
           assert(src_composite == -1);
 #endif
           ApEvent across_done = 
-            runtime->forest->reduce_across(context,
+            runtime->forest->reduce_across(
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, this, 
                                   local_sync_precondition);
@@ -5299,14 +5287,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       // See if we are restricted or not and if not find our valid instances 
       InstanceSet chosen_instances;
       int composite_idx = -1;
       if (!restrict_info.has_restrictions())
       {
         InstanceSet valid_instances;
-        runtime->forest->physical_premap_only(physical_ctx, requirement,
+        runtime->forest->physical_premap_only(this, 0/*idx*/, requirement,
                                               version_info, valid_instances);
         // now invoke the mapper to find the instances to use
         composite_idx = invoke_mapper(valid_instances, chosen_instances);
@@ -5317,9 +5304,8 @@ namespace Legion {
       assert(closed_tree != NULL);
 #endif
       // Now we can perform our close operation
-      runtime->forest->physical_perform_close(physical_ctx, requirement,
+      runtime->forest->physical_perform_close(requirement,
                                               version_info, this, 0/*idx*/, 
-                                              get_parent()/*context*/,
                                               composite_idx, closed_tree,
                                               completion_event,
                                               map_applied_conditions,
@@ -6022,7 +6008,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index,
-                                    const RegionRequirement &req, bool created)
+                                    const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, req, true/*track*/);
@@ -6031,7 +6017,6 @@ namespace Legion {
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      created_requirement = created;
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
@@ -6040,6 +6025,10 @@ namespace Legion {
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_op_id(),
                                            parent_idx);
+        for (std::set<FieldID>::const_iterator it = 
+              requirement.privilege_fields.begin(); it !=
+              requirement.privilege_fields.end(); it++)
+          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,0/*iid*/);
       }
     }
     
@@ -6048,7 +6037,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_close();
-      created_requirement = false;
     }
 
     //--------------------------------------------------------------------------
@@ -6056,7 +6044,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
-      map_applied_conditions.clear();
       runtime->free_virtual_close_op(this);
     }
 
@@ -6078,6 +6065,9 @@ namespace Legion {
     void VirtualCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      // Just doing the dependence analysis will precipitate any
+      // close operations necessary for the virtual close op to
+      // do its job, so it needs to do nothing else
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -6088,59 +6078,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_ready(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   privilege_path,
-                                                   version_info,
-                                                   preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
-      InstanceSet composite_refs(1);
-      composite_refs[0] = InstanceRef(true/*composite*/);
-      // Always eagerly translate composite instances back out into
-      // the parent context
-      runtime->forest->map_virtual_region(physical_ctx, requirement,
-                                          composite_refs[0], version_info,
-                                          parent_ctx->get_parent(), this,
-                                          parent_ctx->get_parent(),
-                                          true/*needs fields*/
-#ifdef DEBUG_LEGION
-                                          , 0/*idx*/, get_logging_name()
-                                          , unique_op_id
-#endif
-                                          );
-      // Pass the reference back to the parent task
-      parent_ctx->return_virtual_instance(parent_idx, composite_refs,
-                                          created_requirement); 
-      if (Runtime::legion_spy_enabled)
-      {
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,0/*iid*/);
-      }
-      // Then we can mark that we are mapped and executed
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
     unsigned VirtualCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -6148,13 +6085,6 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_idx;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6400,14 +6330,13 @@ namespace Legion {
     void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances = restrict_info.get_instances();
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
-      runtime->forest->physical_register_only(physical_ctx, requirement,
+      runtime->forest->physical_register_only(requirement,
                                               version_info, restrict_info,
                                               this, 0/*idx*/, completion_event,
                                               false/*defer add users*/,
@@ -6934,13 +6863,12 @@ namespace Legion {
     void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       // We already know what the answer has to be here 
       InstanceSet mapped_instances = restrict_info.get_instances();
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
-      runtime->forest->physical_register_only(physical_ctx, requirement,
+      runtime->forest->physical_register_only(requirement,
                                               version_info, restrict_info,
                                               this, 0/*idx*/, completion_event,
                                               false/*defer add users*/,
@@ -10148,7 +10076,7 @@ namespace Legion {
         if (restrict_info.has_restrictions())
         {
           mapped_instances = restrict_info.get_instances();
-          runtime->forest->physical_register_only(physical_ctx, requirement,
+          runtime->forest->physical_register_only(requirement,
                                                   version_info, restrict_info,
                                                   this, 0/*idx*/,
                                                   ApEvent::NO_AP_EVENT,
@@ -10232,7 +10160,7 @@ namespace Legion {
       if (restrict_info.has_restrictions())
       {
         mapped_instances = restrict_info.get_instances();
-        runtime->forest->physical_register_only(physical_ctx, requirement,
+        runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/,
                                                 ApEvent::NO_AP_EVENT,

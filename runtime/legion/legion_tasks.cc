@@ -2096,7 +2096,6 @@ namespace Legion {
         // This wait sucks but whatever for now
         wait_on.wait();
       }
-      RegionTreeContext req_ctx = parent_ctx->get_context();
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
       {
@@ -2104,7 +2103,7 @@ namespace Legion {
         VersionInfo &version_info = get_version_info(*it);
         RestrictInfo &restrict_info = get_restrict_info(*it);
         // Do the premapping
-        runtime->forest->physical_premap_only(req_ctx, regions[*it],
+        runtime->forest->physical_premap_only(this, *it, regions[*it],
                                               version_info, valid);
         // If we need visible instances, filter them as part of the conversion
         if (regions[*it].is_no_access())
@@ -2278,9 +2277,8 @@ namespace Legion {
         // could result in the generation of a copy
         set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
-        runtime->forest->physical_register_only(req_ctx, 
-                              regions[*it], version_info, 
-                              restrict_info, this, *it,
+        runtime->forest->physical_register_only(regions[*it], 
+                              version_info, restrict_info, this, *it,
                               completion_event, (regions.size() > 1), 
                               true/*need read only reservatins*/,
                               applied_conditions, chosen_instances
@@ -3545,6 +3543,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
           created_regions[idx] = created_requirements[idx].region;
       }
+      // Need outermost context for any created regions
+      ctx = find_outermost_local_context(this)->get_context(); 
       for (unsigned idx = 0; idx < created_regions.size(); idx++)
         runtime->forest->perform_fence_analysis(ctx, op, 
                                     created_regions[idx], true/*dominate*/);
@@ -4075,19 +4075,10 @@ namespace Legion {
     SingleTask* SingleTask::find_parent_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == parent_req_indexes.size());
-#endif
-      if (index < virtual_mapped.size())
-      {
-        // See if it is virtual mapped
-        if (virtual_mapped[index])
-          return parent_ctx->find_parent_logical_context(
-                                parent_req_indexes[index]);
-        else // We mapped a physical instances so we're it
-          return this;
-      }
+      // If this one of our original requirements, we do the
+      // logical analysis in our context
+      if (index < regions.size())
+        return this;
       else // We created it, get the outermost enclosing context
         return parent_ctx->find_outermost_local_context(this);
     }
@@ -6200,7 +6191,6 @@ namespace Legion {
 #endif
       // Now do the mapping call
       invoke_mapper(must_epoch_op);
-      RegionTreeContext enclosing_context = parent_ctx->get_context();
       const bool multiple_requirements = (regions.size() > 1);
       std::set<Reservation> read_only_reservations;
       // This is the price of allowing read-only requirements to
@@ -6246,45 +6236,15 @@ namespace Legion {
         }
         if (no_access_regions[idx])
           continue;
-        // See if we have to do any virtual mapping before registering
+        // If we virtual mapped it, there is nothing to do
         if (virtual_mapped[idx])
-        {
-#ifdef DEBUG_LEGION
-          assert(physical_instances[idx].size() == 1);
-          assert(physical_instances[idx][0].get_manager()->
-                                      is_virtual_instance());
-#endif
-          // We choose different target contexts depending on whether
-          // we are locally mapping and are remote or not. If we're 
-          // locally mapping and being sent to a remote processor then
-          // we will use our parent context for now and translate later
-          // on our destination node. Otherwise we can just use ourself
-          SingleTask *target_ctx = this;
-          if (is_locally_mapped() && !runtime->is_local(target_proc))
-            target_ctx = parent_ctx;
-          // No translation context for now, we'll change that
-          // when we know where we are going to be running
-          runtime->forest->map_virtual_region(enclosing_context,
-                                              regions[idx],
-                                              physical_instances[idx][0],
-                                              get_version_info(idx),
-                                              target_ctx, this, NULL,
-                                              false/*needs fields*/
-#ifdef DEBUG_LEGION
-                                              , idx, get_logging_name()
-                                              , unique_op_id
-#endif
-                                              );
-          // No need to register this instance in the context
-          // because it doesn't represent a change of state
           continue;
-        }
         // Set the current mapping index before doing anything
         // that sould result in a copy
         set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
-        runtime->forest->physical_register_only(enclosing_context,
-                                    regions[idx], get_version_info(idx), 
+        runtime->forest->physical_register_only(regions[idx], 
+                                    get_version_info(idx), 
                                     get_restrict_info(idx),
                                     this, idx, local_termination_event, 
                                     multiple_requirements/*defer add users*/,
@@ -6309,7 +6269,7 @@ namespace Legion {
             local_termination_event, regions, virtual_mapped, 
             *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
             *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-            enclosing_context, phy_inst_ref, map_applied_conditions);
+            phy_inst_ref, map_applied_conditions);
         // Release any read-only reservations that we're holding
         if (!read_only_reservations.empty())
         {
@@ -6349,15 +6309,13 @@ namespace Legion {
       input.valid_instances.resize(regions.size());
       output.chosen_instances.resize(regions.size());
       std::vector<InstanceSet> postmap_valid(regions.size());
-      RegionTreeContext enclosing_context = parent_ctx->get_context();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Don't need to actually traverse very far, but we do need the
         // valid instances for all the regions
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
-        runtime->forest->physical_premap_only(enclosing_context,
-                                              regions[idx], 
+        runtime->forest->physical_premap_only(this, idx, regions[idx], 
                                               get_version_info(idx),
                                               postmap_valid[idx]);
         // No need to filter these because they are on the way out
@@ -6501,8 +6459,8 @@ namespace Legion {
         RestrictInfo empty_restrict_info;
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
-        runtime->forest->physical_register_only(enclosing_context,
-                          regions[idx], get_version_info(idx), 
+        runtime->forest->physical_register_only(regions[idx], 
+                          get_version_info(idx), 
                           empty_restrict_info, this, idx,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
@@ -6512,65 +6470,6 @@ namespace Legion {
                           , get_logging_name(), unique_op_id
 #endif
                           );
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::return_virtual_instance(unsigned index,
-                                             InstanceSet &refs, bool created)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, SINGLE_RETURN_VIRTUAL_CALL);
-#ifdef DEBUG_LEGION
-      assert(refs.size() == 1);
-      assert(refs[0].is_composite_ref());
-#endif
-      RegionTreeContext virtual_ctx = parent_ctx->get_context();
-      if (created)
-      {
-#ifdef DEBUG_LEGION
-        assert(index >= regions.size());
-        assert((index - regions.size()) < created_requirements.size());
-#endif
-        // No need for the lock when accessing created_requirements, we
-        // know that if we are here then the task is done running so
-        // there will be no more modifications to created requirements
-        CompositeView *composite_view = refs[0].get_composite_view();   
-        runtime->forest->initialize_current_context(virtual_ctx,
-                   created_requirements[index - regions.size()], 
-                   refs, parent_ctx, index, composite_view); 
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(index < regions.size());
-        assert(virtual_mapped[index]);
-        assert(!IS_READ_ONLY(regions[index]));
-#endif
-        // Apply our version state information, put map applied information
-        // in a temporary data structure and then hold the lock when merging
-        // it back into map_applied conditions
-        std::set<RtEvent> temp_map_applied_conditions;
-        RestrictInfo empty_restrict_info;
-        VersionInfo &info = get_version_info(index);
-        runtime->forest->physical_register_only(virtual_ctx, regions[index],
-                                                info, empty_restrict_info, this,
-                                                index, ApEvent::NO_AP_EVENT,
-                                                false/*defer add users*/, 
-                                                false/*not read only*/,
-                                                temp_map_applied_conditions,refs
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-        info.apply_mapping(temp_map_applied_conditions);
-        if (!temp_map_applied_conditions.empty())
-        {
-          AutoLock o_lock(op_lock);
-          map_applied_conditions.insert(temp_map_applied_conditions.begin(),
-                                        temp_map_applied_conditions.end());
-        }
       }
     }
 
@@ -6631,18 +6530,8 @@ namespace Legion {
         }
         else
         {
-#ifdef DEBUG_LEGION
-          assert(physical_instances[idx].has_composite_ref());
-#endif
-          const InstanceRef &ref = physical_instances[idx].get_composite_ref();
-          // If we locally mapped and are now remote, we need to translate
-          // this composite instance so that its views are specific to 
-          // our context
-          CompositeView *composite_view = 
-            ref.get_composite_view()->translate_context(this); 
-          runtime->forest->initialize_current_context(context,
-              clone_requirements[idx], physical_instances[idx], 
-              this, idx, composite_view);
+          runtime->forest->initialize_virtual_context(context,
+                                      clone_requirements[idx]);
         }
       }
     }
@@ -6652,15 +6541,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
+      // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        runtime->forest->invalidate_current_context(context,
+        runtime->forest->invalidate_current_context(context,false/*users only*/,
                                                     regions[idx].region);
+        if (!virtual_mapped[idx])
+          runtime->forest->invalidate_versions(context, regions[idx].region);
       }
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      if (!created_requirements.empty())
       {
-        runtime->forest->invalidate_current_context(context,
-                                        created_requirements[idx].region);
+        // Only invalidate the full logical context if we're
+        // the outermost context, otherwise, we just have to
+        // invaliate the users
+        SingleTask *outermost = 
+          parent_ctx->find_outermost_local_context(this);
+        if (outermost == this)
+        {
+          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+            runtime->forest->invalidate_current_context(context, false,
+                                            created_requirements[idx].region);
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+            runtime->forest->invalidate_current_context(context, true,
+                                            created_requirements[idx].region);
+        }
       }
     }
 
@@ -6739,65 +6646,6 @@ namespace Legion {
       InstanceView *result = 
         manager->create_instance_top_view(this, request_source);
       result->add_base_resource_ref(CONTEXT_REF);
-      // We've got the results, if we have any virtual mappings we have
-      // to see if this instance can be used to satisfy a virtual mapping
-      // We can also skip reduction views because we know they are not
-      // permitted to cross context boundaries
-      std::set<RtEvent> trigger_preconditions;
-      if (has_virtual_instances() && !result->is_reduction_view())
-      {
-        InstanceView *parent_context_view = NULL;
-        const LogicalRegion &handle = manager->region_node->handle;
-        // Nasty corner case, see if there are any other region requirements
-        // which this instance can also be used for and are also virtual 
-        // mapped and therefore we need to do this analysis now before we
-        // release the instance as ready for the context
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // If it's not virtual mapped we can keep going
-          if (!virtual_mapped[idx] || no_access_regions[idx])
-            continue;
-          // Different tree IDs then we can keep going
-          if (regions[idx].region.get_tree_id() != handle.get_tree_id())
-            continue;
-          // See if we have a path
-          std::vector<ColorPoint> path;
-          if (!runtime->forest->compute_index_path(handle.get_index_space(), 
-                                regions[idx].region.get_index_space(), path))
-            continue;
-          // See if we have any overlapping fields
-          bool has_overlapping_fields = false;
-          for (std::set<FieldID>::const_iterator it = 
-                regions[idx].privilege_fields.begin(); it !=
-                regions[idx].privilege_fields.end(); it++)
-          {
-            if (manager->layout->has_field(*it))
-            {
-              has_overlapping_fields = true;
-              break;
-            }
-          }
-          if (!has_overlapping_fields)
-            continue;
-          // We definitely need to do the analysis, since we are a
-          // sub-region and have overlapping fields, get the parent
-          // context view if we haven't done so already
-          if (parent_context_view == NULL)
-          {
-            // Note that this recursion ensures that we handle nested
-            // virtual mappings correctly
-            SingleTask *parent_context = find_parent_context();
-            parent_context_view = 
-              parent_context->create_instance_top_view(manager, 
-                                                      runtime->address_space);
-          }
-          // Now we clone across for the given region requirement
-          VersionInfo &info = get_version_info(idx); 
-          runtime->forest->convert_views_into_context(regions[idx], this, idx,
-                     info, parent_context_view, result, get_task_completion(),
-                     path, map_applied_conditions);
-        }
-      }
       // Record the result and trigger any user event to signal that the
       // view is ready
       RtUserEvent to_trigger;
@@ -6816,17 +6664,7 @@ namespace Legion {
         to_trigger = pending_finder->second;
         pending_top_views.erase(pending_finder);
       }
-      if (!trigger_preconditions.empty())
-      {
-        RtEvent precondition = Runtime::merge_events(trigger_preconditions);
-#ifdef DEBUG_LEGION
-        assert(ready_event != NULL);
-#endif
-        *ready_event = precondition;
-        if (to_trigger.exists())
-          Runtime::trigger_event(to_trigger, precondition);
-      }
-      else if (to_trigger.exists())
+      if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
       return result;
     }
@@ -6852,109 +6690,6 @@ namespace Legion {
       }
       if (removed->remove_base_resource_ref(CONTEXT_REF))
         LogicalView::delete_logical_view(removed);
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::convert_virtual_instance_top_views(
-                   const std::map<AddressSpaceID,RemoteTask*> &remote_instances)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL);
-      // If we have no virtual mapped regions and we have no created
-      // region requirements then we are done
-      if (created_requirements.empty())
-        return;
-      // If we have any remote instances we need to send a message to them
-      // that they have to do this for themselves before we are mapped
-      if (!remote_instances.empty())
-      {
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          RtUserEvent remote_done = Runtime::create_rt_user_event();
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(it->second);
-            rez.serialize<size_t>(created_requirements.size());
-            for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-              pack_region_requirement(created_requirements[idx], rez);
-            rez.serialize(remote_done); 
-          }
-          runtime->send_remote_convert_virtual_instances(it->first, rez);
-          map_applied_conditions.insert(remote_done);
-        }
-      }
-      // Now do it for ourself, we have to make a copy because deletions
-      // can still come back while we are iterating over our instances
-      std::vector<PhysicalManager*> copy_top_views;
-      {
-        AutoLock o_lock(op_lock,1,false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
-              instance_top_views.begin(); it != instance_top_views.end(); it++)
-        {
-          // Try adding a valid reference to make sure it doesn't get
-          // collected while we are trying to do this, we're on the owner
-          // node so this doesn't need to be valid initially
-          if (it->first->try_add_base_valid_ref(CONTEXT_REF, NULL, false))
-            copy_top_views.push_back(it->first);
-          // If we couldn't add the valid ref that means this instance
-          // is definitely going to be collected
-        }
-      }
-      for (std::vector<PhysicalManager*>::const_iterator it = 
-            copy_top_views.begin(); it != copy_top_views.end(); it++)
-      {
-        InstanceView *parent_context_view = NULL;
-        const LogicalRegion &handle = (*it)->region_node->handle;
-        // If we had any created region requirements we need to see 
-        // if we have any interfering users for those requirements
-        if (!created_requirements.empty())
-        {
-          const AddressSpaceID local_space = runtime->address_space;
-          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-          {
-            if (created_requirements[idx].region.get_tree_id() != 
-                 handle.get_tree_id())
-              continue;
-            // We are guaranteed to have a path since we know a created
-            // requirement is always for the top of the region tree
-            // See if we have any overlapping fields
-            bool has_overlapping_fields = false;
-            for (std::set<FieldID>::const_iterator fit = 
-                  created_requirements[idx].privilege_fields.begin(); fit !=
-                  created_requirements[idx].privilege_fields.end(); fit++)
-            {
-              if ((*it)->layout->has_field(*fit))
-              {
-                has_overlapping_fields = true;
-                break;
-              }
-            }
-            if (!has_overlapping_fields)
-              continue;
-            if (parent_context_view == NULL)
-            {
-              SingleTask *parent_context = find_parent_context();
-              parent_context_view = parent_context->create_instance_top_view(
-                                                            *it, local_space);
-            }
-            // Do the conversion back out
-            VersionInfo dummy_info;
-            runtime->forest->convert_views_from_context(
-                                                      created_requirements[idx],
-                                                      this, regions.size()+idx,
-                                                      dummy_info,
-                                                      parent_context_view,
-                                                      get_task_completion(),
-                                                      true/*initial user*/,
-                                                      map_applied_conditions);
-          }
-        }
-        // Then we can remove our valid reference on the manager
-        if ((*it)->remove_base_valid_ref(CONTEXT_REF))
-          PhysicalManager::delete_physical_manager(*it); 
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7439,33 +7174,14 @@ namespace Legion {
           }
           else
           {
-#ifdef DEBUG_LEGION
-            assert(physical_instances[idx].has_composite_ref());
-#endif
             // Make a virtual close op to close up the instance
             VirtualCloseOp *close_op = 
               runtime->get_available_virtual_close_op(true);
-            close_op->initialize(this, idx, regions[idx], false/*created*/);
+            close_op->initialize(this, idx, regions[idx]);
             runtime->add_to_dependence_queue(executing_processor, close_op);
           }
         }
       } 
-      // If we have any created requirements, we have to issue virtual close
-      // operations for those fields as well. Skip this if we are the
-      // top-level task since there is no where for the state to go
-      if (!created_requirements.empty() && !is_top_level_task())
-      {
-        const unsigned offset = regions.size();
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-        {
-          // Make a virtual close op to close up the tree  
-          VirtualCloseOp *close_op = 
-            runtime->get_available_virtual_close_op(true);
-          close_op->initialize(this, offset + idx, 
-                               created_requirements[idx], true/*created*/);
-          runtime->add_to_dependence_queue(executing_processor, close_op);
-        }
-      }
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -8868,11 +8584,6 @@ namespace Legion {
       {
         if (!acquired_instances.empty())
           release_acquired_instances(acquired_instances);
-        // Handle remaining state flowing back out for virtual mappings
-        // and newly created regions and fields, don't have to do this
-        // though if we are at the top of the task tree
-        if (!top_level_task)
-          convert_virtual_instance_top_views(remote_instances);
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
@@ -8909,7 +8620,7 @@ namespace Legion {
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
     {
-      runtime->forest->physical_premap_only(ctx, regions[idx], 
+      runtime->forest->physical_premap_only(this, idx, regions[idx], 
                                             version_infos[idx], valid);
     }
 
@@ -9632,7 +9343,7 @@ namespace Legion {
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
     {
-      runtime->forest->physical_premap_only(ctx, regions[idx], 
+      runtime->forest->physical_premap_only(this, idx, regions[idx], 
                                             version_infos[idx], valid);
     }
 
@@ -9708,10 +9419,6 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
-      
-      // Handle remaining state flowing back out for virtual mappings
-      // and newly created regions and fields
-      convert_virtual_instance_top_views(remote_instances);
       if (!map_applied_conditions.empty())
       {
         RtEvent done = Runtime::merge_events(map_applied_conditions);
@@ -10192,7 +9899,17 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REMOTE_TASK_DEACTIVATE_CALL);
       // Invalidate our context if necessary before deactivating
       // the wrapper as it will release the context
-      if (top_level_context)
+      if (!top_level_context)
+      {
+#ifdef DEBUG_LEGION
+        assert(regions.size() == virtual_mapped.size());
+#endif
+        // Deactivate any region trees that we didn't virtually map
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          if (!virtual_mapped[idx])
+            runtime->forest->invalidate_versions(context, regions[idx].region);
+      }
+      else
         runtime->forest->invalidate_all_versions(context);
       deactivate_wrapper(); 
       version_infos.clear();
@@ -10517,37 +10234,6 @@ namespace Legion {
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
       parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
       parent_task = parent_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::convert_virtual_instances(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_created;
-      derez.deserialize(num_created);
-      created_requirements.resize(num_created);
-      for (unsigned idx = 0; idx < num_created; idx++)
-        unpack_region_requirement(created_requirements[idx], derez);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      std::map<AddressSpaceID,RemoteTask*> empty_remote;
-      convert_virtual_instance_top_views(empty_remote);
-      if (!map_applied_conditions.empty())
-        Runtime::trigger_event(to_trigger,
-                               Runtime::merge_events(map_applied_conditions));
-      else
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteTask::handle_convert_virtual_instances(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RemoteTask *local_context;
-      derez.deserialize(local_context);
-      local_context->convert_virtual_instances(derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12041,7 +11727,6 @@ namespace Legion {
         legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
       }
       temporary_futures.clear();
-      temporary_virtual_refs.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       acquired_instances.clear();
@@ -12750,10 +12435,6 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution();
-      // Now that we've mapped, we can remove any composite references
-      // that we are holding
-      if (!temporary_virtual_refs.empty())
-        temporary_virtual_refs.clear();
     }
 
     //--------------------------------------------------------------------------

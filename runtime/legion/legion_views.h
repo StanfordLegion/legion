@@ -934,7 +934,7 @@ namespace Legion {
                     CopyAcrossHelper *helper, FieldMask dominate_mask, 
                     bool check_overwrite, bool check_ready = true);
     public:
-      virtual SingleTask* get_translation_context(void) const = 0;
+      virtual SingleTask* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1085,7 +1085,7 @@ namespace Legion {
                                    const FieldMask &needed_fields);
     public:
       // From CompositeBase
-      virtual SingleTask* get_translation_context(void) const;
+      virtual SingleTask* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1117,7 +1117,7 @@ namespace Legion {
       // The abstraction of the tree that we closed
       ClosedNode *const closed_tree;
       // The translation context if any
-      SingleTask *const translation_context;
+      SingleTask *const owner_context;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
@@ -1168,7 +1168,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       // From CompositeBase
-      virtual SingleTask* get_translation_context(void) const;
+      virtual SingleTask* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1188,11 +1188,9 @@ namespace Legion {
       void notify_invalid(ReferenceMutator *mutator);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
-      void record_valid_view(LogicalView *view, const FieldMask &mask,
-                             SingleTask *translation_context);
+      void record_valid_view(LogicalView *view, const FieldMask &mask);
       void record_reduction_fields(const FieldMask &reduction_fields);
-      void record_reduction_view(ReductionView *view, const FieldMask &mask,
-                                 SingleTask *translation_context);
+      void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
       void record_version_state(VersionState *state, const FieldMask &mask);

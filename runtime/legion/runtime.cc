@@ -5400,11 +5400,6 @@ namespace Legion {
               runtime->handle_remote_context_free(derez);
               break;
             }
-          case SEND_REMOTE_CONVERT_VIRTUAL:
-            {
-              runtime->handle_remote_convert_virtual_instances(derez);
-              break;
-            }
           case SEND_VERSION_OWNER_REQUEST: 
             {
               runtime->handle_version_owner_request(derez,remote_address_space);
@@ -15223,16 +15218,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_convert_virtual_instances(AddressSpaceID target,
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // The absolutley must not go on the context virtual channel
-      find_messenger(target)->send_message(rez, SEND_REMOTE_CONVERT_VIRTUAL,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_version_owner_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16156,13 +16141,6 @@ namespace Legion {
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
       unregister_remote_context(remote_owner_uid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_convert_virtual_instances(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      RemoteTask::handle_convert_virtual_instances(derez);
     }
 
     //--------------------------------------------------------------------------

@@ -2185,15 +2185,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CurrentInvalidator::CurrentInvalidator(ContextID c)
-      : ctx(c)
+    CurrentInvalidator::CurrentInvalidator(ContextID c, bool only)
+      : ctx(c), users_only(only)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CurrentInvalidator::CurrentInvalidator(const CurrentInvalidator &rhs)
-      : ctx(0)
+      : ctx(0), users_only(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2227,7 +2227,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx); 
+      node->invalidate_current_state(ctx, users_only); 
       return true;
     }
 
@@ -2235,7 +2235,7 @@ namespace Legion {
     bool CurrentInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_current_state(ctx);
+      node->invalidate_current_state(ctx, users_only);
       return true;
     }
 
@@ -5090,7 +5090,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::filter_version_info(const FieldMask &mask,
-      typename LegionMap<VersionID,
+             LegionMap<VersionID,
                        VersioningSet<VERSION_MANAGER_REF> >::aligned &to_filter)
     //--------------------------------------------------------------------------
     {
@@ -5480,7 +5480,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::find_send_infos(
-          typename LegionMap<VersionID,
+                   LegionMap<VersionID,
                              VersioningSet<VERSION_MANAGER_REF> >::aligned& 
             version_infos, const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos)
@@ -5578,13 +5578,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::merge_send_infos(
-        typename LegionMap<VersionID,
-            VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
+        LegionMap<VersionID,
+                  VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
         const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
         ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (typename LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
             it = source_infos.begin(); it != source_infos.end(); it++)
         target_infos[it->first->version_number].insert(it->first, it->second);
     }
@@ -7405,7 +7405,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture(CompositeNode *target,
-           const FieldMask &capture_mask, SingleTask *translation_context) const
+                               const FieldMask &capture_mask) const
     //--------------------------------------------------------------------------
     {
       // Only need this in read only mode since we're just reading
@@ -7420,7 +7420,7 @@ namespace Legion {
           FieldMask overlap = it->second & dirty_overlap;
           if (!overlap)
             continue;
-          target->record_valid_view(it->first, overlap, translation_context);
+          target->record_valid_view(it->first, overlap);
         }
       }
       FieldMask reduction_overlap = reduction_mask & capture_mask;
@@ -7433,7 +7433,7 @@ namespace Legion {
           FieldMask overlap = it->second & reduction_overlap;
           if (!overlap)
             continue;
-          target->record_reduction_view(it->first, overlap,translation_context);
+          target->record_reduction_view(it->first, overlap);
         }
       }
       for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =

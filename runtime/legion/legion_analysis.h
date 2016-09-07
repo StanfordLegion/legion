@@ -897,8 +897,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
-            typename LegionMap<VersionID,
-                               VersioningSet<VERSION_MANAGER_REF> >::aligned
+           LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned
                                                                 &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
@@ -930,8 +929,7 @@ namespace Legion {
       void pack_response(Serializer &rez, AddressSpaceID target,
                          const FieldMask &request_mask);
       static void find_send_infos(
-          typename LegionMap<VersionID,
-                             VersioningSet<VERSION_MANAGER_REF> >::aligned& 
+          LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned& 
             version_infos, const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
       static void pack_send_infos(Serializer &rez, const
@@ -944,7 +942,7 @@ namespace Legion {
           LegionMap<VersionState*,FieldMask>::aligned &infos,
           Runtime *runtime, std::set<RtEvent> &preconditions);
       static void merge_send_infos(
-          typename LegionMap<VersionID,
+          LegionMap<VersionID,
               VersioningSet<VERSION_MANAGER_REF> >::aligned &target_infos,
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
           ReferenceMutator *mutator);
@@ -1165,8 +1163,7 @@ namespace Legion {
     public:
       void capture_root(CompositeView *target, 
                         const FieldMask &capture_mask) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask,
-                   SingleTask *translation_context) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
       void capture_dirty_instances(const FieldMask &capture_mask, 
                                    VersionState *target) const;
     public:
@@ -1364,7 +1361,7 @@ namespace Legion {
      */
     class CurrentInvalidator : public NodeTraverser {
     public:
-      CurrentInvalidator(ContextID ctx);
+      CurrentInvalidator(ContextID ctx, bool users_only);
       CurrentInvalidator(const CurrentInvalidator &rhs);
       ~CurrentInvalidator(void);
     public:
@@ -1375,6 +1372,7 @@ namespace Legion {
       virtual bool visit_partition(PartitionNode *node);
     protected:
       const ContextID ctx;
+      const bool users_only;
     };
 
     /**

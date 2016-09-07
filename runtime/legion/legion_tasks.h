@@ -599,8 +599,6 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances);
-      void return_virtual_instance(unsigned index, 
-                                   InstanceSet &refs, bool created);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -1239,9 +1237,6 @@ namespace Legion {
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-    public:
-      void convert_virtual_instances(Deserializer &derez);
-      static void handle_convert_virtual_instances(Deserializer &derez);
     protected:
       UniqueID remote_owner_uid;
       UniqueID parent_context_uid;
@@ -1550,7 +1545,6 @@ namespace Legion {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      LegionDeque<InstanceRef>::aligned temporary_virtual_refs;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     };

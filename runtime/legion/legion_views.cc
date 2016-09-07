@@ -4576,12 +4576,13 @@ namespace Legion {
                               SingleTask *context, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
                      node, register_now), CompositeBase(view_lock),
-        version_info(info), closed_tree(tree), translation_context(context)
+        version_info(info), closed_tree(tree), owner_context(context)
     {
       // Add our references
       version_info->add_reference();
       closed_tree->add_reference();
 #ifdef DEBUG_LEGION
+      assert(owner_context != NULL);
       assert(closed_tree != NULL);
       assert(closed_tree->node == node);
 #endif
@@ -4594,7 +4595,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
       : DeferredView(NULL, 0, 0, 0, NULL, false), CompositeBase(view_lock),
-        version_info(NULL), closed_tree(NULL), translation_context(NULL)
+        version_info(NULL), closed_tree(NULL), owner_context(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4683,7 +4684,7 @@ namespace Legion {
       DistributedID result_did = runtime->get_available_distributed_id(false);
       CompositeView *result = legion_new<CompositeView>(context, result_did,
           runtime->address_space, logical_node, runtime->address_space,
-          version_info, closed_tree, translation_context, true/*register now*/);
+          version_info, closed_tree, owner_context, true/*register now*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -4849,10 +4850,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(owner_space);
-        if (translation_context != NULL)
-          rez.serialize<UniqueID>(translation_context->get_context_uid());
-        else
-          rez.serialize<UniqueID>(0);
+        rez.serialize<UniqueID>(owner_context->get_context_uid());
         bool is_region = logical_node->is_region();
         rez.serialize(is_region);
         if (is_region)
@@ -5154,10 +5152,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* CompositeView::get_translation_context(void) const
+    SingleTask* CompositeView::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
-      return translation_context;
+      return owner_context;
     }
 
     //--------------------------------------------------------------------------
@@ -5214,8 +5212,8 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID owner;
       derez.deserialize(owner);
-      UniqueID translation_uid;
-      derez.deserialize(translation_uid);
+      UniqueID owner_uid;
+      derez.deserialize(owner_uid);
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *target_node;
@@ -5235,9 +5233,7 @@ namespace Legion {
       version_info->unpack_version_numbers(derez, runtime->forest);
       ClosedNode *closed_tree = 
         ClosedNode::unpack_closed_node(derez, runtime, is_region);
-      SingleTask *translation_context = NULL;
-      if (translation_uid != 0)
-        translation_context = runtime->find_context(translation_uid);
+      SingleTask *owner_context = runtime->find_context(owner_uid);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
@@ -5246,12 +5242,12 @@ namespace Legion {
                                            did, owner, target_node, 
                                            runtime->address_space,
                                            version_info, closed_tree,
-                                           translation_context,
+                                           owner_context,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
                            target_node, runtime->address_space,
-                           version_info, closed_tree, translation_context,
+                           version_info, closed_tree, owner_context,
                            false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
@@ -5300,13 +5296,6 @@ namespace Legion {
         assert(view->is_materialized_view());
 #endif
         MaterializedView *mat_view = view->as_materialized_view();
-        // Perform a translation if necessary
-        if (translation_context != NULL)
-        {
-          InstanceView *inst_view = logical_node->convert_manager(
-              mat_view->manager, translation_context);
-          mat_view = inst_view->as_materialized_view();
-        }
         LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
           valid_views.find(mat_view);
         if (finder == valid_views.end())
@@ -5371,10 +5360,6 @@ namespace Legion {
                                               const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // Perform a translation if necessary
-      if (translation_context != NULL)
-        view = logical_node->convert_manager(view->manager, 
-                                  translation_context)->as_reduction_view();
       // For now just add it, we'll record references 
       // during finalize_capture
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
@@ -5710,10 +5695,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* CompositeNode::get_translation_context(void) const
+    SingleTask* CompositeNode::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
-      return parent->get_translation_context();
+      return parent->get_owner_context();
     }
 
     //--------------------------------------------------------------------------
@@ -5767,10 +5752,10 @@ namespace Legion {
         // Request final states for all the version states and then either
         // launch a task to do the capture, or do it now
         std::set<RtEvent> capture_preconditions;
-        SingleTask *translation_context = parent->get_translation_context();
+        SingleTask *owner_context = parent->get_owner_context();
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               needed_states.begin(); it != needed_states.end(); it++)
-          it->first->request_final_version_state(translation_context,it->second,
+          it->first->request_final_version_state(owner_context, it->second,
                                                  capture_preconditions);
         if (!capture_preconditions.empty())
         {
@@ -5842,7 +5827,6 @@ namespace Legion {
     void CompositeNode::capture(RtUserEvent capture_event)
     //--------------------------------------------------------------------------
     {
-      SingleTask *translation_context = parent->get_translation_context();
       {
         AutoLock n_lock(node_lock);
         LegionMap<RtUserEvent,FieldMask>::aligned::iterator finder = 
@@ -5857,7 +5841,7 @@ namespace Legion {
           FieldMask overlap = it->second & finder->second;
           if (!overlap)
             continue;
-          it->first->capture(this, overlap, translation_context);
+          it->first->capture(this, overlap);
         }
         valid_fields |= finder->second;
         pending_captures.erase(finder); 
@@ -6011,14 +5995,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m,
-                                          SingleTask *translation_context)
+    void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
     //--------------------------------------------------------------------------
     {
-      // Perform a translation if necessary
-      if ((translation_context != NULL) && view->is_instance_view())
-        view = logical_node->convert_manager(
-            view->as_instance_view()->get_manager(), translation_context);
       // should already hold the lock from the caller
       LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
         valid_views.find(view);
@@ -6044,13 +6023,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void CompositeNode::record_reduction_view(ReductionView *view,
-                         const FieldMask &mask, SingleTask *translation_context)
+                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // Perform the translation if necessary
-      if (translation_context != NULL)
-        view = logical_node->convert_manager(view->get_manager(), 
-                                      translation_context)->as_reduction_view();
       // should already hold the lock from the caller
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
