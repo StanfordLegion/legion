@@ -246,9 +246,11 @@ namespace Legion {
                   ProjectionFunction *function);
       void clear(void);
       void sanity_check(unsigned depth);
+      // Cloning logical state for internal opeations
       void clone_logical(const VersionInfo &rhs, const FieldMask &mask,
                          RegionTreeNode *to_node);
       void copy_to(VersionInfo &rhs);
+      // Cloning information for virtual mappings
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -861,13 +863,15 @@ namespace Legion {
                             SingleTask *context, unsigned init_index,
                             const std::vector<LogicalView*> &corresponding);
     public:
-      void record_versions(const FieldMask &version_mask,
-                           FieldMask &unversioned_mask,
-                           SingleTask *context,
-                           Operation *op, unsigned index,
-                           const RegionUsage &usage,
-                           VersionInfo &version_info,
-                           std::set<RtEvent> &ready_events);
+      void record_current_versions(const FieldMask &version_mask,
+                                   FieldMask &unversioned_mask,
+                                   SingleTask *context,
+                                   Operation *op, unsigned index,
+                                   const RegionUsage &usage,
+                                   VersionInfo &version_info,
+                                   std::set<RtEvent> &ready_events);
+      void record_advanced_versions(const FieldMask &version_mask,
+                                    VersionInfo &version_info);
       void record_path_only_versions(const FieldMask &version_mask,
                                      const FieldMask &split_mask,
                                      FieldMask &unversioned_mask,

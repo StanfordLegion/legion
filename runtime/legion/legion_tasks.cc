@@ -1409,6 +1409,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskOp::was_created_requirement_deleted(
+                                             const RegionRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      // Region was created and not deleted
+      if (created_regions.find(req.region) != created_regions.end())
+        return false;
+      // Otherwise see if the field was created and still not deleted
+      // If it is has more than one privilege field then it was not 
+      // a created field
+      if (req.privilege_fields.size() > 1)
+        return true;
+      std::pair<FieldSpace,FieldID> key(req.region.get_field_space(),
+                                    *(req.privilege_fields.begin()));
+      if (created_fields.find(key) != created_fields.end())
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::return_privilege_state(TaskOp *target)
     //--------------------------------------------------------------------------
     {
@@ -3185,6 +3205,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false); // should only be called for RemoteTask
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::send_back_created_state(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // We should be the outermost local context if we're doing this
+#ifdef DEBUG_LEGION
+      assert(parent_ctx->find_outermost_local_context(this) == this);
+#endif
+      if (created_requirements.empty())
+        return;
+      UniqueID target_context_uid = parent_ctx->get_context_uid();
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = created_requirements[idx];
+        // If it was deleted then we don't care
+        if (was_created_requirement_deleted(req))
+          continue;
+        runtime->forest->send_back_logical_state(context, 
+                        target_context_uid, req, target);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6569,20 +6611,10 @@ namespace Legion {
             // Check to see if the region or the fields is still in the 
             // set of created regions or fields, if not then do the full
             // invaliation
-            bool still_created = 
-              created_regions.find(created_requirements[idx].region) !=
-               created_regions.end();
-            if (!still_created && 
-                (created_requirements[idx].privilege_fields.size() == 1))
-            {
-              std::pair<FieldSpace,FieldID> key(
-                  created_requirements[idx].region.get_field_space(),
-                  *(created_requirements[idx].privilege_fields.begin()));
-              still_created = 
-                (created_fields.find(key) != created_fields.end());
-            }
+            const bool users_only = !was_created_requirement_deleted(
+                                           created_requirements[idx]);
             runtime->forest->invalidate_current_context(
-                outermost->get_context(), still_created,
+                outermost->get_context(), users_only,
                 created_requirements[idx].region);
           }
         }
@@ -8824,12 +8856,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
+      AddressSpaceID target = runtime->find_address_space(orig_proc);
+      if (!created_requirements.empty())
+        send_back_created_state(target); 
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
       pack_privilege_state(rez, target);
       // Then pack the future result
       {
@@ -12526,11 +12560,15 @@ namespace Legion {
     void SliceTask::pack_remote_complete(Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Send back any created state that our point tasks made
+      AddressSpaceID target = runtime->find_address_space(orig_proc);
+      for (std::vector<PointTask*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->send_back_created_state(target);
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
       // Serialize the privilege state
-      AddressSpaceID target = runtime->find_address_space(orig_proc);
       pack_privilege_state(rez, target); 
       // Now pack up the future results
       if (redop != 0)

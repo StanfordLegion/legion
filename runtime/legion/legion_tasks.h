@@ -213,6 +213,7 @@ namespace Legion {
       virtual void add_created_region(LogicalRegion handle) = 0;
       virtual void add_created_field(FieldSpace handle, FieldID fid) = 0;
     public:
+      bool was_created_requirement_deleted(const RegionRequirement &req) const;
       void return_privilege_state(TaskOp *target);
       void pack_privilege_state(Serializer &rez, AddressSpaceID target);
       void unpack_privilege_state(Deserializer &derez);
@@ -632,6 +633,7 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
+      void send_back_created_state(AddressSpaceID target);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);

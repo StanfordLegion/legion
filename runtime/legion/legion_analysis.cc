@@ -4050,13 +4050,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::record_versions(const FieldMask &version_mask, 
-                                    FieldMask &unversioned_mask,
-                                    SingleTask *context, 
-                                    Operation *op, unsigned index,
-                                    const RegionUsage &usage,
-                                    VersionInfo &version_info,
-                                    std::set<RtEvent> &ready_events)
+    void VersionManager::record_current_versions(const FieldMask &version_mask, 
+                                                FieldMask &unversioned_mask,
+                                                SingleTask *context, 
+                                                Operation *op, unsigned index,
+                                                const RegionUsage &usage,
+                                                VersionInfo &version_info,
+                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       // See if we have been assigned
@@ -4083,23 +4083,35 @@ namespace Legion {
 #endif
         }
       }
+      // We'll only track unversioned in the reading cases
+      FieldMask unversioned;
       // Now we can record our versions
-      FieldMask unversioned = version_mask;
       if (IS_WRITE(usage))
       {
+        // Uncomment this if we want READ_WRITE on unversioned
+        // data to result in a warning, same with the code below
+#ifdef UNVERSIONED_READ_WRITE_WARNING
+        if (HAS_READ(usage))
+          unversioned = version_mask;
+#endif
         // At first we only need the lock in read-only mode
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
-        // Always need to capture both previous and next versions
+        // Just capture the current versions for now if we end
+        // up mapping a physical instance then we'll advance 
+        // later and record those versions as necessary
         for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator 
-              vit = previous_version_infos.begin(); vit !=
-              previous_version_infos.end(); vit++)
+              vit = current_version_infos.begin(); vit !=
+              current_version_infos.end(); vit++)
         {
           FieldMask local_overlap = vit->second.get_valid_mask() & version_mask;
           if (!local_overlap)
             continue;
+#ifdef UNVERSIONED_READ_WRITE_WARNING
+          unversioned -= local_overlap;
+#endif
           for (ManagerVersions::iterator it = vit->second.begin();
                 it != vit->second.end(); it++)
           {
@@ -4112,34 +4124,15 @@ namespace Legion {
                                                    ready_events);
           }
         }
-        // We're about to produce the first version of this instance
-        // so there's no need to request it
-        for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
-              vit = current_version_infos.begin(); vit != 
-              current_version_infos.end(); vit++)
-        {
-          FieldMask local_overlap = version_mask & vit->second.get_valid_mask();
-          if (!local_overlap)
-            continue;
-          for (ManagerVersions::iterator it = vit->second.begin();
-                it != vit->second.end(); it++)
-          {
-            FieldMask overlap = it->second & local_overlap;
-            if (!overlap)
-              continue;
-            unversioned -= overlap;
-            version_info.add_advance_version(it->first, overlap,
-                                             false/*path only*/);
-          }
-          if (!unversioned)
-            break;
-        }
-#ifdef DEBUG_LEGION
-        assert(!unversioned); // everyone should be versioned here
+#ifdef UNVERSIONED_READ_WRITE_WARNING
+        // Have to return since we don't want to make empty versions
+        return;
 #endif
       }
       else
       {
+        // Only track unversioned in non-writing cases for now
+        unversioned = version_mask;
         // At first we only need the lock in read-only mode
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
@@ -4225,6 +4218,32 @@ namespace Legion {
       }
       else if (!!unversioned_mask)
         unversioned_mask.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::record_advanced_versions(const FieldMask &version_mask,
+                                                  VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      // We're about to produce the first version of this instance
+      // so there's no need to request it
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
+            vit = current_version_infos.begin(); vit != 
+            current_version_infos.end(); vit++)
+      {
+        FieldMask local_overlap = version_mask & vit->second.get_valid_mask();
+        if (!local_overlap)
+          continue;
+        for (ManagerVersions::iterator it = vit->second.begin();
+              it != vit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & local_overlap;
+          if (!overlap)
+            continue;
+          version_info.add_advance_version(it->first, overlap,
+                                           false/*path only*/);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

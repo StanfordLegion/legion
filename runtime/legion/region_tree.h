@@ -250,6 +250,11 @@ namespace Legion {
                                      RegionRequirement &req,
                                      RestrictInfo &restrict_info,
                                      RegionTreePath &path);
+      // For privileges flowing back across node boundaries
+      void send_back_logical_state(RegionTreeContext context,
+                                   UniqueID context_uid,
+                                   const RegionRequirement &req,
+                                   AddressSpaceID target);
     public:
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,

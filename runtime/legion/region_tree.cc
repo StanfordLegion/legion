@@ -1599,6 +1599,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::send_back_logical_state(RegionTreeContext ctx,
+                      UniqueID context_uid, const RegionRequirement &req, 
+                      AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // TODO
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::perform_versioning_analysis(Operation *op, 
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
@@ -12449,22 +12459,9 @@ namespace Legion {
         }
         else
         {
-          // If we are at the destination node and we are writing then
-          // we need to advance the version number, we are guaranteed by
-          // the logical analysis that this is a safe to do without
-          // any kind of synchronization
-          if (IS_WRITE(usage))
-          {
-            // We update the parent state if we are not the top-level node
-            const bool update_parent_state = 
-              !version_info.is_upper_bound_node(this);
-            const AddressSpaceID local_space = context->runtime->address_space;
-            manager.advance_versions(version_mask, parent_ctx, 
-                update_parent_state, local_space, ready_events);
-          }
-          // Record the actual versions to be used here 
-          manager.record_versions(version_mask, unversioned_mask, parent_ctx, 
-                                  op, idx, usage, version_info, ready_events);
+          // Record the current versions to be used here 
+          manager.record_current_versions(version_mask, unversioned_mask, 
+                    parent_ctx, op, idx, usage, version_info, ready_events);
           // If we had any unversioned fields all the way down then we
           // have to report that uninitialized data is being used
           // Skip this if we have simultaneous coherence as it might
@@ -14963,6 +14960,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
+      // If we're actually mapping this region requirement and its a write
+      // then we have to advance the version numbers because we didn't
+      // do it before when we were unsure of whether we were going to 
+      // virtual map the requirement or not. Note we are guaranteed
+      // by the logical analysis that this is safe to do without any
+      // kind of synchronization.
+      if (IS_WRITE(usage))
+      {
+        VersionManager &manager = get_current_version_manager(info.ctx);
+        // We update the parent state if we are not the top-level node
+        const bool update_parent_state = 
+          !info.version_info.is_upper_bound_node(this);
+        const AddressSpaceID local_space = context->runtime->address_space;
+        manager.advance_versions(info.traversal_mask, context,
+            update_parent_state, local_space, info.map_applied_events);
+        // Now record just the advanced versions
+        manager.record_advanced_versions(info.traversal_mask,info.version_info);
+      }
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
       // Get any restricted fields
