@@ -417,6 +417,10 @@ namespace Legion {
       // been verified (flows up edges)
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
+    public:
+      // Help for finding the contexts for an operation
+      SingleTask* find_logical_context(unsigned index);
+      SingleTask* find_physical_context(unsigned index);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);

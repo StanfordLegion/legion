@@ -403,7 +403,7 @@ namespace Legion {
                          unsigned &idx1, unsigned &idx2);
     public:
       // This takes ownership of the value buffer
-      ApEvent fill_fields(RegionTreeContext ctx, Operation *op,
+      ApEvent fill_fields(Operation *op,
                           const RegionRequirement &req,
                           const unsigned index,
                           const void *value, size_t value_size,
@@ -413,12 +413,11 @@ namespace Legion {
                           std::set<RtEvent> &map_applied_events);
       InstanceManager* create_file_instance(AttachOp *attach_op,
                                             const RegionRequirement &req);
-      InstanceRef attach_file(RegionTreeContext ctx, SingleTask *parent_ctx,
+      InstanceRef attach_file(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
                               InstanceManager *file_instance,
                               VersionInfo &version_info);
-      ApEvent detach_file(RegionTreeContext ctx, 
-                          const RegionRequirement &req, DetachOp *detach_op, 
+      ApEvent detach_file(const RegionRequirement &req, DetachOp *detach_op,
                           unsigned index, VersionInfo &version_info, 
                           const InstanceRef &ref);
     public:
@@ -1373,6 +1372,12 @@ namespace Legion {
                                    FieldMask &open_below,
                                    bool force_close_next);
     public:
+      void send_back_logical_state(ContextID ctx, UniqueID context_uid,
+                                   AddressSpaceID target);
+      void process_logical_state_return(ContextID ctx, Deserializer &derez);
+      static void handle_logical_state_return(Runtime *runtime,
+                                              Deserializer &derez);
+    public:
       void compute_version_numbers(ContextID ctx, 
                                    const RegionTreePath &path,
                                    const RegionUsage &usage,
@@ -1768,9 +1773,10 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
-                       VersionInfo &version_info);
+                       SingleTask *context, VersionInfo &version_info,
+                       std::set<RtEvent> &map_applied_events);
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
-                              const unsigned index,
+                              const unsigned index, SingleTask *context,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
@@ -1780,7 +1786,7 @@ namespace Legion {
                            const FieldMask &attach_mask,
                            const RegionRequirement &req, 
                            InstanceManager *manager, VersionInfo &version_info);
-      ApEvent detach_file(ContextID ctx, DetachOp *detach_op, unsigned index, 
+      ApEvent detach_file(SingleTask *context, 
                           VersionInfo &version_info, const InstanceRef &ref);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,

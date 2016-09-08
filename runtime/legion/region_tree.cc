@@ -1475,9 +1475,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_logical_context(
-                                        op->find_parent_index(idx));
+      SingleTask *context = op->find_logical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1524,6 +1522,7 @@ namespace Legion {
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
       // Do our check for restricted coherence
+      SingleTask *parent_ctx = op->get_parent();
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(req, restrict_info);
       // If we have a restriction, then record it on the region requirement
@@ -1555,9 +1554,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_logical_context(
-                                        op->find_parent_index(idx));
+      SingleTask *context = op->find_logical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1604,8 +1601,11 @@ namespace Legion {
                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // TODO
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *top_node = get_node(req.region);
+      top_node->send_back_logical_state(ctx.get_id(), context_uid, target);
     }
 
     //--------------------------------------------------------------------------
@@ -1620,9 +1620,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                          op->find_parent_index(idx));
+      SingleTask *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1658,9 +1656,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL);
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                          op->find_parent_index(idx));
+      SingleTask *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2085,9 +2081,7 @@ namespace Legion {
       // If we are a NO_ACCESS, then we are already done 
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                        op->find_parent_index(index));
+      SingleTask *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2118,9 +2112,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                        op->find_parent_index(index));
+      SingleTask *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2241,7 +2233,6 @@ namespace Legion {
 #endif
       std::vector<std::vector<InstanceView*> > views(regions.size());
       // Do the precondition pass
-      SingleTask *parent_ctx = op->get_parent();
       std::vector<SingleTask*> enclosing_contexts(regions.size());
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
@@ -2257,8 +2248,7 @@ namespace Legion {
         assert(req.handle_type == SINGULAR);
         assert(!targets.empty());
 #endif
-        SingleTask *context = parent_ctx->find_parent_physical_context(
-                                            op->find_parent_index(idx1));
+        SingleTask *context = op->find_physical_context(idx1);
         // Save this for later in case we need it
         enclosing_contexts[idx1] = context;
         RegionNode *region_node = get_node(req.region);
@@ -2359,9 +2349,7 @@ namespace Legion {
       RegionNode *top_node = get_node(req.parent);
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                           op->find_parent_index(index));
+      SingleTask *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2437,9 +2425,7 @@ namespace Legion {
       RegionUsage usage(req);
       TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                          user_mask, map_applied);
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                        op->find_parent_index(index));
+      SingleTask *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2500,9 +2486,7 @@ namespace Legion {
                                                  dst_indexes);
       // Convert the destination references to views
       std::vector<MaterializedView*> dst_views(dst_targets.size());
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *dst_context = parent_ctx->find_parent_physical_context(
-                                        op->find_parent_index(dst_index));
+      SingleTask *dst_context = op->find_physical_context(dst_index);
       for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
         const InstanceRef &dst_ref = dst_targets[idx];
@@ -2521,8 +2505,7 @@ namespace Legion {
       // and issue copies to any of the deferred views
       if (src_targets.empty())
       {
-        SingleTask *src_context = parent_ctx->find_parent_physical_context(
-                                          op->find_parent_index(src_index));
+        SingleTask *src_context = op->find_physical_context(src_index);
         RegionTreeContext ctx = src_context->get_context();
 #ifdef DEBUG_LEGION
         assert(ctx.exists());
@@ -3159,7 +3142,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::fill_fields(RegionTreeContext ctx, Operation *op,
+    ApEvent RegionTreeForest::fill_fields(Operation *op,
                                           const RegionRequirement &req,
                                           const unsigned index,
                                           const void *value, size_t value_size,
@@ -3174,6 +3157,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
+      SingleTask *context = op->find_physical_context(index);
+      RegionTreeContext ctx = context->get_context();
       RegionNode *fill_node = get_node(req.region);
       FieldMask fill_mask = 
         fill_node->column_source->get_field_mask(req.privilege_fields);
@@ -3187,16 +3172,15 @@ namespace Legion {
         // If we have restrictions, we have to eagerly fill these fields 
         FieldMask eager_fields;
         restrict_info.populate_restrict_fields(eager_fields);
-        ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), op, 
-                           index, eager_fields, value, value_size, 
-                           version_info, instances, precondition,
-                           map_applied_events);
+        ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
+              op, index, context, eager_fields, value, value_size, 
+              version_info, instances, precondition, map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
-          fill_node->fill_fields(ctx.get_id(), fill_mask,
-                                 value, value_size, version_info);
+          fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
+                                 context, version_info, map_applied_events);
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3207,8 +3191,8 @@ namespace Legion {
         assert(instances.empty());
 #endif
         // Fill in these fields on this node
-        fill_node->fill_fields(ctx.get_id(), fill_mask, 
-                               value, value_size, version_info); 
+        fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
+                               context, version_info, map_applied_events); 
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -3228,8 +3212,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::attach_file(RegionTreeContext ctx,
-                                              SingleTask *parent_ctx,
+    InstanceRef RegionTreeForest::attach_file(AttachOp *attach_op, 
+                                              unsigned index,
                                               const RegionRequirement &req,
                                               InstanceManager *file_instance,
                                               VersionInfo &version_info)
@@ -3239,16 +3223,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
+      SingleTask *context = attach_op->find_physical_context(index);
+      RegionTreeContext ctx = context->get_context();
       RegionNode *attach_node = get_node(req.region);
       // Perform the attachment
-      return attach_node->attach_file(ctx.get_id(), parent_ctx, 
+      return attach_node->attach_file(ctx.get_id(), context, 
                                       file_instance->layout->allocated_fields, 
                                       req, file_instance, version_info);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::detach_file(RegionTreeContext ctx,
-                                          const RegionRequirement &req,
+    ApEvent RegionTreeForest::detach_file(const RegionRequirement &req,
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
@@ -3259,10 +3244,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
+      SingleTask *context = detach_op->find_physical_context(index);
       RegionNode *detach_node = get_node(req.region);
       // Perform the detachment
-      return detach_node->detach_file(ctx.get_id(), detach_op, index,
-                                      version_info, ref);
+      return detach_node->detach_file(context, version_info, ref);
     }
 
     //--------------------------------------------------------------------------
@@ -12404,6 +12389,199 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeNode::send_back_logical_state(ContextID ctx, 
+                                                 UniqueID context_uid,
+                                                 AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      CurrentState &state = get_current_state(ctx);
+      std::set<RegionTreeNode*> to_traverse;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(context_uid);
+        if (is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(as_partition_node()->handle);
+        }
+        rez.serialize(state.dirty_below);
+        rez.serialize(state.dirty_fields);
+        rez.serialize(state.reduction_fields);
+        rez.serialize<size_t>(state.outstanding_reductions.size());
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it = 
+              state.outstanding_reductions.begin(); it != 
+              state.outstanding_reductions.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        rez.serialize<size_t>(state.projection_epochs.size());
+        for (std::list<ProjectionEpoch*>::const_iterator pit = 
+              state.projection_epochs.begin(); pit != 
+              state.projection_epochs.end(); pit++)
+        {
+          rez.serialize((*pit)->epoch_id);
+          rez.serialize((*pit)->valid_fields);
+          rez.serialize<size_t>((*pit)->projections.size());
+          for (std::map<ProjectionFunction*,std::set<Domain> >::const_iterator
+                fit = (*pit)->projections.begin(); 
+                fit != (*pit)->projections.end(); fit++)
+          {
+            rez.serialize(fit->first->projection_id);
+            for (std::set<Domain>::const_iterator it = fit->second.begin();
+                  it != fit->second.end(); it++)
+              rez.serialize(*it);
+          }
+        }
+        rez.serialize<size_t>(state.field_states.size());
+        for (LegionList<FieldState>::aligned::const_iterator fit = 
+              state.field_states.begin(); fit != 
+              state.field_states.end(); fit++)
+        {
+          rez.serialize(fit->valid_fields);
+          rez.serialize(fit->open_state);
+          rez.serialize(fit->redop);
+          if (fit->open_state >= OPEN_READ_ONLY_PROJ)
+          {
+#ifdef DEBUG_LEGION
+            assert(fit->projection != NULL);
+#endif
+            rez.serialize(fit->projection->projection_id);
+            rez.serialize(fit->projection_domain);
+          }
+#ifdef DEBUG_LEGION
+          else
+            assert(fit->projection == NULL);
+#endif
+          rez.serialize<size_t>(fit->open_children.size());
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                fit->open_children.begin(); it != 
+                fit->open_children.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+            to_traverse.insert(get_tree_child(it->first));
+          }
+        }
+      }
+      context->runtime->send_back_logical_state(target, rez);
+      // Now recurse down the tree
+      for (std::set<RegionTreeNode*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        (*it)->send_back_logical_state(ctx, context_uid, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::process_logical_state_return(ContextID ctx,
+                                                      Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CurrentState &state = get_current_state(ctx);
+      derez.deserialize(state.dirty_below);
+      derez.deserialize(state.dirty_fields);
+      derez.deserialize(state.reduction_fields);
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      for (unsigned idx = 0; idx < num_reductions; idx++)
+      {
+        ReductionOpID redop;
+        derez.deserialize(redop);
+        derez.deserialize(state.outstanding_reductions[redop]);
+      }
+      size_t num_projection_epochs;
+      derez.deserialize(num_projection_epochs);
+      for (unsigned idx1 = 0; idx1 < num_projection_epochs; idx1++)
+      {
+        ProjectionEpochID epoch_id;
+        derez.deserialize(epoch_id);
+        FieldMask valid_fields;
+        derez.deserialize(valid_fields);
+        ProjectionEpoch *epoch = new ProjectionEpoch(epoch_id, valid_fields);
+        size_t num_projections;
+        derez.deserialize(num_projections);
+        for (unsigned idx2 = 0; idx2 < num_projections; idx2++)
+        {
+          ProjectionID proj_id;
+          derez.deserialize(proj_id);
+          ProjectionFunction *function = 
+            context->runtime->find_projection_function(proj_id);
+          std::set<Domain> &doms = epoch->projections[function];
+          size_t num_doms;
+          derez.deserialize(num_doms);
+          for (unsigned idx3 = 0; idx3 < num_doms; idx3++)
+          {
+            Domain dom;
+            derez.deserialize(dom);
+            doms.insert(dom);
+          }
+        }
+      }
+      size_t num_field_states;
+      derez.deserialize(num_field_states);
+      state.field_states.resize(num_field_states);
+      for (LegionList<FieldState>::aligned::iterator fit = 
+            state.field_states.begin(); fit != state.field_states.end(); fit++)
+      {
+        derez.deserialize(fit->valid_fields);
+        derez.deserialize(fit->open_state);
+        derez.deserialize(fit->redop);
+        if (fit->open_state >= OPEN_READ_ONLY_PROJ)
+        {
+          ProjectionID proj_id;
+          derez.deserialize(proj_id);
+          fit->projection = context->runtime->find_projection_function(proj_id);
+          derez.deserialize(fit->projection_domain);
+        }
+        size_t num_open_children;
+        derez.deserialize(num_open_children);
+        for (unsigned idx = 0; idx < num_open_children; idx++)
+        {
+          ColorPoint color;
+          derez.deserialize(color);
+          derez.deserialize(fit->open_children[color]);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RegionTreeNode::handle_logical_state_return(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      SingleTask *context = runtime->find_context(context_uid);
+      SingleTask *outermost = 
+        context->get_parent()->find_outermost_local_context(context);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *node = NULL;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      node->process_logical_state_return(outermost->get_context().get_id(),
+                                         derez);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::compute_version_numbers(ContextID ctx,
                                                const RegionTreePath &path,
                                                const RegionUsage &usage,
@@ -15368,17 +15546,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 VersionInfo &version_info)
+                                 SingleTask *context, VersionInfo &version_info,
+                                 std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
+      // A fill is a kind of a write, so we have to do the advance
+      // of the version information same as if we had mapped this region
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = 
+        !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(fill_mask, context,
+          update_parent_state, local_space, map_applied_events);
+      // Now record just the advanced versions
+      manager.record_advanced_versions(fill_mask, version_info);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(context, did, context->runtime->address_space,
-                             context->runtime->address_space, this, 
-                             fill_value, true/*register now*/);
+        legion_new<FillView>(this->context, did, local_space, local_space, 
+                             this, fill_value, true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
       // Invalidate any reduction views
@@ -15389,7 +15577,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
-                                          const unsigned index,
+                                          const unsigned index, 
+                                          SingleTask *context,
                                           const FieldMask &fill_mask,
                                           const void *value, size_t value_size,
                                           VersionInfo &version_info, 
@@ -15398,15 +15587,21 @@ namespace Legion {
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
+      // A fill is a kind of a write, so we have to do the advance
+      // of the version information same as if we had mapped this region
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = 
+        !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(fill_mask, context,
+          update_parent_state, local_space, map_applied_events);
+      // Now record just the advanced versions
+      manager.record_advanced_versions(fill_mask, version_info);
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       std::set<ApEvent> post_events;
-      SingleTask *parent_ctx = op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                        op->find_parent_index(index));
       std::vector<InstanceView*> target_views(instances.size(), NULL);
       convert_target_views(instances, context, target_views);
-      const AddressSpaceID local_space = context->runtime->address_space;
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         InstanceView *target = target_views[idx];
@@ -15474,14 +15669,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_file(ContextID ctx, DetachOp *detach_op, 
-                                    unsigned index, VersionInfo &version_info, 
-                                    const InstanceRef &ref)
+    ApEvent RegionNode::detach_file(SingleTask *context, 
+                              VersionInfo &version_info, const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-      SingleTask *parent_ctx = detach_op->get_parent();
-      SingleTask *context = parent_ctx->find_parent_physical_context(
-                                  detach_op->find_parent_index(index));
       InstanceView *view = convert_reference(ref, context);
 #ifdef DEBUG_LEGION
       assert(view->is_materialized_view());

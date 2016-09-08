@@ -1108,6 +1108,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    SingleTask* Operation::find_logical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->find_parent_logical_context(find_parent_index(index));
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* Operation::find_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->find_parent_physical_context(find_parent_index(index));
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceRef &ref,
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
@@ -10067,7 +10081,6 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -10095,7 +10108,7 @@ namespace Legion {
         }
         ApEvent sync_precondition = compute_sync_precondition();
         ApEvent done_event = 
-          runtime->forest->fill_fields(physical_ctx, this, requirement, 
+          runtime->forest->fill_fields(this, requirement, 
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
@@ -10158,7 +10171,6 @@ namespace Legion {
       size_t result_size = future.impl->get_untyped_size();
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       InstanceSet mapped_instances;
       if (restrict_info.has_restrictions())
       {
@@ -10179,7 +10191,7 @@ namespace Legion {
       }
       ApEvent sync_precondition = compute_sync_precondition();
       ApEvent done_event = 
-          runtime->forest->fill_fields(physical_ctx, this, requirement, 
+          runtime->forest->fill_fields(this, requirement, 
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
@@ -10658,9 +10670,7 @@ namespace Legion {
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
-      InstanceRef result = runtime->forest->attach_file(physical_ctx,
-                                                        parent_ctx,
+      InstanceRef result = runtime->forest->attach_file(this, 0/*idx*/,
                                                         requirement,
                                                         file_instance,
                                                         version_info);
@@ -11078,11 +11088,9 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
       }
-
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
       ApEvent detach_event = 
-        runtime->forest->detach_file(physical_ctx, requirement, 
-                                     this, 0/*idx*/, version_info, reference);
+        runtime->forest->detach_file(requirement, this, 0/*idx*/, 
+                                     version_info, reference);
       std::set<RtEvent> applied_conditions;
       version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())

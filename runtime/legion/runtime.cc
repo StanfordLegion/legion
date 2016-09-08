@@ -5197,6 +5197,11 @@ namespace Legion {
               runtime->handle_send_atomic_reservation_response(derez);
               break;
             }
+          case SEND_BACK_LOGICAL_STATE:
+            {
+              runtime->handle_send_back_logical_state(derez);
+              break;
+            }
           case SEND_MATERIALIZED_VIEW:
             {
               runtime->handle_send_materialized_view(derez, 
@@ -14888,6 +14893,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_back_logical_state(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // No need to flush, it will get flushed by the remote map return
+      find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
+                                        DEFAULT_VIRTUAL_CHANNEL,false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_atomic_reservation_request(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15792,6 +15806,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_unregister_collectable(this, derez);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_back_logical_state(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode::handle_logical_state_return(this, derez); 
     }
 
     //--------------------------------------------------------------------------
