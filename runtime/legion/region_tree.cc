@@ -1669,7 +1669,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
-      VersioningInvalidator invalidator;
+      VersioningInvalidator invalidator(ctx);
       node->visit_node(&invalidator);
     }
 
@@ -1682,7 +1682,7 @@ namespace Legion {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         trees = tree_nodes;
       }
-      VersioningInvalidator invalidator; 
+      VersioningInvalidator invalidator(ctx); 
       for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
             trees.begin(); it != trees.end(); it++)
         it->second->visit_node(&invalidator);

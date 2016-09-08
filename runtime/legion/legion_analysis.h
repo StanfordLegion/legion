@@ -1612,9 +1612,15 @@ namespace Legion {
      */
     class VersioningInvalidator : public NodeTraverser {
     public:
+      VersioningInvalidator(void);
+      VersioningInvalidator(RegionTreeContext ctx);
+    public:
       virtual bool visit_only_valid(void) const { return true; }
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
+    protected:
+      const ContextID ctx;
+      const bool invalidate_all;
     };
 
   }; // namespace Internal 

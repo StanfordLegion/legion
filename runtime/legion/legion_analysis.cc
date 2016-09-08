@@ -8597,10 +8597,27 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    VersioningInvalidator::VersioningInvalidator(void)
+      : ctx(0), invalidate_all(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersioningInvalidator::VersioningInvalidator(RegionTreeContext c)
+      : ctx(c.get_id()), invalidate_all(!c.exists())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     bool VersioningInvalidator::visit_region(RegionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_version_managers();
+      if (invalidate_all)
+        node->invalidate_version_managers();
+      else
+        node->invalidate_version_state(ctx);
       return true;
     }
 
@@ -8608,7 +8625,10 @@ namespace Legion {
     bool VersioningInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      node->invalidate_version_managers();
+      if (invalidate_all)
+        node->invalidate_version_managers();
+      else
+        node->invalidate_version_state(ctx);
       return true;
     }
 
