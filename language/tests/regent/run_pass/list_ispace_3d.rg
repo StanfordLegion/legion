@@ -28,9 +28,9 @@ task main()
   do
     var i = 0
     for p in l do
-      regentlib.assert(p.x == i / 6, "x index doesn't match in ForList loop.")
-      regentlib.assert(p.y == (i / 3) % 2, "y index doesn't match in ForList loop.")
-      regentlib.assert(p.z == i % 3, "z index doesn't match in ForList loop.")
+      regentlib.assert(p.x == i % 5, "x index doesn't match in ForList loop.")
+      regentlib.assert(p.y == (i / 5) % 2, "y index doesn't match in ForList loop.")
+      regentlib.assert(p.z == i / 5 / 2, "z index doesn't match in ForList loop.")
       i += 1
     end
     regentlib.assert(i == 30, "list length is incorrect.")
@@ -40,9 +40,9 @@ task main()
   do
     for i = 0, 30 do
       var p = l[i]
-      regentlib.assert(p.x == i / 6, "x index doesn't match in ForNum loop.")
-      regentlib.assert(p.y == (i / 3) % 2, "y index doesn't match in ForNum loop.")
-      regentlib.assert(p.z == i % 3, "z index doesn't match in ForNum loop.")
+      regentlib.assert(p.x == i % 5, "x index doesn't match in ForNum loop.")
+      regentlib.assert(p.y == (i / 5) % 2, "y index doesn't match in ForNum loop.")
+      regentlib.assert(p.z == i / 5 / 2, "z index doesn't match in ForNum loop.")
     end
   end
 

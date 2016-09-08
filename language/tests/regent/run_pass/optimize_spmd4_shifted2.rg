@@ -113,7 +113,7 @@ task main()
   -- Note: This test hits a bug in the vectorizer if vectorization is allowed.
   __forbid(__vectorize)
   for x in r do
-    x.a = 10000 + 10 * i
+    x.a = 10000 + 10 * (x.x * r.bounds:size().y + x.y)
     x.b = 0
     x.c = 0
     i += 1
