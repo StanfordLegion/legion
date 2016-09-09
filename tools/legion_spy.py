@@ -4615,7 +4615,8 @@ class Operation(object):
                  'launch_rect', 'creator', 'realm_copies', 'realm_fills', 
                  'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
                  'cluster_name', 'generation', 'need_logical_replay', 
-                 'reachable_cache', 'transitive_warning_issued']
+                 'reachable_cache', 'transitive_warning_issued', 
+                 'arrival_barriers', 'wait_barriers']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4659,6 +4660,9 @@ class Operation(object):
         self.need_logical_replay = None 
         self.reachable_cache = None
         self.transitive_warning_issued = False
+        # Phase barrier information
+        self.arrival_barriers = None
+        self.wait_barriers = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
@@ -4914,6 +4918,16 @@ class Operation(object):
         if self.realm_fills is None:
             self.realm_fills = list()
         self.realm_fills.append(fill)
+
+    def add_arrival_barrier(self, bar):
+        if not self.arrival_barriers:
+            self.arrival_barriers = list()
+        self.arrival_barriers.append(bar)
+
+    def add_wait_barrier(self, bar):
+        if not self.wait_barriers:
+            self.wait_barriers = list()
+        self.wait_barriers.append(bar)
 
     def find_temporary_instance(self, index, fid):
         if not self.temporaries:
@@ -5899,8 +5913,6 @@ class Operation(object):
         self.print_base_node(printer, True) 
 
     def print_incoming_dataflow_edges(self, printer, previous):
-        if self.incoming is None:
-            return
         if self.inter_close_ops:
             for close in self.inter_close_ops:
                 close.print_incoming_dataflow_edges(printer, previous)
@@ -5910,8 +5922,42 @@ class Operation(object):
         if self.advance_ops:
             for advance in self.advance_ops:
                 advance.print_incoming_dataflow_edges(printer, previous)
-        for dep in self.incoming:
-            dep.print_dataflow_edge(printer, previous)
+        if self.incoming:
+            for dep in self.incoming:
+                dep.print_dataflow_edge(printer, previous)
+        # Handle any phase barriers
+        if self.state.detailed_graphs:
+            self.print_phase_barrier_edges(printer) 
+
+    def print_phase_barrier_edges(self, printer):
+        if self.wait_barriers:
+            for bar in self.wait_barriers:
+                if bar.barrier_contributors:
+                    for contributor in bar.barrier_contributors:
+                        title = str(contributor)+' (UID: '+str(contributor.uid)+\
+                                ' in context '+str(contributor.context.op)+' UID: '+\
+                                str(contributor.context.op.uid)+')'
+                        label = printer.generate_html_op_label(title, None, None,
+                                "white", self.state.detailed_graphs)
+                        node_name = contributor.node_name+'_'+self.node_name
+                        printer.println(node_name+' [label=<'+label+'>,fontsize=14,'+\
+                                'fontcolor=black,shape=record,penwidth=0];')
+                        printer.println(node_name+' -> '+self.node_name+
+                                ' [style=solid,color=black,penwidth=2];')
+        if self.arrival_barriers:
+            for bar in self.arrival_barriers:
+                if bar.barrier_waiters:
+                    for waiter in bar.barrier_waiters:
+                        title = str(waiter)+' (UID: '+str(waiter.uid)+\
+                                ' in context '+str(waiter.context.op)+' UID: '+\
+                                str(waiter.context.op.uid)+')'
+                        label = printer.generate_html_op_label(title, None, None,
+                                "white", self.state.detailed_graphs)
+                        node_name = waiter.node_name+'_'+self.node_name
+                        printer.println(node_name+' [label=<'+label+'>,fontsize=14,'+\
+                                'fontcolor=black,shape=record,penwidth=0];')
+                        printer.println(self.node_name+' -> '+node_name+
+                                ' [style=solid,color=black,penwidth=2];')
 
     def print_event_node(self, printer):
         self.print_base_node(printer, False)
@@ -6602,6 +6648,10 @@ class Task(object):
                         all_ops.append(advance)
                 # Then add the operation itself
                 all_ops.append(op)
+                # Print any phase barier edges now, since
+                # we know they will all be printed
+                if self.state.detailed_graphs:
+                    op.print_phase_barrier_edges(printer)
             # Now traverse the list in reverse order
             while all_ops:
                 src = all_ops.pop()
@@ -7969,7 +8019,8 @@ class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
                  'incoming_copies', 'outgoing_copies', 'generation', 'ap_user_event',
-                 'rt_user_event', 'user_event_triggered']
+                 'rt_user_event', 'user_event_triggered', 
+                 'barrier_contributors', 'barrier_waiters']
     def __init__(self, state, handle):
         self.state = state
         self.handle = handle
@@ -7987,6 +8038,9 @@ class Event(object):
         self.user_event_triggered = False
         # For traversals
         self.generation = 0
+        # For phase barriers
+        self.barrier_contributors = None
+        self.barrier_waiters = None
 
     def exists(self):
         return self.handle.uid > 0
@@ -8090,6 +8144,18 @@ class Event(object):
         if self.outgoing_copies is None:
             self.outgoing_copies = set()
         self.outgoing_copies.add(copy)
+
+    def add_phase_barrier_contributor(self, op):
+        if not self.barrier_contributors:
+            self.barrier_contributors = set()
+        self.barrier_contributors.add(op)
+        self.phase_barrier = True
+
+    def add_phase_barrier_waiter(self, op):
+        if not self.barrier_waiters:
+            self.barrier_waiters = set()
+        self.barrier_waiters.add(op)
+        self.phase_barrier = True
 
 class RealmBase(object):
     __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 'start_event', 
@@ -8912,8 +8978,10 @@ realm_fill_field_pat    = re.compile(
 realm_fill_intersect_pat= re.compile(
     prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
            "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
-phase_barrier_pat       = re.compile(
-    prefix+"Phase Barrier (?P<iid>[0-9a-f]+)")
+barrier_arrive_pat      = re.compile(
+    prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+barrier_wait_pat        = re.compile(
+    prefix+"Phase Barrier Wait (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -9023,11 +9091,19 @@ def parse_legion_spy_line(line, state):
             fill.set_intersect(state.get_partition(int(m.group('index'),16),
               int(m.group('field')), int(m.group('tid'))))
         return True
-    m = phase_barrier_pat.match(line)
+    m = barrier_arrive_pat.match(line)
     if m is not None:
-        if state.phase_barriers is None:
-            state.phase_barriers = set()
-        state.phase_barriers.add(int(m.group('iid'),16))
+        e = state.get_event(int(m.group('iid'),16))
+        op = state.get_operation(int(m.group('uid')))
+        e.add_phase_barrier_contributor(op)
+        op.add_arrival_barrier(e)
+        return True
+    m = barrier_wait_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('iid'),16))
+        op = state.get_operation(int(m.group('uid')))
+        e.add_phase_barrier_waiter(op)
+        op.add_wait_barrier(e)
         return True
     # Region requirements and mapping dependences happen often
     m = requirement_pat.match(line)
@@ -9616,8 +9692,8 @@ class State(object):
                  'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
                  'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 
-                 'phase_barriers', 'no_event', 'slice_index', 'slice_slice', 
-                 'point_slice', 'next_generation', 'next_realm_num', 'detailed_graphs', 
+                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 
+                 'next_generation', 'next_realm_num', 'detailed_graphs', 
                  'assert_on_error', 'assert_on_warning']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.verbose = verbose
@@ -9651,7 +9727,6 @@ class State(object):
         self.events = dict()
         self.copies = dict()
         self.fills = dict()
-        self.phase_barriers = None
         self.no_event = Event(self, EventHandle(0))
         # For parsing only
         self.slice_index = dict()
@@ -9759,11 +9834,6 @@ class State(object):
             # FIXME: This fails on dynamic collectives.
             # if self.assert_on_warning:
             #     assert False
-        # If we have any phase barriers, mark all the events of the phase barrier
-        if self.phase_barriers is not None:
-            for event in self.events.itervalues():
-                if event.handle.uid in self.phase_barriers:
-                    event.phase_barrier = True
         # Update the instance 
         for inst in self.instances.itervalues():
             inst.update_creator()
