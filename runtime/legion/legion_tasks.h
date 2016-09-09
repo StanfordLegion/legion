@@ -211,7 +211,6 @@ namespace Legion {
                                         const std::set<IndexPartition> &parts);
     public:
       virtual void add_created_region(LogicalRegion handle) = 0;
-      virtual void add_created_field(FieldSpace handle, FieldID fid) = 0;
     public:
       bool was_created_requirement_deleted(const RegionRequirement &req) const;
       void return_privilege_state(TaskOp *target);
@@ -504,9 +503,8 @@ namespace Legion {
       DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
     public:
       virtual void add_created_region(LogicalRegion handle);
-      virtual void add_created_field(FieldSpace handle, FieldID fid);
       // for logging created region requirements
-      void log_created_requirement(unsigned index);
+      void log_created_requirements(void);
     public:
       SingleTask* find_parent_logical_context(unsigned index);
       SingleTask* find_parent_physical_context(unsigned index);
@@ -640,7 +638,7 @@ namespace Legion {
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(const void *res, size_t res_size, bool owned);
-      void unmap_all_mapped_regions(void);
+      void unmap_all_mapped_regions(bool need_lock = true);
     public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineTask *inline_task);
@@ -861,7 +859,6 @@ namespace Legion {
       virtual void register_must_epoch(void) = 0;
     public:
       virtual void add_created_region(LogicalRegion handle);
-      virtual void add_created_field(FieldSpace handle, FieldID fid);
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,

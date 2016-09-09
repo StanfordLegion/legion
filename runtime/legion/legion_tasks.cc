@@ -1045,7 +1045,6 @@ namespace Legion {
       assert(created_fields.find(key) == created_fields.end());
 #endif
       created_fields.insert(key);
-      add_created_field(handle, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -1061,7 +1060,6 @@ namespace Legion {
         assert(created_fields.find(key) == created_fields.end());
 #endif
         created_fields.insert(key);
-        add_created_field(handle, fields[idx]);
       }
     }
 
@@ -1105,7 +1103,6 @@ namespace Legion {
         assert(created_fields.find(*it) == created_fields.end());
 #endif
         created_fields.insert(*it);
-        add_created_field(it->first, it->second);
       }
     }
 
@@ -4066,82 +4063,43 @@ namespace Legion {
     {
       // Already hold the lock from the caller
       RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
-      runtime->forest->get_field_space_fields(handle.get_field_space(),
-                                              new_req.instance_fields);
-      if (new_req.instance_fields.empty())
-        return;
-      new_req.privilege_fields.insert(new_req.instance_fields.begin(),
-                                      new_req.instance_fields.end());
+      // Put a region requirement with no fields in the list of
+      // created requirements, we know we can add any fields for
+      // this field space in the future since we own all privileges
       // Now make a new region requirement and physical region
       created_requirements.push_back(new_req);
       // Created regions always return privileges that they make
       returnable_privileges.push_back(true);
-      // Make a new unmapped physical region
-      physical_regions.push_back(PhysicalRegion(
-            legion_new<PhysicalRegionImpl>(created_requirements.back(), 
-              ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
-              is_leaf(), runtime)));
-      // Log this requirement for legion spy if necessary
-      if (Runtime::legion_spy_enabled)
-        log_created_requirement(created_requirements.size() - 1);
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::add_created_field(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      std::set<LogicalRegion> top_regions;
-      runtime->forest->get_all_regions(handle, top_regions);
-      // See if we can aggregate this with any of the previous created
-      // region requirements
-      for (std::deque<RegionRequirement>::iterator it = 
-           created_requirements.begin(); it != created_requirements.end(); it++)
-      {
-        std::set<LogicalRegion>::const_iterator finder = 
-          top_regions.find(it->region);
-        if (finder == top_regions.end())
-          continue;
-        it->privilege_fields.insert(fid);
-        top_regions.erase(finder);
-        if (top_regions.empty())
-          return;
-      }
-      for (std::set<LogicalRegion>::const_iterator it = top_regions.begin();
-            it != top_regions.end(); it++)
-      {
-        RegionRequirement new_req(*it, READ_WRITE, EXCLUSIVE, *it);
-        new_req.privilege_fields.insert(fid);
-        created_requirements.push_back(new_req);
-        // These privileges won't live past the end of this task 
-        // because they are locally created fields on regions that
-        // already existed before the task was run
-        returnable_privileges.push_back(false);
+      // Make a new unmapped physical region if we aren't done executing yet
+      if (!task_executed)
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(created_requirements.back(), 
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
                 is_leaf(), runtime)));
-        if (Runtime::legion_spy_enabled)
-          log_created_requirement(created_requirements.size() - 1);
-      }
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::log_created_requirement(unsigned index)
+    void SingleTask::log_created_requirements(void)
     //--------------------------------------------------------------------------
     {
-      log_requirement(unique_op_id, regions.size() + index, 
-                      created_requirements[index]);
       std::vector<MappingInstance> instances(1, 
-          Mapping::PhysicalInstance::get_virtual_instance());
-      RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-      std::vector<PhysicalManager*> unacquired;
-      InstanceSet instance_set;
-      runtime->forest->physical_convert_mapping(this, 
-          created_requirements[index], instances, instance_set, bad_tree, 
-          missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-      runtime->forest->log_mapping_decision(unique_op_id,
-          regions.size() + index, created_requirements[index], instance_set);
+            Mapping::PhysicalInstance::get_virtual_instance());
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      {
+        // Skip it if there are no privilege fields
+        if (created_requirements[idx].privilege_fields.empty())
+          continue;
+        log_requirement(unique_op_id, regions.size() + idx, 
+                        created_requirements[idx]);
+        InstanceSet instance_set;
+        std::vector<PhysicalManager*> unacquired;  
+        RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
+        runtime->forest->physical_convert_mapping(this, 
+            created_requirements[idx], instances, instance_set, bad_tree, 
+            missing_fields, NULL, unacquired, false/*do acquire_checks*/);
+        runtime->forest->log_mapping_decision(unique_op_id,
+            regions.size() + idx, created_requirements[idx], instance_set);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5072,12 +5030,14 @@ namespace Legion {
           continue;
         return int(idx);
       }
+      const FieldSpace fs = req.parent.get_field_space(); 
       // The created region requirements have to be checked while holding
       // the lock since they are subject to mutation by the application
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // We might also mutate it so we take the lock in exclusive mode
+      AutoLock o_lock(op_lock);
       for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
-        const RegionRequirement &our_req = created_requirements[idx];
+        RegionRequirement &our_req = created_requirements[idx];
         // First check that the regions match
         if (our_req.region != req.parent)
           continue;
@@ -5085,6 +5045,15 @@ namespace Legion {
         if (check_privilege && 
             ((req.privilege & our_req.privilege) != req.privilege))
           continue;
+        // If this is a returnable privilege requiremnt that means
+        // that we made this region so we always have privileges
+        // on any fields for that region, just add them and be done
+        if (returnable_privileges[idx])
+        {
+          our_req.privilege_fields.insert(req.privilege_fields.begin(),
+                                          req.privilege_fields.end());
+          return int(regions.size() + idx);
+        }
         // Finally check that all the fields are contained
         bool dominated = true;
         for (std::set<FieldID>::const_iterator it = 
@@ -5094,6 +5063,16 @@ namespace Legion {
           if (our_req.privilege_fields.find(*it) ==
               our_req.privilege_fields.end())
           {
+            // Check to see if this is a field we made
+            std::pair<FieldSpace,FieldID> key(fs, *it);
+            if (created_fields.find(key) != created_fields.end())
+            {
+              // We made it so we can add it to the requirement
+              // and continue on our way
+              our_req.privilege_fields.insert(*it);
+              continue;
+            }
+            // Otherwise we don't have privileges
             dominated = false;
             break;
           }
@@ -5103,7 +5082,34 @@ namespace Legion {
         // Include the offset by the number of base requirements
         return int(regions.size() + idx);
       }
-      return -1;
+      // Method of last resort, check to see if we made all the fields
+      // if we did, then we can make a new requirement for all the fields
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        std::pair<FieldSpace,FieldID> key(fs, *it);
+        // Didn't make it so we don't have privileges anywhere
+        if (created_fields.find(key) == created_fields.end())
+          return -1;
+      }
+      // If we get here then we can make a new requirement
+      // which has non-returnable privileges
+      // Get the top level region for the region tree
+      RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
+      RegionRequirement new_req(top->handle, READ_WRITE, EXCLUSIVE,top->handle);
+      created_requirements.push_back(new_req);
+      // Add our fields
+      created_requirements.back().privilege_fields.insert(
+          req.privilege_fields.begin(), req.privilege_fields.end());
+      // This is not a returnable privilege requirement
+      returnable_privileges.push_back(false);
+      // Make a new unmapped physical region if we're not done executing yet
+      if (!task_executed)
+        physical_regions.push_back(PhysicalRegion(
+              legion_new<PhysicalRegionImpl>(created_requirements.back(),
+                ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
+                is_leaf(), runtime)));
+      return int(created_requirements.size() - 1);
     }
 
     //--------------------------------------------------------------------------
@@ -5257,23 +5263,37 @@ namespace Legion {
       }
       // If none of that worked, we now get to try the created requirements
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++)
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, privilege_fields, bad_field,
-                                   skip_privilege);
+          check_privilege_internal(req, created_requirements[idx], 
+                      privilege_fields, bad_field, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
         // Something other than bad parent region is a real error
         if (et != ERROR_BAD_PARENT_REGION)
           return et;
+        // If we got a BAD_PARENT_REGION, see if this a returnable
+        // privilege in which case we know we have privileges on all fields
+        if (returnable_privileges[idx])
+          return NO_ERROR;
         // Otherwise we just keep going
       }
-      // Didn't actually find it so this is the result 
-      return ERROR_BAD_PARENT_REGION;
+      // Finally see if we created all the fields in which case we know
+      // we have privileges on all their regions
+      const FieldSpace sp = req.region.get_field_space();
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        std::pair<FieldSpace,FieldID> key(sp, *it);
+        // If we don't find the field, then we are done
+        if (created_fields.find(key) == created_fields.end())
+          return ERROR_BAD_PARENT_REGION;
+      }
+      // Otherwise we have privileges on these fields for all regions
+      // so we are good on privileges
+      return NO_ERROR;
     }
 
     //--------------------------------------------------------------------------
@@ -7223,10 +7243,6 @@ namespace Legion {
     void SingleTask::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert((regions.size() + 
-                created_requirements.size()) == physical_regions.size());
-#endif
       // Quick check to make sure the user didn't forget to end a trace
       if (current_trace != NULL)
       {
@@ -7237,15 +7253,9 @@ namespace Legion {
 #endif
         exit(ERROR_INCOMPLETE_TRACE);
       }
-      // Unmap all of the physical regions which are still mapped
-      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-      {
-        if (physical_regions[idx].impl->is_mapped())
-          physical_regions[idx].impl->unmap_region();
-      } 
-      // Now we can clear the physical regions since we're done using them
-      physical_regions.clear();
-      // Do the same thing with any residual inline mapped regions
+      // We can unmap all the inline regions here, we'll have to wait to
+      // do the physical_regions until post_end_task when we can take
+      // the operation lock
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
       {
@@ -7364,6 +7374,12 @@ namespace Legion {
               children_commit_invoked = true;
             }
           }
+          // Finally unmap any of our mapped physical instances
+#ifdef DEBUG_LEGION
+          assert((regions.size() + 
+                    created_requirements.size()) == physical_regions.size());
+#endif
+          unmap_all_mapped_regions(false/*need lock*/);
         }
         if (!preconditions.empty())
           handle_post_mapped(Runtime::merge_events(preconditions));
@@ -7394,6 +7410,12 @@ namespace Legion {
             children_commit_invoked = true;
           }
         }
+        // Finally unmap any physical regions that we mapped
+#ifdef DEBUG_LEGION
+        assert((regions.size() + 
+                  created_requirements.size()) == physical_regions.size());
+#endif
+        unmap_all_mapped_regions(false/*need lock*/);
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -7413,9 +7435,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::unmap_all_mapped_regions(void)
+    void SingleTask::unmap_all_mapped_regions(bool need_lock)
     //--------------------------------------------------------------------------
     {
+      if (need_lock)
+      {
+        AutoLock o_lock(op_lock);
+        unmap_all_mapped_regions(false/*need lock*/);
+        return;
+      }
       // Unmap any of our original physical instances
       for (std::vector<PhysicalRegion>::const_iterator it = 
             physical_regions.begin(); it != physical_regions.end(); it++)
@@ -7772,13 +7800,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MultiTask::add_created_region(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::add_created_field(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       // Do nothing
@@ -8679,10 +8700,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_POST_MAPPED_CALL);
-      // If this is either a remote task or we have virtual mappings, then
+      // If this is a remote task then
       // we need to wait before completing our mapping
-      if ((is_remote() || has_virtual_instances()) && 
-          !mapped_precondition.has_triggered())
+      if (!mapped_precondition.has_triggered())
       {
         SingleTask::DeferredPostMappedArgs args;
         args.task = this;
@@ -8690,6 +8710,8 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
+      if (Runtime::legion_spy_enabled)
+        log_created_requirements();
       // We used to have to apply our virtual state here, but that is now
       // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
@@ -8699,12 +8721,9 @@ namespace Legion {
         if (!acquired_instances.empty())
           release_acquired_instances(acquired_instances);
         if (!map_applied_conditions.empty())
-        {
-          map_applied_conditions.insert(mapped_precondition);
           complete_mapping(Runtime::merge_events(map_applied_conditions));
-        }
         else 
-          complete_mapping(mapped_precondition);
+          complete_mapping();
         return;
       }
       RtEvent applied_condition;
@@ -9535,6 +9554,8 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
+      if (Runtime::legion_spy_enabled)
+        log_created_requirements();
       if (!map_applied_conditions.empty())
       {
         RtEvent done = Runtime::merge_events(map_applied_conditions);
